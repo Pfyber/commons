@@ -80,11 +80,12 @@ body {
 .label .name {
   font-size: 12px;
   font-weight: 700;
+  line-height: 16px;
   color: #fff;
   white-space: nowrap;
-  text-shadow:
-    0 1px 0 rgba(0, 0, 0, 0.55),
-    0 0 3px rgba(0, 0, 0, 0.45);
+  background: rgba(46, 44, 34, 0.5);
+  border-radius: 999px;
+  padding: 0 6px;
   margin-bottom: 2px;
 }
 
@@ -176,13 +177,59 @@ body {
   visibility: hidden;
 }
 
+/* Sits under the top bar so it never covers the player's own name. */
 .toast {
-  align-self: center;
+  position: fixed;
+  top: max(64px, calc(env(safe-area-inset-top) + 56px));
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  width: max-content;
+  text-align: center;
   background: rgba(59, 58, 46, 0.88);
   color: #fff;
   border-radius: 999px;
   padding: 8px 16px;
   font-size: 14px;
+  animation: toast-in 0.2s ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
+.pill {
+  white-space: nowrap;
+}
+
+.pill.place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 520px) {
+  .top {
+    gap: 6px;
+  }
+  .top-right {
+    gap: 4px !important;
+    flex-shrink: 0;
+  }
+  .pill {
+    padding: 7px 10px;
+    font-size: 13px;
+  }
+  .pill.btn {
+    padding: 5px 8px !important;
+    font-size: 16px !important;
+  }
+  .pill.nearby {
+    display: none;
+  }
 }
 
 .bottom {
@@ -460,6 +507,7 @@ body {
 .chess-board {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
   aspect-ratio: 1;
   border-radius: 8px;
   overflow: hidden;
@@ -469,6 +517,8 @@ body {
 .chess-board .sq {
   border: 0;
   padding: 0;
+  min-width: 0;
+  min-height: 0;
   font-size: clamp(20px, 7vw, 30px);
   line-height: 1;
   display: grid;

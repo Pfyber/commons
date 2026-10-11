@@ -5,6 +5,7 @@
 // pure functions of elapsed time, and video sources are seeked to it.
 
 import { Sprite, Texture } from "pixi.js";
+import { drawPixelText, pixelWidth } from "../world/pixelfont";
 import type { ServerMsg } from "../net/protocol.gen";
 import { SCREEN_FACE_TOP, TILE, hash } from "../world/art";
 import type { MapObject } from "../world/map";
@@ -27,11 +28,8 @@ function rect(ctx: CanvasRenderingContext2D, color: string, x: number, y: number
 function caption(ctx: CanvasRenderingContext2D, title: string, t: number) {
   if (t > 6) return;
   ctx.globalAlpha = Math.min(1, (6 - t) / 1.5);
-  ctx.font = "7px ui-monospace, monospace";
-  const w = ctx.measureText(title).width + 6;
-  rect(ctx, "rgba(0,0,0,0.55)", 2, 2, w, 9);
-  ctx.fillStyle = "#fff";
-  ctx.fillText(title, 5, 9);
+  rect(ctx, "rgba(0,0,0,0.55)", 2, 2, pixelWidth(title) + 6, 9);
+  drawPixelText(ctx, title, 5, 4, "#fff");
   ctx.globalAlpha = 1;
 }
 

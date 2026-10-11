@@ -11,7 +11,7 @@ import type { Social } from "./social";
 import type { FriendsPanel } from "./ui/social";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
-import type { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
+import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame } from "./ui/panels";
 import { Avatar } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
@@ -313,11 +313,11 @@ export class Game {
     this.disposers.push(() => stage.off("pointertap", tap));
 
     const down = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       if (e.key === "Escape") {
-        this.ui.place.hide();
+        if (!Panel.closeCurrent()) this.ui.place.hide();
         return;
       }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       if (e.key === "Enter") {
         e.preventDefault();
         this.hud.focusChat();
@@ -625,7 +625,13 @@ export class Game {
     if (self) {
       const others = [...this.avatars.values()].filter((a) => a !== self);
       others.sort((a, b) => dist2(a.pos, self.pos) - dist2(b.pos, self.pos));
-      others.forEach((a, i) => (a.showName = i < MAX_NAMES));
+      // Nearest first; a name that would overlap a nearer one waits its turn.
+      const shown = [self.nameBox()];
+      others.forEach((a, i) => {
+        const box = a.nameBox();
+        a.showName = i < MAX_NAMES && !shown.some((b) => Math.abs(b.y - box.y) < 15 && b.x0 < box.x1 + 4 && box.x0 < b.x1 + 4);
+        if (a.showName) shown.push(box);
+      });
       this.hud.setNearby(this.avatars.size);
     }
     this.scene.update();

@@ -4,6 +4,7 @@
 
 import { Texture } from "pixi.js";
 import type { MapObject } from "./map";
+import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 
 export const TILE = 32;
 
@@ -315,6 +316,12 @@ export function decorTexture(kind: string, variant: number): Texture | null {
 // ---- multi-tile objects ----------------------------------------------------
 
 function label(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, color = "#3b3a2e", size = 12) {
+  if (canPixel(text)) {
+    let scale = Math.max(1, Math.round(size / 7));
+    while (scale > 1 && pixelWidth(text, scale) > ctx.canvas.width - 4) scale--;
+    drawPixelText(ctx, text, cx - pixelWidth(text, scale) / 2, y - (5 * scale) / 2, color, scale);
+    return;
+  }
   ctx.font = `bold ${size}px ui-rounded, "Segoe UI", system-ui, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";

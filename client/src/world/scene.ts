@@ -85,13 +85,16 @@ export class Scene {
     };
   }
 
+  /** Centres on `p`, but stops at the map edge; a map smaller than the screen is centred. */
   follow(p: TileXY) {
-    this.cam = p;
     const { width, height } = this.app.screen;
-    this.world.position.set(
-      Math.round(width / 2 - (p.x * TILE + TILE / 2) * this.scale),
-      Math.round(height / 2 - (p.y * TILE + TILE / 2) * this.scale),
-    );
+    const span = TILE * this.scale;
+    const axis = (at: number, size: number, view: number) =>
+      size <= view ? size / 2 : Math.min(Math.max(at + 0.5, view / 2), size - view / 2);
+    const cx = axis(p.x, this.map.width, width / span);
+    const cy = axis(p.y, this.map.height, height / span);
+    this.cam = { x: cx - 0.5, y: cy - 0.5 };
+    this.world.position.set(Math.round(width / 2 - cx * span), Math.round(height / 2 - cy * span));
   }
 
   screenToTile(sx: number, sy: number): TileXY {

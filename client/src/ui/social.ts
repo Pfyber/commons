@@ -15,6 +15,9 @@ function err(e: unknown): string {
   return e instanceof ApiError ? e.message : "That didn't work.";
 }
 
+/** Home invitations last this long (server: social hub). */
+const INVITE_SECS = 15 * 60;
+
 function ago(unix: number): string {
   const s = Math.max(0, Date.now() / 1000 - unix);
   if (s < 60) return "just now";
@@ -200,15 +203,26 @@ export class NotificationsPanel extends Panel {
     social.onChange(() => this.open && this.render());
   }
 
+  /** Gifts still on the doorstep; "Go home" only shows while there are some. */
+  private waitingGifts = 0;
+
   show() {
     super.show();
     void this.social.markRead();
+    this.social
+      .gifts()
+      .then((g) => {
+        this.waitingGifts = g.length;
+        if (this.open) this.render();
+      })
+      .catch(() => {});
   }
 
   render() {
     this.body.replaceChildren();
     const ns = this.social.notifications;
     if (!ns.length) this.body.append(el("p", "empty", "Nothing new. It's peaceful here."));
+    const newestGift = ns.find((n) => n.kind === "gift");
     for (const n of ns) {
       const row = el("div", n.read ? "note" : "note unread");
       row.append(el("span", "text", describe(n)), el("span", "time", ago(n.at)));
@@ -221,8 +235,9 @@ export class NotificationsPanel extends Panel {
           button("Decline", () => void this.social.respond(from, false), "small"),
         );
       }
-      if (n.kind === "home_invite" && from) row.append(button("Visit", () => this.actions.visitId(from, name), "small primary-sm"));
-      if (n.kind === "gift") row.append(button("Go home", () => this.actions.goHome(), "small"));
+      const inviteLive = Date.now() / 1000 - n.at < INVITE_SECS;
+      if (n.kind === "home_invite" && from && inviteLive) row.append(button("Visit", () => this.actions.visitId(from, name), "small primary-sm"));
+      if (n === newestGift && this.waitingGifts > 0) row.append(button("Go home", () => this.actions.goHome(), "small"));
       this.body.append(row);
     }
   }

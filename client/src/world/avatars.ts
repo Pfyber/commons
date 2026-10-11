@@ -38,6 +38,7 @@ export class Avatar {
   pos: TileXY;
   private facing = 1;
   showName = true;
+  private nameW = 0;
   /** Posture (protocol `state::*`): 0 idle, 1 sitting. */
   state = 0;
   /** Where we stood before sitting down; standing up returns here. */
@@ -185,6 +186,14 @@ export class Avatar {
       this.emoteEl = null;
       this.emoteId = 0;
     }
+  }
+
+  /** Screen box of the name tag (measured once), for decluttering overlapping names. */
+  nameBox(): { x0: number; x1: number; y: number } {
+    if (!this.nameW && !this.nameEl.hidden) this.nameW = this.nameEl.offsetWidth;
+    const w = this.nameW || this.info.name.length * 7;
+    const s = this.scene.tileToScreen(this.pos.x + 0.5, this.pos.y);
+    return { x0: s.x - w / 2, x1: s.x + w / 2, y: s.y };
   }
 
   destroy() {

@@ -66,7 +66,7 @@ async function main() {
   const app = new Application();
   await app.init({
     resizeTo: window,
-    background: "#e3e9e6", // fog beyond the map edge
+    background: "#6f8d62", // hedge green around maps smaller than the screen
     antialias: false,
     autoDensity: true,
     resolution: Math.min(window.devicePixelRatio || 1, 2),

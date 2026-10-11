@@ -53,6 +53,7 @@ export class Hud {
     this.log = root.querySelector(".log")!;
     this.input = root.querySelector(".chat input")!;
     this.toastEl = root.querySelector(".toast")!;
+    if (matchMedia("(pointer: coarse)").matches) this.input.placeholder = "Tap to chat";
     this.coinsEl = root.querySelector(".coins")!;
     root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
     root.querySelector<HTMLButtonElement>(".album-btn")!.onclick = () => h.onAlbum();

@@ -47,6 +47,13 @@ export class Panel {
     return !this.el.hidden;
   }
 
+  /** Closes whichever panel is open; returns whether one was. */
+  static closeCurrent(): boolean {
+    if (!Panel.current) return false;
+    Panel.current.hide();
+    return true;
+  }
+
   show() {
     if (Panel.current && Panel.current !== this) Panel.current.hide();
     Panel.current = this;
