@@ -7,9 +7,14 @@
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import os from "node:os";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
+// Terminals opened before Rust was installed don't have cargo on PATH yet;
+// rustup's default location covers that case.
+process.env.PATH = [process.env.PATH, path.join(os.homedir(), ".cargo", "bin")].join(path.delimiter);
+
 const botsIdx = args.indexOf("--bots");
 const bots = botsIdx >= 0 ? Number(args[botsIdx + 1] ?? 50) : 0;
 
