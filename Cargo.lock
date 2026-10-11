@@ -393,6 +393,7 @@ dependencies = [
  "anyhow",
  "axum",
  "commons-common",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -409,6 +410,25 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "commons-social"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "commons-api",
+ "commons-common",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

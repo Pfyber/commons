@@ -68,6 +68,7 @@ services:
       COMMONS_CLIENT_URL: http://localhost:5173
       DATABASE_URL: postgres://commons:commons@postgres:5432/commons
       COMMONS_API_INTERNAL_URL: http://api:8080
+      COMMONS_SOCIAL_INTERNAL_URL: http://social:8083
     depends_on:
       postgres: { condition: service_healthy }
     ports: ["8080:8080"]
@@ -79,6 +80,14 @@ services:
       <<: *app_env
       ZONE_PUBLIC_URL: ws://localhost:8082/ws
     ports: ["8081:8081"]
+
+  social:
+    profiles: [app]
+    build: { context: .., dockerfile: infra/Dockerfile.server, args: { BIN: social } }
+    environment: *app_env
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["8083:8083"]
 
   zone:
     profiles: [app]

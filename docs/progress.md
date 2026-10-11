@@ -200,7 +200,57 @@ Gate: p99 tick < 20 ms, p99 per-client outbound < 8 KB/s.
 
 See docs/adr/0002-m3-economy.md for the decisions behind this.
 
-## Next: M4 · Friends
+## M4 · Friends: done (2026-10-11)
 
-Social gateway, friends list with presence, join friend, gifts to doorsteps,
-notifications, and home visits.
+- **Social gateway** (`server/crates/social`, :8083): one socket per client
+  for live presence, messages and notifications; REST for actions; Postgres
+  for friendships, requests, blocks, DMs, gifts and notifications (migration
+  `0003_friends.sql`). The API crate is now lib + bin so the gateway reuses
+  the economy.
+- **Friends:** add by name or by tapping someone in the world. Requests
+  arrive live with a 🔔 badge, and asking someone who already asked you makes
+  you friends at once. The friends panel (👥, F) shows who's online and where.
+- **Join friend:** the orchestrator asks the gateway where they are and
+  routes you to their exact instance.
+- **Messages** between friends, delivered live, with history.
+- **Gifts:** give any item, and it waits as a box on the friend's doorstep
+  until opened. Gifts earn friendship points; 3 gifts make you close friends.
+- **Homes:** close friends can drop by any time; friends need an invitation
+  (15 min). The HUD shows "Ana's home". Only the owner arranges furniture or
+  gardens there.
+- **Block** from the avatar menu: ends the friendship, stops contact both
+  ways, and hides their chat.
+- Notifications panel (🔔, N) with actions: accept, visit, go home for a gift.
+- Only one panel is open at a time now (they used to stack).
+
+### Tests
+
+- Social integration tests on Postgres: requests and auto-accept, gifts (only
+  between friends, idempotent, opened once, earning close friendship), visit
+  and locate rules with invites, blocking. Hub unit tests cover out-of-order
+  presence reports.
+- Two-browser end-to-end: request → live badge → accept → presence → DM → gift
+  on the doorstep → refused uninvited visit → invite → visit → join friend →
+  block, with no errors.
+
+### Botswarm (500 bots, separate zone server)
+
+| Tick p99 | Client KB/s p99 | Gate |
+|---|---|---|
+| 2.9 ms | 3.53 | PASS |
+
+### Demo notes
+
+1. `node scripts/dev.mjs`, then open two browsers (one private window) and
+   log in as two names.
+2. 👥 → add the other by name; accept in the other window via 🔔.
+3. Message, gift a seed (the other goes home through the west gate to open
+   it), invite home, visit.
+4. Walk somewhere and have the other press **Join**.
+
+See docs/adr/0003-m4-social.md.
+
+## Next: M5 · Crowds
+
+Instancing, orchestrator routing by population, crowd LOD, slow mode,
+mega-event broadcast over NATS, and a 10,000-bot festival test.

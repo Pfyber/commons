@@ -17,6 +17,7 @@ mod home;
 use crate::econ::EconomyClient;
 use crate::games::ChessGame;
 use crate::registry::ZoneDef;
+use crate::social::{Presence, SocialClient};
 use crate::stats::InstanceStats;
 use bytes::Bytes;
 use commons_common::filter::clean_chat;
@@ -179,6 +180,7 @@ pub struct Instance {
     /// For private spaces (homes): the owning player.
     owner: Option<String>,
     economy: Option<Arc<EconomyClient>>,
+    social: Option<Arc<SocialClient>>,
     /// Lets async work post its results back into the actor.
     self_tx: Option<mpsc::WeakSender<Cmd>>,
     /// Prefix making idempotency keys unique to this instance's lifetime.
@@ -198,6 +200,7 @@ impl Instance {
         number: u16,
         owner: Option<String>,
         economy: Option<Arc<EconomyClient>>,
+        social: Option<Arc<SocialClient>>,
     ) -> Self {
         let cells = zone.cells_w as usize * zone.cells_h as usize;
         let soil_kind = zone.map.ground_legend.iter().position(|g| g == "soil");
@@ -227,6 +230,7 @@ impl Instance {
             screen_index: None,
             owner,
             economy,
+            social,
             self_tx: None,
             key_prefix: format!("{:016x}", rand::rng().random::<u64>()),
             key_seq: 0,
@@ -243,9 +247,10 @@ impl Instance {
         number: u16,
         owner: Option<String>,
         economy: Option<Arc<EconomyClient>>,
+        social: Option<Arc<SocialClient>>,
     ) -> InstanceHandle {
         let (tx, rx) = mpsc::channel(INBOX);
-        let mut inst = Instance::new(zone, number, owner, economy);
+        let mut inst = Instance::new(zone, number, owner, economy, social);
         inst.self_tx = Some(tx.downgrade());
         let (clock, stats) = (inst.clock, inst.stats.clone());
         tracing::info!(zone = %inst.zone.id, instance = number, owner = ?inst.owner, "instance started");
@@ -277,6 +282,20 @@ impl Instance {
     fn next_key(&mut self, kind: &str) -> String {
         self.key_seq += 1;
         format!("{kind}:{}:{}", self.key_prefix, self.key_seq)
+    }
+
+    fn report_presence(&self, player: &str, present: bool) {
+        if let Some(social) = &self.social {
+            social.report(Presence {
+                player,
+                zone: &self.zone.id,
+                zone_name: &self.zone.map.name,
+                instance: self.number,
+                owner: self.owner.as_deref(),
+                present,
+                at_ms: now_ms(),
+            });
+        }
     }
 
     /// Loads garden plots and (for homes) furniture from the economy service.
@@ -497,6 +516,8 @@ impl Instance {
         self.members[cell as usize].push(id);
         self.broadcast(cell, &spawn_msg, Some(id));
         self.update_subs(id, now);
+        let player = self.avatars[&id].player_id.clone();
+        self.report_presence(&player, true);
         if let Some(msg) = self.screen_state(now) {
             self.send_to(id, &msg);
         }
@@ -520,6 +541,7 @@ impl Instance {
             self.watchers[*c as usize].retain(|&w| w != id);
         }
         self.broadcast(a.cell, &ServerMsg::Despawn { id }, None);
+        self.report_presence(&a.player_id, false);
         self.stats
             .population
             .store(self.avatars.len() as u32, Ordering::Relaxed);
@@ -853,7 +875,7 @@ pub(crate) mod tests {
     }
 
     fn instance_for(zone: Arc<ZoneDef>) -> Instance {
-        Instance::new(zone, 1, None, None)
+        Instance::new(zone, 1, None, None, None)
     }
 
     /// 16×16 park with one chess table at (5,5) and its benches at (4,5) and (6,5).
@@ -887,6 +909,7 @@ pub(crate) mod tests {
             1,
             None,
             Some(econ),
+            None,
         )
     }
 

@@ -207,12 +207,17 @@ async fn create(
 
 /// Validates the access token in `Authorization: Bearer …`.
 pub fn bearer(state: &AppState, headers: &HeaderMap) -> ApiResult<AccessClaims> {
+    bearer_with(&state.secret, headers)
+}
+
+/// `bearer` for services that don't share the API's state (social gateway).
+pub fn bearer_with(secret: &[u8], headers: &HeaderMap) -> ApiResult<AccessClaims> {
     let raw = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
-    token::verify(&state.secret, raw).map_err(|e| ApiError::unauthorized(e.to_string()))
+    token::verify(secret, raw).map_err(|e| ApiError::unauthorized(e.to_string()))
 }
 
 // ---- handlers -------------------------------------------------------------

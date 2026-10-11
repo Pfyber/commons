@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Starts the whole dev stack with prefixed logs: api, orchestrator, zone
-// server and the Vite client. Ctrl+C stops everything.
+// server, social gateway and the Vite client (Postgres must be running). Ctrl+C stops everything.
 //
 //   node scripts/dev.mjs            # everything
 //   node scripts/dev.mjs --bots 50  # plus 50 wandering bots for company
@@ -23,7 +23,7 @@ const botsIdx = args.indexOf("--bots");
 const bots = botsIdx >= 0 ? Number(args[botsIdx + 1] ?? 50) : 0;
 
 console.log("building servers…");
-const build = spawnSync("cargo", ["build", "--release", "--bin", "api", "--bin", "orchestrator", "--bin", "zone", "--bin", "botswarm"], {
+const build = spawnSync("cargo", ["build", "--release", "--bin", "api", "--bin", "orchestrator", "--bin", "zone", "--bin", "social", "--bin", "botswarm"], {
   cwd: root,
   stdio: "inherit",
   shell: process.platform === "win32",
@@ -31,7 +31,7 @@ const build = spawnSync("cargo", ["build", "--release", "--bin", "api", "--bin",
 if (build.status !== 0) process.exit(build.status ?? 1);
 
 const exe = (name) => path.join(root, "target", "release", process.platform === "win32" ? `${name}.exe` : name);
-const colors = { api: 36, orch: 35, zone: 33, web: 32, bots: 90 };
+const colors = { api: 36, orch: 35, zone: 33, soc: 34, web: 32, bots: 90 };
 const children = [];
 
 function run(tag, cmd, cmdArgs, opts = {}) {
@@ -56,6 +56,7 @@ function run(tag, cmd, cmdArgs, opts = {}) {
 run("api", exe("api"), []);
 run("orch", exe("orchestrator"), []);
 run("zone", exe("zone"), []);
+run("soc", exe("social"), []);
 run("web", "npm", ["run", "dev"], { cwd: path.join(root, "client") });
 if (bots > 0) {
   setTimeout(() => run("bots", exe("botswarm"), ["--bots", String(bots), "--ramp", "5", "--duration", "86400", "--behaviour", "mix"]), 2000);

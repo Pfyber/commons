@@ -5,21 +5,21 @@ import { COIN, type Economy, type Item } from "../economy";
 import { ApiError } from "../net/api";
 import { itemIconUrl } from "../world/items";
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): HTMLElementTagNameMap[K] {
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text) e.textContent = text;
   return e;
 }
 
-function icon(item: Item | undefined): HTMLImageElement {
+export function icon(item: Item | undefined): HTMLImageElement {
   const img = el("img", "icon");
   img.alt = "";
   if (item) img.src = itemIconUrl(item.key, item.kind);
   return img;
 }
 
-function button(label: string, run: () => void, cls = ""): HTMLButtonElement {
+export function button(label: string, run: () => void, cls = ""): HTMLButtonElement {
   const b = el("button", cls, label);
   b.type = "button";
   b.onclick = run;
@@ -27,7 +27,9 @@ function button(label: string, run: () => void, cls = ""): HTMLButtonElement {
 }
 
 /** A closable floating panel. */
-class Panel {
+export class Panel {
+  /** Panels share one spot on screen, so only one is open at a time. */
+  private static current: Panel | null = null;
   readonly el: HTMLDivElement;
   protected body: HTMLDivElement;
 
@@ -46,12 +48,15 @@ class Panel {
   }
 
   show() {
+    if (Panel.current && Panel.current !== this) Panel.current.hide();
+    Panel.current = this;
     this.el.hidden = false;
     this.render();
   }
 
   hide() {
     this.el.hidden = true;
+    if (Panel.current === this) Panel.current = null;
   }
 
   toggle() {

@@ -3,6 +3,7 @@
 use crate::econ::EconomyClient;
 use crate::instance::{Instance, InstanceHandle};
 use crate::screen::Playlist;
+use crate::social::SocialClient;
 use crate::stats::InstanceSnapshot;
 use anyhow::Context;
 use commons_protocol::CELL_TILES;
@@ -50,6 +51,7 @@ type InstanceKey = (String, u16, Option<String>);
 pub struct Registry {
     pub secret: Vec<u8>,
     pub economy: Option<Arc<EconomyClient>>,
+    pub social: Option<Arc<SocialClient>>,
     zones: HashMap<String, Arc<ZoneDef>>,
     instances: Mutex<HashMap<InstanceKey, InstanceHandle>>,
 }
@@ -61,6 +63,7 @@ impl Registry {
         playlist: Playlist,
         secret: Vec<u8>,
         economy: Option<Arc<EconomyClient>>,
+        social: Option<Arc<SocialClient>>,
     ) -> anyhow::Result<Self> {
         let playlist = Arc::new(playlist);
         let mut zones = HashMap::new();
@@ -87,6 +90,7 @@ impl Registry {
         Ok(Registry {
             secret,
             economy,
+            social,
             zones,
             instances: Mutex::new(HashMap::new()),
         })
@@ -105,7 +109,15 @@ impl Registry {
         let mut instances = self.instances.lock().unwrap();
         let handle = instances
             .entry((zone.to_string(), number, owner.clone()))
-            .or_insert_with(|| Instance::spawn(def.clone(), number, owner, self.economy.clone()));
+            .or_insert_with(|| {
+                Instance::spawn(
+                    def.clone(),
+                    number,
+                    owner,
+                    self.economy.clone(),
+                    self.social.clone(),
+                )
+            });
         Some(handle.clone())
     }
 

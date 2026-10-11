@@ -3,11 +3,13 @@ import parkUrl from "../../assets/maps/founders_park.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
-import { ApiError, Auth } from "./net/api";
+import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
+import { Social } from "./social";
 import { Hud } from "./ui/hud";
 import { signIn } from "./ui/login";
 import { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
+import { FriendsPanel, NotificationsPanel } from "./ui/social";
 import type { ZoneMap } from "./world/map";
 import "./styles.css";
 
@@ -73,16 +75,26 @@ async function main() {
 
   let game: Game | null = null;
   const eco = new Economy(auth);
+  const social = new Social(auth, auth.player!.id);
   const place = new PlaceBanner(() => place.hide());
+  const friendActions = {
+    join: (f: { id: string }) => void travel({ friend: f.id }),
+    visit: (f: { id: string }) => void travel({ zone: "home", owner: f.id }),
+    visitId: (id: string) => void travel({ zone: "home", owner: id }),
+    goHome: () => void travel({ zone: "home" }),
+  };
+  const hud = new Hud(document.getElementById("hud")!, {
+    onChat: (text) => game?.chat(text),
+    onEmote: (id) => game?.emote(id),
+    onSit: () => game?.toggleSit(),
+    onBag: () => ui.bag.toggle(),
+    onAlbum: () => ui.album.toggle(),
+    onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
+    onNotifications: () => notifications.toggle(),
+  });
   const ui: Ui = {
     eco,
-    hud: new Hud(document.getElementById("hud")!, {
-      onChat: (text) => game?.chat(text),
-      onEmote: (id) => game?.emote(id),
-      onSit: () => game?.toggleSit(),
-      onBag: () => ui.bag.toggle(),
-      onAlbum: () => ui.album.toggle(),
-    }),
+    hud,
     bag: new BagPanel(eco, (item) => {
       ui.bag.hide();
       place.show(item);
@@ -93,24 +105,34 @@ async function main() {
     reel: new ReelGame(),
     place,
     menu: new ActionMenu(),
+    social,
+    friends: new FriendsPanel(social, eco, friendActions),
   };
-  eco.onChange(() => ui.hud.setCoins(eco.coins));
-  await eco.load().catch(() => {});
+  const notifications = new NotificationsPanel(social, friendActions);
+  eco.onChange(() => hud.setCoins(eco.coins));
+  social.onChange(() => hud.setBadge(social.unreadCount));
+  social.onToast = (t) => hud.toast(t, 4000);
+  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {})]);
 
-  let zone = "founders_park";
+  let dest: Destination = { zone: "founders_park" };
   let retry = 0;
-  const enter = async () => {
+  /** Joins `dest`; on failure either retries (connection trouble) or throws (refused). */
+  const enter = async (refusalThrows = false) => {
     try {
-      const [ticket, map] = await Promise.all([auth.join(zone), loadMap(zone)]);
-      if (!game || game.zoneId !== zone) {
+      const ticket = await auth.join(dest);
+      const map = await loadMap(ticket.zone_id);
+      const placeInfo = { label: ticket.label, owner: ticket.owner };
+      if (!game || game.zoneId !== ticket.zone_id || game.place.owner !== placeInfo.owner) {
         game?.destroy();
-        game = new Game(app, map, zone, ui, document.getElementById("labels")!, {
+        game = new Game(app, map, ticket.zone_id, placeInfo, ui, document.getElementById("labels")!, {
           onWelcome: () => (retry = 0),
           onDisconnect,
-          onTravel: (z) => void travel(z),
+          onTravel: (z) => void travel({ zone: z }),
         });
         if (import.meta.env.DEV) (window as unknown as { __commons: Game }).__commons = game;
       }
+      // A friend's location becomes the place to reconnect to.
+      dest = { zone: ticket.zone_id, owner: ticket.owner ?? undefined };
       game.connect(ticket.server_url, ticket.join_token);
       hideOverlay();
     } catch (e) {
@@ -119,21 +141,28 @@ async function main() {
         location.reload();
         return;
       }
+      if (refusalThrows && e instanceof ApiError && e.status >= 400 && e.status < 500) throw e;
       scheduleRetry();
     }
   };
-  const travel = async (to: string) => {
-    if (to === zone) return;
-    zone = to;
+  const travel = async (to: Destination) => {
+    const previous = dest;
+    dest = to;
     document.body.classList.add("fading");
     await new Promise((r) => setTimeout(r, 250));
-    await enter();
-    document.body.classList.remove("fading");
+    try {
+      await enter(true);
+    } catch (e) {
+      dest = previous;
+      hud.toast(e instanceof ApiError ? e.message : "You can't go there right now.", 4000);
+    } finally {
+      document.body.classList.remove("fading");
+    }
   };
   const scheduleRetry = () => {
     const delay = Math.min(30_000, 1000 * 2 ** retry++);
     showOverlay("Reconnecting…", "Lost the connection to the park. Trying again shortly.");
-    window.setTimeout(enter, delay);
+    window.setTimeout(() => void enter(), delay);
   };
   const onDisconnect = (reason: CloseReason) => {
     if (reason?.code === ERR_REPLACED) {
@@ -152,7 +181,7 @@ async function main() {
   // A small daily gift, no streaks (spec §8.3).
   eco
     .daily()
-    .then((g) => g && ui.hud.toast(`A little gift for today: ${g.qty}× ${eco.name(g.item)} 🌱`, 5000))
+    .then((g) => g && hud.toast(`A little gift for today: ${g.qty}× ${eco.name(g.item)} 🌱`, 5000))
     .catch(() => {});
 }
 

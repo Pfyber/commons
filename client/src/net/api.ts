@@ -26,7 +26,18 @@ export interface JoinTicket {
   server_url: string;
   zone_id: string;
   instance_id: number;
+  /** For homes: whose home. */
+  owner: string | null;
+  /** e.g. "Ana's home"; empty for public zones. */
+  label: string;
   join_token: string;
+}
+
+/** Where to go: a zone, a friend's side, or someone's home. */
+export interface Destination {
+  zone?: string;
+  friend?: string;
+  owner?: string;
 }
 
 export class ApiError extends Error {
@@ -143,7 +154,7 @@ export class Auth {
     return request<T>("POST", path, body, await this.accessToken());
   }
 
-  async join(zoneId: string): Promise<JoinTicket> {
-    return post<JoinTicket>("/api/join", { zone_id: zoneId }, await this.accessToken());
+  async join(dest: Destination): Promise<JoinTicket> {
+    return post<JoinTicket>("/api/join", { zone_id: dest.zone, friend: dest.friend, owner: dest.owner }, await this.accessToken());
   }
 }

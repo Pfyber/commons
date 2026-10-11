@@ -1,12 +1,14 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
-import type { Application, FederatedPointerEvent } from "pixi.js";
+import { type Application, type FederatedPointerEvent, Sprite } from "pixi.js";
 import { ChessPanel, type GameStateMsg } from "./activities/chess";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
 import { DayNight } from "./ambient/daynight";
 import type { Economy } from "./economy";
 import type { ServerMsg } from "./net/protocol.gen";
+import type { Social } from "./social";
+import type { FriendsPanel } from "./ui/social";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import type { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
@@ -16,6 +18,8 @@ import { type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from ".
 import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
 import { compress, findPath } from "./world/path";
 import { Props } from "./world/props";
+import { giftBoxTexture } from "./world/items";
+import { TILE } from "./world/art";
 import { Scene } from "./world/scene";
 
 /** Error codes from server/crates/protocol (error_code). */
@@ -40,7 +44,25 @@ export interface Ui {
   reel: ReelGame;
   place: PlaceBanner;
   menu: ActionMenu;
+  social: Social;
+  friends: FriendsPanel;
 }
+
+/** Where this Game is: label for the HUD and, for homes, whose. */
+export interface Place {
+  label: string;
+  owner: string | null;
+}
+
+/** Tiles in front of the cottage door where gifts are left (home map). */
+const DOORSTEP: TileXY[] = [
+  { x: 8, y: 10 },
+  { x: 11, y: 10 },
+  { x: 7, y: 10 },
+  { x: 12, y: 10 },
+  { x: 6, y: 10 },
+  { x: 13, y: 10 },
+];
 
 const cheb = (a: TileXY, b: TileXY) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const SITTING = 1;
@@ -81,6 +103,7 @@ export class Game {
     private app: Application,
     map: ZoneMap,
     readonly zoneId: string,
+    readonly place: Place,
     private ui: Ui,
     private labels: HTMLElement,
     private events: { onWelcome(): void; onDisconnect(reason: CloseReason): void; onTravel(zone: string): void },
@@ -88,7 +111,7 @@ export class Game {
     this.hud = ui.hud;
     this.scene = new Scene(app, map);
     this.props = new Props(this.scene, map, ui.eco);
-    ui.bag.placeable = zoneId === "home";
+    ui.bag.placeable = zoneId === "home" && place.owner === ui.social.selfId;
     this.furniture = new Furniture(map);
     const screenObj = map.objects.find((o) => o.kind === "big_screen");
     if (screenObj) {
@@ -146,7 +169,8 @@ export class Game {
     switch (m.t) {
       case "Welcome":
         this.selfId = m.selfId;
-        this.hud.setPlace(this.scene.map.name, m.instance);
+        this.hud.setPlace(this.place.label || this.scene.map.name, m.instance);
+        if (this.isOwnHome) void this.loadGifts();
         this.events.onWelcome();
         break;
       case "CellEnter":
@@ -181,7 +205,7 @@ export class Game {
         break;
       case "ChatBubble": {
         const a = this.avatars.get(m.id);
-        if (!a) break;
+        if (!a || this.ui.social.isBlockedName(a.info.name)) break;
         a.say(m.text);
         this.hud.addChat(a.info.name, m.text, m.id === this.selfId);
         break;
@@ -274,6 +298,8 @@ export class Game {
     stage.hitArea = this.app.screen;
     const tap = (e: FederatedPointerEvent) => {
       const t = this.scene.screenToTile(e.global.x, e.global.y);
+      if (this.tapAvatar(e.global.x, e.global.y)) return;
+      if (this.tapGift(t)) return;
       if (this.tapCollect(t)) return;
       const id = this.furniture.idAt(t);
       const seat = this.furniture.seats.get(id);
@@ -319,6 +345,66 @@ export class Game {
       window.removeEventListener("blur", blur);
       window.removeEventListener("resize", resize);
     });
+  }
+
+  // ---- people & gifts ---------------------------------------------------------
+
+  private get isOwnHome(): boolean {
+    return this.zoneId === "home" && this.place.owner === this.ui.social.selfId;
+  }
+
+  /** Tapping another avatar: befriend, message or block them. */
+  private tapAvatar(sx: number, sy: number): boolean {
+    for (const a of this.avatars.values()) {
+      if (a.info.id === this.selfId) continue;
+      const b = a.sprite.getBounds();
+      if (sx < b.minX || sx > b.maxX || sy < b.minY || sy > b.maxY) continue;
+      const social = this.ui.social;
+      const name = a.info.name;
+      const friend = social.friendByName(name);
+      const say = (p: Promise<string | void>) => p.then((t) => t && this.hud.toast(t)).catch((e) => this.hud.toast(e?.message ?? "That didn't work."));
+      const actions: [string, () => void][] = friend
+        ? [["Message", () => this.ui.friends.chatWith(friend)]]
+        : [["Add friend", () => void say(social.request(name))]];
+      actions.push(["Block", () => confirm(`Block ${name}? You won't see their chat, and they can't contact you.`) && void say(social.block(name).then(() => `Blocked ${name}.`))]);
+      this.ui.menu.showWith(name, friend ? (friend.level >= 2 ? "Close friend" : "Friend") : "", actions);
+      return true;
+    }
+    return false;
+  }
+
+  private gifts = new Map<string, { sprite: Sprite; tile: TileXY; id: string }>();
+
+  /** Gifts waiting on your doorstep (spec §8.1). */
+  private async loadGifts() {
+    const gifts = await this.ui.social.gifts().catch(() => []);
+    for (const g of this.gifts.values()) g.sprite.destroy();
+    this.gifts.clear();
+    gifts.slice(0, DOORSTEP.length).forEach((g, i) => {
+      const tile = DOORSTEP[i];
+      const sprite = new Sprite(giftBoxTexture());
+      sprite.anchor.set(0.5, 1);
+      sprite.position.set(tile.x * TILE + TILE / 2, tile.y * TILE + TILE - 2);
+      sprite.zIndex = tile.y * TILE + TILE - 2;
+      this.scene.sorted.addChild(sprite);
+      this.gifts.set(`${tile.x},${tile.y}`, { sprite, tile, id: g.id });
+    });
+    if (gifts.length) this.hud.toast(`${gifts.length === 1 ? "A gift is" : `${gifts.length} gifts are`} waiting on your doorstep 🎁`, 4000);
+  }
+
+  private tapGift(t: TileXY): boolean {
+    const g = this.gifts.get(`${t.x},${t.y}`);
+    if (!g) return false;
+    this.ui.social
+      .openGift(g.id)
+      .then((r) => {
+        const [item, qty] = r.applied.added[0] ?? [0, 0];
+        this.hud.toast(`🎁 ${qty} ${this.ui.eco.name(item)} from ${r.from_name}`, 4000);
+        return this.ui.eco.load();
+      })
+      .catch((e) => this.hud.toast(e?.message ?? "That didn't work."))
+      .finally(() => void this.loadGifts());
+    return true;
   }
 
   // ---- collecting: fishing, gardens, market, homes ---------------------------

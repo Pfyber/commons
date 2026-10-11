@@ -1,0 +1,29 @@
+[package]
+name = "commons-social"
+description = "Social gateway: friends, presence, direct messages, gifts, notifications"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "social"
+path = "src/main.rs"
+
+[dependencies]
+commons-api = { path = "../api" }
+commons-common.workspace = true
+
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

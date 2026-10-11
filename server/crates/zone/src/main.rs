@@ -7,6 +7,7 @@ mod games;
 mod instance;
 mod registry;
 mod screen;
+mod social;
 mod stats;
 
 use axum::Router;
@@ -27,11 +28,16 @@ async fn main() -> anyhow::Result<()> {
     let api = config::env_str("COMMONS_API_INTERNAL_URL", "http://127.0.0.1:8080");
     let economy = econ::EconomyClient::new(api, config::secret());
     tokio::spawn(economy.clone().load_catalog_forever());
+    let social = social::SocialClient::new(
+        config::env_str("COMMONS_SOCIAL_INTERNAL_URL", "http://127.0.0.1:8083"),
+        config::secret(),
+    );
     let registry = Arc::new(Registry::load(
         &maps_dir,
         playlist,
         config::secret(),
         Some(economy),
+        Some(social),
     )?);
 
     let app = Router::new()

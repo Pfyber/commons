@@ -2,31 +2,11 @@
 //! daily gift) and internal endpoints for zone servers. Postgres-backed;
 //! migrations in `server/migrations` run on startup.
 
-mod auth;
-mod economy;
-mod error;
-mod internal;
-mod store;
-#[cfg(test)]
-mod tests;
-
-use anyhow::Context;
 use axum::Router;
+use commons_api::economy::Catalog;
+use commons_api::{AppState, auth, economy, internal, store};
 use commons_common::{config, telemetry};
-use economy::Catalog;
-use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
-
-pub struct AppState {
-    pub secret: Vec<u8>,
-    pub dev: bool,
-    pub client_url: String,
-    pub store: store::Store,
-    pub db: sqlx::PgPool,
-    pub catalog: Arc<Catalog>,
-    /// Garden growth period per stage (spec: plants grow over real days).
-    pub stage_ms: i64,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -36,15 +16,7 @@ async fn main() -> anyhow::Result<()> {
         "DATABASE_URL",
         "postgres://commons:commons@localhost:5432/commons",
     );
-    let db = PgPoolOptions::new()
-        .max_connections(config::env_or("DATABASE_POOL", 20))
-        .connect(&db_url)
-        .await
-        .with_context(|| format!("connecting to {}", redact(&db_url)))?;
-    sqlx::migrate!("../../migrations")
-        .run(&db)
-        .await
-        .context("running migrations")?;
+    let db = commons_api::connect(&db_url, config::env_or("DATABASE_POOL", 20)).await?;
     let catalog = Arc::new(Catalog::load(&db).await?);
     tracing::info!(items = catalog.items.len(), "catalogue loaded");
 
@@ -72,11 +44,4 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(%bind, "api listening");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-fn redact(url: &str) -> String {
-    match (url.find("://"), url.rfind('@')) {
-        (Some(s), Some(at)) if at > s => format!("{}://***{}", &url[..s], &url[at..]),
-        _ => url.to_string(),
-    }
 }

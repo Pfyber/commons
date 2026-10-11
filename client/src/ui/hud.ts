@@ -12,6 +12,8 @@ export interface HudHandlers {
   onSit(): void;
   onBag(): void;
   onAlbum(): void;
+  onFriends(): void;
+  onNotifications(): void;
 }
 
 export class Hud {
@@ -22,6 +24,7 @@ export class Hud {
   private toastEl: HTMLDivElement;
   private sitBtn: HTMLButtonElement;
   private coinsEl: HTMLDivElement;
+  private badgeEl!: HTMLSpanElement;
   private toastTimer = 0;
 
   constructor(root: HTMLElement, h: HudHandlers) {
@@ -32,6 +35,8 @@ export class Hud {
           <div class="pill coins" title="Coins"></div>
           <button type="button" class="pill btn bag-btn" title="Bag (B)">🎒</button>
           <button type="button" class="pill btn album-btn" title="Album (L)">📖</button>
+          <button type="button" class="pill btn friends-btn" title="Friends (F)">👥</button>
+          <button type="button" class="pill btn notes-btn" title="Notifications (N)">🔔<span class="badge-count" hidden></span></button>
           <div class="pill nearby" title="People in view"></div>
         </div>
       </div>
@@ -51,10 +56,15 @@ export class Hud {
     this.coinsEl = root.querySelector(".coins")!;
     root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
     root.querySelector<HTMLButtonElement>(".album-btn")!.onclick = () => h.onAlbum();
+    root.querySelector<HTMLButtonElement>(".friends-btn")!.onclick = () => h.onFriends();
+    root.querySelector<HTMLButtonElement>(".notes-btn")!.onclick = () => h.onNotifications();
+    this.badgeEl = root.querySelector(".badge-count")!;
     window.addEventListener("keydown", (e) => {
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === "b" || e.key === "B") h.onBag();
       if (e.key === "l" || e.key === "L") h.onAlbum();
+      if (e.key === "f" || e.key === "F") h.onFriends();
+      if (e.key === "n" || e.key === "N") h.onNotifications();
     });
 
     const form = root.querySelector<HTMLFormElement>(".chat")!;
@@ -96,6 +106,11 @@ export class Hud {
 
   setPlace(name: string, instance: number) {
     this.place.textContent = `${name} · ${instance}`;
+  }
+
+  setBadge(n: number) {
+    this.badgeEl.hidden = n === 0;
+    this.badgeEl.textContent = n > 9 ? "9+" : String(n);
   }
 
   setCoins(n: number) {

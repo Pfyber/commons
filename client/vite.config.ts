@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api/join": "http://localhost:8081",
+      "/api/social": { target: "http://localhost:8083", ws: true },
       "/api": "http://localhost:8080",
     },
     fs: { allow: [".."] }, // maps live in ../assets

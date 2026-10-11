@@ -269,3 +269,19 @@ export function bobberTexture(): Texture {
     }),
   );
 }
+
+export function giftBoxTexture(): Texture {
+  return cachedTex("giftbox", () =>
+    canvas(24, 24, (ctx) => {
+      px(ctx, "rgba(0,0,0,0.18)", 3, 21, 18, 3);
+      px(ctx, O, 2, 8, 20, 14);
+      px(ctx, "#e8566b", 3, 9, 18, 12);
+      px(ctx, "#f6c343", 10, 9, 4, 12);
+      px(ctx, O, 1, 5, 22, 5);
+      px(ctx, "#f28c9b", 2, 6, 20, 3);
+      px(ctx, "#f6c343", 10, 6, 4, 3);
+      px(ctx, "#f6c343", 6, 1, 5, 5);
+      px(ctx, "#f6c343", 13, 1, 5, 5);
+    }),
+  );
+}
