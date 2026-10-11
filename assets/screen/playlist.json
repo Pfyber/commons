@@ -1,0 +1,5 @@
+[
+  { "title": "The Pond, Underwater", "source": "scene:aquarium", "duration_s": 240 },
+  { "title": "Stars over the Park", "source": "scene:stars", "duration_s": 240 },
+  { "title": "Town Noticeboard", "source": "scene:notice", "duration_s": 90 }
+]

@@ -74,6 +74,17 @@ export class Scene {
     return { w: Math.ceil(width / (TILE * this.scale)) + 1, h: Math.ceil(height / (TILE * this.scale)) + 1 };
   }
 
+  /** Visible area in tiles (inclusive bounds, may exceed the map). */
+  viewRect(): { x0: number; y0: number; x1: number; y1: number } {
+    const v = this.viewTiles();
+    return {
+      x0: this.cam.x - v.w / 2,
+      y0: this.cam.y - v.h / 2,
+      x1: this.cam.x + v.w / 2,
+      y1: this.cam.y + v.h / 2,
+    };
+  }
+
   follow(p: TileXY) {
     this.cam = p;
     const { width, height } = this.app.screen;

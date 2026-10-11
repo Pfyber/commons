@@ -9,6 +9,9 @@
 //! watched cells via CellEnter/CellLeave (subscription changes) and
 //! Spawn/Despawn (an avatar crossing into or out of the watched area).
 
+mod hangout;
+
+use crate::games::ChessGame;
 use crate::registry::ZoneDef;
 use crate::stats::InstanceStats;
 use bytes::Bytes;
@@ -94,6 +97,13 @@ struct Avatar {
     move_rl: Bucket,
     chat_rl: Bucket,
     emote_rl: Bucket,
+    game_rl: Bucket,
+    /// Occupied bench, if sitting on one.
+    seat: Option<u32>,
+    /// Where the avatar stands up to.
+    stand_tile: TilePos,
+    /// Sit requested while walking; applied on arrival.
+    pending_sit: Option<u32>,
 }
 
 impl Avatar {
@@ -137,6 +147,10 @@ pub struct Instance {
     members: Vec<Vec<u32>>,
     /// Avatars watching each cell.
     watchers: Vec<Vec<u32>>,
+    seat_occupant: HashMap<u32, u32>,
+    games: HashMap<u32, ChessGame>,
+    /// Index of the programme last announced on the big screen.
+    screen_index: Option<usize>,
 }
 
 impl Instance {
@@ -156,6 +170,9 @@ impl Instance {
             by_player: HashMap::new(),
             members: vec![Vec::new(); cells],
             watchers: vec![Vec::new(); cells],
+            seat_occupant: HashMap::new(),
+            games: HashMap::new(),
+            screen_index: None,
         };
         tracing::info!(zone = %inst.zone.id, instance = number, "instance started");
         tokio::spawn(inst.run(rx));
@@ -184,6 +201,7 @@ impl Instance {
             }
             let now = self.clock.now_ms();
             self.step(now);
+            self.screen_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
             self.stats.record_tick(elapsed);
@@ -318,6 +336,10 @@ impl Instance {
             move_rl: Bucket::new(10.0, 5.0),
             chat_rl: Bucket::new(3.0, 0.5),
             emote_rl: Bucket::new(3.0, 1.0),
+            game_rl: Bucket::new(5.0, 2.0),
+            seat: None,
+            stand_tile: tile,
+            pending_sit: None,
         };
         avatar.send(
             &ServerMsg::Welcome {
@@ -337,12 +359,16 @@ impl Instance {
         self.members[cell as usize].push(id);
         self.broadcast(cell, &spawn_msg, Some(id));
         self.update_subs(id, now);
+        if let Some(msg) = self.screen_state(now) {
+            self.send_to(id, &msg);
+        }
         self.stats
             .population
             .store(self.avatars.len() as u32, Ordering::Relaxed);
     }
 
     fn remove(&mut self, id: u32) {
+        self.leave_seat(id);
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
@@ -385,16 +411,24 @@ impl Instance {
                     },
                 );
             }
+            ClientMsg::Sit { seat } => self.sit(id, seat, now),
+            ClientMsg::Stand {} => self.stand(id, now),
+            ClientMsg::GameMove { table, uci } => self.game_move(id, table, &uci, now),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }
 
     fn move_to(&mut self, id: u32, target: TilePos, now: u32) {
-        let grid = &self.zone.grid;
         let a = self.avatars.get_mut(&id).unwrap();
         if !a.move_rl.try_take(now as u64) {
             return;
         }
+        a.pending_sit = None;
+        if a.state != state::IDLE {
+            self.stand(id, now);
+        }
+        let grid = &self.zone.grid;
+        let a = self.avatars.get_mut(&id).unwrap();
         // Mid-walk, continue through the tile being walked into so the new path
         // joins the old one without a seam. Otherwise start shortly in the future
         // so observers receive the MoveStart before the walk begins.
@@ -480,12 +514,16 @@ impl Instance {
             let a = self.avatars.get_mut(&id).unwrap();
             let m = a.motion.as_ref().unwrap();
             let tile = m.tile_at(now);
-            if m.is_done(now) {
+            let arrived = m.is_done(now);
+            if arrived {
                 a.motion = None;
             }
             if tile != a.tile {
                 a.tile = tile;
                 self.on_tile_changed(id, now);
+            }
+            if arrived && let Some(seat) = self.avatars.get_mut(&id).unwrap().pending_sit.take() {
+                self.try_sit(id, seat, now);
             }
         }
     }
@@ -580,6 +618,9 @@ impl Instance {
                 );
             }
         }
+        for &c in desired.iter().filter(|c| current.binary_search(c).is_err()) {
+            out.extend(self.games_in_cell(c).iter().map(|m| m.to_bytes()));
+        }
         let a = self.avatars.get_mut(&id).unwrap();
         a.subs = desired;
         for m in out {
@@ -624,12 +665,65 @@ impl Instance {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use commons_common::token::TrustTier;
     use commons_protocol::split_frame;
     use commons_sim::MapFile;
     use commons_sim::map::Spawn;
+
+    fn map(w: u16, h: u16) -> MapFile {
+        let n = w as usize * h as usize;
+        MapFile {
+            name: "test".into(),
+            width: w,
+            height: h,
+            spawn: Spawn { x: 8, y: 8 },
+            ground_legend: vec!["grass".into()],
+            decor_legend: vec!["none".into(), "bench".into(), "chess_table".into()],
+            ground: vec![0; n],
+            decor: vec![0; n],
+            collision: vec![0; n],
+            objects: vec![],
+        }
+    }
+
+    fn instance_for(zone: Arc<ZoneDef>) -> Instance {
+        let cells = zone.cells_w as usize * zone.cells_h as usize;
+        Instance {
+            zone,
+            number: 1,
+            clock: Clock(Instant::now()),
+            stats: Arc::new(InstanceStats::default()),
+            next_id: 1,
+            avatars: HashMap::new(),
+            by_conn: HashMap::new(),
+            by_player: HashMap::new(),
+            members: vec![Vec::new(); cells],
+            watchers: vec![Vec::new(); cells],
+            seat_occupant: HashMap::new(),
+            games: HashMap::new(),
+            screen_index: None,
+        }
+    }
+
+    /// 16×16 park with one chess table at (5,5) and its benches at (4,5) and (6,5).
+    pub(crate) fn chess_instance() -> Instance {
+        let mut m = map(16, 16);
+        for (x, d) in [(4u16, 1u8), (5, 2), (6, 1)] {
+            let i = 5 * 16 + x as usize;
+            m.decor[i] = d;
+            m.collision[i] = 1;
+        }
+        instance_for(Arc::new(ZoneDef::new("test".into(), m, None)))
+    }
+
+    /// Teleports an idle avatar (test setup only).
+    pub(crate) fn place(inst: &mut Instance, id: u32, tile: TilePos) {
+        inst.avatars.get_mut(&id).unwrap().tile = tile;
+        let now = inst.clock.now_ms();
+        inst.on_tile_changed(id, now);
+    }
 
     fn zone() -> Arc<ZoneDef> {
         let (w, h) = (64u16, 64u16);
@@ -646,24 +740,11 @@ mod tests {
             collision: vec![0; n],
             objects: vec![],
         };
-        Arc::new(ZoneDef::new("test".into(), map))
+        Arc::new(ZoneDef::new("test".into(), map, None))
     }
 
     fn instance() -> Instance {
-        let zone = zone();
-        let cells = zone.cells_w as usize * zone.cells_h as usize;
-        Instance {
-            zone,
-            number: 1,
-            clock: Clock(Instant::now()),
-            stats: Arc::new(InstanceStats::default()),
-            next_id: 1,
-            avatars: HashMap::new(),
-            by_conn: HashMap::new(),
-            by_player: HashMap::new(),
-            members: vec![Vec::new(); cells],
-            watchers: vec![Vec::new(); cells],
-        }
+        instance_for(zone())
     }
 
     fn claims(name: &str) -> JoinClaims {
@@ -678,15 +759,15 @@ mod tests {
         }
     }
 
-    struct Client {
+    pub(crate) struct Client {
         rx: mpsc::Receiver<Bytes>,
-        known: std::collections::HashSet<u32>,
-        log: Vec<ServerMsg>,
+        pub(crate) known: std::collections::HashSet<u32>,
+        pub(crate) log: Vec<ServerMsg>,
     }
 
     impl Client {
         /// Applies received messages to a client-side entity set, like the real client.
-        fn pump(&mut self) {
+        pub(crate) fn pump(&mut self) {
             while let Ok(frame) = self.rx.try_recv() {
                 for m in split_frame(&frame) {
                     let msg = ServerMsg::decode(m.unwrap()).unwrap();
@@ -711,7 +792,7 @@ mod tests {
         }
     }
 
-    fn connect(inst: &mut Instance, conn: ConnId, name: &str, view: (u8, u8)) -> Client {
+    pub(crate) fn connect(inst: &mut Instance, conn: ConnId, name: &str, view: (u8, u8)) -> Client {
         let (tx, rx) = mpsc::channel(1024);
         inst.handle(Cmd::Join {
             conn,
@@ -817,7 +898,7 @@ mod tests {
         grid.set_blocked(20, 20, true);
         inst.zone = Arc::new(ZoneDef {
             grid,
-            ..ZoneDef::new("test".into(), inst.zone.map.clone())
+            ..ZoneDef::new("test".into(), inst.zone.map.clone(), None)
         });
         inst.handle(Cmd::Msg {
             conn: 1,

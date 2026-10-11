@@ -1,10 +1,15 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
 import type { Application } from "pixi.js";
+import { ChessPanel, type GameStateMsg } from "./activities/chess";
+import { BigScreen } from "./activities/screen";
+import { Ambient } from "./ambient/ambient";
+import { DayNight } from "./ambient/daynight";
 import type { ServerMsg } from "./net/protocol.gen";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import { Avatar } from "./world/avatars";
+import { Furniture } from "./world/furniture";
 import { type ZoneMap, nearestWalkable, stepTarget } from "./world/map";
 import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
 import { compress, findPath } from "./world/path";
@@ -12,6 +17,12 @@ import { Scene } from "./world/scene";
 
 /** Error codes from server/crates/protocol (error_code). */
 const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION_MISMATCH: 3 };
+/** Errors worth showing to the player as-is. */
+const TOAST_CODES = new Set([ERR.RATE_LIMITED, 9, 10, 11]);
+const SITTING = 1;
+const SEAT_GROUND = 0xffffffff;
+/** Spectators further than this from a table stop following its game. */
+const WATCH_RANGE = 12;
 /** Names are drawn for the nearest few avatars only, to keep crowds readable. */
 const MAX_NAMES = 25;
 const KEY_STEPS = 3;
@@ -33,6 +44,12 @@ export class Game {
   private lastKeyDir = "";
   private lastKeySend = 0;
   private disposers: (() => void)[] = [];
+  private furniture: Furniture;
+  private games = new Map<number, GameStateMsg>();
+  private chess: ChessPanel;
+  private screen: BigScreen | null = null;
+  private ambient: Ambient;
+  private daynight: DayNight;
 
   constructor(
     private app: Application,
@@ -42,6 +59,19 @@ export class Game {
     private events: { onWelcome(): void; onDisconnect(reason: CloseReason): void },
   ) {
     this.scene = new Scene(app, map);
+    this.furniture = new Furniture(map);
+    const screenObj = map.objects.find((o) => o.kind === "big_screen");
+    if (screenObj) {
+      this.screen = new BigScreen(screenObj);
+      this.scene.sorted.addChild(this.screen.sprite);
+    }
+    this.ambient = new Ambient(this.scene, map);
+    this.daynight = new DayNight(app, this.scene, map);
+    this.chess = new ChessPanel(document.body, () => this.selfId, {
+      move: (table, uci) => this.socket?.send({ t: "GameMove", table, uci }),
+      close: () => this.chess.hide(),
+      nameOf: (id) => this.avatars.get(id)?.info.name ?? "someone",
+    });
     this.bindInput();
     const tick = () => this.update();
     app.ticker.add(tick);
@@ -126,9 +156,23 @@ export class Game {
         this.hud.addChat(a.info.name, m.text, m.id === this.selfId);
         break;
       }
+      case "StateChange": {
+        const a = this.avatars.get(m.id);
+        if (!a) break;
+        a.setState(m.state, { x: m.x, y: m.y });
+        if (m.id === this.selfId) this.onSelfState(m.state, { x: m.x, y: m.y });
+        break;
+      }
+      case "GameState":
+        this.games.set(m.table, m);
+        if (this.chess.open) this.chess.update(m);
+        break;
+      case "ScreenState":
+        this.screen?.setState(m);
+        break;
       case "Error":
         if (m.code === ERR.NO_PATH) this.hud.toast("Can't get there from here.");
-        else if (m.code === ERR.RATE_LIMITED) this.hud.toast(m.message);
+        else if (TOAST_CODES.has(m.code)) this.hud.toast(m.message.charAt(0).toUpperCase() + m.message.slice(1) + ".");
         else if (m.code !== ERR.REPLACED && m.code !== ERR.UNAUTHORIZED && m.code !== ERR.VERSION_MISMATCH) {
           console.warn("server error", m.code, m.message);
         }
@@ -149,6 +193,11 @@ export class Game {
     const self = this.self;
     if (!this.socket || !self) return;
     const now = this.socket.clock.now();
+    // Walking off stands us up; the server does the same on MoveTo.
+    if (self.state === SITTING) {
+      self.setState(0, self.standTile ?? self.destination);
+      this.hud.setSitting(false);
+    }
     const cur = self.currentMotion;
     const sp = cur ? splice(cur, now) : null;
     let start: TileXY;
@@ -176,6 +225,11 @@ export class Game {
     stage.hitArea = this.app.screen;
     stage.on("pointertap", (e) => {
       const t = this.scene.screenToTile(e.global.x, e.global.y);
+      const id = this.furniture.idAt(t);
+      const seat = this.furniture.seats.get(id);
+      if (seat) return this.sitAt(seat.id);
+      const table = this.furniture.tables.get(id);
+      if (table) return this.watchTable(table.id);
       const target = nearestWalkable(this.scene.map, t.x, t.y, 2);
       if (target) this.moveTo(target, true);
     });
@@ -209,6 +263,45 @@ export class Game {
       window.removeEventListener("blur", blur);
       window.removeEventListener("resize", resize);
     });
+  }
+
+  // ---- sitting & tables ---------------------------------------------------
+
+  /** Walks next to a bench and sits on it (the server applies Sit on arrival). */
+  private sitAt(seatId: number) {
+    const self = this.self;
+    const seat = this.furniture.seats.get(seatId);
+    if (!self || !seat || !this.socket) return;
+    if (self.state === SITTING && self.destination.x === seat.tile.x && self.destination.y === seat.tile.y) return;
+    const from = self.state === SITTING ? (self.standTile ?? self.destination) : self.destination;
+    const spot = this.furniture.approach(seat.tile, from);
+    if (!spot) return;
+    if (spot.x !== from.x || spot.y !== from.y || self.state === SITTING) this.moveTo(spot, true);
+    this.socket.send({ t: "Sit", seat: seatId });
+    if (seat.table) this.chess.show(seat.table.id, this.games.get(seat.table.id));
+  }
+
+  private watchTable(tableId: number) {
+    const table = this.furniture.tables.get(tableId)!;
+    const self = this.self;
+    if (self && Math.hypot(self.pos.x - table.tile.x, self.pos.y - table.tile.y) > WATCH_RANGE) {
+      this.hud.toast("Walk closer to watch the game.");
+      return;
+    }
+    this.chess.show(tableId, this.games.get(tableId));
+  }
+
+  private onSelfState(state: number, at: TileXY) {
+    this.hud.setSitting(state === SITTING);
+    const seat = this.furniture.seats.get(this.furniture.idAt(at));
+    if (state === SITTING && seat?.table) this.chess.show(seat.table.id, this.games.get(seat.table.id));
+  }
+
+  toggleSit() {
+    const self = this.self;
+    if (!self || !this.socket) return;
+    if (self.state === SITTING) this.socket.send({ t: "Stand" });
+    else if (!self.moving) this.socket.send({ t: "Sit", seat: SEAT_GROUND });
   }
 
   emote(id: number) {
@@ -280,6 +373,17 @@ export class Game {
       this.hud.setNearby(this.avatars.size);
     }
     this.scene.update();
+    this.ambient.update(this.app.ticker.deltaMS, wallNow);
+    this.daynight.update();
+    if (this.screen && self) {
+      const c = this.screen.center;
+      this.screen.update(serverNow, Math.abs(c.x - self.pos.x) < 30 && Math.abs(c.y - self.pos.y) < 20);
+    }
+    // Stop following a game once we've wandered off.
+    if (this.chess.open && self) {
+      const t = this.furniture.tables.get(this.chess.table);
+      if (t && Math.hypot(self.pos.x - t.tile.x, self.pos.y - t.tile.y) > WATCH_RANGE) this.chess.hide();
+    }
   }
 
   destroy() {

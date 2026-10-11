@@ -144,7 +144,7 @@ fn main() -> std::io::Result<()> {
 
     // Main paths: cross through the plaza, plus a loop.
     b.rect(2, 47, 82, 3, "path");
-    b.rect(47, 4, 3, 88, "path");
+    b.rect(47, 11, 3, 81, "path"); // from the big screen's lawn to the south edge
     for (x0, y0, w, h) in [
         (14, 20, 2, 60),
         (14, 20, 66, 2),
@@ -236,7 +236,7 @@ fn main() -> std::io::Result<()> {
             b.decor(x + 4, 50, "lamp");
         }
     }
-    for y in (8..90).step_by(8) {
+    for y in (16..90).step_by(8) {
         if (y as i32 - cy).abs() > 10 {
             b.decor(46, y, "bench");
             b.decor(50, y + 4, "lamp");

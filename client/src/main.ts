@@ -64,6 +64,7 @@ async function main() {
   const hud = new Hud(document.getElementById("hud")!, {
     onChat: (text) => game.chat(text),
     onEmote: (id) => game.emote(id),
+    onSit: () => game.toggleSit(),
   });
 
   let retry = 0;

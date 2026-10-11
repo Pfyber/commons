@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -129,6 +129,9 @@ export type ClientMsg =
   | { t: "Emote"; emote: number }
   | { t: "ChatSay"; text: string }
   | { t: "Ping"; clientT: number }
+  | { t: "Sit"; seat: number }
+  | { t: "Stand" }
+  | { t: "GameMove"; table: number; uci: string }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -158,6 +161,18 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(5);
       w.u32(m.clientT);
       break;
+    case "Sit":
+      w.u8(6);
+      w.u32(m.seat);
+      break;
+    case "Stand":
+      w.u8(7);
+      break;
+    case "GameMove":
+      w.u8(8);
+      w.u32(m.table);
+      w.str(m.uci);
+      break;
   }
   return w.finish();
 }
@@ -182,6 +197,15 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 5:
       m = { t: "Ping", clientT: r.u32() };
       break;
+    case 6:
+      m = { t: "Sit", seat: r.u32() };
+      break;
+    case 7:
+      m = { t: "Stand" };
+      break;
+    case 8:
+      m = { t: "GameMove", table: r.u32(), uci: r.str() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -201,6 +225,9 @@ export type ServerMsg =
   | { t: "ChatBubble"; id: number; text: string }
   | { t: "Pong"; clientT: number; serverT: number }
   | { t: "Error"; code: number; message: string }
+  | { t: "StateChange"; id: number; state: number; x: number; y: number }
+  | { t: "GameState"; table: number; status: number; white: number; black: number; fen: string; last: string; legal: string[] }
+  | { t: "ScreenState"; screen: number; title: string; source: string; startedT: number; durationMs: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -264,6 +291,31 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.code);
       w.str(m.message);
       break;
+    case "StateChange":
+      w.u8(12);
+      w.u32(m.id);
+      w.u8(m.state);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
+    case "GameState":
+      w.u8(13);
+      w.u32(m.table);
+      w.u8(m.status);
+      w.u32(m.white);
+      w.u32(m.black);
+      w.str(m.fen);
+      w.str(m.last);
+      w.vec(m.legal, (x) => w.str(x));
+      break;
+    case "ScreenState":
+      w.u8(14);
+      w.u32(m.screen);
+      w.str(m.title);
+      w.str(m.source);
+      w.u32(m.startedT);
+      w.u32(m.durationMs);
+      break;
   }
   return w.finish();
 }
@@ -305,6 +357,15 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 11:
       m = { t: "Error", code: r.u16(), message: r.str() };
+      break;
+    case 12:
+      m = { t: "StateChange", id: r.u32(), state: r.u8(), x: r.u16(), y: r.u16() };
+      break;
+    case 13:
+      m = { t: "GameState", table: r.u32(), status: r.u8(), white: r.u32(), black: r.u32(), fen: r.str(), last: r.str(), legal: r.vec(() => r.str()) };
+      break;
+    case 14:
+      m = { t: "ScreenState", screen: r.u32(), title: r.str(), source: r.str(), startedT: r.u32(), durationMs: r.u32() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

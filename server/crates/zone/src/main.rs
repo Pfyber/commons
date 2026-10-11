@@ -2,8 +2,10 @@
 //! single-threaded actor ticking at 10 Hz.
 
 mod conn;
+mod games;
 mod instance;
 mod registry;
+mod screen;
 mod stats;
 
 use axum::Router;
@@ -19,7 +21,9 @@ async fn main() -> anyhow::Result<()> {
     let prom = telemetry::init("zone");
     let bind = config::env_str("ZONE_BIND", "0.0.0.0:8082");
     let maps_dir = config::env_str("COMMONS_MAPS_DIR", "assets/maps");
-    let registry = Arc::new(Registry::load(&maps_dir, config::secret())?);
+    let playlist_path = config::env_str("COMMONS_SCREEN_PLAYLIST", "assets/screen/playlist.json");
+    let playlist = screen::Playlist::load(&playlist_path)?;
+    let registry = Arc::new(Registry::load(&maps_dir, playlist, config::secret())?);
 
     let app = Router::new()
         .route("/ws", get(ws))

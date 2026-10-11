@@ -7,6 +7,9 @@ import type { MapObject } from "./map";
 
 export const TILE = 32;
 
+/** Y of the big screen's frame inside its object texture (which starts 64px above the footprint). */
+export const SCREEN_FACE_TOP = 52;
+
 export const PALETTE = {
   grass: "#86b86b",
   grassDark: "#76a85d",
@@ -335,18 +338,21 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       break;
     }
     case "big_screen": {
+      // The face sits low on short legs so it's in view from the lawn in front.
       [c, ctx] = makeCanvas(w, h + 64);
       overhang = 64;
-      px(ctx, P.outline, 8, 0, w - 16, 76);
-      px(ctx, "#2d3540", 12, 4, w - 24, 68);
-      const grad = ctx.createLinearGradient(0, 4, 0, 72);
+      const top = SCREEN_FACE_TOP;
+      const legTop = top + 76;
+      px(ctx, P.outline, 40, legTop, 8, h + 64 - legTop);
+      px(ctx, P.outline, w - 48, legTop, 8, h + 64 - legTop);
+      px(ctx, P.outline, 8, top, w - 16, 76);
+      px(ctx, "#2d3540", 12, top + 4, w - 24, 68);
+      const grad = ctx.createLinearGradient(0, top + 4, 0, top + 72);
       grad.addColorStop(0, "#3d5a73");
       grad.addColorStop(1, "#24313c");
       ctx.fillStyle = grad;
-      ctx.fillRect(14, 6, w - 28, 64);
-      label(ctx, "Big Screen · showings soon", w / 2, 38, "#cfe3f0", 16);
-      px(ctx, P.outline, 40, 76, 8, h + 64 - 76);
-      px(ctx, P.outline, w - 48, 76, 8, h + 64 - 76);
+      ctx.fillRect(14, top + 6, w - 28, 64);
+      label(ctx, "Big Screen", w / 2, top + 38, "#cfe3f0", 16);
       break;
     }
     case "town_hall": {
@@ -440,8 +446,11 @@ export function lookParts(look: number) {
 
 const avatarCache = new Map<string, Texture>();
 
-/** 24×34 avatar sprite, feet at the bottom centre. `frame` 0/1 alternates the legs. */
-export function avatarTexture(look: number, frame: 0 | 1): Texture {
+/**
+ * 24×34 avatar sprite, feet at the bottom centre. Frames 0/1 alternate the
+ * legs while walking; frame 2 is sitting (body lowered, legs forward).
+ */
+export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
   const key = `${look}:${frame}`;
   const cached = avatarCache.get(key);
   if (cached) return cached;
@@ -450,10 +459,18 @@ export function avatarTexture(look: number, frame: 0 | 1): Texture {
   const o = PALETTE.outline;
   px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
   // legs
-  px(ctx, o, frame ? 7 : 8, 25, 4, 7);
-  px(ctx, o, frame ? 14 : 13, 25, 4, 7);
-  px(ctx, "#4a4a5a", frame ? 8 : 9, 25, 2, 6);
-  px(ctx, "#4a4a5a", frame ? 15 : 14, 25, 2, 6);
+  if (frame === 2) {
+    px(ctx, o, 6, 27, 12, 5);
+    px(ctx, "#4a4a5a", 7, 28, 10, 3);
+    px(ctx, o, 6, 31, 3, 2);
+    px(ctx, o, 15, 31, 3, 2);
+    ctx.translate(0, 4);
+  } else {
+    px(ctx, o, frame ? 7 : 8, 25, 4, 7);
+    px(ctx, o, frame ? 14 : 13, 25, 4, 7);
+    px(ctx, "#4a4a5a", frame ? 8 : 9, 25, 2, 6);
+    px(ctx, "#4a4a5a", frame ? 15 : 14, 25, 2, 6);
+  }
   // body
   px(ctx, o, 5, 15, 14, 12);
   px(ctx, p.outfit, 6, 16, 12, 10);
@@ -486,4 +503,71 @@ export function avatarTexture(look: number, frame: 0 | 1): Texture {
   const t = toTexture(c);
   avatarCache.set(key, t);
   return t;
+}
+
+// ---- ambient creatures (client-only, spec §7.1) -------------------------
+
+const ambientCache = new Map<string, Texture>();
+
+function cached(key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): Texture {
+  let t = ambientCache.get(key);
+  if (!t) {
+    const [c, ctx] = makeCanvas(w, h);
+    draw(ctx);
+    t = toTexture(c);
+    ambientCache.set(key, t);
+  }
+  return t;
+}
+
+/** Duck facing right; `frame` bobs the head. */
+export function duckTexture(frame: 0 | 1): Texture {
+  return cached(`duck:${frame}`, 16, 12, (ctx) => {
+    const o = PALETTE.outline;
+    px(ctx, "rgba(255,255,255,0.35)", 1, 10, 13, 2);
+    px(ctx, o, 2, 5, 11, 6);
+    px(ctx, "#f4efe2", 3, 6, 9, 4);
+    px(ctx, "#d9d0bd", 3, 8, 6, 2);
+    const hy = frame ? 1 : 0;
+    px(ctx, o, 9, 1 + hy, 5, 5);
+    px(ctx, "#3f7a4a", 10, 2 + hy, 3, 3);
+    px(ctx, "#f2a541", 14, 3 + hy, 2, 2);
+    px(ctx, "#fff", 12, 2 + hy, 1, 1);
+  });
+}
+
+/** Small bird seen from above; `frame` flaps the wings. */
+export function birdTexture(frame: 0 | 1): Texture {
+  return cached(`bird:${frame}`, 12, 8, (ctx) => {
+    const c = "#4b4033";
+    if (frame) {
+      px(ctx, c, 0, 1, 4, 2);
+      px(ctx, c, 8, 1, 4, 2);
+    } else {
+      px(ctx, c, 0, 4, 4, 2);
+      px(ctx, c, 8, 4, 4, 2);
+    }
+    px(ctx, c, 4, 2, 4, 4);
+    px(ctx, "#f2a541", 8, 3, 1, 1);
+  });
+}
+
+export function butterflyTexture(hue: number, frame: 0 | 1): Texture {
+  return cached(`fly:${hue}:${frame}`, 8, 6, (ctx) => {
+    const c = `hsl(${hue} 80% 70%)`;
+    const w = frame ? 2 : 3;
+    px(ctx, c, 4 - w, 0, w, 3);
+    px(ctx, c, 4, 0, w, 3);
+    px(ctx, c, 4 - w + 1, 3, w - 1, 2);
+    px(ctx, c, 4, 3, w - 1, 2);
+    px(ctx, PALETTE.outline, 3, 1, 2, 4);
+  });
+}
+
+export function leafTexture(variant: number): Texture {
+  const colors = ["#7dbb5c", "#d9a441", "#c8693e"];
+  return cached(`leaf:${variant % 3}`, 4, 3, (ctx) => {
+    px(ctx, colors[variant % 3], 0, 0, 3, 2);
+    px(ctx, colors[variant % 3], 1, 1, 3, 2);
+  });
 }

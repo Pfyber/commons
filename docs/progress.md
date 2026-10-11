@@ -81,8 +81,66 @@ Gate: p99 tick < 20 ms, p99 per-client outbound < 8 KB/s.
 - No idle-instance shutdown yet; instances are created on demand from join
   tokens.
 
-## Next: M2 · Hang out
+## M1 follow-up: smooth movement (2026-10-11)
 
-Sitting (benches and blankets as seats, `StateChange`), chess at the tables,
-big screen timestamp sync, client-only ambient life (ducks, birds, leaves),
-and day/night tied to local time.
+- The local player is predicted client-side with a TypeScript mirror of the
+  server's A*, so the first movement comes 16 ms after input. The server's
+  agreeing `MoveStart` echo is ignored.
+- Mid-walk redirects splice through the tile being entered (`Motion::splice`),
+  so a new path continues the old one exactly, with no snap-back or pause.
+- The camera locks to the player, and releasing a movement key stops at the
+  next tile.
+
+## M2 · Hang out: done (2026-10-11)
+
+- **Sitting:** click a bench to walk next to it and sit, or use 🪑 to sit on
+  the ground. Seats are bench tiles (ids are tile indices, derived identically
+  by server, client and bots in `sim::furniture`). A `Sit` sent while walking
+  applies on arrival. Walking off stands you up where you sat down from. Seat
+  conflicts are refused (`SEAT_TAKEN`). New messages: `Sit`, `Stand`,
+  `StateChange`.
+- **Chess:** sit on either bench beside a table (left plays white, right plays
+  black) and the game starts when both seats are filled. The server is
+  authoritative (`chess` crate) and sends `GameState` with the legal moves, so
+  the client needs no rules. Players can resign or ask for a rematch. Anyone
+  within 12 tiles can click the table to watch. A player leaving abandons the
+  game. Games over 400 plies are declared drawn.
+- **Big screen:** the server announces the programme (`ScreenState`) from a
+  schedule that's a pure function of the instance clock, and every client
+  renders the same moment. The default programme is procedural (an aquarium,
+  a night sky and a town noticeboard), so there's no licensing or external
+  dependency. `assets/screen/playlist.json` can list video URLs, which are
+  seeked to the shared time.
+- **Ambient (client-only):** ducks paddling on the pond, butterflies over the
+  flowerbeds, occasional flocks of birds with shadows, and leaves drifting
+  from trees near the camera.
+- **Day/night:** lighting follows the player's local time, with a multiply
+  tint plus additive glows on lamps, the fountain and the town hall at night.
+  `?hour=21.5` overrides the clock for testing.
+- **Bots:** they now sit on benches (a third of the time at chess tables) and
+  play random legal moves, so the perf gate exercises M2 traffic.
+- **Map fix:** the path no longer runs under the big screen, and the screen
+  face sits low enough to watch from the lawn.
+
+### Botswarm (500 bots, mixed behaviour incl. sitting and chess)
+
+| Tick p50 | Tick p99 | Client KB/s p99 | Gate |
+|---|---|---|---|
+| 1.2 ms | 2.6 ms | 3.30 | PASS |
+
+### Demo notes
+
+1. `node scripts/dev.mjs --bots 40`, then open http://localhost:5173.
+2. Click a bench by the fountain to sit down; 🪑/🧍 sits you on the ground or
+   stands you up.
+3. At the chess tables north-east of the fountain, sit on either bench. With
+   a second browser (or a bot) on the other side the game starts: click a
+   piece, then a highlighted square.
+4. Walk north to the big screen; every viewer sees the same fish at the same
+   moment.
+5. Add `?hour=22` to the URL for night, or `?hour=18.8` for dusk at the pond.
+
+## Next: M3 · Collect
+
+The economy service and inventory (Postgres, idempotent grants, append-only
+ledger), fishing, gardening, the album, and a home zone with furniture.

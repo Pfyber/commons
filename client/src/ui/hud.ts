@@ -9,6 +9,7 @@ const LOG_MS = 12_000;
 export interface HudHandlers {
   onChat(text: string): void;
   onEmote(id: number): void;
+  onSit(): void;
 }
 
 export class Hud {
@@ -17,6 +18,7 @@ export class Hud {
   private log: HTMLDivElement;
   readonly input: HTMLInputElement;
   private toastEl: HTMLDivElement;
+  private sitBtn: HTMLButtonElement;
   private toastTimer = 0;
 
   constructor(root: HTMLElement, h: HudHandlers) {
@@ -53,6 +55,12 @@ export class Hud {
     });
 
     const bar = root.querySelector(".emotes")!;
+    this.sitBtn = document.createElement("button");
+    this.sitBtn.type = "button";
+    this.sitBtn.className = "sit";
+    this.sitBtn.onclick = () => h.onSit();
+    bar.appendChild(this.sitBtn);
+    this.setSitting(false);
     for (const [id, e] of Object.entries(EMOTES)) {
       const b = document.createElement("button");
       b.type = "button";
@@ -62,6 +70,12 @@ export class Hud {
       b.onclick = () => h.onEmote(Number(id));
       bar.appendChild(b);
     }
+  }
+
+  setSitting(sitting: boolean) {
+    this.sitBtn.textContent = sitting ? "🧍" : "🪑";
+    this.sitBtn.title = sitting ? "Stand up" : "Sit down here";
+    this.sitBtn.setAttribute("aria-label", this.sitBtn.title);
   }
 
   setPlace(name: string, instance: number) {

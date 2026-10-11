@@ -4,8 +4,8 @@ A calm, persistent 2D park-town MMO where players hang out, collect and create,
 and where the community democratically governs and expands the world.
 
 The spec is in [docs/spec.md](docs/spec.md) and progress is tracked in
-[docs/progress.md](docs/progress.md). Milestones M0 (Skeleton) and M1 (Walk
-together) are done.
+[docs/progress.md](docs/progress.md). Milestones M0 (Skeleton), M1 (Walk
+together) and M2 (Hang out) are done.
 
 ## Quick start
 
@@ -19,7 +19,9 @@ node scripts/dev.mjs --bots 50  # same, plus 50 bots wandering the park
 
 Open http://localhost:5173 and use **Dev quick login** with any name, or the
 email flow (in dev mode the magic link is shown on screen). Click or tap to
-walk, or use WASD/arrows. Press Enter to chat, and 1–7 for emotes.
+walk, or use WASD/arrows. Press Enter to chat, and 1–7 for emotes. Click a
+bench to sit (🪑 sits on the ground); sit beside a chess table to play. Add
+`?hour=22` to the URL to see the park at night.
 
 Backing services (Postgres, Valkey, NATS, MinIO, Prometheus and Grafana) are
 not needed for M1. To run them:

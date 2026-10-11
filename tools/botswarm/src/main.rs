@@ -11,6 +11,7 @@ use anyhow::{Context, bail};
 use clap::{Parser, ValueEnum};
 use commons_common::token::{self, JoinClaims, TrustTier};
 use commons_protocol::{ClientMsg, PROTOCOL_VERSION, ServerMsg, emote, push_framed, split_frame};
+use commons_sim::furniture::{Furniture, Side};
 use commons_sim::{Grid, MapFile, Motion, TilePos};
 use futures_util::{SinkExt, StreamExt};
 use rand::rngs::SmallRng;
@@ -102,6 +103,32 @@ fn frame(msg: &ClientMsg) -> Message {
     Message::Binary(f.into())
 }
 
+/// Map data every bot shares.
+struct World {
+    grid: Grid,
+    furniture: Furniture,
+}
+
+/// A walkable tile next to `seat`, to stand on before sitting.
+fn approach(grid: &Grid, seat: TilePos) -> Option<TilePos> {
+    for (dx, dy) in [
+        (0, 1),
+        (-1, 1),
+        (1, 1),
+        (-1, 0),
+        (1, 0),
+        (0, -1),
+        (-1, -1),
+        (1, -1),
+    ] {
+        let (x, y) = (seat.0 as i32 + dx, seat.1 as i32 + dy);
+        if grid.walkable_i(x, y) {
+            return Some((x as u16, y as u16));
+        }
+    }
+    None
+}
+
 fn pick_target(grid: &Grid, rng: &mut impl Rng, around: TilePos, radius: i32) -> Option<TilePos> {
     for _ in 0..20 {
         let x = around.0 as i32 + rng.random_range(-radius..=radius);
@@ -117,7 +144,7 @@ fn pick_target(grid: &Grid, rng: &mut impl Rng, around: TilePos, radius: i32) ->
 async fn run_bot(
     i: usize,
     args: Arc<Args>,
-    grid: Arc<Grid>,
+    world: Arc<World>,
     spawn: TilePos,
     secret: Arc<Vec<u8>>,
     start_delay: Duration,
@@ -129,7 +156,7 @@ async fn run_bot(
     if let Err(e) = bot_loop(
         i,
         &args,
-        &grid,
+        &world,
         spawn,
         &secret,
         window_start,
@@ -147,7 +174,7 @@ async fn run_bot(
 async fn bot_loop(
     i: usize,
     args: &Args,
-    grid: &Grid,
+    world: &World,
     spawn: TilePos,
     secret: &[u8],
     window_start: Instant,
@@ -201,6 +228,14 @@ async fn bot_loop(
     let mut next_emote = Instant::now() + Duration::from_secs(rng.random_range(5..20));
     let mut next_ping = Instant::now() + Duration::from_secs(1);
     let mut timer = tokio::time::interval(Duration::from_millis(250));
+    let grid = &world.grid;
+    // Sitting and chess: some bots take a bench now and then; at a table they
+    // play random legal moves.
+    let mut sitting = false;
+    let mut my_table: Option<(u32, Side)> = None;
+    let mut next_sit = Instant::now() + Duration::from_secs(rng.random_range(5..40));
+    let mut stand_at = Instant::now();
+    let mut chess_move: Option<(Instant, u32, String)> = None;
 
     loop {
         tokio::select! {
@@ -242,6 +277,31 @@ async fn bot_loop(
                             report.rtts_ms.push(rtt as f64);
                             server_offset = server_t as i64 + rtt / 2 - local_ms();
                         }
+                        ServerMsg::StateChange { id, state, x, y } if id == self_id => {
+                            sitting = state == commons_protocol::state::SITTING;
+                            motion = None;
+                            me = (x, y);
+                            my_table = None;
+                            if sitting {
+                                let seat = Furniture::seat_id_for(grid.w, (x, y));
+                                my_table = world.furniture.seats.get(&seat).and_then(|s| s.table);
+                                let secs = if my_table.is_some() { 60..180 } else { 10..40 };
+                                stand_at = Instant::now() + Duration::from_secs(rng.random_range(secs));
+                            }
+                        }
+                        ServerMsg::GameState { table, status, white, black, fen, legal, .. }
+                            if my_table.is_some_and(|(t, _)| t == table) =>
+                        {
+                            let white_to_move = fen.split(' ').nth(1) == Some("w");
+                            let mine = (white_to_move && white == self_id) || (!white_to_move && black == self_id);
+                            let delay = Duration::from_millis(rng.random_range(800..3000));
+                            if status == commons_protocol::game_status::PLAYING && mine && !legal.is_empty() {
+                                let mv = legal.choose(&mut rng).unwrap().clone();
+                                chess_move = Some((Instant::now() + delay, table, mv));
+                            } else if status >= commons_protocol::game_status::WHITE_WON {
+                                chess_move = Some((Instant::now() + delay * 3, table, "new".into()));
+                            }
+                        }
                         ServerMsg::Error { code, message } => {
                             report.server_errors += 1;
                             if code == commons_protocol::error_code::UNAUTHORIZED { bail!("unauthorized: {message}"); }
@@ -262,7 +322,33 @@ async fn bot_loop(
                     me = m.tile_at(server_now);
                     if m.is_done(server_now) { motion = None; }
                 }
-                if now >= next_move && self_id != 0 {
+                if let Some((at, table, uci)) = chess_move.take() {
+                    if now >= at {
+                        tx.send(frame(&ClientMsg::GameMove { table, uci })).await?;
+                    } else {
+                        chess_move = Some((at, table, uci));
+                    }
+                }
+                if sitting {
+                    if now >= stand_at {
+                        tx.send(frame(&ClientMsg::Stand {})).await?;
+                        sitting = false;
+                        next_move = now + Duration::from_secs(1);
+                    }
+                } else if now >= next_sit && self_id != 0 && behaviour == Behaviour::Wander {
+                    next_sit = now + Duration::from_secs(rng.random_range(30..90));
+                    // Table seats a third of the time, so games actually happen.
+                    let table_seats: Vec<_> = world.furniture.seats.iter().filter(|(_, s)| s.table.is_some()).collect();
+                    let all: Vec<_> = world.furniture.seats.iter().collect();
+                    let pool = if rng.random_bool(0.35) && !table_seats.is_empty() { table_seats } else { all };
+                    if let Some((&id, seat)) = pool.choose(&mut rng).copied()
+                        && let Some((x, y)) = approach(grid, seat.tile)
+                    {
+                        tx.send(frame(&ClientMsg::MoveTo { x, y })).await?;
+                        tx.send(frame(&ClientMsg::Sit { seat: id })).await?;
+                        next_move = now + Duration::from_secs(20);
+                    }
+                } else if now >= next_move && self_id != 0 {
                     let target = match behaviour {
                         Behaviour::Crowd => pick_target(grid, &mut rng, spawn, 7),
                         _ => pick_target(grid, &mut rng, me, 12),
@@ -323,7 +409,10 @@ async fn main() -> anyhow::Result<()> {
     let map_text =
         std::fs::read_to_string(&args.map).with_context(|| format!("reading {}", args.map))?;
     let map = MapFile::from_json(&map_text).map_err(anyhow::Error::msg)?;
-    let grid = Arc::new(map.grid());
+    let world = Arc::new(World {
+        grid: map.grid(),
+        furniture: Furniture::from_map(&map),
+    });
     let spawn = (map.spawn.x, map.spawn.y);
     let secret = Arc::new(commons_common::config::secret());
 
@@ -341,7 +430,7 @@ async fn main() -> anyhow::Result<()> {
         handles.push(tokio::spawn(run_bot(
             i,
             args.clone(),
-            grid.clone(),
+            world.clone(),
             spawn,
             secret.clone(),
             delay,

@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -44,6 +44,14 @@ message_enum! {
         3 Emote { emote: u8 }
         4 ChatSay { text: String }
         5 Ping { client_t: u32 }
+        /// Sit on a seat (a bench tile index, `y * width + x`) or on the
+        /// ground with [`SEAT_GROUND`]. Sent while walking to an adjacent
+        /// tile, it takes effect on arrival.
+        6 Sit { seat: u32 }
+        7 Stand {}
+        /// A table-game move in UCI notation (`e2e4`, `e7e8q`), or the
+        /// actions `new` (rematch after a finished game) and `resign`.
+        8 GameMove { table: u32, uci: String }
     }
 }
 
@@ -65,6 +73,22 @@ message_enum! {
         9 ChatBubble { id: u32, text: String }
         10 Pong { client_t: u32, server_t: u32 }
         11 Error { code: u16, message: String }
+        /// Posture change (`state::*`); `x`/`y` is where the avatar now is.
+        12 StateChange { id: u32, state: u8, x: u16, y: u16 }
+        /// Full state of a table game. `white`/`black` are entity ids (0 =
+        /// empty seat); `legal` lists the side to move's UCI moves.
+        13 GameState {
+            table: u32,
+            status: u8,
+            white: u32,
+            black: u32,
+            fen: String,
+            last: String,
+            legal: Vec<String>,
+        }
+        /// What the big screen is showing. Clients play `source` from
+        /// `(now - started_t)` so everyone sees the same moment.
+        14 ScreenState { screen: u32, title: String, source: String, started_t: u32, duration_ms: u32 }
     }
 }
 
@@ -90,11 +114,27 @@ pub mod error_code {
     pub const REPLACED: u16 = 6;
     pub const UNKNOWN_ZONE: u16 = 7;
     pub const SLOW_CONSUMER: u16 = 8;
+    pub const SEAT_TAKEN: u16 = 9;
+    pub const TOO_FAR: u16 = 10;
+    pub const ILLEGAL_MOVE: u16 = 11;
+}
+
+/// `Sit.seat` value for sitting on the ground where you stand.
+pub const SEAT_GROUND: u32 = u32::MAX;
+
+/// `GameState.status`.
+pub mod game_status {
+    pub const WAITING: u8 = 0;
+    pub const PLAYING: u8 = 1;
+    pub const WHITE_WON: u8 = 2;
+    pub const BLACK_WON: u8 = 3;
+    pub const DRAW: u8 = 4;
 }
 
 /// Avatar states for `EntityInfo.state`.
 pub mod state {
     pub const IDLE: u8 = 0;
+    pub const SITTING: u8 = 1;
 }
 
 #[cfg(test)]
@@ -145,6 +185,28 @@ mod tests {
             ServerMsg::ChatBubble {
                 id: 1,
                 text: "hi".into(),
+            },
+            ServerMsg::StateChange {
+                id: 1,
+                state: state::SITTING,
+                x: 4,
+                y: 5,
+            },
+            ServerMsg::GameState {
+                table: 99,
+                status: game_status::PLAYING,
+                white: 1,
+                black: 2,
+                fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".into(),
+                last: "".into(),
+                legal: vec!["e2e4".into(), "g1f3".into()],
+            },
+            ServerMsg::ScreenState {
+                screen: 1,
+                title: "Aquarium".into(),
+                source: "scene:aquarium".into(),
+                started_t: 10,
+                duration_ms: 180_000,
             },
             ServerMsg::Pong {
                 client_t: 1,

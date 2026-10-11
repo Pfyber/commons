@@ -241,6 +241,14 @@ pub fn sample_vectors() -> String {
             text: "hello 👋".into(),
         },
         ClientMsg::Ping { client_t: 123456 },
+        ClientMsg::Sit {
+            seat: crate::SEAT_GROUND,
+        },
+        ClientMsg::Stand {},
+        ClientMsg::GameMove {
+            table: 4321,
+            uci: "e7e8q".into(),
+        },
     ];
     let server = [
         ServerMsg::Welcome {
@@ -271,6 +279,28 @@ pub fn sample_vectors() -> String {
         ServerMsg::Error {
             code: 4,
             message: "no path".into(),
+        },
+        ServerMsg::StateChange {
+            id: 9,
+            state: 1,
+            x: 40,
+            y: 41,
+        },
+        ServerMsg::GameState {
+            table: 4321,
+            status: 1,
+            white: 3,
+            black: 0,
+            fen: "8/8/8/8/8/8/8/K6k w - - 0 1".into(),
+            last: "a2a1".into(),
+            legal: vec!["a1a2".into(), "a1b1".into()],
+        },
+        ServerMsg::ScreenState {
+            screen: 1,
+            title: "Night sky".into(),
+            source: "scene:stars".into(),
+            started_t: 5,
+            duration_ms: 60000,
         },
     ];
     let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();

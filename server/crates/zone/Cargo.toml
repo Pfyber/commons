@@ -16,6 +16,7 @@ commons-protocol.workspace = true
 commons-sim.workspace = true
 
 anyhow.workspace = true
+chess.workspace = true
 axum.workspace = true
 bytes.workspace = true
 futures-util.workspace = true

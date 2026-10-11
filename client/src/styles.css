@@ -409,3 +409,128 @@ body {
     height: 40px;
   }
 }
+
+/* ---- activity panels ---- */
+
+.panel {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  top: 64px;
+  z-index: 5;
+  background: var(--paper);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel .x {
+  border: 0;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--muted);
+  width: 32px;
+  height: 32px;
+}
+
+.chess {
+  width: min(344px, calc(100vw - 24px));
+}
+
+.chess-info {
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chess-info .status {
+  color: var(--muted);
+}
+
+.chess-board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 3px solid var(--wood-dark, #8a5d36);
+}
+
+.chess-board .sq {
+  border: 0;
+  padding: 0;
+  font-size: clamp(20px, 7vw, 30px);
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: default;
+  color: #2b2a24;
+  font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", system-ui, sans-serif;
+}
+
+.chess-board .light {
+  background: #efe3c8;
+}
+
+.chess-board .dark {
+  background: #b58863;
+}
+
+.chess-board .last {
+  box-shadow: inset 0 0 0 100px rgba(255, 214, 77, 0.35);
+}
+
+.chess-board .movable {
+  cursor: pointer;
+}
+
+.chess-board .sel {
+  box-shadow: inset 0 0 0 3px #5d8a4e;
+}
+
+.chess-board .target {
+  cursor: pointer;
+  box-shadow: inset 0 0 0 100px rgba(93, 138, 78, 0.45);
+}
+
+.chess-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chess-actions:empty {
+  display: none;
+}
+
+.chess-actions button {
+  flex: 1;
+  font: inherit;
+  font-weight: 700;
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--paper-2);
+  cursor: pointer;
+}
+
+@media (max-width: 520px) {
+  .panel {
+    top: auto;
+    bottom: 160px;
+    left: 12px;
+    right: 12px;
+  }
+  .chess {
+    width: auto;
+  }
+}

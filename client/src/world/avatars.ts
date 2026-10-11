@@ -38,6 +38,10 @@ export class Avatar {
   pos: TileXY;
   private facing = 1;
   showName = true;
+  /** Posture (protocol `state::*`): 0 idle, 1 sitting. */
+  state = 0;
+  /** Where we stood before sitting down; standing up returns here. */
+  standTile: TileXY | null = null;
 
   constructor(
     public info: EntityInfo,
@@ -67,8 +71,17 @@ export class Avatar {
   /** Updates from a Spawn/CellEnter snapshot. */
   apply(info: EntityInfo, now: number) {
     this.info = info;
+    this.state = info.state;
     if (info.path.length > 0) this.setMotion({ path: info.path, t0: info.t0, speedX10: info.speedX10 }, now);
     else this.snap({ x: info.x, y: info.y });
+  }
+
+  /** StateChange from the server: sit down on / stand up from `at`. */
+  setState(state: number, at: TileXY) {
+    if (state === 1 && this.state !== 1) this.standTile = this.destination;
+    if (state !== 1) this.standTile = null;
+    this.state = state;
+    this.snap(at);
   }
 
   setMotion(m: Motion, now: number) {
@@ -144,15 +157,17 @@ export class Avatar {
     if (heading && Math.abs(heading.x) > 0.1) this.facing = heading.x > 0 ? 1 : -1;
 
     const walking = heading !== null;
+    const sitting = this.state === 1 && !walking;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;
-    const frame: 0 | 1 = walking || dancing ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
+    const frame: 0 | 1 | 2 = sitting ? 2 : walking || dancing ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
     this.sprite.texture = avatarTexture(this.info.look, frame);
-    const bob = walking ? Math.abs(Math.sin(wallNow / 90)) * -1.5 : dancing ? Math.sin(wallNow / 70) * 2 : 0;
+    const bob = walking ? Math.abs(Math.sin(wallNow / 90)) * -1.5 : dancing && !sitting ? Math.sin(wallNow / 70) * 2 : 0;
     const feetX = x * TILE + TILE / 2;
-    const feetY = y * TILE + TILE - 4;
+    // Seated avatars sit on the bench's slats, drawn just in front of it.
+    const feetY = y * TILE + TILE - (sitting ? 6 : 4);
     this.sprite.position.set(Math.round(feetX), Math.round(feetY + bob));
     this.sprite.scale.x = this.facing;
-    this.sprite.zIndex = feetY + 0.5;
+    this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
 
     // DOM label above the head.
     const s = this.scene.tileToScreen(x + 0.5, y + 1 - 4 / TILE - 34 / TILE);

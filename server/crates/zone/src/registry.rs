@@ -1,9 +1,11 @@
 //! Zone definitions loaded from map files, and the live instances of each.
 
 use crate::instance::{Instance, InstanceHandle};
+use crate::screen::Playlist;
 use crate::stats::InstanceSnapshot;
 use anyhow::Context;
 use commons_protocol::CELL_TILES;
+use commons_sim::furniture::Furniture;
 use commons_sim::{Grid, MapFile};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -17,19 +19,26 @@ pub struct ZoneDef {
     pub grid: Grid,
     pub cells_w: u16,
     pub cells_h: u16,
+    pub furniture: Furniture,
+    /// Present when the map has a big screen.
+    pub playlist: Option<Arc<Playlist>>,
 }
 
 impl ZoneDef {
-    pub fn new(id: String, map: MapFile) -> Self {
+    pub fn new(id: String, map: MapFile, playlist: Option<Arc<Playlist>>) -> Self {
         let grid = map.grid();
         let cells_w = map.width.div_ceil(CELL_TILES);
         let cells_h = map.height.div_ceil(CELL_TILES);
+        let furniture = Furniture::from_map(&map);
+        let playlist = playlist.filter(|_| map.objects.iter().any(|o| o.kind == "big_screen"));
         ZoneDef {
             id,
             map,
             grid,
             cells_w,
             cells_h,
+            furniture,
+            playlist,
         }
     }
 }
@@ -42,7 +51,8 @@ pub struct Registry {
 
 impl Registry {
     /// Loads every `*.json` map in `dir`; the file stem is the zone id.
-    pub fn load(dir: &str, secret: Vec<u8>) -> anyhow::Result<Self> {
+    pub fn load(dir: &str, playlist: Playlist, secret: Vec<u8>) -> anyhow::Result<Self> {
+        let playlist = Arc::new(playlist);
         let mut zones = HashMap::new();
         for entry in std::fs::read_dir(dir).with_context(|| format!("reading maps dir {dir}"))? {
             let path = entry?.path();
@@ -51,8 +61,16 @@ impl Registry {
                 let text = std::fs::read_to_string(&path)?;
                 let map = MapFile::from_json(&text)
                     .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
-                tracing::info!(zone = %id, name = %map.name, w = map.width, h = map.height, "loaded zone");
-                zones.insert(id.clone(), Arc::new(ZoneDef::new(id, map)));
+                let def = ZoneDef::new(id.clone(), map, Some(playlist.clone()));
+                tracing::info!(
+                    zone = %id,
+                    name = %def.map.name,
+                    seats = def.furniture.seats.len(),
+                    tables = def.furniture.tables.len(),
+                    screen = def.playlist.is_some(),
+                    "loaded zone"
+                );
+                zones.insert(id, Arc::new(def));
             }
         }
         anyhow::ensure!(!zones.is_empty(), "no maps found in {dir}");
