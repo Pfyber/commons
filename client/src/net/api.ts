@@ -42,11 +42,15 @@ export class ApiError extends Error {
 const REFRESH_KEY = "commons.refresh";
 
 async function post<T>(path: string, body: unknown, bearer?: string): Promise<T> {
+  return request<T>("POST", path, body, bearer);
+}
+
+async function request<T>(method: string, path: string, body: unknown, bearer?: string): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (bearer) headers.authorization = `Bearer ${bearer}`;
   let res: Response;
   try {
-    res = await fetch(path, { method: "POST", headers, body: JSON.stringify(body) });
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
     throw new ApiError(0, "network", "Can't reach Commons right now. Check your connection.");
   }
@@ -128,6 +132,15 @@ export class Auth {
       this.adopt(await post<Session>("/api/auth/refresh", { refresh_token: this.session.refresh_token }));
     }
     return this.session!.access_token;
+  }
+
+  /** Authenticated GET/POST against the API. */
+  async get<T>(path: string): Promise<T> {
+    return request<T>("GET", path, undefined, await this.accessToken());
+  }
+
+  async send<T>(path: string, body: unknown): Promise<T> {
+    return request<T>("POST", path, body, await this.accessToken());
   }
 
   async join(zoneId: string): Promise<JoinTicket> {

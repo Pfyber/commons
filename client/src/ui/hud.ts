@@ -10,6 +10,8 @@ export interface HudHandlers {
   onChat(text: string): void;
   onEmote(id: number): void;
   onSit(): void;
+  onBag(): void;
+  onAlbum(): void;
 }
 
 export class Hud {
@@ -19,13 +21,19 @@ export class Hud {
   readonly input: HTMLInputElement;
   private toastEl: HTMLDivElement;
   private sitBtn: HTMLButtonElement;
+  private coinsEl: HTMLDivElement;
   private toastTimer = 0;
 
   constructor(root: HTMLElement, h: HudHandlers) {
     root.innerHTML = `
       <div class="top">
         <div class="pill place"></div>
-        <div class="pill nearby" title="People in view"></div>
+        <div class="top-right">
+          <div class="pill coins" title="Coins"></div>
+          <button type="button" class="pill btn bag-btn" title="Bag (B)">🎒</button>
+          <button type="button" class="pill btn album-btn" title="Album (L)">📖</button>
+          <div class="pill nearby" title="People in view"></div>
+        </div>
       </div>
       <div class="toast" role="status" hidden></div>
       <div class="bottom">
@@ -40,6 +48,14 @@ export class Hud {
     this.log = root.querySelector(".log")!;
     this.input = root.querySelector(".chat input")!;
     this.toastEl = root.querySelector(".toast")!;
+    this.coinsEl = root.querySelector(".coins")!;
+    root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
+    root.querySelector<HTMLButtonElement>(".album-btn")!.onclick = () => h.onAlbum();
+    window.addEventListener("keydown", (e) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === "b" || e.key === "B") h.onBag();
+      if (e.key === "l" || e.key === "L") h.onAlbum();
+    });
 
     const form = root.querySelector<HTMLFormElement>(".chat")!;
     form.onsubmit = (ev) => {
@@ -80,6 +96,10 @@ export class Hud {
 
   setPlace(name: string, instance: number) {
     this.place.textContent = `${name} · ${instance}`;
+  }
+
+  setCoins(n: number) {
+    this.coinsEl.textContent = `🪙 ${n}`;
   }
 
   setNearby(n: number) {

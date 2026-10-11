@@ -534,3 +534,267 @@ body {
     width: auto;
   }
 }
+
+/* ---- M3: HUD buttons, bag/album/market panels, reel, placement ---- */
+
+.top-right {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pill.btn {
+  border: 0;
+  font-size: 18px;
+  padding: 6px 12px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+body.fading #stage {
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+#stage {
+  transition: opacity 0.35s;
+}
+
+.panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
+.panel h3 {
+  margin: 6px 0 0;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel .stamp {
+  background: #5d8a4e;
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  transform: rotate(-4deg);
+}
+
+.panel .icon {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  flex: none;
+}
+
+.bag,
+.album,
+.market,
+.plot,
+.action-menu {
+  width: min(360px, calc(100vw - 24px));
+}
+
+.panel .coins {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.item-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+
+.item-grid .item {
+  background: var(--paper-2);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+  font-size: 12px;
+  text-align: center;
+}
+
+.item-grid .item.unknown .icon {
+  filter: brightness(0) opacity(0.25);
+}
+
+.item-grid .qty {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-weight: 700;
+}
+
+.panel .hint,
+.panel .empty {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.panel .error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 0;
+}
+
+.panel .error:empty {
+  display: none;
+}
+
+.panel .rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panel .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.panel .row .name {
+  flex: 1;
+}
+
+.panel .row .price {
+  font-weight: 700;
+  color: #8a6a1a;
+}
+
+.panel button.small,
+.panel button.primary,
+.panel .tabs button {
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  border: 0;
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: var(--paper-2);
+  cursor: pointer;
+}
+
+.panel button.primary {
+  background: var(--leaf);
+  color: #fff;
+  padding: 10px;
+  font-size: 15px;
+}
+
+.panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.panel .tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.panel .tabs button.on {
+  background: var(--leaf);
+  color: #fff;
+}
+
+.reel {
+  position: fixed;
+  left: 50%;
+  bottom: 190px;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(360px, calc(100vw - 24px));
+  background: var(--paper);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.reel .bar {
+  position: relative;
+  height: 22px;
+  border-radius: 11px;
+  background: linear-gradient(90deg, #d9cdb4, #efe3c8 35%, #efe3c8 65%, #d9cdb4);
+  overflow: hidden;
+}
+
+.reel .sweet {
+  position: absolute;
+  left: 42%;
+  width: 16%;
+  top: 0;
+  bottom: 0;
+  background: rgba(93, 138, 78, 0.6);
+}
+
+.reel .needle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 4px;
+  margin-left: -2px;
+  background: var(--ink);
+  border-radius: 2px;
+}
+
+.reel button {
+  font: inherit;
+  font-size: 16px;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--leaf);
+  color: #fff;
+  cursor: pointer;
+}
+
+.place-banner {
+  position: fixed;
+  left: 50%;
+  top: 64px;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: var(--paper);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  padding: 6px 8px 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.place-banner .icon {
+  width: 24px;
+  height: 24px;
+  image-rendering: pixelated;
+}
+
+.place-banner button {
+  font: inherit;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: var(--paper-2);
+  cursor: pointer;
+}

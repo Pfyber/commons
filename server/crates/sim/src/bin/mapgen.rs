@@ -36,6 +36,7 @@ const DECOR: &[&str] = &[
     "reeds",
     "fence",
     "sign",
+    "wall",
 ];
 
 fn g(name: &str) -> u8 {
@@ -57,6 +58,8 @@ fn hash(x: u16, y: u16, salt: u32) -> u32 {
 }
 
 struct Builder {
+    w: u16,
+    h: u16,
     ground: Vec<u8>,
     decor: Vec<u8>,
     solid: Vec<bool>,
@@ -64,17 +67,19 @@ struct Builder {
 }
 
 impl Builder {
-    fn i(x: u16, y: u16) -> usize {
-        y as usize * W as usize + x as usize
+    fn i(&self, x: u16, y: u16) -> usize {
+        y as usize * self.w as usize + x as usize
     }
     fn ground(&mut self, x: u16, y: u16, t: &str) {
-        if x < W && y < H {
-            self.ground[Self::i(x, y)] = g(t);
+        if x < self.w && y < self.h {
+            let i = self.i(x, y);
+            self.ground[i] = g(t);
         }
     }
     fn decor(&mut self, x: u16, y: u16, t: &str) {
-        if x < W && y < H {
-            self.decor[Self::i(x, y)] = d(t);
+        if x < self.w && y < self.h {
+            let i = self.i(x, y);
+            self.decor[i] = d(t);
         }
     }
     fn rect(&mut self, x0: u16, y0: u16, w: u16, h: u16, t: &str) {
@@ -98,7 +103,8 @@ impl Builder {
         if solid {
             for yy in y..y + h {
                 for xx in x..x + w {
-                    self.solid[Self::i(xx, yy)] = true;
+                    let i = self.i(xx, yy);
+                    self.solid[i] = true;
                 }
             }
         }
@@ -113,16 +119,61 @@ impl Builder {
     }
     /// True if nothing has been placed on this tile yet.
     fn free(&self, x: u16, y: u16) -> bool {
-        let i = Self::i(x, y);
+        let i = self.i(x, y);
         self.decor[i] == 0
             && !self.solid[i]
             && [g("grass"), g("grass_dark")].contains(&self.ground[i])
     }
 }
 
-fn main() -> std::io::Result<()> {
+impl Builder {
+    fn new(w: u16, h: u16) -> Self {
+        let n = w as usize * h as usize;
+        Builder {
+            w,
+            h,
+            ground: vec![0; n],
+            decor: vec![0; n],
+            solid: vec![false; n],
+            objects: vec![],
+        }
+    }
+
+    /// Derives collision (water, fog, solid decor and objects) and packs the map.
+    fn finish(self, name: &str, spawn: (u16, u16)) -> MapFile {
+        let walk_decor = [d("none"), d("reeds")];
+        let blocked_ground = [g("water"), g("fog")];
+        let collision: Vec<u8> = (0..self.ground.len())
+            .map(|i| {
+                let blocked = self.solid[i]
+                    || blocked_ground.contains(&self.ground[i])
+                    || !walk_decor.contains(&self.decor[i]);
+                blocked as u8
+            })
+            .collect();
+        MapFile {
+            name: name.into(),
+            width: self.w,
+            height: self.h,
+            spawn: Spawn {
+                x: spawn.0,
+                y: spawn.1,
+            },
+            ground_legend: GROUND.iter().map(|s| s.to_string()).collect(),
+            decor_legend: DECOR.iter().map(|s| s.to_string()).collect(),
+            ground: self.ground,
+            decor: self.decor,
+            collision,
+            objects: self.objects,
+        }
+    }
+}
+
+fn park() -> MapFile {
     let n = W as usize * H as usize;
     let mut b = Builder {
+        w: W,
+        h: H,
         ground: vec![0; n],
         decor: vec![0; n],
         solid: vec![false; n],
@@ -217,6 +268,9 @@ fn main() -> std::io::Result<()> {
     // Homes gate on the west edge.
     b.object("homes_gate", 0, 46, 2, 5, Some("Homes"), true);
 
+    // The market cart: sell your catches and harvest, buy seeds and furniture.
+    b.object("market_cart", 54, 51, 2, 1, Some("Market"), true);
+
     // The fogged bridge across the river: built but closed until the first vote.
     b.rect(84, 47, 4, 3, "bridge");
     b.object(
@@ -270,38 +324,67 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    // Collision: water, fog, solid decor and solid objects.
-    let walk_decor = [d("none"), d("reeds")];
-    let blocked_ground = [g("water"), g("fog")];
-    let collision: Vec<u8> = (0..n)
-        .map(|i| {
-            let gr = b.ground[i];
-            let blocked =
-                b.solid[i] || blocked_ground.contains(&gr) || !walk_decor.contains(&b.decor[i]);
-            blocked as u8
-        })
-        .collect();
+    b.finish("Founders' Park", (48, 53))
+}
 
-    let map = MapFile {
-        name: "Founders' Park".into(),
-        width: W,
-        height: H,
-        spawn: Spawn { x: 48, y: 53 },
-        ground_legend: GROUND.iter().map(|s| s.to_string()).collect(),
-        decor_legend: DECOR.iter().map(|s| s.to_string()).collect(),
-        ground: b.ground,
-        decor: b.decor,
-        collision,
-        objects: b.objects,
-    };
+/// A player's home (spec §8.2): a cottage to furnish, a small garden and a
+/// gate back to the park.
+fn home() -> MapFile {
+    let (w, h) = (20u16, 15u16);
+    let mut b = Builder::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            if hash(x / 2, y / 2, 9).is_multiple_of(4) {
+                b.ground(x, y, "grass_dark");
+            }
+        }
+    }
+    // Cottage: wooden floor inside walls, door at the bottom middle.
+    b.rect(3, 2, 14, 7, "floor");
+    for x in 2..18 {
+        b.decor(x, 1, "wall");
+        if !(9..=10).contains(&x) {
+            b.decor(x, 9, "wall");
+        }
+    }
+    for y in 1..10 {
+        b.decor(2, y, "wall");
+        b.decor(17, y, "wall");
+    }
+    b.rect(9, 9, 2, 6, "path");
+    // Garden plots west of the path.
+    b.rect(3, 11, 5, 2, "soil");
+    // Fence around the yard, with the gate in the middle of the bottom edge.
+    for x in 0..w {
+        if !(9..=10).contains(&x) {
+            b.decor(x, h - 1, "fence");
+        }
+    }
+    for y in 10..h {
+        b.decor(0, y, "fence");
+        b.decor(w - 1, y, "fence");
+    }
+    b.decor(14, 11, "tree");
+    b.decor(16, 12, "bush");
+    b.decor(1, 0, "pine");
+    b.decor(18, 0, "pine");
+    b.object("park_gate", 9, h - 1, 2, 1, Some("To the park"), true);
+    b.finish("Home", (10, 11))
+}
 
-    let json = serde_json::to_string(&map).unwrap();
+fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
+    let json = serde_json::to_string(map).unwrap();
     // Validate before writing.
     MapFile::from_json(&json).expect("generated map is invalid");
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../assets/maps/founders_park.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../../assets/maps/{name}.json"));
     std::fs::create_dir_all(path.parent().unwrap())?;
     std::fs::write(&path, json)?;
     println!("wrote {}", path.display());
     Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    write("founders_park", &park())?;
+    write("home", &home())
 }

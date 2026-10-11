@@ -3,6 +3,7 @@
 //! integer costs, fixed neighbour order, explicit tie-breaking.
 
 pub mod furniture;
+pub mod garden;
 pub mod map;
 pub mod motion;
 pub mod path;

@@ -15,9 +15,8 @@ impl Instance {
     /// `Sit` from the client. While walking, the request is kept and applied
     /// on arrival, so clients can send MoveTo + Sit together.
     pub(super) fn sit(&mut self, id: u32, seat: u32, now: u32) {
-        let a = self.avatars.get_mut(&id).unwrap();
-        if a.motion.as_ref().is_some_and(|m| !m.is_done(now)) {
-            a.pending_sit = Some(seat);
+        if self.moving(id, now) {
+            self.avatars.get_mut(&id).unwrap().pending = Some(super::Pending::Sit(seat));
             return;
         }
         self.try_sit(id, seat, now);
@@ -74,7 +73,7 @@ impl Instance {
 
     pub(super) fn stand(&mut self, id: u32, now: u32) {
         let a = self.avatars.get_mut(&id).unwrap();
-        a.pending_sit = None;
+        a.pending = None;
         if a.state != state::SITTING {
             return;
         }

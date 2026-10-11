@@ -88,6 +88,11 @@ export class DayNight {
     }
   }
 
+  destroy() {
+    this.app.stage.removeChild(this.shade);
+    this.shade.destroy();
+  }
+
   hour(): number {
     if (this.override !== null) return this.override;
     const d = new Date();

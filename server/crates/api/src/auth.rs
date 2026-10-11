@@ -5,6 +5,7 @@
 //! returns a session, or a `signup_token` for new emails → `POST /auth/signup`.
 
 use crate::AppState;
+use crate::economy::{Op, WELCOME, apply};
 use crate::error::{ApiError, ApiResult};
 use crate::store::{CreateError, Player};
 use axum::extract::State;
@@ -69,21 +70,6 @@ fn random_token() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn new_player_id() -> String {
-    let mut b: [u8; 16] = rand::rng().random();
-    b[6] = (b[6] & 0x0f) | 0x40; // UUID v4
-    b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &h[0..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..32]
-    )
-}
-
 fn current_year() -> i32 {
     chrono::Utc::now().year()
 }
@@ -145,7 +131,7 @@ fn validate_name(raw: &str) -> ApiResult<String> {
     Ok(name)
 }
 
-fn issue_session(state: &AppState, p: &Player) -> Session {
+async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
     let claims = AccessClaims {
         sub: p.id.clone(),
         name: p.display_name.clone(),
@@ -156,8 +142,9 @@ fn issue_session(state: &AppState, p: &Player) -> Session {
     let refresh_token = random_token();
     state
         .store
-        .put_refresh(&refresh_token, &p.id, now_unix() + REFRESH_TTL_SECS);
-    Session {
+        .put_refresh(&refresh_token, &p.id, now_unix() + REFRESH_TTL_SECS)
+        .await?;
+    Ok(Session {
         access_token: token::sign(&state.secret, &claims, ACCESS_TTL_SECS),
         access_expires_in: ACCESS_TTL_SECS,
         refresh_token,
@@ -168,25 +155,45 @@ fn issue_session(state: &AppState, p: &Player) -> Session {
             trust_tier: p.trust_tier,
             minor: is_minor(p),
         },
-    }
+    })
 }
 
-fn create(
+async fn create(
     state: &AppState,
     email: String,
     display_name: String,
     birth_year: i32,
 ) -> ApiResult<Player> {
-    let p = Player {
-        id: new_player_id(),
-        email,
-        display_name,
-        birth_year,
-        look: rand::rng().random(),
-        trust_tier: token::TrustTier::Visitor,
-        created_at: now_unix(),
-    };
-    state.store.create_player(p).map_err(|e| match e {
+    let look: u32 = rand::rng().random();
+    let catalog = state.catalog.clone();
+    let created = state
+        .store
+        .create_player(
+            &email,
+            &display_name,
+            birth_year,
+            look,
+            move |conn, player| {
+                Box::pin(async move {
+                    let ops: Vec<Op> = WELCOME
+                        .iter()
+                        .map(|&(item, delta)| Op { item, delta })
+                        .collect();
+                    apply(
+                        conn,
+                        &catalog,
+                        player,
+                        &ops,
+                        "welcome",
+                        &format!("welcome:{player}"),
+                    )
+                    .await?;
+                    Ok(())
+                })
+            },
+        )
+        .await?;
+    created.map_err(|e| match e {
         CreateError::NameTaken => {
             ApiError::new(StatusCode::CONFLICT, "name_taken", "That name is taken.")
         }
@@ -229,7 +236,10 @@ async fn magic_link(
         ));
     }
     let token = random_token();
-    state.store.put_magic(&token, &email, now + MAGIC_TTL_SECS);
+    state
+        .store
+        .put_magic(&token, &email, now + MAGIC_TTL_SECS)
+        .await?;
     let link = format!("{}/?login={token}", state.client_url);
     if state.dev {
         tracing::info!(%email, %link, "magic link (dev)");
@@ -246,15 +256,12 @@ struct VerifyReq {
 }
 
 async fn verify(State(state): S, Json(req): Json<VerifyReq>) -> ApiResult<Json<serde_json::Value>> {
-    let email = state
-        .store
-        .take_magic(&req.token, now_unix())
-        .ok_or_else(|| {
-            ApiError::unauthorized("This sign-in link has expired or was already used.")
-        })?;
-    match state.store.player_by_email(&email) {
+    let email = state.store.take_magic(&req.token).await?.ok_or_else(|| {
+        ApiError::unauthorized("This sign-in link has expired or was already used.")
+    })?;
+    match state.store.player_by_email(&email).await? {
         Some(p) => Ok(Json(
-            serde_json::to_value(issue_session(&state, &p)).unwrap(),
+            serde_json::to_value(issue_session(&state, &p).await?).unwrap(),
         )),
         None => {
             let signup_token = token::sign(
@@ -296,9 +303,9 @@ async fn signup(State(state): S, Json(req): Json<SignupReq>) -> ApiResult<Json<S
         ));
     }
     let name = validate_name(&req.display_name)?;
-    let p = create(&state, claims.email, name, req.birth_year)?;
+    let p = create(&state, claims.email, name, req.birth_year).await?;
     tracing::info!(player = %p.id, "account created");
-    Ok(Json(issue_session(&state, &p)))
+    Ok(Json(issue_session(&state, &p).await?))
 }
 
 #[derive(Deserialize)]
@@ -309,13 +316,15 @@ struct RefreshReq {
 async fn refresh(State(state): S, Json(req): Json<RefreshReq>) -> ApiResult<Json<Session>> {
     let id = state
         .store
-        .take_refresh(&req.refresh_token, now_unix())
+        .take_refresh(&req.refresh_token)
+        .await?
         .ok_or_else(|| ApiError::unauthorized("session expired"))?;
     let p = state
         .store
         .player(&id)
+        .await?
         .ok_or_else(|| ApiError::unauthorized("account not found"))?;
-    Ok(Json(issue_session(&state, &p)))
+    Ok(Json(issue_session(&state, &p).await?))
 }
 
 #[derive(Deserialize)]
@@ -333,17 +342,17 @@ async fn dev_login(State(state): S, Json(req): Json<DevLoginReq>) -> ApiResult<J
         ));
     }
     let name = validate_name(&req.display_name)?;
-    let p = match state.store.player_by_name(&name) {
+    let p = match state.store.player_by_name(&name).await? {
         Some(p) => p,
         None => {
             let email = format!(
                 "{}@dev.commons.local",
                 name.to_lowercase().replace(' ', "_")
             );
-            create(&state, email, name, current_year() - 30)?
+            create(&state, email, name, current_year() - 30).await?
         }
     };
-    Ok(Json(issue_session(&state, &p)))
+    Ok(Json(issue_session(&state, &p).await?))
 }
 
 async fn me(State(state): S, headers: HeaderMap) -> ApiResult<Json<AccessClaims>> {

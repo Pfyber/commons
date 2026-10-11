@@ -1,24 +1,48 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
-import type { Application } from "pixi.js";
+import type { Application, FederatedPointerEvent } from "pixi.js";
 import { ChessPanel, type GameStateMsg } from "./activities/chess";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
 import { DayNight } from "./ambient/daynight";
+import type { Economy } from "./economy";
 import type { ServerMsg } from "./net/protocol.gen";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
+import type { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
 import { Avatar } from "./world/avatars";
 import { Furniture } from "./world/furniture";
-import { type ZoneMap, nearestWalkable, stepTarget } from "./world/map";
+import { type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
 import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
 import { compress, findPath } from "./world/path";
+import { Props } from "./world/props";
 import { Scene } from "./world/scene";
 
 /** Error codes from server/crates/protocol (error_code). */
 const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION_MISMATCH: 3 };
 /** Errors worth showing to the player as-is. */
-const TOAST_CODES = new Set([ERR.RATE_LIMITED, 9, 10, 11]);
+const TOAST_CODES = new Set([ERR.RATE_LIMITED, 9, 10, 11, 12, 13]);
+const FISHING = 2;
+const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3 };
+/** Casts reach this far from where you stand (server: CAST_RANGE). */
+const CAST_RANGE = 2;
+/** Matches the server's bite window minus a little latency headroom. */
+const REEL_WINDOW_MS = 2300;
+
+/** UI shared across zones (created once in main). */
+export interface Ui {
+  hud: Hud;
+  eco: Economy;
+  bag: BagPanel;
+  album: AlbumPanel;
+  market: MarketPanel;
+  plot: PlotMenu;
+  reel: ReelGame;
+  place: PlaceBanner;
+  menu: ActionMenu;
+}
+
+const cheb = (a: TileXY, b: TileXY) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const SITTING = 1;
 const SEAT_GROUND = 0xffffffff;
 /** Spectators further than this from a table stop following its game. */
@@ -48,17 +72,23 @@ export class Game {
   private games = new Map<number, GameStateMsg>();
   private chess: ChessPanel;
   private screen: BigScreen | null = null;
+  readonly props: Props;
+  private hud: Hud;
   private ambient: Ambient;
   private daynight: DayNight;
 
   constructor(
     private app: Application,
     map: ZoneMap,
-    private hud: Hud,
+    readonly zoneId: string,
+    private ui: Ui,
     private labels: HTMLElement,
-    private events: { onWelcome(): void; onDisconnect(reason: CloseReason): void },
+    private events: { onWelcome(): void; onDisconnect(reason: CloseReason): void; onTravel(zone: string): void },
   ) {
+    this.hud = ui.hud;
     this.scene = new Scene(app, map);
+    this.props = new Props(this.scene, map, ui.eco);
+    ui.bag.placeable = zoneId === "home";
     this.furniture = new Furniture(map);
     const screenObj = map.objects.find((o) => o.kind === "big_screen");
     if (screenObj) {
@@ -170,6 +200,25 @@ export class Game {
       case "ScreenState":
         this.screen?.setState(m);
         break;
+      case "FishEvent":
+        this.onFish(m);
+        break;
+      case "PlotState": {
+        const info = { plant: m.plant, stage: m.stage, watered: m.watered, owner: m.owner, stageLeftMs: m.stageLeftMs };
+        this.props.setPlot(m.x, m.y, info);
+        this.ui.plot.update(m.x, m.y, info);
+        break;
+      }
+      case "ObjectUpdate":
+        this.props.setObject(m.x, m.y, m.item);
+        break;
+      case "Granted":
+        this.ui.eco.setTotal(m.item, m.total, m.first);
+        if (m.added > 0) {
+          const name = this.ui.eco.name(m.item);
+          this.hud.toast(`+${m.added} ${name}${m.first ? " · new in your album!" : ""}`, 3500);
+        }
+        break;
       case "Error":
         if (m.code === ERR.NO_PATH) this.hud.toast("Can't get there from here.");
         else if (TOAST_CODES.has(m.code)) this.hud.toast(m.message.charAt(0).toUpperCase() + m.message.slice(1) + ".");
@@ -223,8 +272,9 @@ export class Game {
     const stage = this.app.stage;
     stage.eventMode = "static";
     stage.hitArea = this.app.screen;
-    stage.on("pointertap", (e) => {
+    const tap = (e: FederatedPointerEvent) => {
       const t = this.scene.screenToTile(e.global.x, e.global.y);
+      if (this.tapCollect(t)) return;
       const id = this.furniture.idAt(t);
       const seat = this.furniture.seats.get(id);
       if (seat) return this.sitAt(seat.id);
@@ -232,10 +282,16 @@ export class Game {
       if (table) return this.watchTable(table.id);
       const target = nearestWalkable(this.scene.map, t.x, t.y, 2);
       if (target) this.moveTo(target, true);
-    });
+    };
+    stage.on("pointertap", tap);
+    this.disposers.push(() => stage.off("pointertap", tap));
 
     const down = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if (e.key === "Escape") {
+        this.ui.place.hide();
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         this.hud.focusChat();
@@ -263,6 +319,120 @@ export class Game {
       window.removeEventListener("blur", blur);
       window.removeEventListener("resize", resize);
     });
+  }
+
+  // ---- collecting: fishing, gardens, market, homes ---------------------------
+
+  /** Handles taps on M3 things; returns true if the tap was used. */
+  private tapCollect(t: TileXY): boolean {
+    const map = this.scene.map;
+    const self = this.self;
+    if (!self) return false;
+    const ui = this.ui;
+    if (ui.place.item) {
+      this.socket?.send({ t: "Place", item: ui.place.item.id, x: t.x, y: t.y });
+      ui.place.hide();
+      return true;
+    }
+    const placed = this.props.objectAt(t.x, t.y);
+    if (placed && this.zoneId === "home") {
+      ui.menu.showWith(ui.eco.name(placed), "", [["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]]);
+      return true;
+    }
+    // Map objects: the drawn art reaches a couple of tiles above the footprint.
+    const obj = map.objects.find((o) => t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 2 && t.y < o.y + o.h);
+    if (obj?.kind === "market_cart") {
+      const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
+      ui.market.show();
+      return true;
+    }
+    if (obj?.kind === "homes_gate") {
+      this.events.onTravel("home");
+      return true;
+    }
+    if (obj?.kind === "park_gate") {
+      this.events.onTravel("founders_park");
+      return true;
+    }
+    const ground = groundAt(map, t.x, t.y);
+    if (ground === "water") {
+      this.fish(t);
+      return true;
+    }
+    if (ground === "soil") {
+      ui.plot.showFor(t.x, t.y, this.props.plotAt(t.x, t.y));
+      return true;
+    }
+    return false;
+  }
+
+  /** Walks within reach of the water if needed, then casts. */
+  private fish(target: TileXY) {
+    const self = this.self;
+    if (!self || !this.socket) return;
+    if (self.state === FISHING) return;
+    if (cheb(self.destination, target) > CAST_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
+      const spot = this.castSpot(target, self.destination);
+      if (!spot) return this.hud.toast("Find a spot on the shore.");
+      this.moveTo(spot, true);
+    }
+    this.socket.send({ t: "FishCast", x: target.x, y: target.y });
+  }
+
+  /** The walkable tile within casting range of `target` nearest to `from`. */
+  private castSpot(target: TileXY, from: TileXY): TileXY | null {
+    let best: TileXY | null = null;
+    let bestD = Infinity;
+    for (let dy = -CAST_RANGE; dy <= CAST_RANGE; dy++) {
+      for (let dx = -CAST_RANGE; dx <= CAST_RANGE; dx++) {
+        const c = { x: target.x + dx, y: target.y + dy };
+        if (!walkable(this.scene.map, c.x, c.y)) continue;
+        const d = Math.hypot(c.x - from.x, c.y - from.y);
+        if (d < bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+    }
+    return best;
+  }
+
+  private onFish(m: Extract<ServerMsg, { t: "FishEvent" }>) {
+    const isSelf = m.id === this.selfId;
+    switch (m.kind) {
+      case FISH.CAST:
+        this.props.cast(m.id, { x: m.x, y: m.y });
+        break;
+      case FISH.BITE:
+        this.props.bite(m.id);
+        if (isSelf) this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }));
+        break;
+      case FISH.CAUGHT: {
+        this.props.reelIn(m.id);
+        if (isSelf) this.ui.reel.stop();
+        this.avatars.get(m.id)?.say(`🎣 ${this.ui.eco.name(m.item)}!`);
+        break;
+      }
+      case FISH.ESCAPED:
+        this.props.reelIn(m.id);
+        if (isSelf) {
+          this.ui.reel.stop();
+          this.hud.toast("It got away…");
+        }
+        break;
+    }
+  }
+
+  /** Garden action from the plot menu: walk next to the plot, then act. */
+  plotAction(x: number, y: number, action: number, item: number) {
+    const self = this.self;
+    if (!self || !this.socket) return;
+    if (cheb(self.destination, { x, y }) > 1) {
+      const spot = this.furniture.approach({ x, y }, self.destination) ?? { x, y };
+      this.moveTo(spot, true);
+    }
+    this.socket.send({ t: "PlotAction", x, y, action, item });
   }
 
   // ---- sitting & tables ---------------------------------------------------
@@ -373,6 +543,7 @@ export class Game {
       this.hud.setNearby(this.avatars.size);
     }
     this.scene.update();
+    this.props.update(wallNow);
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
     this.daynight.update();
     if (this.screen && self) {
@@ -390,6 +561,13 @@ export class Game {
     this.socket?.close();
     this.clearAvatars();
     for (const d of this.disposers) d();
+    this.chess.el.remove();
+    this.daynight.destroy();
+    for (const p of [this.ui.plot, this.ui.menu, this.ui.market]) p.hide();
+    this.ui.reel.stop();
+    this.ui.place.hide();
+    this.app.stage.removeChild(this.scene.world);
+    this.scene.world.destroy({ children: true });
   }
 }
 

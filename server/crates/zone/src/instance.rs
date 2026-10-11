@@ -9,8 +9,12 @@
 //! watched cells via CellEnter/CellLeave (subscription changes) and
 //! Spawn/Despawn (an avatar crossing into or out of the watched area).
 
+mod fishing;
+mod garden;
 mod hangout;
+mod home;
 
+use crate::econ::EconomyClient;
 use crate::games::ChessGame;
 use crate::registry::ZoneDef;
 use crate::stats::InstanceStats;
@@ -21,9 +25,9 @@ use commons_common::token::JoinClaims;
 use commons_protocol::{
     CELL_TILES, ClientMsg, EntityInfo, ServerMsg, Tile, emote, error_code, push_framed, state,
 };
-use commons_sim::{Motion, TilePos, WALK_SPEED_X10, compress, find_path};
+use commons_sim::{Grid, Motion, TilePos, WALK_SPEED_X10, compress, find_path};
 use rand::Rng;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -59,6 +63,24 @@ pub enum Cmd {
     },
     Leave {
         conn: ConnId,
+    },
+    /// Continuation of async work (economy calls), run inside the actor.
+    Call(Box<dyn FnOnce(&mut Instance) + Send>),
+}
+
+/// Something an avatar asked for while walking; done on arrival.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pending {
+    Sit(u32),
+    Plot {
+        x: u16,
+        y: u16,
+        action: u8,
+        item: u32,
+    },
+    Cast {
+        x: u16,
+        y: u16,
     },
 }
 
@@ -102,8 +124,9 @@ struct Avatar {
     seat: Option<u32>,
     /// Where the avatar stands up to.
     stand_tile: TilePos,
-    /// Sit requested while walking; applied on arrival.
-    pending_sit: Option<u32>,
+    /// Requested while walking; applied on arrival.
+    pending: Option<Pending>,
+    fish: Option<fishing::FishSession>,
 }
 
 impl Avatar {
@@ -151,19 +174,48 @@ pub struct Instance {
     games: HashMap<u32, ChessGame>,
     /// Index of the programme last announced on the big screen.
     screen_index: Option<usize>,
+    /// Collision grid; a copy so placed furniture can block tiles.
+    grid: Grid,
+    /// For private spaces (homes): the owning player.
+    owner: Option<String>,
+    economy: Option<Arc<EconomyClient>>,
+    /// Lets async work post its results back into the actor.
+    self_tx: Option<mpsc::WeakSender<Cmd>>,
+    /// Prefix making idempotency keys unique to this instance's lifetime.
+    key_prefix: String,
+    key_seq: u64,
+    soil: HashSet<TilePos>,
+    plots: HashMap<TilePos, garden::PlotView>,
+    objects: HashMap<TilePos, u32>,
+    /// Tiles with an economy call in flight, to refuse double actions.
+    busy: HashSet<TilePos>,
+    next_garden_tick: u32,
 }
 
 impl Instance {
-    pub fn spawn(zone: Arc<ZoneDef>, number: u16) -> InstanceHandle {
-        let (tx, rx) = mpsc::channel(INBOX);
-        let clock = Clock(Instant::now());
-        let stats = Arc::new(InstanceStats::default());
+    pub fn new(
+        zone: Arc<ZoneDef>,
+        number: u16,
+        owner: Option<String>,
+        economy: Option<Arc<EconomyClient>>,
+    ) -> Self {
         let cells = zone.cells_w as usize * zone.cells_h as usize;
-        let inst = Instance {
+        let soil_kind = zone.map.ground_legend.iter().position(|g| g == "soil");
+        let w = zone.map.width as usize;
+        let soil = zone
+            .map
+            .ground
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| Some(**g as usize) == soil_kind)
+            .map(|(i, _)| ((i % w) as u16, (i / w) as u16))
+            .collect();
+        Instance {
+            grid: zone.grid.clone(),
             zone,
             number,
-            clock,
-            stats: stats.clone(),
+            clock: Clock(Instant::now()),
+            stats: Arc::new(InstanceStats::default()),
             next_id: 1,
             avatars: HashMap::new(),
             by_conn: HashMap::new(),
@@ -173,10 +225,64 @@ impl Instance {
             seat_occupant: HashMap::new(),
             games: HashMap::new(),
             screen_index: None,
-        };
-        tracing::info!(zone = %inst.zone.id, instance = number, "instance started");
+            owner,
+            economy,
+            self_tx: None,
+            key_prefix: format!("{:016x}", rand::rng().random::<u64>()),
+            key_seq: 0,
+            soil,
+            plots: HashMap::new(),
+            objects: HashMap::new(),
+            busy: HashSet::new(),
+            next_garden_tick: 0,
+        }
+    }
+
+    pub fn spawn(
+        zone: Arc<ZoneDef>,
+        number: u16,
+        owner: Option<String>,
+        economy: Option<Arc<EconomyClient>>,
+    ) -> InstanceHandle {
+        let (tx, rx) = mpsc::channel(INBOX);
+        let mut inst = Instance::new(zone, number, owner, economy);
+        inst.self_tx = Some(tx.downgrade());
+        let (clock, stats) = (inst.clock, inst.stats.clone());
+        tracing::info!(zone = %inst.zone.id, instance = number, owner = ?inst.owner, "instance started");
+        inst.load_persistent();
         tokio::spawn(inst.run(rx));
         InstanceHandle { tx, clock, stats }
+    }
+
+    /// Runs `work` off the actor and applies its result inside it.
+    fn spawn_call<F, T>(&self, work: F, then: impl FnOnce(&mut Instance, T) + Send + 'static)
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let Some(tx) = self.self_tx.as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        tokio::spawn(async move {
+            let out = work.await;
+            let _ = tx
+                .send(Cmd::Call(Box::new(move |inst: &mut Instance| {
+                    then(inst, out)
+                })))
+                .await;
+        });
+    }
+
+    /// A fresh idempotency key for an economy call.
+    fn next_key(&mut self, kind: &str) -> String {
+        self.key_seq += 1;
+        format!("{kind}:{}:{}", self.key_prefix, self.key_seq)
+    }
+
+    /// Loads garden plots and (for homes) furniture from the economy service.
+    fn load_persistent(&self) {
+        self.load_plots();
+        self.load_home();
     }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
@@ -202,6 +308,8 @@ impl Instance {
             let now = self.clock.now_ms();
             self.step(now);
             self.screen_tick(now);
+            self.fish_tick(now);
+            self.garden_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
             self.stats.record_tick(elapsed);
@@ -229,6 +337,7 @@ impl Instance {
                     self.on_message(id, msg);
                 }
             }
+            Cmd::Call(f) => f(self),
         }
     }
 
@@ -254,6 +363,37 @@ impl Instance {
             }
         }
         out
+    }
+
+    fn moving(&self, id: u32, now: u32) -> bool {
+        self.avatars[&id]
+            .motion
+            .as_ref()
+            .is_some_and(|m| !m.is_done(now))
+    }
+
+    /// Tells a player what they received (and new totals) after an economy call.
+    fn send_granted(&mut self, id: u32, applied: &crate::econ::Applied) {
+        let msgs: Vec<ServerMsg> = applied
+            .totals
+            .iter()
+            .map(|&(item, total)| {
+                let added = applied
+                    .added
+                    .iter()
+                    .find(|(i, _)| *i == item)
+                    .map_or(0, |(_, n)| *n);
+                ServerMsg::Granted {
+                    item: item as u32,
+                    added: added.clamp(0, u16::MAX as i32) as u16,
+                    total: total.max(0) as u32,
+                    first: applied.firsts.contains(&item),
+                }
+            })
+            .collect();
+        for m in msgs {
+            self.send_to(id, &m);
+        }
     }
 
     fn send_to(&mut self, id: u32, msg: &ServerMsg) {
@@ -306,13 +446,10 @@ impl Instance {
         let spawn = &self.zone.map.spawn;
         let mut rng = rand::rng();
         let jitter = (
-            (spawn.x as i32 + rng.random_range(-3..=3)).clamp(0, self.zone.grid.w as i32 - 1)
-                as u16,
-            (spawn.y as i32 + rng.random_range(-2..=2)).clamp(0, self.zone.grid.h as i32 - 1)
-                as u16,
+            (spawn.x as i32 + rng.random_range(-3..=3)).clamp(0, self.grid.w as i32 - 1) as u16,
+            (spawn.y as i32 + rng.random_range(-2..=2)).clamp(0, self.grid.h as i32 - 1) as u16,
         );
         let tile = self
-            .zone
             .grid
             .nearest_walkable(jitter, 8)
             .unwrap_or((spawn.x, spawn.y));
@@ -339,7 +476,8 @@ impl Instance {
             game_rl: Bucket::new(5.0, 2.0),
             seat: None,
             stand_tile: tile,
-            pending_sit: None,
+            pending: None,
+            fish: None,
         };
         avatar.send(
             &ServerMsg::Welcome {
@@ -369,6 +507,7 @@ impl Instance {
 
     fn remove(&mut self, id: u32) {
         self.leave_seat(id);
+        self.stop_fishing(id, false);
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
@@ -414,6 +553,13 @@ impl Instance {
             ClientMsg::Sit { seat } => self.sit(id, seat, now),
             ClientMsg::Stand {} => self.stand(id, now),
             ClientMsg::GameMove { table, uci } => self.game_move(id, table, &uci, now),
+            ClientMsg::FishCast { x, y } => self.fish_cast(id, (x, y), now),
+            ClientMsg::FishReel { quality } => self.fish_reel(id, quality, now),
+            ClientMsg::PlotAction { x, y, action, item } => {
+                self.plot_action(id, (x, y), action, item, now)
+            }
+            ClientMsg::Place { item, x, y } => self.place(id, item, (x, y)),
+            ClientMsg::Pickup { x, y } => self.pickup(id, (x, y)),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }
@@ -423,11 +569,13 @@ impl Instance {
         if !a.move_rl.try_take(now as u64) {
             return;
         }
-        a.pending_sit = None;
-        if a.state != state::IDLE {
-            self.stand(id, now);
+        a.pending = None;
+        match a.state {
+            state::SITTING => self.stand(id, now),
+            state::FISHING => self.stop_fishing(id, false),
+            _ => {}
         }
-        let grid = &self.zone.grid;
+        let grid = &self.grid;
         let a = self.avatars.get_mut(&id).unwrap();
         // Mid-walk, continue through the tile being walked into so the new path
         // joins the old one without a seam. Otherwise start shortly in the future
@@ -522,8 +670,14 @@ impl Instance {
                 a.tile = tile;
                 self.on_tile_changed(id, now);
             }
-            if arrived && let Some(seat) = self.avatars.get_mut(&id).unwrap().pending_sit.take() {
-                self.try_sit(id, seat, now);
+            if arrived && let Some(p) = self.avatars.get_mut(&id).unwrap().pending.take() {
+                match p {
+                    Pending::Sit(seat) => self.try_sit(id, seat, now),
+                    Pending::Plot { x, y, action, item } => {
+                        self.do_plot_action(id, (x, y), action, item)
+                    }
+                    Pending::Cast { x, y } => self.do_cast(id, (x, y), now),
+                }
             }
         }
     }
@@ -620,6 +774,8 @@ impl Instance {
         }
         for &c in desired.iter().filter(|c| current.binary_search(c).is_err()) {
             out.extend(self.games_in_cell(c).iter().map(|m| m.to_bytes()));
+            out.extend(self.plots_in_cell(c, now_ms()).iter().map(|m| m.to_bytes()));
+            out.extend(self.objects_in_cell(c).iter().map(|m| m.to_bytes()));
         }
         let a = self.avatars.get_mut(&id).unwrap();
         a.subs = desired;
@@ -664,6 +820,14 @@ impl Instance {
     }
 }
 
+/// Wall-clock unix milliseconds (garden growth runs on real days).
+pub(crate) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -689,22 +853,7 @@ pub(crate) mod tests {
     }
 
     fn instance_for(zone: Arc<ZoneDef>) -> Instance {
-        let cells = zone.cells_w as usize * zone.cells_h as usize;
-        Instance {
-            zone,
-            number: 1,
-            clock: Clock(Instant::now()),
-            stats: Arc::new(InstanceStats::default()),
-            next_id: 1,
-            avatars: HashMap::new(),
-            by_conn: HashMap::new(),
-            by_player: HashMap::new(),
-            members: vec![Vec::new(); cells],
-            watchers: vec![Vec::new(); cells],
-            seat_occupant: HashMap::new(),
-            games: HashMap::new(),
-            screen_index: None,
-        }
+        Instance::new(zone, 1, None, None)
     }
 
     /// 16×16 park with one chess table at (5,5) and its benches at (4,5) and (6,5).
@@ -716,6 +865,29 @@ pub(crate) mod tests {
             m.collision[i] = 1;
         }
         instance_for(Arc::new(ZoneDef::new("test".into(), m, None)))
+    }
+
+    /// 16×16 meadow: water from row 6 down, soil plots at (2..=5, 2), and a
+    /// preloaded fish catalogue.
+    pub(crate) fn pond_instance() -> Instance {
+        let mut m = map(16, 16);
+        m.ground_legend = vec!["grass".into(), "water".into(), "soil".into()];
+        for y in 6..16usize {
+            for x in 0..16usize {
+                m.ground[y * 16 + x] = 1;
+                m.collision[y * 16 + x] = 1;
+            }
+        }
+        for x in 2..=5usize {
+            m.ground[2 * 16 + x] = 2;
+        }
+        let econ = crate::econ::EconomyClient::with_catalog(crate::econ::ZoneCatalog::for_tests());
+        Instance::new(
+            Arc::new(ZoneDef::new("test".into(), m, None)),
+            1,
+            None,
+            Some(econ),
+        )
     }
 
     /// Teleports an idle avatar (test setup only).
@@ -756,6 +928,7 @@ pub(crate) mod tests {
             minor: false,
             zone: "test".into(),
             instance: 1,
+            owner: None,
         }
     }
 
@@ -894,12 +1067,7 @@ pub(crate) mod tests {
     fn unreachable_target_is_rejected() {
         let mut inst = instance();
         let mut a = connect(&mut inst, 1, "a", (20, 12));
-        let mut grid = inst.zone.grid.clone();
-        grid.set_blocked(20, 20, true);
-        inst.zone = Arc::new(ZoneDef {
-            grid,
-            ..ZoneDef::new("test".into(), inst.zone.map.clone(), None)
-        });
+        inst.grid.set_blocked(20, 20, true);
         inst.handle(Cmd::Msg {
             conn: 1,
             msg: ClientMsg::MoveTo { x: 20, y: 20 },

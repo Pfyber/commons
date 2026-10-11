@@ -249,6 +249,20 @@ pub fn sample_vectors() -> String {
             table: 4321,
             uci: "e7e8q".into(),
         },
+        ClientMsg::FishCast { x: 20, y: 60 },
+        ClientMsg::FishReel { quality: 875 },
+        ClientMsg::PlotAction {
+            x: 21,
+            y: 27,
+            action: 1,
+            item: 200,
+        },
+        ClientMsg::Place {
+            item: 400,
+            x: 5,
+            y: 4,
+        },
+        ClientMsg::Pickup { x: 5, y: 4 },
     ];
     let server = [
         ServerMsg::Welcome {
@@ -301,6 +315,33 @@ pub fn sample_vectors() -> String {
             source: "scene:stars".into(),
             started_t: 5,
             duration_ms: 60000,
+        },
+        ServerMsg::FishEvent {
+            id: 3,
+            kind: 2,
+            x: 20,
+            y: 60,
+            item: 105,
+        },
+        ServerMsg::PlotState {
+            x: 21,
+            y: 27,
+            plant: 300,
+            stage: 2,
+            watered: true,
+            owner: "Ana".into(),
+            stage_left_ms: 4_000_000_000,
+        },
+        ServerMsg::ObjectUpdate {
+            x: 5,
+            y: 4,
+            item: 0,
+        },
+        ServerMsg::Granted {
+            item: 1,
+            added: 20,
+            total: 4_000_000_000,
+            first: true,
         },
     ];
     let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();

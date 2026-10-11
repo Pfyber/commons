@@ -113,10 +113,23 @@ pub struct JoinClaims {
     pub minor: bool,
     pub zone: String,
     pub instance: u16,
+    /// For private spaces (homes): whose space this instance is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
 }
 
 impl Claims for JoinClaims {
     const TYP: &'static str = "join";
+}
+
+/// Service-to-service calls (zone server → API internal endpoints).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServiceClaims {
+    pub svc: String,
+}
+
+impl Claims for ServiceClaims {
+    const TYP: &'static str = "service";
 }
 
 pub const ACCESS_TTL_SECS: u64 = 15 * 60;

@@ -1,5 +1,6 @@
 //! Zone definitions loaded from map files, and the live instances of each.
 
+use crate::econ::EconomyClient;
 use crate::instance::{Instance, InstanceHandle};
 use crate::screen::Playlist;
 use crate::stats::InstanceSnapshot;
@@ -43,15 +44,24 @@ impl ZoneDef {
     }
 }
 
+/// Instances are keyed by zone, number and (for homes) owner.
+type InstanceKey = (String, u16, Option<String>);
+
 pub struct Registry {
     pub secret: Vec<u8>,
+    pub economy: Option<Arc<EconomyClient>>,
     zones: HashMap<String, Arc<ZoneDef>>,
-    instances: Mutex<HashMap<(String, u16), InstanceHandle>>,
+    instances: Mutex<HashMap<InstanceKey, InstanceHandle>>,
 }
 
 impl Registry {
     /// Loads every `*.json` map in `dir`; the file stem is the zone id.
-    pub fn load(dir: &str, playlist: Playlist, secret: Vec<u8>) -> anyhow::Result<Self> {
+    pub fn load(
+        dir: &str,
+        playlist: Playlist,
+        secret: Vec<u8>,
+        economy: Option<Arc<EconomyClient>>,
+    ) -> anyhow::Result<Self> {
         let playlist = Arc::new(playlist);
         let mut zones = HashMap::new();
         for entry in std::fs::read_dir(dir).with_context(|| format!("reading maps dir {dir}"))? {
@@ -76,20 +86,26 @@ impl Registry {
         anyhow::ensure!(!zones.is_empty(), "no maps found in {dir}");
         Ok(Registry {
             secret,
+            economy,
             zones,
             instances: Mutex::new(HashMap::new()),
         })
     }
 
-    pub fn instance(&self, zone: &str, number: u16) -> Option<InstanceHandle> {
+    pub fn instance(
+        &self,
+        zone: &str,
+        number: u16,
+        owner: Option<String>,
+    ) -> Option<InstanceHandle> {
         if number == 0 || number > MAX_INSTANCES_PER_ZONE {
             return None;
         }
         let def = self.zones.get(zone)?;
         let mut instances = self.instances.lock().unwrap();
         let handle = instances
-            .entry((zone.to_string(), number))
-            .or_insert_with(|| Instance::spawn(def.clone(), number));
+            .entry((zone.to_string(), number, owner.clone()))
+            .or_insert_with(|| Instance::spawn(def.clone(), number, owner, self.economy.clone()));
         Some(handle.clone())
     }
 
@@ -97,7 +113,7 @@ impl Registry {
         let instances = self.instances.lock().unwrap();
         let mut out: Vec<_> = instances
             .iter()
-            .map(|((zone, n), h)| h.stats.snapshot(zone, *n))
+            .map(|((zone, n, _), h)| h.stats.snapshot(zone, *n))
             .collect();
         out.sort_by(|a, b| (&a.zone, a.instance).cmp(&(&b.zone, b.instance)));
         out

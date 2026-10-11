@@ -140,7 +140,67 @@ Gate: p99 tick < 20 ms, p99 per-client outbound < 8 KB/s.
    moment.
 5. Add `?hour=22` to the URL for night, or `?hour=18.8` for dusk at the pond.
 
-## Next: M3 · Collect
+## M3 · Collect: done (2026-10-11)
 
-The economy service and inventory (Postgres, idempotent grants, append-only
-ledger), fishing, gardening, the album, and a home zone with furniture.
+- **Postgres** (local 16, or Compose). The API migrates on startup. Accounts,
+  sessions and magic links moved from memory into Postgres, and new players
+  start with 100 coins and 3 tulip seeds.
+- **Economy service** (the only place items change): transactional and
+  idempotent, with an append-only ledger and no negative stock. Public
+  endpoints: `/api/catalog`, `/api/inventory`, `/api/album`,
+  `/api/market/{buy,sell}` and `/api/daily` (a small daily seed gift, no
+  streaks). Internal endpoints for zone servers: `/internal/grant`,
+  `/internal/plots/*` and `/internal/home/*`.
+- **Fishing:** tap the water and you walk to the shore and cast. The server
+  picks the bite time (2.5–9 s); a needle mini-game scores the reel; the server
+  rolls the catch (8 species including an old boot, rarer with better timing,
+  2 only at night) and grants it.
+- **Gardening:** tap a soil plot to plant, water or harvest. Each stage needs
+  watering, and harvest gives 2–3 flowers and sometimes a seed back. Community
+  plots are in the park, private ones at home.
+- **Market cart** by the fountain: sell fish and flowers, buy seeds and 7
+  pieces of furniture.
+- **Album** (📖): Fish and Plants pages with ??? slots, night-only hints and a
+  "Complete!" stamp. First catches toast "new in your album!".
+- **Home:** the gate on the park's west edge leads to your own cottage, with a
+  garden and a gate back. Place furniture from the bag, and tap it to pick it
+  up again. It persists and blocks movement.
+- Protocol v3: `FishCast`, `FishReel`, `PlotAction`, `Place`, `Pickup`,
+  `FishEvent`, `PlotState`, `ObjectUpdate`, `Granted`.
+- Fix: a Game's stage tap handler is now removed when you change zone, so
+  stale handlers no longer swallow taps.
+
+### Tests
+
+- API integration tests on real Postgres (`commons_test`, and a Postgres
+  service in CI): idempotent and atomic trades, 8 concurrent duplicates
+  granting once, plant → water ×3 → harvest, place/pickup.
+- Zone tests: fishing cast/bite/escape, catch odds by quality and night, plot
+  validation.
+- Browser end-to-end on the full stack: caught a fish, grew and harvested
+  tulips, sold everything for 159 coins, bought a chair, went home, placed and
+  picked it up, checked the album, and made four park↔home round trips.
+
+### Botswarm (500 bots)
+
+| Tick p99 | Client KB/s p99 | Gate |
+|---|---|---|
+| 2.6 ms | 3.38 | PASS |
+
+### Demo notes
+
+1. Postgres running (see README), then `node scripts/dev.mjs --bots 20`.
+2. Walk to the pond (south-west) and tap the water. When it bites, stop the
+   needle in the green.
+3. In the fenced community garden north-west of the fountain, tap a soil plot,
+   plant tulip seeds, and water at each stage (1 minute per stage in dev).
+4. Sell at the market cart east of the fountain, then buy a chair.
+5. Walk to the gate on the far west edge to go home. Use 🎒 → Place, tap a
+   spot; tap the chair to pick it up.
+
+See docs/adr/0002-m3-economy.md for the decisions behind this.
+
+## Next: M4 · Friends
+
+Social gateway, friends list with presence, join friend, gifts to doorsteps,
+notifications, and home visits.

@@ -74,7 +74,8 @@ pub async fn session(mut socket: WebSocket, registry: Arc<Registry>) {
         Ok(c) => c,
         Err(e) => return reject(&mut socket, error_code::UNAUTHORIZED, &e.to_string()).await,
     };
-    let Some(instance) = registry.instance(&claims.zone, claims.instance) else {
+    let Some(instance) = registry.instance(&claims.zone, claims.instance, claims.owner.clone())
+    else {
         return reject(&mut socket, error_code::UNKNOWN_ZONE, "unknown zone").await;
     };
 

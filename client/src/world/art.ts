@@ -288,6 +288,15 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       px(ctx, P.wood, 22, 4, 4, 17);
       break;
     }
+    case "wall": {
+      [c, ctx] = makeCanvas(32, 48);
+      px(ctx, P.outline, 0, 4, 32, 44);
+      px(ctx, "#e9dcc3", 1, 5, 30, 34);
+      px(ctx, "#cdbb9c", 1, 39, 30, 8);
+      for (let y = 10; y < 38; y += 8) px(ctx, "#ddcdb0", 1, y, 30, 1);
+      px(ctx, "#b5544a", 0, 0, 32, 6);
+      break;
+    }
     case "sign": {
       [c, ctx] = makeCanvas(32, 36);
       px(ctx, P.trunk, 14, 16, 4, 20);
@@ -408,6 +417,34 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.outline, 0, h / 2 - 8, 26, 18);
       px(ctx, P.wood, 1, h / 2 - 7, 24, 16);
       label(ctx, "?", 13, h / 2 + 1, "#5a3b2b", 12);
+      break;
+    }
+    case "market_cart": {
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      // Striped awning on poles over a wooden cart.
+      px(ctx, P.outline, 4, 6, 3, h + 30);
+      px(ctx, P.outline, w - 7, 6, 3, h + 30);
+      for (let i = 0; i < 8; i++) px(ctx, i % 2 ? "#f4f1d8" : "#5d8a4e", i * (w / 8), 0, w / 8, 12);
+      px(ctx, P.outline, 0, 12, w, 2);
+      px(ctx, P.outline, 2, 26, w - 4, h + 8);
+      px(ctx, P.wood, 3, 27, w - 6, h + 6);
+      for (const [x, col] of [[10, "#e8566b"], [20, "#f6c343"], [36, "#9fb7c4"], [46, "#9b7fd4"]] as [number, string][]) {
+        px(ctx, col, x, 22, 6, 5);
+      }
+      label(ctx, "Market", w / 2, 36, "#fff9ec", 11);
+      break;
+    }
+    case "park_gate": {
+      [c, ctx] = makeCanvas(w, h + 24);
+      overhang = 24;
+      px(ctx, P.outline, 2, 0, 6, h + 24);
+      px(ctx, P.outline, w - 8, 0, 6, h + 24);
+      px(ctx, P.wood, 3, 1, 4, h + 22);
+      px(ctx, P.wood, w - 7, 1, 4, h + 22);
+      px(ctx, P.outline, 0, 2, w, 8);
+      px(ctx, P.wood, 1, 3, w - 2, 6);
+      label(ctx, "🌳", w / 2, 18, "#000", 12);
       break;
     }
     case "garden_sign": {

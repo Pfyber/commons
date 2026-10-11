@@ -12,13 +12,20 @@ path = "src/main.rs"
 
 [dependencies]
 commons-common.workspace = true
+commons-sim.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

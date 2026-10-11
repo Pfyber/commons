@@ -15,6 +15,10 @@ const args = process.argv.slice(2);
 // rustup's default location covers that case.
 process.env.PATH = [process.env.PATH, path.join(os.homedir(), ".cargo", "bin")].join(path.delimiter);
 
+// Plants grow one stage per minute in dev (production: hours), so gardening
+// can be tried in a single session.
+process.env.COMMONS_GROWTH_STAGE_SECS ??= "60";
+
 const botsIdx = args.indexOf("--bots");
 const bots = botsIdx >= 0 ? Number(args[botsIdx + 1] ?? 50) : 0;
 

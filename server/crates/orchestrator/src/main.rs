@@ -67,6 +67,8 @@ async fn join(
         return Err(err(StatusCode::NOT_FOUND, "unknown_zone", "no such zone"));
     }
     let instance = 1;
+    // Homes are private: you join your own (visiting friends comes in M4).
+    let owner = (req.zone_id == "home").then(|| who.sub.clone());
     let claims = JoinClaims {
         sub: who.sub,
         name: who.name,
@@ -75,6 +77,7 @@ async fn join(
         minor: who.minor,
         zone: req.zone_id.clone(),
         instance,
+        owner,
     };
     Ok(Json(JoinResp {
         server_url: state.zone_server_url.clone(),
@@ -91,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         secret: config::secret(),
         zone_server_url: config::env_str("ZONE_PUBLIC_URL", "ws://localhost:8082/ws"),
-        zones: config::env_str("COMMONS_ZONES", "founders_park")
+        zones: config::env_str("COMMONS_ZONES", "founders_park,home")
             .split(',')
             .map(|s| s.trim().to_string())
             .collect(),

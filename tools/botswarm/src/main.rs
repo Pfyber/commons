@@ -200,6 +200,7 @@ async fn bot_loop(
         minor: false,
         zone: args.zone.clone(),
         instance: args.instance,
+        owner: None,
     };
     let join_token = token::sign(secret, &claims, 300);
     let (ws, _) = tokio_tungstenite::connect_async(&args.url)

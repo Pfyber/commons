@@ -2,6 +2,7 @@
 //! single-threaded actor ticking at 10 Hz.
 
 mod conn;
+mod econ;
 mod games;
 mod instance;
 mod registry;
@@ -23,7 +24,15 @@ async fn main() -> anyhow::Result<()> {
     let maps_dir = config::env_str("COMMONS_MAPS_DIR", "assets/maps");
     let playlist_path = config::env_str("COMMONS_SCREEN_PLAYLIST", "assets/screen/playlist.json");
     let playlist = screen::Playlist::load(&playlist_path)?;
-    let registry = Arc::new(Registry::load(&maps_dir, playlist, config::secret())?);
+    let api = config::env_str("COMMONS_API_INTERNAL_URL", "http://127.0.0.1:8080");
+    let economy = econ::EconomyClient::new(api, config::secret());
+    tokio::spawn(economy.clone().load_catalog_forever());
+    let registry = Arc::new(Registry::load(
+        &maps_dir,
+        playlist,
+        config::secret(),
+        Some(economy),
+    )?);
 
     let app = Router::new()
         .route("/ws", get(ws))

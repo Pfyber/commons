@@ -35,3 +35,10 @@ pub fn secret() -> Vec<u8> {
         Err(_) => panic!("COMMONS_SECRET is required when COMMONS_DEV=false"),
     }
 }
+
+/// Garden growth period per stage, shared by the API and zone servers.
+/// Defaults to 6 hours (ripe in under a day with waterings); dev setups
+/// shorten it with `COMMONS_GROWTH_STAGE_SECS`.
+pub fn growth_stage_ms() -> i64 {
+    env_or::<i64>("COMMONS_GROWTH_STAGE_SECS", 6 * 3600).max(1) * 1000
+}

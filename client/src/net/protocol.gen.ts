@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -132,6 +132,11 @@ export type ClientMsg =
   | { t: "Sit"; seat: number }
   | { t: "Stand" }
   | { t: "GameMove"; table: number; uci: string }
+  | { t: "FishCast"; x: number; y: number }
+  | { t: "FishReel"; quality: number }
+  | { t: "PlotAction"; x: number; y: number; action: number; item: number }
+  | { t: "Place"; item: number; x: number; y: number }
+  | { t: "Pickup"; x: number; y: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -173,6 +178,33 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u32(m.table);
       w.str(m.uci);
       break;
+    case "FishCast":
+      w.u8(9);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
+    case "FishReel":
+      w.u8(10);
+      w.u16(m.quality);
+      break;
+    case "PlotAction":
+      w.u8(11);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u8(m.action);
+      w.u32(m.item);
+      break;
+    case "Place":
+      w.u8(12);
+      w.u32(m.item);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
+    case "Pickup":
+      w.u8(13);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
   }
   return w.finish();
 }
@@ -206,6 +238,21 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 8:
       m = { t: "GameMove", table: r.u32(), uci: r.str() };
       break;
+    case 9:
+      m = { t: "FishCast", x: r.u16(), y: r.u16() };
+      break;
+    case 10:
+      m = { t: "FishReel", quality: r.u16() };
+      break;
+    case 11:
+      m = { t: "PlotAction", x: r.u16(), y: r.u16(), action: r.u8(), item: r.u32() };
+      break;
+    case 12:
+      m = { t: "Place", item: r.u32(), x: r.u16(), y: r.u16() };
+      break;
+    case 13:
+      m = { t: "Pickup", x: r.u16(), y: r.u16() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -228,6 +275,10 @@ export type ServerMsg =
   | { t: "StateChange"; id: number; state: number; x: number; y: number }
   | { t: "GameState"; table: number; status: number; white: number; black: number; fen: string; last: string; legal: string[] }
   | { t: "ScreenState"; screen: number; title: string; source: string; startedT: number; durationMs: number }
+  | { t: "FishEvent"; id: number; kind: number; x: number; y: number; item: number }
+  | { t: "PlotState"; x: number; y: number; plant: number; stage: number; watered: boolean; owner: string; stageLeftMs: number }
+  | { t: "ObjectUpdate"; x: number; y: number; item: number }
+  | { t: "Granted"; item: number; added: number; total: number; first: boolean }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -316,6 +367,37 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.startedT);
       w.u32(m.durationMs);
       break;
+    case "FishEvent":
+      w.u8(15);
+      w.u32(m.id);
+      w.u8(m.kind);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.item);
+      break;
+    case "PlotState":
+      w.u8(16);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.plant);
+      w.u8(m.stage);
+      w.bool(m.watered);
+      w.str(m.owner);
+      w.u32(m.stageLeftMs);
+      break;
+    case "ObjectUpdate":
+      w.u8(17);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.item);
+      break;
+    case "Granted":
+      w.u8(18);
+      w.u32(m.item);
+      w.u16(m.added);
+      w.u32(m.total);
+      w.bool(m.first);
+      break;
   }
   return w.finish();
 }
@@ -366,6 +448,18 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 14:
       m = { t: "ScreenState", screen: r.u32(), title: r.str(), source: r.str(), startedT: r.u32(), durationMs: r.u32() };
+      break;
+    case 15:
+      m = { t: "FishEvent", id: r.u32(), kind: r.u8(), x: r.u16(), y: r.u16(), item: r.u32() };
+      break;
+    case 16:
+      m = { t: "PlotState", x: r.u16(), y: r.u16(), plant: r.u32(), stage: r.u8(), watered: r.bool(), owner: r.str(), stageLeftMs: r.u32() };
+      break;
+    case 17:
+      m = { t: "ObjectUpdate", x: r.u16(), y: r.u16(), item: r.u32() };
+      break;
+    case 18:
+      m = { t: "Granted", item: r.u32(), added: r.u16(), total: r.u32(), first: r.bool() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

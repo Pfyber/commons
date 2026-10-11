@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -52,6 +52,16 @@ message_enum! {
         /// A table-game move in UCI notation (`e2e4`, `e7e8q`), or the
         /// actions `new` (rematch after a finished game) and `resign`.
         8 GameMove { table: u32, uci: String }
+        /// Cast a line at water tile (x, y), standing within 2 tiles of it.
+        9 FishCast { x: u16, y: u16 }
+        /// Reel in after a bite; `quality` 0–1000 is the timing mini-game score.
+        10 FishReel { quality: u16 }
+        /// Garden plot action (`plot_action::*`); `item` is the seed to plant.
+        11 PlotAction { x: u16, y: u16, action: u8, item: u32 }
+        /// Place a furniture item at (x, y) in your home.
+        12 Place { item: u32, x: u16, y: u16 }
+        /// Pick up the furniture at (x, y) in your home.
+        13 Pickup { x: u16, y: u16 }
     }
 }
 
@@ -89,6 +99,25 @@ message_enum! {
         /// What the big screen is showing. Clients play `source` from
         /// `(now - started_t)` so everyone sees the same moment.
         14 ScreenState { screen: u32, title: String, source: String, started_t: u32, duration_ms: u32 }
+        /// Fishing progress (`fish_event::*`) for avatar `id`; `item` is the catch.
+        15 FishEvent { id: u32, kind: u8, x: u16, y: u16, item: u32 }
+        /// A garden plot; `plant` 0 means empty. `stage_ms` is how long each
+        /// stage takes and `stage_left_ms` the time left in the current one
+        /// (meaningful only while `watered`).
+        16 PlotState {
+            x: u16,
+            y: u16,
+            plant: u32,
+            stage: u8,
+            watered: bool,
+            owner: String,
+            stage_left_ms: u32,
+        }
+        /// Furniture at (x, y); `item` 0 means removed.
+        17 ObjectUpdate { x: u16, y: u16, item: u32 }
+        /// Your inventory changed: `added` received now, `total` held, and
+        /// whether it's a first-ever find for the album.
+        18 Granted { item: u32, added: u16, total: u32, first: bool }
     }
 }
 
@@ -117,6 +146,24 @@ pub mod error_code {
     pub const SEAT_TAKEN: u16 = 9;
     pub const TOO_FAR: u16 = 10;
     pub const ILLEGAL_MOVE: u16 = 11;
+    pub const NOT_ALLOWED: u16 = 12;
+    /// A backing service (economy) is unavailable; try again shortly.
+    pub const UNAVAILABLE: u16 = 13;
+}
+
+/// `PlotAction.action`.
+pub mod plot_action {
+    pub const PLANT: u8 = 1;
+    pub const WATER: u8 = 2;
+    pub const HARVEST: u8 = 3;
+}
+
+/// `FishEvent.kind`.
+pub mod fish_event {
+    pub const CAST: u8 = 0;
+    pub const BITE: u8 = 1;
+    pub const CAUGHT: u8 = 2;
+    pub const ESCAPED: u8 = 3;
 }
 
 /// `Sit.seat` value for sitting on the ground where you stand.
@@ -135,6 +182,7 @@ pub mod game_status {
 pub mod state {
     pub const IDLE: u8 = 0;
     pub const SITTING: u8 = 1;
+    pub const FISHING: u8 = 2;
 }
 
 #[cfg(test)]
