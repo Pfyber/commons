@@ -1,0 +1,11 @@
+[package]
+name = "commons-sim"
+description = "Deterministic shared simulation: map grid, pathfinding, path motion"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

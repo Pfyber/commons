@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["server/crates/*", "tools/botswarm"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+commons-protocol = { path = "server/crates/protocol" }
+commons-sim = { path = "server/crates/sim" }
+commons-common = { path = "server/crates/common" }
+
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+hmac = "0.12"
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
+rand = { version = "0.9", features = ["small_rng"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[profile.release]
+debug = "line-tables-only"

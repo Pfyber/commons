@@ -1,0 +1,13 @@
+//! Deterministic simulation shared by the server, bots and (later, via WASM)
+//! the client. Everything here must give identical results on every platform:
+//! integer costs, fixed neighbour order, explicit tie-breaking.
+
+pub mod map;
+pub mod motion;
+pub mod path;
+
+pub use map::{Grid, MapFile};
+pub use motion::{Motion, WALK_SPEED_X10};
+pub use path::{compress, find_path};
+
+pub type TilePos = (u16, u16);

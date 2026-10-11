@@ -1,0 +1,411 @@
+:root {
+  --ink: #3b3a2e;
+  --paper: #fffaf0;
+  --paper-2: #f3ead8;
+  --leaf: #5d8a4e;
+  --leaf-dark: #4a7240;
+  --muted: #7d7766;
+  --danger: #b5544a;
+  --shadow: 0 6px 24px rgba(40, 50, 30, 0.18);
+  --radius: 16px;
+  --font: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #e3e9e6;
+  color: var(--ink);
+  font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+#stage canvas {
+  display: block;
+  touch-action: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ---- avatar labels (screen space) ---- */
+
+#labels {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  will-change: transform;
+}
+
+/* Bottom-anchored above the head: emote on top, then bubble, then name. */
+.label .stack {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.label .emote {
+  order: 0;
+}
+
+.label .bubble {
+  order: 1;
+}
+
+.label .name {
+  order: 2;
+}
+
+.label .name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.55),
+    0 0 3px rgba(0, 0, 0, 0.45);
+  margin-bottom: 2px;
+}
+
+.label.self .name {
+  color: #fff3c4;
+}
+
+.bubble {
+  max-width: 200px;
+  width: max-content;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  background: var(--paper);
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  text-align: center;
+  position: relative;
+  transition: opacity 0.4s;
+}
+
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-bottom: 0;
+  border-top-color: var(--paper);
+}
+
+.bubble.fade {
+  opacity: 0;
+}
+
+.emote {
+  font-size: 22px;
+  margin-bottom: 2px;
+}
+
+.emote.pop {
+  animation: pop 2.2s ease-out forwards;
+}
+
+@keyframes pop {
+  0% { opacity: 0; transform: translateY(20%) scale(0.4); }
+  15% { opacity: 1; transform: translateY(-10%) scale(1.15); }
+  25% { transform: translateY(0) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-60%); }
+}
+
+/* ---- HUD ---- */
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+#hud > * > * {
+  pointer-events: auto;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pill {
+  background: rgba(255, 250, 240, 0.92);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: var(--shadow);
+}
+
+.pill:empty {
+  visibility: hidden;
+}
+
+.toast {
+  align-self: center;
+  background: rgba(59, 58, 46, 0.88);
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+.bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(520px, 100%);
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none !important;
+}
+
+.log .line {
+  align-self: flex-start;
+  background: rgba(255, 250, 240, 0.85);
+  border-radius: 10px;
+  padding: 3px 10px;
+  font-size: 13px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  transition: opacity 1s;
+}
+
+.log .line.self strong {
+  color: var(--leaf-dark);
+}
+
+.log .line.old {
+  opacity: 0;
+}
+
+.chat input {
+  width: 100%;
+  font: inherit;
+  font-size: 16px; /* no zoom-on-focus on iOS */
+  padding: 12px 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: rgba(255, 250, 240, 0.94);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  outline: none;
+}
+
+.chat input:focus {
+  box-shadow:
+    var(--shadow),
+    0 0 0 3px rgba(93, 138, 78, 0.5);
+}
+
+.emotes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.emotes button {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 250, 240, 0.94);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.emotes button:active {
+  transform: scale(0.9);
+}
+
+/* ---- overlay cards (sign-in, reconnect) ---- */
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: radial-gradient(circle at 50% 30%, rgba(134, 184, 107, 0.92), rgba(74, 114, 64, 0.96));
+  z-index: 10;
+}
+
+#overlay:empty {
+  display: none;
+}
+
+.card {
+  width: min(400px, 100%);
+  background: var(--paper);
+  border-radius: 20px;
+  padding: 28px 24px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card h1 {
+  margin: 0;
+  font-size: 32px;
+  color: var(--leaf-dark);
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.card p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.card .tagline {
+  color: var(--muted);
+}
+
+.card form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.card input,
+.card select {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+  padding: 11px 14px;
+  border: 2px solid var(--paper-2);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.card input:focus,
+.card select:focus {
+  outline: none;
+  border-color: var(--leaf);
+}
+
+.card button,
+.card .button {
+  font: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 0;
+  background: var(--paper-2);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+}
+
+.card .primary {
+  background: var(--leaf);
+  color: #fff;
+}
+
+.card .primary:hover {
+  background: var(--leaf-dark);
+}
+
+.card button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.card .link {
+  background: none;
+  color: var(--muted);
+  font-weight: 400;
+  text-decoration: underline;
+}
+
+.card .row {
+  display: flex;
+  gap: 8px;
+}
+
+.card .row input {
+  flex: 1;
+}
+
+.card .dev {
+  border-top: 2px dashed var(--paper-2);
+  padding-top: 12px;
+}
+
+.card .fine {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.card .error {
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.card .error:empty {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .emotes button {
+    width: 40px;
+    height: 40px;
+  }
+}

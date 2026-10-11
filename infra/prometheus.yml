@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # Services running on the host during development.
+  - job_name: commons
+    static_configs:
+      - targets:
+          - host.docker.internal:8080 # api
+          - host.docker.internal:8081 # orchestrator
+          - host.docker.internal:8082 # zone

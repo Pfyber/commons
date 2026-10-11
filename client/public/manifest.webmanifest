@@ -1,0 +1,11 @@
+{
+  "name": "Commons",
+  "short_name": "Commons",
+  "description": "A calm park-town where the community decides what comes next.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2f4a2b",
+  "theme_color": "#5d8a4e",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

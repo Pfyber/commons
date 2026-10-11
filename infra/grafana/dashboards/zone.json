@@ -1,0 +1,48 @@
+{
+  "uid": "commons-zone",
+  "title": "Commons · Zone servers",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Population per instance",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "zone_instance_population", "legendFormat": "{{zone}} #{{instance}}" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tick duration p99 (gate: 20 ms)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, zone, instance) (rate(zone_tick_seconds_bucket[1m])))",
+          "legendFormat": "{{zone}} #{{instance}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbound KB/s per client (gate: 8)",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(zone_bytes_out_total[1m]) / 1024 / clamp_min(zone_instance_population, 1)",
+          "legendFormat": "{{zone}} #{{instance}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbound MB/s total",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum(rate(zone_bytes_out_total[1m])) / 1048576", "legendFormat": "all" }]
+    }
+  ]
+}

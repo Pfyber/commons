@@ -1,0 +1,15 @@
+# Builds one Commons server binary: --build-arg BIN=zone|api|orchestrator
+FROM rust:1-bookworm AS build
+WORKDIR /src
+COPY . .
+ARG BIN
+RUN cargo build --release --locked --bin ${BIN} && cp target/release/${BIN} /app
+
+FROM debian:bookworm-slim
+RUN useradd --system commons
+COPY --from=build /app /usr/local/bin/app
+COPY assets/maps /srv/assets/maps
+WORKDIR /srv
+ENV COMMONS_MAPS_DIR=/srv/assets/maps
+USER commons
+ENTRYPOINT ["/usr/local/bin/app"]

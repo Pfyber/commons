@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: "clippy, rustfmt" }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Includes the check that client/src/net/protocol.gen.ts is up to date.
+      - run: cargo test --workspace
+
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: client }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: client/package-lock.json }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  # Spec §6.6: 1 instance × 500 bots, p99 tick < 20 ms, p99 outbound < 8 KB/s per client.
+  perf-gate:
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --bin zone --bin botswarm
+      - name: Start zone server
+        run: |
+          RUST_LOG=warn ./target/release/zone > zone.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8082/healthz && break; sleep 1; done
+      - name: Botswarm 500
+        run: ./target/release/botswarm --bots 500 --ramp 10 --duration 60 --gate
+      - if: failure()
+        run: tail -100 zone.log
