@@ -66,6 +66,46 @@ impl Motion {
         let (x, y) = self.pos_at(t);
         (x.round() as u16, y.round() as u16)
     }
+
+    /// Where a walk in progress can be redirected without a visible seam: the
+    /// tile most recently passed, the tile being walked into, and the time the
+    /// avatar was at the former. A new path `[prev, next, ...]` starting at that
+    /// time reproduces the current motion exactly up to `next`.
+    /// `None` if the walk hasn't started yet or has finished.
+    pub fn splice(&self, t: u32) -> Option<(TilePos, TilePos, u32)> {
+        if t <= self.t0 || self.is_done(t) {
+            return None;
+        }
+        let ms_per_tile = self.ms_per_tile();
+        let travelled = (t - self.t0) as f64 / ms_per_tile;
+        let mut before = 0.0;
+        for w in self.path.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let (dx, dy) = (
+                (b.0 as i32 - a.0 as i32).signum(),
+                (b.1 as i32 - a.1 as i32).signum(),
+            );
+            let steps = (b.0 as i32 - a.0 as i32)
+                .abs()
+                .max((b.1 as i32 - a.1 as i32).abs());
+            let len = seg_len(a, b);
+            if travelled < before + len {
+                let step_len = len / steps as f64;
+                let k = (((travelled - before) / step_len).floor() as i32).min(steps - 1);
+                let prev = (a.0 as i32 + dx * k, a.1 as i32 + dy * k);
+                let next = (prev.0 + dx, prev.1 + dy);
+                let t_prev =
+                    self.t0 + ((before + k as f64 * step_len) * ms_per_tile).round() as u32;
+                return Some((
+                    (prev.0 as u16, prev.1 as u16),
+                    (next.0 as u16, next.1 as u16),
+                    t_prev,
+                ));
+            }
+            before += len;
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -86,5 +126,32 @@ mod tests {
         assert_eq!(m.tile_at(9999), (4, 3));
         assert!(m.is_done(2750));
         assert!(!m.is_done(2749));
+    }
+
+    #[test]
+    fn splice_is_seamless() {
+        let m = Motion {
+            path: vec![(0, 0), (4, 0), (7, 3)],
+            t0: 1000,
+            speed_x10: 40,
+        };
+        assert_eq!(m.splice(1000), None);
+        assert_eq!(m.splice(1600), Some(((2, 0), (3, 0), 1500)));
+        let (prev, next, t_prev) = m.splice(2400).unwrap();
+        assert_eq!((prev, next), ((5, 1), (6, 2)));
+        // Redirecting through `next` reproduces the old motion until `next`.
+        let redirected = Motion {
+            path: vec![prev, next, (6, 9)],
+            t0: t_prev,
+            speed_x10: 40,
+        };
+        for t in [2400, 2450, 2500] {
+            let (a, b) = (m.pos_at(t), redirected.pos_at(t));
+            assert!(
+                (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01,
+                "t={t}: {a:?} vs {b:?}"
+            );
+        }
+        assert_eq!(m.splice(9999), None);
     }
 }

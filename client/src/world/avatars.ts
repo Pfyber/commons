@@ -85,6 +85,10 @@ export class Avatar {
     this.blend.until = 0;
   }
 
+  get currentMotion(): Motion | null {
+    return this.motion;
+  }
+
   get moving(): boolean {
     return this.motion !== null;
   }

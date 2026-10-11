@@ -6,7 +6,8 @@ import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import { Avatar } from "./world/avatars";
 import { type ZoneMap, nearestWalkable, stepTarget } from "./world/map";
-import type { TileXY } from "./world/motion";
+import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
+import { compress, findPath } from "./world/path";
 import { Scene } from "./world/scene";
 
 /** Error codes from server/crates/protocol (error_code). */
@@ -28,7 +29,6 @@ export class Game {
   private socket: ZoneSocket | null = null;
   private avatars = new Map<number, Avatar>();
   private selfId = 0;
-  private cam: TileXY | null = null;
   private keys = new Set<string>();
   private lastKeyDir = "";
   private lastKeySend = 0;
@@ -68,6 +68,9 @@ export class Game {
 
   private upsert(info: Extract<ServerMsg, { t: "Spawn" }>["entity"], now: number) {
     const existing = this.avatars.get(info.id);
+    // Our own avatar is predicted locally; server snapshots of it (e.g. in a
+    // CellEnter after crossing a cell) would only pull it back in time.
+    if (existing && info.id === this.selfId) return;
     if (existing) existing.apply(info, now);
     else this.avatars.set(info.id, new Avatar(info, this.scene, this.labels, info.id === this.selfId, now));
   }
@@ -98,9 +101,18 @@ export class Game {
       case "Despawn":
         this.remove(m.id);
         break;
-      case "MoveStart":
-        this.avatars.get(m.id)?.setMotion({ path: m.path, t0: m.t0, speedX10: m.speedX10 }, now);
+      case "MoveStart": {
+        const a = this.avatars.get(m.id);
+        if (!a) break;
+        if (m.id === this.selfId) {
+          // The server confirming our predicted walk: keep the local timing.
+          const end = m.path[m.path.length - 1];
+          const dest = a.destination;
+          if (end.x === dest.x && end.y === dest.y) break;
+        }
+        a.setMotion({ path: m.path, t0: m.t0, speedX10: m.speedX10 }, now);
         break;
+      }
       case "Snap":
         this.avatars.get(m.id)?.snap({ x: m.x, y: m.y });
         break;
@@ -128,8 +140,32 @@ export class Game {
 
   // ---- input -------------------------------------------------------------
 
+  /**
+   * Starts walking immediately using the same pathfinding and splice rules as
+   * the server, then tells the server. Its MoveStart echo is ignored when it
+   * agrees with the prediction.
+   */
   private moveTo(t: TileXY, marker: boolean) {
-    if (!this.socket) return;
+    const self = this.self;
+    if (!this.socket || !self) return;
+    const now = this.socket.clock.now();
+    const cur = self.currentMotion;
+    const sp = cur ? splice(cur, now) : null;
+    let start: TileXY;
+    let t0 = now;
+    if (sp) {
+      start = sp.next;
+      t0 = sp.tPrev;
+    } else {
+      start = cur && now <= cur.t0 ? cur.path[0] : self.destination;
+    }
+    const full = findPath(this.scene.map, start, t);
+    if (!full) {
+      this.hud.toast("Can't get there from here.");
+      return;
+    }
+    if (sp) full.unshift(sp.prev);
+    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10: WALK_SPEED_X10 }, now);
     this.socket.send({ t: "MoveTo", x: t.x, y: t.y });
     if (marker) this.scene.showTarget(t);
   }
@@ -187,6 +223,13 @@ export class Game {
   private keyboardMove(wallNow: number) {
     const self = this.self;
     if (!self || this.keys.size === 0) {
+      // Keys released: stop at the tile we're walking into instead of
+      // finishing the look-ahead segment.
+      if (self && this.lastKeyDir && this.socket) {
+        const m = self.currentMotion;
+        const sp = m ? splice(m, this.socket.clock.now()) : null;
+        if (sp) this.moveTo(sp.next, false);
+      }
       this.lastKeyDir = "";
       return;
     }
@@ -226,11 +269,7 @@ export class Game {
     const self = this.self;
     if (self) {
       self.update(serverNow, wallNow);
-      const target = self.pos;
-      this.cam = this.cam
-        ? { x: this.cam.x + (target.x - this.cam.x) * 0.2, y: this.cam.y + (target.y - this.cam.y) * 0.2 }
-        : { ...target };
-      this.scene.follow(this.cam);
+      this.scene.follow(self.pos);
     }
     for (const a of this.avatars.values()) a.update(serverNow, wallNow);
 

@@ -29,7 +29,7 @@ use tokio::sync::mpsc;
 pub const TICK: Duration = Duration::from_millis(100);
 /// Walks start slightly in the future so most observers receive the
 /// MoveStart before the avatar begins moving.
-const MOVE_LEAD_MS: u32 = 150;
+const MOVE_LEAD_MS: u32 = 100;
 /// Proximity chat radius in tiles (spec §7).
 const CHAT_RADIUS: i32 = 8;
 const MAX_PATH_EXPANSIONS: usize = 8_000;
@@ -395,25 +395,32 @@ impl Instance {
         if !a.move_rl.try_take(now as u64) {
             return;
         }
-        // Start from where the avatar is right now, mid-walk or not.
-        let start = match &a.motion {
-            Some(m) => {
-                let t = m.tile_at(now);
-                if grid.walkable(t.0, t.1) { t } else { a.tile }
+        // Mid-walk, continue through the tile being walked into so the new path
+        // joins the old one without a seam. Otherwise start shortly in the future
+        // so observers receive the MoveStart before the walk begins.
+        let (prefix, start, t0) = match a.motion.as_ref().and_then(|m| m.splice(now)) {
+            Some((prev, next, t_prev)) => (Some(prev), next, t_prev),
+            None => {
+                let from = match &a.motion {
+                    Some(m) if !m.is_done(now) => m.path[0],
+                    _ => a.tile,
+                };
+                (None, from, now + MOVE_LEAD_MS)
             }
-            None => a.tile,
         };
-        let Some(full) = find_path(grid, start, target, MAX_PATH_EXPANSIONS) else {
+        let Some(mut full) = find_path(grid, start, target, MAX_PATH_EXPANSIONS) else {
             self.error(id, error_code::NO_PATH, "can't get there");
             return;
         };
+        if let Some(prev) = prefix {
+            full.insert(0, prev);
+        }
         if full.len() < 2 {
             return;
         }
-        let path = compress(&full);
         let motion = Motion {
-            path,
-            t0: now + MOVE_LEAD_MS,
+            path: compress(&full),
+            t0,
             speed_x10: WALK_SPEED_X10,
         };
         let msg = ServerMsg::MoveStart {
@@ -424,14 +431,7 @@ impl Instance {
         };
         a.motion = Some(motion);
         let cell = a.cell;
-        let moved = a.tile != start;
-        if moved {
-            a.tile = start;
-        }
         self.broadcast(cell, &msg, None);
-        if moved {
-            self.on_tile_changed(id, now);
-        }
     }
 
     fn chat(&mut self, id: u32, text: &str, now: u32) {

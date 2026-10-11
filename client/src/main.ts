@@ -103,6 +103,7 @@ async function main() {
     onWelcome: () => (retry = 0),
     onDisconnect,
   });
+  if (import.meta.env.DEV) (window as unknown as { __commons: Game }).__commons = game;
   await join();
 }
 
