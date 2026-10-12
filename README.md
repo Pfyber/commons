@@ -19,8 +19,8 @@ psql -U postgres -c "CREATE ROLE commons LOGIN PASSWORD 'commons'"   -c "CREATE 
 
 ```sh
 cd client && npm install && cd ..
-node scripts/dev.mjs            # api :8080, orchestrator :8081, zone :8082, social :8083, web :5173
-node scripts/dev.mjs --bots 50  # same, plus 50 bots wandering the park
+node scripts/dev.mjs            # api :8080, orchestrator :8081, zone :8082, social :8083, web :5173, 20 bots
+node scripts/dev.mjs --bots 50  # more bots (--bots 0 for none)
 ```
 
 Open http://localhost:5173 and use **Dev quick login** with any name, or the

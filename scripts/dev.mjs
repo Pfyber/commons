@@ -2,8 +2,9 @@
 // Starts the whole dev stack with prefixed logs: api, orchestrator, zone
 // server, social gateway and the Vite client (Postgres must be running). Ctrl+C stops everything.
 //
-//   node scripts/dev.mjs            # everything
-//   node scripts/dev.mjs --bots 50  # plus 50 wandering bots for company
+//   node scripts/dev.mjs            # everything, with 20 bots for company
+//   node scripts/dev.mjs --bots 50  # more bots
+//   node scripts/dev.mjs --bots 0   # nobody but you
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -20,7 +21,7 @@ process.env.PATH = [process.env.PATH, path.join(os.homedir(), ".cargo", "bin")].
 process.env.COMMONS_GROWTH_STAGE_SECS ??= "60";
 
 const botsIdx = args.indexOf("--bots");
-const bots = botsIdx >= 0 ? Number(args[botsIdx + 1] ?? 50) : 0;
+const bots = botsIdx >= 0 ? Number(args[botsIdx + 1] ?? 50) : 20;
 
 console.log("building servers…");
 const build = spawnSync("cargo", ["build", "--release", "--bin", "api", "--bin", "orchestrator", "--bin", "zone", "--bin", "social", "--bin", "botswarm"], {
@@ -59,7 +60,22 @@ run("zone", exe("zone"), []);
 run("soc", exe("social"), []);
 run("web", "npm", ["run", "dev"], { cwd: path.join(root, "client") });
 if (bots > 0) {
-  setTimeout(() => run("bots", exe("botswarm"), ["--bots", String(bots), "--ramp", "5", "--duration", "86400", "--behaviour", "mix"]), 2000);
+  // Bots join once the zone server answers, however long startup takes.
+  const startBots = async () => {
+    for (let i = 0; i < 120; i++) {
+      try {
+        if ((await fetch("http://127.0.0.1:8082/debug/stats")).ok) {
+          run("bots", exe("botswarm"), ["--bots", String(bots), "--ramp", "5", "--duration", "86400", "--behaviour", "mix"]);
+          return;
+        }
+      } catch {
+        // not up yet
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    console.log("bots: the zone server never came up, so no bots");
+  };
+  void startBots();
 }
 
 console.log("\nCommons is starting: open http://localhost:5173 (Ctrl+C to stop)\n");
