@@ -68,6 +68,7 @@ async function main() {
     resizeTo: window,
     background: "#6f8d62", // hedge green around maps smaller than the screen
     antialias: false,
+    roundPixels: true, // keep sprites on whole device pixels
     autoDensity: true,
     resolution: Math.min(window.devicePixelRatio || 1, 2),
   });

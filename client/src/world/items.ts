@@ -4,6 +4,7 @@
 
 import { Texture } from "pixi.js";
 import { PALETTE, toTexture } from "./art";
+import { disc, oval } from "./pixeldraw";
 
 type Draw = (ctx: CanvasRenderingContext2D) => void;
 
@@ -48,14 +49,8 @@ function plantOf(key: string) {
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
   if (key === "coin") {
-    ctx.fillStyle = O;
-    ctx.beginPath();
-    ctx.arc(8, 8, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#f6c343";
-    ctx.beginPath();
-    ctx.arc(8, 8, 6, 0, Math.PI * 2);
-    ctx.fill();
+    disc(ctx, O, 8, 8, 7);
+    disc(ctx, "#f6c343", 8, 8, 6);
     px(ctx, "#fff3c4", 6, 4, 2, 2);
     px(ctx, "#c99a2a", 7, 6, 2, 5);
     return;
@@ -154,14 +149,8 @@ function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
       for (let i = 0; i < 6; i++) px(ctx, i % 2 ? PALETTE.leaf : PALETTE.leafLight, 6 + i * 3, 6 + (i % 3) * 3, 3, 15 - (i % 3) * 3);
       break;
     case "round_rug":
-      ctx.fillStyle = "#b5544a";
-      ctx.beginPath();
-      ctx.ellipse(16, 22, 15, 8, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#e6b450";
-      ctx.beginPath();
-      ctx.ellipse(16, 22, 9, 4.5, 0, 0, Math.PI * 2);
-      ctx.fill();
+      oval(ctx, "#b5544a", 16, 22, 15, 8);
+      oval(ctx, "#e6b450", 16, 22, 9, 4.5);
       break;
     case "bookshelf":
       px(ctx, O, 3, 0, 26, 31);

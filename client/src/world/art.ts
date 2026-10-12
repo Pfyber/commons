@@ -4,6 +4,7 @@
 
 import { Texture } from "pixi.js";
 import type { MapObject } from "./map";
+import { disc, polygon } from "./pixeldraw";
 import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 
 export const TILE = 32;
@@ -70,12 +71,8 @@ function px(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, 
   ctx.fillRect(x, y, w, h);
 }
 
-function circle(ctx: CanvasRenderingContext2D, color: string, cx: number, cy: number, r: number) {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
-}
+// Hard-edged circles (see pixeldraw.ts).
+const circle = disc;
 
 // ---- ground ---------------------------------------------------------------
 
@@ -218,13 +215,11 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       for (let i = 0; i < 3; i++) {
         const top = 4 + i * 13;
         const half = 8 + i * 4;
-        ctx.fillStyle = i % 2 ? P.pine : P.pineLight;
-        ctx.beginPath();
-        ctx.moveTo(18, top);
-        ctx.lineTo(18 + half, top + 20);
-        ctx.lineTo(18 - half, top + 20);
-        ctx.closePath();
-        ctx.fill();
+        polygon(ctx, i % 2 ? P.pine : P.pineLight, [
+          [18, top],
+          [18 + half, top + 20],
+          [18 - half, top + 20],
+        ]);
       }
       break;
     }
@@ -378,13 +373,11 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, "rgba(0,0,0,0.15)", 6, h + top - 8, w - 12, 8);
       px(ctx, P.outline, 8, top - 4, w - 16, h - 4);
       px(ctx, "#efe3cf", 10, top - 2, w - 20, h - 8);
-      ctx.fillStyle = "#b5544a";
-      ctx.beginPath();
-      ctx.moveTo(0, top + 4);
-      ctx.lineTo(w / 2, 0);
-      ctx.lineTo(w, top + 4);
-      ctx.closePath();
-      ctx.fill();
+      polygon(ctx, "#b5544a", [
+        [0, top + 4],
+        [w / 2, 0],
+        [w, top + 4],
+      ]);
       ctx.fillStyle = "#99443b";
       ctx.fillRect(0, top, w, 8);
       circle(ctx, "#efe3cf", w / 2, 30, 12);

@@ -60,10 +60,17 @@ export class Scene {
     this.resize();
   }
 
-  /** Picks an integer zoom so roughly 22×13 tiles fit on screen. */
+  /**
+   * Zooms so roughly 22×13 tiles fit on screen, with each art pixel covering
+   * a whole number of *device* pixels. With display scaling (125%, 150%) a
+   * CSS-integer zoom would be fractional on the device and pixels would come
+   * out unevenly sized.
+   */
   resize() {
     const { width, height } = this.app.screen;
-    this.scale = Math.max(1, Math.min(3, Math.round(Math.min(width / (22 * TILE), height / (13 * TILE)))));
+    const res = this.app.renderer.resolution;
+    const want = Math.min(3, Math.min(width / (22 * TILE), height / (13 * TILE)));
+    this.scale = Math.max(1, Math.round(want * res)) / res;
     this.world.scale.set(this.scale);
     this.follow(this.cam);
   }
@@ -94,7 +101,10 @@ export class Scene {
     const cx = axis(p.x, this.map.width, width / span);
     const cy = axis(p.y, this.map.height, height / span);
     this.cam = { x: cx - 0.5, y: cy - 0.5 };
-    this.world.position.set(Math.round(width / 2 - cx * span), Math.round(height / 2 - cy * span));
+    // Snap to the device pixel grid so every art pixel lands on whole pixels.
+    const res = this.app.renderer.resolution;
+    const snap = (v: number) => Math.round(v * res) / res;
+    this.world.position.set(snap(width / 2 - cx * span), snap(height / 2 - cy * span));
   }
 
   screenToTile(sx: number, sy: number): TileXY {

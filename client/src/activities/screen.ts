@@ -6,6 +6,7 @@
 
 import { Sprite, Texture } from "pixi.js";
 import { drawPixelText, pixelWidth } from "../world/pixelfont";
+import { disc, polygon } from "../world/pixeldraw";
 import type { ServerMsg } from "../net/protocol.gen";
 import { SCREEN_FACE_TOP, TILE, hash } from "../world/art";
 import type { MapObject } from "../world/map";
@@ -41,13 +42,12 @@ const aquarium: Scene = (ctx, t) => {
   ctx.fillRect(0, 0, W, H);
   for (let i = 0; i < 3; i++) {
     const x = ((t * 6 + i * 70) % (W + 40)) - 20;
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x + 14, 0);
-    ctx.lineTo(x - 6, H);
-    ctx.lineTo(x - 20, H);
-    ctx.fill();
+    polygon(ctx, "rgba(255,255,255,0.06)", [
+      [x, 0],
+      [x + 14, 0],
+      [x - 6, H],
+      [x - 20, H],
+    ]);
   }
   rect(ctx, "#c9b27c", 0, H - 3, W, 3);
   for (let i = 0; i < 10; i++) {
@@ -92,14 +92,8 @@ const stars: Scene = (ctx, t) => {
     ctx.fillRect(x, y, 1, 1);
   }
   const mx = ((t * 1.5) % (W + 20)) - 10;
-  ctx.fillStyle = "#f4f1d8";
-  ctx.beginPath();
-  ctx.arc(mx, 8, 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#0d1530";
-  ctx.beginPath();
-  ctx.arc(mx + 2, 7, 3.5, 0, Math.PI * 2);
-  ctx.fill();
+  disc(ctx, "#f4f1d8", mx, 8, 4);
+  disc(ctx, "#0d1530", mx + 2, 7, 3.5);
   // A shooting star every 12 s, the same one for everyone.
   const k = Math.floor(t / 12);
   const phase = t - k * 12;
