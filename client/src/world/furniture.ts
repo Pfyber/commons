@@ -22,12 +22,12 @@ export class Furniture {
   readonly tables = new Map<number, Table>();
 
   constructor(private map: ZoneMap) {
-    const bench = map.decor_legend.indexOf("bench");
-    const swing = map.decor_legend.indexOf("swing");
     const table = map.decor_legend.indexOf("chess_table");
+    // Picnic blankets (lie back and watch the stars) and logs round the campfire.
+    const seatKinds = new Set(["bench", "swing", "blanket", "log_seat"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
     const w = map.width;
     map.decor.forEach((d, i) => {
-      if (d === bench || (swing >= 0 && d === swing)) this.seats.set(i, { id: i, tile: { x: i % w, y: Math.floor(i / w) }, table: null });
+      if (seatKinds.has(d)) this.seats.set(i, { id: i, tile: { x: i % w, y: Math.floor(i / w) }, table: null });
     });
     map.decor.forEach((d, i) => {
       if (d !== table || i % w === 0) return;

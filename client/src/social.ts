@@ -251,6 +251,8 @@ export function describe(n: Notification): string {
       return `${who} invited you to their home 🏡`;
     case "close_friend":
       return `You and ${who} are now close friends 💛`;
+    case "bottle_thanks":
+      return "Someone found your message in a bottle and sent a thank-you 💛";
     default:
       return "Something happened";
   }

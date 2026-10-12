@@ -72,9 +72,9 @@ export class DayNight {
 
     const tex = glowTexture();
     this.glow = tex;
-    const lamp = map.decor_legend.indexOf("lamp");
+    const lamps = new Set(["lamp", "lantern"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
     map.decor.forEach((d, i) => {
-      if (d !== lamp) return;
+      if (!lamps.has(d)) return;
       const s = new Sprite(tex);
       s.anchor.set(0.5);
       s.scale.set(2.2);
@@ -82,10 +82,10 @@ export class DayNight {
       this.lights.addChild(s);
     });
     for (const o of map.objects) {
-      if (o.kind !== "town_hall" && o.kind !== "fountain") continue;
+      if (!["town_hall", "fountain", "campfire", "lantern_stand"].includes(o.kind)) continue;
       const s = new Sprite(tex);
       s.anchor.set(0.5);
-      s.scale.set(o.kind === "town_hall" ? 4 : 1.6);
+      s.scale.set(o.kind === "town_hall" ? 4 : o.kind === "campfire" ? 3.2 : 1.6);
       s.alpha = 0.7;
       s.position.set((o.x + o.w / 2) * TILE, (o.y + o.h / 2) * TILE);
       this.lights.addChild(s);

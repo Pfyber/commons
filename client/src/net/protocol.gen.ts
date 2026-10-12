@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -95,6 +95,7 @@ export interface EntityInfo {
   speedX10: number;
   t0: number;
   path: Tile[];
+  mood: number;
 }
 
 export function encEntityInfo(w: Writer, v: EntityInfo) {
@@ -107,6 +108,7 @@ export function encEntityInfo(w: Writer, v: EntityInfo) {
   w.u8(v.speedX10);
   w.u32(v.t0);
   w.vec(v.path, (x) => encTile(w, x));
+  w.u8(v.mood);
 }
 
 export function decEntityInfo(r: Reader): EntityInfo {
@@ -120,6 +122,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
     speedX10: r.u8(),
     t0: r.u32(),
     path: r.vec(() => decTile(r)),
+    mood: r.u8(),
   };
 }
 
@@ -139,6 +142,10 @@ export type ClientMsg =
   | { t: "Pickup"; x: number; y: number }
   | { t: "JamNote"; instrument: number; pitch: number; beat: number }
   | { t: "Paint"; easel: number; cell: number; color: number }
+  | { t: "SetMood"; mood: number }
+  | { t: "Offer"; to: number; kind: number }
+  | { t: "Accept"; from: number; kind: number }
+  | { t: "SkyLantern"; text: string }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -219,6 +226,24 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u16(m.cell);
       w.u8(m.color);
       break;
+    case "SetMood":
+      w.u8(16);
+      w.u8(m.mood);
+      break;
+    case "Offer":
+      w.u8(17);
+      w.u32(m.to);
+      w.u8(m.kind);
+      break;
+    case "Accept":
+      w.u8(18);
+      w.u32(m.from);
+      w.u8(m.kind);
+      break;
+    case "SkyLantern":
+      w.u8(19);
+      w.str(m.text);
+      break;
   }
   return w.finish();
 }
@@ -273,6 +298,18 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 15:
       m = { t: "Paint", easel: r.u8(), cell: r.u16(), color: r.u8() };
       break;
+    case 16:
+      m = { t: "SetMood", mood: r.u8() };
+      break;
+    case 17:
+      m = { t: "Offer", to: r.u32(), kind: r.u8() };
+      break;
+    case 18:
+      m = { t: "Accept", from: r.u32(), kind: r.u8() };
+      break;
+    case 19:
+      m = { t: "SkyLantern", text: r.str() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -302,6 +339,10 @@ export type ServerMsg =
   | { t: "JamNote"; id: number; instrument: number; pitch: number; beat: number }
   | { t: "Painted"; id: number; easel: number; cell: number; color: number }
   | { t: "Ball"; x: number; y: number; vx: number; vy: number; t0: number; left: number; right: number }
+  | { t: "MoodShown"; id: number; mood: number }
+  | { t: "Offered"; from: number; kind: number }
+  | { t: "Together"; a: number; b: number; kind: number }
+  | { t: "LanternRise"; id: number; x: number; y: number; text: string }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -445,6 +486,29 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(m.left);
       w.u8(m.right);
       break;
+    case "MoodShown":
+      w.u8(22);
+      w.u32(m.id);
+      w.u8(m.mood);
+      break;
+    case "Offered":
+      w.u8(23);
+      w.u32(m.from);
+      w.u8(m.kind);
+      break;
+    case "Together":
+      w.u8(24);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.kind);
+      break;
+    case "LanternRise":
+      w.u8(25);
+      w.u32(m.id);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.str(m.text);
+      break;
   }
   return w.finish();
 }
@@ -516,6 +580,18 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 21:
       m = { t: "Ball", x: r.u16(), y: r.u16(), vx: r.u16(), vy: r.u16(), t0: r.u32(), left: r.u8(), right: r.u8() };
+      break;
+    case 22:
+      m = { t: "MoodShown", id: r.u32(), mood: r.u8() };
+      break;
+    case 23:
+      m = { t: "Offered", from: r.u32(), kind: r.u8() };
+      break;
+    case 24:
+      m = { t: "Together", a: r.u32(), b: r.u32(), kind: r.u8() };
+      break;
+    case 25:
+      m = { t: "LanternRise", id: r.u32(), x: r.u16(), y: r.u16(), text: r.str() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

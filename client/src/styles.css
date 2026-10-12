@@ -1565,3 +1565,193 @@ body.fading #stage {
   background: rgba(95, 143, 78, 0.14);
   border-radius: 8px;
 }
+
+/* ---- the dreamier park: moods, together, nooks, the fire, bottles ---- */
+
+.label .name .mood {
+  margin-right: 3px;
+  font-size: 11px;
+}
+
+.offer-card {
+  position: fixed;
+  left: 50%;
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  padding: 10px 14px;
+  background: rgba(255, 250, 240, 0.97);
+  border: 2px solid #e6b450;
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  font-weight: 600;
+  z-index: 30;
+  animation: toast-in 0.2s ease-out;
+}
+
+.offer-card button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(59, 58, 46, 0.08);
+}
+
+.offer-card button.primary-sm {
+  background: #5f8f4e;
+  color: #fff;
+}
+
+.mood-picker {
+  position: fixed;
+  left: 12px;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(300px, calc(100vw - 24px));
+  padding: 12px;
+  background: rgba(255, 250, 240, 0.97);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 30;
+}
+
+.mood-picker strong {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.mood-picker button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 700;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mood-picker button:hover,
+.mood-picker button.on {
+  background: rgba(95, 143, 78, 0.16);
+}
+
+.mood-picker small {
+  font-weight: 500;
+  color: #6b7563;
+}
+
+.emotes .mood-btn.on {
+  background: #e7f2dc;
+  outline: 2px solid #8fb875;
+}
+
+.fire-card {
+  position: fixed;
+  left: 50%;
+  top: max(110px, calc(env(safe-area-inset-top) + 100px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 12px 16px;
+  text-align: center;
+  color: #fff7e6;
+  background: rgba(58, 36, 24, 0.86);
+  border: 2px solid #f6a14f;
+  border-radius: 14px;
+  box-shadow: 0 0 24px rgba(246, 161, 79, 0.35);
+  pointer-events: none;
+  z-index: 5;
+  animation: toast-in 0.4s ease-out;
+}
+
+.fire-card span {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.fire-card small {
+  opacity: 0.8;
+}
+
+/* Inside a nook: the edges soften, and the chat box says it's private. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(40, 30, 60, 0.38) 100%);
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  z-index: 0;
+}
+
+#labels,
+#hud {
+  z-index: 2;
+}
+
+body.in-nook::after {
+  opacity: 1;
+}
+
+.chat input.whisper {
+  background: #f1ecfa;
+  outline: 2px solid #b9a6e0;
+}
+
+.chat input.whisper::placeholder {
+  color: #6f5a99;
+}
+
+.panel.bottles .bottle-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+  padding: 14px 16px;
+  background: #fbf3dc;
+  border: 1px solid #e3d3a6;
+  border-radius: 6px;
+  box-shadow: 2px 3px 0 rgba(59, 58, 46, 0.12);
+  font-family: Georgia, "Times New Roman", serif;
+  transform: rotate(-0.6deg);
+}
+
+.panel.bottles .bottle-note span {
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.panel.bottles .bottle-note small {
+  color: #8a7b58;
+}
+
+.panel.bottles .row-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.panel.bottles .bottle-text,
+.panel.wish .wish-text {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(59, 58, 46, 0.25);
+  font: inherit;
+  resize: vertical;
+}

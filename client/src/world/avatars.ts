@@ -6,6 +6,7 @@ import type { EntityInfo } from "../net/protocol.gen";
 import { TILE, avatarTexture } from "./art";
 import { type Motion, type TileXY, headingAt, posAt } from "./motion";
 import type { Scene } from "./scene";
+import { moodIcon } from "../activities/together";
 
 export const EMOTES: Record<number, { icon: string; label: string }> = {
   1: { icon: "👋", label: "Wave" },
@@ -69,6 +70,24 @@ export class Avatar {
     this.apply(info, now);
   }
 
+  /** Shows the avatar's mood (`mood::*`) as a sign before its name. */
+  setMood(mood: number) {
+    let sign = this.nameEl.querySelector<HTMLSpanElement>(".mood");
+    const icon = moodIcon(mood);
+    if (!icon) {
+      sign?.remove();
+      this.nameW = 0;
+      return;
+    }
+    if (!sign) {
+      sign = document.createElement("span");
+      sign.className = "mood";
+      this.nameEl.prepend(sign);
+      this.nameW = 0;
+    }
+    sign.textContent = icon;
+  }
+
   /** Styles the name tag as a non-player character's. */
   markNpc() {
     this.label.classList.add("npc");
@@ -96,6 +115,7 @@ export class Avatar {
   apply(info: EntityInfo, now: number) {
     this.info = info;
     this.state = info.state;
+    this.setMood(info.mood);
     if (info.path.length > 0) this.setMotion({ path: info.path, t0: info.t0, speedX10: info.speedX10 }, now);
     else this.snap({ x: info.x, y: info.y });
   }

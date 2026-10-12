@@ -17,6 +17,7 @@ export interface HudHandlers {
   /** Toggles sound; returns whether it's now muted. */
   onSound(): boolean;
   onTasks(): void;
+  onMood(): void;
 }
 
 export class Hud {
@@ -30,6 +31,8 @@ export class Hud {
   private badgeEl!: HTMLSpanElement;
   private toastTimer = 0;
   private tasksEl: HTMLButtonElement;
+  private moodBtn!: HTMLButtonElement;
+  private chatPlaceholder = "";
 
   constructor(root: HTMLElement, h: HudHandlers) {
     root.innerHTML = `
@@ -94,6 +97,14 @@ export class Hud {
     });
 
     const bar = root.querySelector(".emotes")!;
+    this.moodBtn = document.createElement("button");
+    this.moodBtn.type = "button";
+    this.moodBtn.className = "mood-btn";
+    this.moodBtn.title = "How you'd like company";
+    this.moodBtn.setAttribute("aria-label", this.moodBtn.title);
+    this.moodBtn.textContent = "💬";
+    this.moodBtn.onclick = () => h.onMood();
+    bar.appendChild(this.moodBtn);
     this.sitBtn = document.createElement("button");
     this.sitBtn.type = "button";
     this.sitBtn.className = "sit";
@@ -130,6 +141,19 @@ export class Hud {
   setMuted(muted: boolean) {
     const b = document.querySelector<HTMLButtonElement>(".sound-btn");
     if (b) b.textContent = muted ? "🔇" : "🔊";
+  }
+
+  /** Shows the current mood on its button. */
+  setMood(icon: string, on: boolean) {
+    this.moodBtn.textContent = icon;
+    this.moodBtn.classList.toggle("on", on);
+  }
+
+  /** A hint in the chat box (e.g. "only people here can hear you"); null restores it. */
+  setChatHint(text: string | null) {
+    if (!this.chatPlaceholder) this.chatPlaceholder = this.input.placeholder;
+    this.input.placeholder = text ?? this.chatPlaceholder;
+    this.input.classList.toggle("whisper", text !== null);
   }
 
   /** The Caretaker's tasks chip under the place name; null hides it. */

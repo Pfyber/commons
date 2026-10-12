@@ -179,6 +179,18 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     case "floor":
       for (let r = 0; r < TILE; r += 8) px(ctx, P.woodDark, ox, oy + r, TILE, 1);
       break;
+    case "stones": {
+      // Stepping stones: flat round stones over the water.
+      px(ctx, P.water, ox, oy, TILE, TILE);
+      px(ctx, P.foam, ox + 4 + (h % 20), oy + 4 + ((h >>> 8) % 6), 4, 1);
+      const sx = ox + 9 + (h % 5);
+      const sy = oy + 10 + ((h >>> 4) % 6);
+      oval(ctx, "rgba(0,0,0,0.18)", sx + 7, sy + 10, 10, 5);
+      oval(ctx, P.outline, sx + 7, sy + 7, 10, 6);
+      oval(ctx, "#b9b4a2", sx + 7, sy + 6, 9, 5);
+      px(ctx, "#d6d1bf", sx + 2, sy + 3, 6, 2);
+      break;
+    }
     case "pitch":
       // Mown stripes, chalk lines round the edge.
       if (tx % 2) px(ctx, P.pitchStripe, ox, oy, TILE, TILE);
@@ -312,6 +324,61 @@ export function decorTexture(kind: string, variant: number): Texture | null {
           [18 - half, top + 20],
         ]);
       }
+      break;
+    }
+    case "pine_secret": {
+      // Looks just like a pine. Almost.
+      [c, ctx] = makeCanvas(36, 60);
+      px(ctx, "rgba(0,0,0,0.18)", 8, 54, 20, 4);
+      px(ctx, P.trunk, 16, 46, 4, 10);
+      for (let i = 0; i < 3; i++) {
+        const top = 4 + i * 13;
+        const half = 8 + i * 4;
+        polygon(ctx, i % 2 ? P.pine : P.pineLight, [
+          [18, top],
+          [18 + half, top + 20],
+          [18 - half, top + 20],
+        ]);
+      }
+      px(ctx, "#fff6d0", 22, 30, 1, 1);
+      break;
+    }
+    case "willow":
+    case "willow_curtain": {
+      // A weeping willow: a round crown and long hanging strands. The
+      // curtain is a gap between two willows, all strands.
+      [c, ctx] = makeCanvas(40, 60);
+      const curtain = kind === "willow_curtain";
+      const leaf = ["#9cc46e", "#a8cc74", "#93bd66"][v];
+      if (!curtain) {
+        px(ctx, "rgba(0,0,0,0.18)", 4, 54, 32, 4);
+        px(ctx, P.outline, 18, 26, 5, 30);
+        px(ctx, P.trunk, 19, 26, 3, 29);
+        oval(ctx, P.outline, 20, 14, 19, 12);
+        oval(ctx, leaf, 20, 14, 18, 11);
+        oval(ctx, "#c3e08f", 14, 9, 7, 4);
+      }
+      // Long hanging strands, almost to the ground.
+      for (let i = 0; i < 10; i++) {
+        const sx = 2 + i * 4;
+        const top = curtain ? 0 : 14 + (Math.abs(4.5 - i) | 0);
+        const len = curtain ? 50 + ((i * 7 + v) % 8) : 36 + ((i * 5 + v) % 6) - (Math.abs(4.5 - i) | 0);
+        px(ctx, P.outline, sx - 1, top, 1, len);
+        px(ctx, curtain ? "#b2d685" : leaf, sx, top, 2, len);
+        px(ctx, "#c3e08f", sx, top + len - 4, 2, 4);
+      }
+      break;
+    }
+    case "log_seat": {
+      // A log lying on its side, worn smooth from sitting.
+      [c, ctx] = makeCanvas(32, 22);
+      px(ctx, "rgba(0,0,0,0.18)", 3, 17, 26, 4);
+      px(ctx, P.outline, 2, 6, 28, 13);
+      px(ctx, P.trunk, 3, 7, 26, 11);
+      px(ctx, "#9a6e45", 3, 7, 26, 3);
+      oval(ctx, P.outline, 28, 12, 4, 6);
+      oval(ctx, "#d9b27c", 28, 12, 3, 5);
+      px(ctx, "#b5844f", 27, 11, 2, 2);
       break;
     }
     case "bush": {
@@ -875,6 +942,59 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       polygon(ctx, "#efe3cf", [[28, 17], [7, 17], [4, 20], [7, 23], [28, 23]]);
       px(ctx, P.woodDark, 8, 10, 14, 1);
       px(ctx, P.woodDark, 10, 20, 14, 1);
+      break;
+    }
+    case "campfire": {
+      // A ring of stones and crossed logs; the flames are animated on top.
+      [c, ctx] = makeCanvas(w + 16, h + 8);
+      overhang = 8;
+      const cx = (w + 16) / 2;
+      const cy = 8 + h / 2 + 4;
+      oval(ctx, "rgba(0,0,0,0.2)", cx, cy + 4, 18, 7);
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2;
+        const sx = cx + Math.cos(a) * 15;
+        const sy = cy + Math.sin(a) * 7;
+        oval(ctx, P.outline, sx, sy, 4, 3);
+        oval(ctx, i % 2 ? P.stone : P.stoneDark, sx, sy - 1, 3, 2);
+      }
+      px(ctx, P.outline, cx - 11, cy - 3, 22, 6);
+      px(ctx, P.trunk, cx - 10, cy - 2, 20, 4);
+      px(ctx, "#3a2a1c", cx - 4, cy - 4, 8, 3);
+      break;
+    }
+    case "lantern_stand": {
+      // A little wooden stand with paper lanterns waiting for wishes.
+      [c, ctx] = makeCanvas(w + 16, h + 36);
+      overhang = 36;
+      const top = 36;
+      px(ctx, "rgba(0,0,0,0.18)", 4, top + h - 6, w + 8, 5);
+      px(ctx, P.outline, 6, top - 8, 3, h + 4);
+      px(ctx, P.outline, w + 7, top - 8, 3, h + 4);
+      px(ctx, P.outline, 3, top - 2, w + 10, 10);
+      px(ctx, P.wood, 4, top - 1, w + 8, 8);
+      for (const [lx, ly, col] of [[6, top - 14, "#f28c6b"], [16, top - 20, "#ffd27a"], [26, top - 13, "#f4a7b9"], [15, top - 6, "#ffe9a8"]] as [number, number, string][]) {
+        px(ctx, P.outline, lx - 1, ly - 1, 9, 11);
+        px(ctx, col, lx, ly, 7, 9);
+        px(ctx, "rgba(255,255,255,0.5)", lx + 1, ly + 1, 2, 7);
+      }
+      px(ctx, P.outline, 3, top - 30, w + 10, 2);
+      break;
+    }
+    case "bottles": {
+      // A driftwood crate of corked bottles, and paper and a pencil.
+      [c, ctx] = makeCanvas(w, h + 14);
+      overhang = 14;
+      px(ctx, "rgba(0,0,0,0.18)", 3, h + 8, w - 6, 5);
+      px(ctx, P.outline, 4, 14, w - 8, h - 2);
+      px(ctx, "#b89a74", 5, 15, w - 10, h - 4);
+      px(ctx, "#8e7458", 5, 22, w - 10, 2);
+      for (const [bx, col] of [[8, "#7fc4b8"], [14, "#a7d38b"], [20, "#8fb7e0"]] as [number, string][]) {
+        px(ctx, P.outline, bx - 1, 3, 6, 13);
+        px(ctx, col, bx, 6, 4, 9);
+        px(ctx, "#c99a6a", bx + 1, 2, 2, 3);
+        px(ctx, "#f4f1d8", bx + 1, 9, 2, 4);
+      }
       break;
     }
     case "founders_stone": {

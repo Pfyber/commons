@@ -8,6 +8,10 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
+import { Sky } from "./ambient/sky";
+import { Campfire } from "./activities/campfire";
+import { type MoodPicker, type OfferCard, TOGETHER } from "./activities/together";
+import type { BottlesPanel, WishPanel } from "./ui/dream";
 import { Critters } from "./ambient/critters";
 import type { Soundscape } from "./ambient/sound";
 import { Weather } from "./ambient/weather";
@@ -77,7 +81,30 @@ export interface Ui {
   welcome: Welcome;
   welcomePanel: WelcomePanel;
   founders: FoundersPanel;
+  bottles: BottlesPanel;
+  wish: WishPanel;
+  offer: OfferCard;
+  mood: MoodPicker;
 }
+
+/** What the Caretaker lets slip about the park's secret places. */
+const SECRET_HINTS = [
+  "They say the willows in the meadow keep a secret. Try walking right through them.",
+  "Ever counted the pines east of the fairy ring? One of them isn't quite a pine.",
+  "Those stepping stones by the pier lead somewhere quiet.",
+  "Whatever's said at the heart of the maze stays there.",
+  "Lie on a picnic blanket after dark and watch for shooting stars.",
+  "If you've something kind to say to a stranger, the bottles at the pier will carry it.",
+  "Sit by the campfire on the west field. There's always a question to talk about.",
+];
+
+/** Secret places: discovery keys by nook name. */
+const NOOKS: Record<string, string> = {
+  "The Willow Hideaway": "nook_willow",
+  "The Moss Grotto": "nook_grotto",
+  "The Little Island": "nook_island",
+  "The Heart of the Maze": "nook_maze",
+};
 
 /** Things to find in the park; remembered per browser. */
 const DISCOVERIES: Record<string, string> = {
@@ -86,6 +113,10 @@ const DISCOVERIES: Record<string, string> = {
   maze_heart: "You found the heart of the maze 🌿",
   tiny_door: "You knock on the tiny door. Someone very small giggles inside.",
   fairy_ring: "A ring of mushrooms in a hidden clearing. It feels like a secret.",
+  nook_willow: "🤫 The Willow Hideaway. The branches close behind you; only people in here can hear you.",
+  nook_grotto: "🤫 The Moss Grotto. One of those pines wasn't a pine at all. Only people in here can hear you.",
+  nook_island: "🤫 The Little Island. The pond keeps your secrets: only people here can hear you.",
+  nook_maze: "🤫 The Heart of the Maze. Whatever you say here stays here.",
 };
 const WISHES = [
   "The water ripples. Somewhere, something nice is on its way.",
@@ -170,6 +201,14 @@ export class Game {
   private caretaker: Caretaker | null = null;
   private grove: Grove | null = null;
   private caretakerTalkAt = 0;
+  private sky: Sky;
+  private campfire: Campfire | null = null;
+  /** For each tile, the nook it's in (0: none), and their names. */
+  private nookOf: Uint8Array;
+  private nookNames: string[] = [];
+  private inNook = 0;
+  /** The mood we show others, kept across zones and visits. */
+  private mood = loadMood();
   private ringCheckAt = 0;
 
   constructor(
@@ -210,6 +249,19 @@ export class Game {
       if (grove.active) this.grove = grove;
       if (map.objects.some((o) => o.kind === "founders_stone")) this.caretaker = new Caretaker(map, this.scene, labels);
     }
+    this.sky = new Sky(app, this.scene, () => this.onShootingStar());
+    const fire = map.objects.find((o) => o.kind === "campfire");
+    if (fire) {
+      this.campfire = new Campfire({ x: fire.x, y: fire.y });
+      this.sky.glowLayer.addChild(this.campfire.flames);
+    }
+    this.nookOf = new Uint8Array(map.width * map.height);
+    map.objects
+      .filter((o) => o.kind === "nook")
+      .forEach((o, i) => {
+        this.nookNames.push(o.label ?? "");
+        for (let y = o.y; y < o.y + o.h; y++) for (let x = o.x; x < o.x + o.w; x++) this.nookOf[y * map.width + x] = i + 1;
+      });
     // Founders: trees in the grove and a leaf by their names.
     this.disposers.push(ui.welcome.onChange(() => this.applyFounders()));
     this.applyFounders();
@@ -297,6 +349,8 @@ export class Game {
     else if (!s.tasks.fish) lines = ["Hello there! Tap me if you'd like a little something to do.", "The fish are biting by the pier today."];
     else if (!s.tasks.plant) lines = ["The garden could use a seed or two. You've got some in your bag!"];
     else lines = ["A bench is nicer with two. Or try a game of chess: the Park Elder is always up for one."];
+    // Now and then, a hint about the park's secrets instead.
+    if (s && (s.founder || w.done === 3) && Math.random() < 0.5) lines = SECRET_HINTS;
     c.say(lines[Math.floor(Math.random() * lines.length)]);
   }
 
@@ -305,6 +359,84 @@ export class Game {
     const w = this.ui.welcome;
     if (w.status?.founder || (w.status && w.done === 3)) return;
     window.setTimeout(() => void w.load().catch(() => {}), delay);
+  }
+
+  // ---- being together -------------------------------------------------------
+
+  /** Shows others how you'd like company (`mood::*`); remembered. */
+  setMood(mood: number) {
+    this.mood = mood;
+    try {
+      localStorage.setItem("commons.mood", String(mood));
+    } catch {
+      // storage unavailable
+    }
+    this.socket?.send({ t: "SetMood", mood });
+    this.self?.setMood(mood);
+  }
+
+  get currentMood() {
+    return this.mood;
+  }
+
+  private offer(to: number, kind: number, name: string) {
+    const self = this.self;
+    const them = this.avatars.get(to);
+    if (!self || !them || !this.socket) return;
+    if (cheb(self.destination, { x: Math.round(them.pos.x), y: Math.round(them.pos.y) }) > 2) {
+      const spot = nearestWalkable(this.scene.map, Math.round(them.pos.x) + 1, Math.round(them.pos.y), 2);
+      if (spot) this.moveTo(spot, true);
+      // Offer once we're there.
+      window.setTimeout(() => this.socket?.send({ t: "Offer", to, kind }), 1800);
+    } else {
+      this.socket.send({ t: "Offer", to, kind });
+    }
+    this.hud.toast(`${TOGETHER[kind].icon} You offered ${name} ${TOGETHER[kind].verb}…`, 3000);
+  }
+
+  private together(a: number, b: number, kind: number) {
+    const t = TOGETHER[kind];
+    if (!t) return;
+    const pa = this.avatars.get(a);
+    const pb = this.avatars.get(b);
+    for (const p of [pa, pb]) {
+      if (!p) continue;
+      if (kind === 3) p.emote(4);
+      else p.flash(t.icon);
+    }
+    if (kind === 1) window.setTimeout(() => [pa, pb].forEach((p) => p?.flash("💞")), 900);
+    const other = a === this.selfId ? pb : b === this.selfId ? pa : null;
+    if (other) this.hud.toast(`${t.icon} You and ${other.info.name} ${t.done}${kind === 1 ? " 💞" : "!"}`, 3500);
+  }
+
+  /** Sends a wish up on a sky lantern. */
+  releaseLantern(text: string) {
+    this.socket?.send({ t: "SkyLantern", text });
+  }
+
+  private onShootingStar() {
+    const self = this.self;
+    if (!self) return;
+    // Noticed when you're looking up: lying on a blanket, sitting out, or in a nook.
+    if (self.state === SITTING || this.inNook) this.hud.toast("🌠 A shooting star! Make a wish.", 4000);
+  }
+
+  /** Entering or leaving a nook: chat stays inside it. */
+  private checkNook(pos: TileXY) {
+    const map = this.scene.map;
+    const n = this.nookOf[Math.round(pos.y) * map.width + Math.round(pos.x)] ?? 0;
+    if (n === this.inNook) return;
+    this.inNook = n;
+    document.body.classList.toggle("in-nook", n > 0);
+    if (!n) {
+      this.hud.setChatHint(null);
+      return;
+    }
+    const name = this.nookNames[n - 1];
+    this.hud.setChatHint(`🤫 ${name}: only people here can hear you`);
+    const key = NOOKS[name];
+    if (key && !found().has(key)) this.discover(key, DISCOVERIES[key]);
+    else this.hud.toast(`🤫 ${name}`, 2500);
   }
 
   private remove(id: number) {
@@ -320,6 +452,7 @@ export class Game {
         this.selfId = m.selfId;
         this.hud.setPlace(this.place.label || this.scene.map.name, m.instance);
         if (this.isOwnHome) void this.loadGifts();
+        if (this.mood) this.socket?.send({ t: "SetMood", mood: this.mood });
         this.events.onWelcome();
         break;
       case "CellEnter":
@@ -414,6 +547,25 @@ export class Game {
       case "Painted":
         this.ui.easel.remote(m.easel, m.cell, m.color);
         break;
+      case "MoodShown":
+        this.avatars.get(m.id)?.setMood(m.mood);
+        break;
+      case "Offered": {
+        const from = this.avatars.get(m.from);
+        if (!from || this.ui.social.isBlockedName(from.info.name)) break;
+        this.ui.offer.show(from.info.name, m.kind, () => this.socket?.send({ t: "Accept", from: m.from, kind: m.kind }));
+        break;
+      }
+      case "Together":
+        this.together(m.a, m.b, m.kind);
+        break;
+      case "LanternRise": {
+        const who = this.avatars.get(m.id);
+        if (who && this.ui.social.isBlockedName(who.info.name)) break;
+        this.sky.release(m.x, m.y, performance.now());
+        who?.say(`🏮 ${m.text}`);
+        break;
+      }
       case "Ball": {
         const scored = this.ball?.apply(m);
         const self = this.self;
@@ -620,6 +772,9 @@ export class Game {
       const actions: [string, () => void][] = friend
         ? [["Message", () => this.ui.friends.chatWith(friend)]]
         : [["Add friend", () => void say(social.request(name))]];
+      for (const [kind, t] of Object.entries(TOGETHER)) {
+        actions.push([`${t.icon} ${t.offer}`, () => this.offer(a.info.id, Number(kind), name)]);
+      }
       actions.push(["Report", () => this.ui.report.openFor(name)]);
       actions.push(["Block", () => confirm(`Block ${name}? You won't see their chat, and they can't contact you.`) && void say(social.block(name).then(() => `Blocked ${name}.`))]);
       this.ui.menu.showWith(name, friend ? (friend.level >= 2 ? "Close friend" : "Friend") : "", actions);
@@ -701,6 +856,16 @@ export class Game {
       }
       if (obj.kind === "town_hall") void ui.townhall.openAt({ kind: "list" });
       else ui.story.show();
+      return true;
+    }
+    if (obj && (obj.kind === "lantern_stand" || obj.kind === "bottles" || obj.kind === "campfire")) {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+        const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      if (obj.kind === "lantern_stand") ui.wish.show();
+      else if (obj.kind === "bottles") ui.bottles.show();
+      else this.hud.toast("🔥 Sit on a log to join the circle. There's always something to talk about.", 4500);
       return true;
     }
     if (obj?.kind === "founders_stone") {
@@ -965,12 +1130,18 @@ export class Game {
       this.caretaker.update(Date.now(), wallNow);
       this.caretakerChat(wallNow);
     }
+    this.sky.update(wallNow, this.daynight.dark > 0.5);
+    if (this.campfire) {
+      const at = this.campfire.at;
+      this.campfire.update(wallNow, !!self && self.state === SITTING && Math.hypot(self.pos.x - at.x, self.pos.y - at.y) <= 3);
+    }
     if (wallNow > this.ringCheckAt) {
       this.ringCheckAt = wallNow + 400;
       // The fairy ring is found by walking into the hidden clearing.
       if (self && this.zoneId === "founders_park" && Math.hypot(self.pos.x - 9, self.pos.y - 14) < 1.6 && !found().has("fairy_ring")) {
         this.discover("fairy_ring", DISCOVERIES.fairy_ring);
       }
+      if (self) this.checkNook(self.pos);
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
     // The jam pads go away when you walk off from the bandstand.
@@ -999,6 +1170,12 @@ export class Game {
     this.weather.destroy();
     this.critters.destroy();
     this.caretaker?.destroy();
+    this.campfire?.destroy();
+    this.sky.destroy();
+    this.ui.offer.hide();
+    document.body.classList.remove("in-nook");
+    this.hud.setChatHint(null);
+    for (const p of [this.ui.bottles, this.ui.wish]) p.hide();
     for (const p of [this.ui.welcomePanel, this.ui.founders]) p.hide();
     for (const p of [this.ui.plot, this.ui.menu, this.ui.market, this.ui.easel, this.ui.word, this.ui.townhall, this.ui.story]) p.hide();
     this.ui.reel.stop();
@@ -1010,4 +1187,12 @@ export class Game {
 
 function dist2(a: TileXY, b: TileXY) {
   return (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+}
+
+function loadMood(): number {
+  try {
+    return Number(localStorage.getItem("commons.mood") ?? 0) || 0;
+  } catch {
+    return 0;
+  }
 }

@@ -10,7 +10,7 @@ const CHUNK = 16;
 /** Decor drawn flat on the ground. */
 const FLAT = new Set(["blanket", "lilypad", "mushrooms"]);
 /** Decor that sways in the wind. */
-const SWAY = new Set(["tree", "pine", "apple_tree", "bush", "tallgrass", "reeds"]);
+const SWAY = new Set(["tree", "pine", "apple_tree", "bush", "tallgrass", "reeds", "willow", "willow_curtain", "pine_secret"]);
 
 /** Side-by-side bench tiles draw as one long bench (one seat per tile). */
 function benchPiece(map: ZoneMap, x: number, y: number): string {
@@ -67,7 +67,7 @@ export class Scene {
     }
 
     for (const o of map.objects) {
-      if (o.kind === "grove_slot") continue; // drawn by the Founders' Grove
+      if (o.kind === "grove_slot" || o.kind === "nook") continue; // drawn elsewhere, or invisible
       const { texture, overhang } = objectTexture(o);
       const s = new Sprite(texture);
       s.position.set(o.x * TILE, o.y * TILE - overhang);

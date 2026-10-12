@@ -10,6 +10,8 @@ import { Town } from "./town";
 import { Gov } from "./gov";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
+import { BottlesPanel, WishPanel } from "./ui/dream";
+import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
 import { Hud } from "./ui/hud";
@@ -113,6 +115,16 @@ async function main() {
     onNotifications: () => notifications.toggle(),
     onSound: () => sound.toggle(),
     onTasks: () => welcomePanel.show(),
+    onMood: () => {
+      moodPicker.setCurrent((game as Game | null)?.currentMood ?? 0);
+      moodPicker.toggle();
+    },
+  });
+  const showMood = (m: number) => hud.setMood(m ? (MOODS.find((x) => x.id === m)?.icon ?? "💬") : "💬", m > 0);
+  const moodPicker = new MoodPicker((m) => {
+    game?.setMood(m);
+    showMood(m);
+    if (m) hud.toast(`${MOODS.find((x) => x.id === m)?.icon} Others now see you're ${MOODS.find((x) => x.id === m)?.label.toLowerCase()}.`, 3500);
   });
   hud.setMuted(sound.muted);
   const ui: Ui = {
@@ -150,6 +162,10 @@ async function main() {
     welcome,
     welcomePanel,
     founders: new FoundersPanel(welcome, () => auth.player?.display_name ?? ""),
+    bottles: new BottlesPanel(auth),
+    wish: new WishPanel((text) => game?.releaseLantern(text)),
+    offer: new OfferCard(),
+    mood: moodPicker,
   };
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
   welcome.onChange(() => {
@@ -227,6 +243,7 @@ async function main() {
   };
 
   await enter();
+  showMood((game as Game | null)?.currentMood ?? 0);
   // First visit: the Caretaker says hello. Afterwards, keep the tasks fresh
   // (sitting together is reported by the zone about once a minute).
   welcome
