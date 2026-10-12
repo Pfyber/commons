@@ -41,6 +41,17 @@ export const PALETTE = {
   stone: "#a9a69c",
   stoneDark: "#8b887e",
   lampGlow: "#ffe39a",
+  pitch: "#79b25e",
+  pitchStripe: "#86bf69",
+  chalk: "#f4f6ee",
+};
+
+/** Accent colours of the topic corners (boards, flags). */
+export const QUARTER_COLORS: Record<string, string> = {
+  sports: "#4f8fd6",
+  art: "#d6609a",
+  music: "#9b6fd4",
+  games: "#e0943a",
 };
 
 export function hash(x: number, y: number, salt = 0): number {
@@ -94,6 +105,7 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     bridge: P.bridge,
     fog: P.fog,
     floor: P.floor,
+    pitch: P.pitch,
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
   const differs = (dx: number, dy: number) => {
@@ -166,6 +178,14 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
       break;
     case "floor":
       for (let r = 0; r < TILE; r += 8) px(ctx, P.woodDark, ox, oy + r, TILE, 1);
+      break;
+    case "pitch":
+      // Mown stripes, chalk lines round the edge.
+      if (tx % 2) px(ctx, P.pitchStripe, ox, oy, TILE, TILE);
+      if (differs(0, -1)) px(ctx, P.chalk, ox, oy + 2, TILE, 2);
+      if (differs(0, 1)) px(ctx, P.chalk, ox, oy + TILE - 4, TILE, 2);
+      if (differs(-1, 0)) px(ctx, P.chalk, ox + 2, oy, 2, TILE);
+      if (differs(1, 0)) px(ctx, P.chalk, ox + TILE - 4, oy, 2, TILE);
       break;
   }
 }
@@ -299,6 +319,26 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       px(ctx, "#cdbb9c", 1, 39, 30, 8);
       for (let y = 10; y < 38; y += 8) px(ctx, "#ddcdb0", 1, y, 30, 1);
       px(ctx, "#b5544a", 0, 0, 32, 6);
+      break;
+    }
+    case "lantern": {
+      [c, ctx] = makeCanvas(16, 40);
+      px(ctx, P.outline, 7, 12, 2, 28);
+      px(ctx, P.outline, 3, 2, 10, 12);
+      px(ctx, P.lampGlow, 4, 3, 8, 10);
+      px(ctx, "#fff6d0", 6, 5, 4, 5);
+      px(ctx, P.outline, 2, 0, 12, 3);
+      break;
+    }
+    case "wildflowers": {
+      [c, ctx] = makeCanvas(32, 16);
+      const colors = ["#f4a7b9", "#ffe08a", "#ffffff", "#c9a7f4", "#f28c6b"];
+      for (let i = 0; i < 7; i++) {
+        const fx = 2 + ((i * 9 + v * 5) % 28);
+        const fy = 4 + ((i * 5 + v * 3) % 9);
+        px(ctx, "#5f9a48", fx + 1, fy + 2, 1, 4);
+        px(ctx, colors[(i + v) % colors.length], fx, fy, 3, 3);
+      }
       break;
     }
     case "sign": {
@@ -453,6 +493,120 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.outline, 0, 2, w, 8);
       px(ctx, P.wood, 1, 3, w - 2, 6);
       label(ctx, "🌳", w / 2, 18, "#000", 12);
+      break;
+    }
+    case "board_sports":
+    case "board_art":
+    case "board_music":
+    case "board_games":
+    case "notice_board": {
+      // A wooden board on two posts: a coloured header with the corner's
+      // name over a cork panel with pinned notes.
+      [c, ctx] = makeCanvas(w, h + 30);
+      overhang = 30;
+      const slug = o.kind.replace("board_", "");
+      const accent = QUARTER_COLORS[slug] ?? "#b5544a";
+      px(ctx, "rgba(0,0,0,0.15)", 6, h + 24, w - 12, 5);
+      px(ctx, P.outline, 8, 26, 4, h + 4);
+      px(ctx, P.outline, w - 12, 26, 4, h + 4);
+      px(ctx, P.outline, 2, 2, w - 4, 36);
+      px(ctx, P.wood, 3, 3, w - 6, 34);
+      px(ctx, "#c99a6a", 6, 14, w - 12, 21);
+      const notes = ["#fff9ec", "#fde68a", "#cfe8ff", "#ffd6e0"];
+      for (let i = 0; i < 5; i++) {
+        const nx = 8 + ((i * 13) % (w - 22));
+        const ny = 16 + ((i * 7) % 9);
+        px(ctx, notes[i % notes.length], nx, ny, 9, 8);
+        px(ctx, "#b5544a", nx + 4, ny, 1, 1);
+      }
+      px(ctx, accent, 4, 4, w - 8, 9);
+      const title = o.kind === "notice_board" ? "NOTICES" : slug.toUpperCase();
+      label(ctx, title, w / 2, 9, "#fff9ec", 7);
+      break;
+    }
+    case "goal": {
+      // A football goal standing on the pitch's short side.
+      [c, ctx] = makeCanvas(w, h + 12);
+      overhang = 12;
+      for (let y = 12; y < h + 8; y += 4) px(ctx, "rgba(255,255,255,0.55)", 6, y, w - 10, 1);
+      for (let x = 6; x < w - 4; x += 4) px(ctx, "rgba(255,255,255,0.55)", x, 12, 1, h - 4);
+      px(ctx, P.outline, 2, 8, 5, h + 4);
+      px(ctx, P.chalk, 3, 9, 3, h + 2);
+      px(ctx, P.outline, 2, 6, w - 4, 5);
+      px(ctx, P.chalk, 3, 7, w - 6, 3);
+      px(ctx, P.outline, w - 7, 8, 5, h + 4);
+      px(ctx, P.chalk, w - 6, 9, 3, h + 2);
+      break;
+    }
+    case "easels": {
+      // Three easels with canvases in progress.
+      [c, ctx] = makeCanvas(w, h + 30);
+      overhang = 30;
+      const art = [
+        ["#9fd3ee", "#f6c343", "#5f9a48"],
+        ["#f4a7b9", "#9b6fd4", "#fff9ec"],
+        ["#ffe08a", "#e8566b", "#4f8fd6"],
+      ];
+      for (let i = 0; i < 3; i++) {
+        const x = i * 32 + 6;
+        px(ctx, P.woodDark, x + 3, 22, 2, h + 6);
+        px(ctx, P.woodDark, x + 15, 22, 2, h + 6);
+        px(ctx, P.woodDark, x + 9, 26, 2, h + 2);
+        px(ctx, P.outline, x, 4, 20, 22);
+        px(ctx, art[i][0], x + 1, 5, 18, 20);
+        px(ctx, art[i][1], x + 4 + i * 2, 9, 6, 6);
+        px(ctx, art[i][2], x + 3, 17, 14, 4);
+        px(ctx, P.wood, x - 1, 24, 22, 3);
+      }
+      break;
+    }
+    case "bandstand": {
+      // An octagonal-ish bandstand: raised platform, posts and a roof.
+      [c, ctx] = makeCanvas(w, h + 44);
+      overhang = 44;
+      const top = 44;
+      px(ctx, "rgba(0,0,0,0.15)", 6, top + h - 8, w - 12, 8);
+      px(ctx, P.outline, 4, top + h - 30, w - 8, 24);
+      px(ctx, "#efe3cf", 5, top + h - 29, w - 10, 6);
+      px(ctx, P.wood, 5, top + h - 23, w - 10, 16);
+      for (let x = 10; x < w - 10; x += 12) px(ctx, P.woodDark, x, top + h - 22, 2, 14);
+      for (const x of [10, w / 2 - 2, w - 14]) px(ctx, "#fff9ec", x, 26, 4, top + h - 54);
+      polygon(ctx, P.outline, [
+        [0, 30],
+        [w / 2, 0],
+        [w, 30],
+      ]);
+      polygon(ctx, "#5d8a4e", [
+        [3, 29],
+        [w / 2, 2],
+        [w - 3, 29],
+      ]);
+      px(ctx, P.outline, 0, 28, w, 5);
+      px(ctx, "#f4f1d8", 1, 29, w - 2, 3);
+      for (let x = 2; x < w - 2; x += 10) px(ctx, "#e8566b", x, 32, 5, 3);
+      label(ctx, "♪", w / 2, 18, "#fff9ec", 12);
+      break;
+    }
+    case "arcade": {
+      // A row of arcade cabinets with glowing screens.
+      [c, ctx] = makeCanvas(w, h + 34);
+      overhang = 34;
+      const bodies = ["#e0943a", "#4f8fd6", "#d6609a"];
+      for (let i = 0; i < 3; i++) {
+        const x = i * 32 + 4;
+        px(ctx, P.outline, x, 2, 24, h + 30);
+        px(ctx, bodies[i], x + 1, 3, 22, h + 28);
+        px(ctx, P.outline, x + 3, 6, 18, 4);
+        px(ctx, "#fff3c4", x + 4, 7, 16, 2);
+        px(ctx, P.outline, x + 3, 12, 18, 16);
+        px(ctx, "#1d2b3a", x + 4, 13, 16, 14);
+        px(ctx, ["#7ee081", "#ffe08a", "#9fd3ee"][i], x + 6 + i * 3, 16 + i * 2, 4, 4);
+        px(ctx, "#e8566b", x + 12, 22, 3, 2);
+        px(ctx, P.outline, x + 2, 30, 20, 6);
+        px(ctx, "#3b3a2e", x + 3, 31, 18, 4);
+        px(ctx, "#e8566b", x + 6, 32, 2, 2);
+        px(ctx, "#f6c343", x + 14, 32, 2, 2);
+      }
       break;
     }
     case "garden_sign": {

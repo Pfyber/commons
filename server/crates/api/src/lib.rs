@@ -1,4 +1,5 @@
-//! Commons API library: auth, the economy service and internal endpoints.
+//! Commons API library: auth, the economy service, town life (quarters,
+//! goals, requests) and internal endpoints.
 //! The `api` binary serves it; the social gateway reuses the economy and
 //! account code.
 
@@ -9,6 +10,7 @@ pub mod internal;
 pub mod store;
 #[cfg(test)]
 mod tests;
+pub mod town;
 
 use anyhow::Context;
 use economy::Catalog;

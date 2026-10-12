@@ -169,6 +169,11 @@ pub mod fish_event {
 /// `Sit.seat` value for sitting on the ground where you stand.
 pub const SEAT_GROUND: u32 = u32::MAX;
 
+/// `GameState.white`/`black` when the Park Elder (the computer opponent) has
+/// that side. Players ask for it with `GameMove { uci: "elder" }` while
+/// sitting alone at a table.
+pub const ELDER_ID: u32 = u32::MAX - 1;
+
 /// `GameState.status`.
 pub mod game_status {
     pub const WAITING: u8 = 0;

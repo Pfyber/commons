@@ -6,10 +6,12 @@ import { Game, type Ui } from "./game";
 import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
 import { Social } from "./social";
+import { Town } from "./town";
 import { Hud } from "./ui/hud";
 import { signIn } from "./ui/login";
 import { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
 import { FriendsPanel, NotificationsPanel } from "./ui/social";
+import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import type { ZoneMap } from "./world/map";
 import "./styles.css";
 
@@ -77,6 +79,7 @@ async function main() {
   let game: Game | null = null;
   const eco = new Economy(auth);
   const social = new Social(auth, auth.player!.id);
+  const town = new Town(auth);
   const place = new PlaceBanner(() => place.hide());
   const friendActions = {
     join: (f: { id: string }) => void travel({ friend: f.id }),
@@ -108,6 +111,13 @@ async function main() {
     menu: new ActionMenu(),
     social,
     friends: new FriendsPanel(social, eco, friendActions),
+    town,
+    quarter: new QuarterPanel(town),
+    requests: new RequestsPanel(town, eco),
+    goal: new GoalPanel(town, eco, (g) => {
+      game?.milestones.apply(g.reached);
+      hud.toast(`The town reached “${g.title}”! 🎉`, 6000);
+    }),
   };
   const notifications = new NotificationsPanel(social, friendActions);
   eco.onChange(() => hud.setCoins(eco.coins));

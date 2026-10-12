@@ -54,6 +54,9 @@ export class DayNight {
   private shade = new Graphics();
   private lights = new Container();
   private override: number | null;
+  private glow: Texture;
+  /** 0 in daylight … 1 at night. */
+  dark = 0;
 
   constructor(
     private app: Application,
@@ -68,6 +71,7 @@ export class DayNight {
     scene.world.addChild(this.lights);
 
     const tex = glowTexture();
+    this.glow = tex;
     const lamp = map.decor_legend.indexOf("lamp");
     map.decor.forEach((d, i) => {
       if (d !== lamp) return;
@@ -88,6 +92,15 @@ export class DayNight {
     }
   }
 
+  /** A warm light at world position (x, y) that shows after dark. */
+  addLight(x: number, y: number, scale: number) {
+    const s = new Sprite(this.glow);
+    s.anchor.set(0.5);
+    s.scale.set(scale);
+    s.position.set(x, y);
+    this.lights.addChild(s);
+  }
+
   destroy() {
     this.app.stage.removeChild(this.shade);
     this.shade.destroy();
@@ -101,6 +114,7 @@ export class DayNight {
 
   update() {
     const { tint, dark } = lightAt(this.hour());
+    this.dark = dark;
     const { width, height } = this.app.screen;
     this.shade.clear();
     if (tint !== 0xffffff) this.shade.rect(0, 0, width, height).fill(tint);

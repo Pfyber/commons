@@ -32,12 +32,14 @@ export class Panel {
   private static current: Panel | null = null;
   readonly el: HTMLDivElement;
   protected body: HTMLDivElement;
+  protected titleEl: HTMLElement;
 
   constructor(title: string, cls: string) {
     this.el = el("div", `panel ${cls}`);
     this.el.hidden = true;
     const head = el("div", "panel-head");
-    head.append(el("strong", "", title), button("✕", () => this.hide(), "x"));
+    this.titleEl = el("strong", "", title);
+    head.append(this.titleEl, button("✕", () => this.hide(), "x"));
     this.body = el("div", "panel-body");
     this.el.append(head, this.body);
     document.body.appendChild(this.el);

@@ -4,7 +4,7 @@
 
 use axum::Router;
 use commons_api::economy::Catalog;
-use commons_api::{AppState, auth, economy, internal, store};
+use commons_api::{AppState, auth, economy, internal, store, town};
 use commons_common::{config, telemetry};
 use std::sync::Arc;
 
@@ -36,7 +36,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = Router::new()
-        .nest("/api", auth::routes().merge(economy::routes()))
+        .nest(
+            "/api",
+            auth::routes()
+                .merge(economy::routes())
+                .merge(town::routes()),
+        )
         .nest("/internal", internal::routes())
         .with_state(state)
         .merge(telemetry::routes(prom));

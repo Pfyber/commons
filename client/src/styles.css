@@ -1012,3 +1012,115 @@ body.fading #stage {
 .panel .note.unread {
   background: #fff6dc;
 }
+
+/* ---- town life: corner boards, notice board, town goal ---- */
+
+.quarter,
+.requests,
+.goal {
+  width: min(400px, calc(100vw - 24px));
+}
+
+.panel .quarter-head .hint {
+  margin: 0 0 6px;
+}
+
+.panel .quarter-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.panel .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.panel button.chip {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--paper-2);
+  cursor: pointer;
+}
+
+.panel button.chip.on {
+  background: var(--leaf);
+  color: #fff;
+}
+
+.panel .posts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel .post {
+  background: var(--paper-2);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.panel .post-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.panel .post .time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.panel .post .body {
+  margin: 4px 0 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.panel .request {
+  align-items: center;
+}
+
+.panel .request.done {
+  opacity: 0.6;
+}
+
+.panel .request-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  font-size: 14px;
+  gap: 2px;
+}
+
+.panel .progress {
+  height: 14px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+
+.panel .progress .fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f6c343, #f28c6b);
+  border-radius: 999px;
+  transition: width 0.4s ease-out;
+}
+
+.panel .progress-text {
+  margin: 4px 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.panel .btns {
+  display: flex;
+  gap: 6px;
+}

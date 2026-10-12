@@ -173,6 +173,8 @@ pub struct Instance {
     watchers: Vec<Vec<u32>>,
     seat_occupant: HashMap<u32, u32>,
     games: HashMap<u32, ChessGame>,
+    /// Tables where the Park Elder has the empty side.
+    elders: HashMap<u32, hangout::Elder>,
     /// Index of the programme last announced on the big screen.
     screen_index: Option<usize>,
     /// Collision grid; a copy so placed furniture can block tiles.
@@ -227,6 +229,7 @@ impl Instance {
             watchers: vec![Vec::new(); cells],
             seat_occupant: HashMap::new(),
             games: HashMap::new(),
+            elders: HashMap::new(),
             screen_index: None,
             owner,
             economy,
@@ -326,6 +329,7 @@ impl Instance {
             }
             let now = self.clock.now_ms();
             self.step(now);
+            self.elder_tick(now);
             self.screen_tick(now);
             self.fish_tick(now);
             self.garden_tick(now);

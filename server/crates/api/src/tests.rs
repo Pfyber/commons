@@ -341,3 +341,248 @@ async fn home_place_and_pickup() {
     assert_eq!(st, StatusCode::OK, "{r}");
     assert_eq!(r["totals"][0], serde_json::json!([400, 1]));
 }
+
+// ---- town life ------------------------------------------------------------------
+
+mod town_life {
+    use super::*;
+    use crate::town::{self, STREET_AUTHORS};
+    use axum::Router;
+    use serde_json::{Value, json};
+
+    fn app(s: Arc<AppState>) -> Router {
+        Router::new().nest("/api", town::routes()).with_state(s)
+    }
+
+    fn bearer_for(s: &AppState, id: Uuid, name: &str) -> String {
+        let claims = token::AccessClaims {
+            sub: id.to_string(),
+            name: name.into(),
+            look: 1,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+        };
+        format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        )
+    }
+
+    async fn call(
+        app: &Router,
+        auth: &str,
+        method: &str,
+        uri: &str,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(if method == "GET" {
+                Body::empty()
+            } else {
+                Body::from(body.to_string())
+            })
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    #[test]
+    fn hashtags_are_normalised_and_capped() {
+        assert_eq!(
+            town::hashtags("Ride on Sunday? #Cycling #gravel, #cycling #x #mtb-trails #four"),
+            vec!["cycling", "gravel", "mtb-trails"]
+        );
+        assert!(town::hashtags("no tags # here").is_empty());
+        assert_eq!(
+            town::clean_post("  hello\n\n  park  ").as_deref(),
+            Some("hello park")
+        );
+        assert_eq!(town::clean_post("   "), None);
+    }
+
+    #[tokio::test]
+    async fn quarters_boards_and_streets() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let p = player(&s).await;
+        let me = bearer_for(&s, p, "Ada");
+
+        // Join two quarters at once; leave one.
+        for q in ["sports", "art"] {
+            let uri = format!("/api/town/quarters/{q}/join");
+            let (st, _) = call(&app, &me, "POST", &uri, json!({})).await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        call(&app, &me, "POST", "/api/town/quarters/art/leave", json!({})).await;
+        let (_, qs) = call(&app, &me, "GET", "/api/town/quarters", Value::Null).await;
+        let joined: Vec<&str> = qs
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|q| q["joined"] == true)
+            .map(|q| q["slug"].as_str().unwrap())
+            .collect();
+        assert_eq!(joined, vec!["sports"]);
+        let (st, _) = call(&app, &me, "POST", "/api/town/quarters/nope/join", json!({})).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+
+        // Posting picks up tags and joins the quarter; posting again at once
+        // is too soon.
+        let tag = format!("t{}", &Uuid::new_v4().simple().to_string()[..8]);
+        let board = "/api/town/quarters/music/board";
+        let (st, r) = call(
+            &app,
+            &me,
+            "POST",
+            board,
+            json!({ "body": format!("open mic tonight? #{tag}") }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["tags"], json!([tag]));
+        let (st, _) = call(&app, &me, "POST", board, json!({ "body": "again" })).await;
+        assert_eq!(st, StatusCode::TOO_MANY_REQUESTS);
+
+        // Enough different people using the tag: a street is forming.
+        for i in 1..STREET_AUTHORS {
+            let other = player(&s).await;
+            let auth = bearer_for(&s, other, &format!("P{i}"));
+            let (st, _) = call(
+                &app,
+                &auth,
+                "POST",
+                board,
+                json!({ "body": format!("me too #{tag}") }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        let (_, b) = call(&app, &me, "GET", &format!("{board}?tag={tag}"), Value::Null).await;
+        assert_eq!(b["posts"].as_array().unwrap().len() as i64, STREET_AUTHORS);
+        let t = b["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["tag"] == tag.as_str())
+            .unwrap();
+        assert_eq!(t["authors"], STREET_AUTHORS);
+        assert_eq!(t["forming"], true);
+    }
+
+    #[tokio::test]
+    async fn donations_fill_a_goal_exactly_once() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let p = player(&s).await; // 100 coins
+        let key = format!("test_{}", Uuid::new_v4().simple());
+        let goal: i32 = sqlx::query_scalar(
+            "INSERT INTO town_goals (key, title, blurb, target, seq)
+             VALUES ($1, 'Test', 'Test', 50, (SELECT coalesce(max(seq), 0) + 100 FROM town_goals)) RETURNING id",
+        )
+        .bind(&key)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+
+        let d = town::donate_to(&s, goal, p, 30, "a").await.unwrap();
+        assert_eq!(
+            d,
+            town::Donated {
+                accepted: 30,
+                completed: false
+            }
+        );
+        // A retry of the same press changes nothing.
+        let again = town::donate_to(&s, goal, p, 30, "a").await.unwrap();
+        assert_eq!(again.accepted, 0);
+        // Only the 20 still needed are taken, and the goal completes.
+        let d = town::donate_to(&s, goal, p, 40, "b").await.unwrap();
+        assert_eq!(
+            d,
+            town::Donated {
+                accepted: 20,
+                completed: true
+            }
+        );
+        let mut conn = db.acquire().await.unwrap();
+        let coins = crate::economy::totals(&mut conn, p, &[1]).await.unwrap();
+        assert_eq!(coins, vec![(1, 50)]);
+        assert!(
+            town::donate_to(&s, goal, p, 5, "c").await.is_err(),
+            "a reached goal takes nothing"
+        );
+        sqlx::query("DELETE FROM town_goals WHERE id = $1")
+            .bind(goal)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn daily_requests_are_stable_and_done_once() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let a = town::requests_for(&s.catalog, "2026-10-12");
+        assert_eq!(a.len(), town::REQUESTS_PER_DAY);
+        assert_eq!(
+            a,
+            town::requests_for(&s.catalog, "2026-10-12"),
+            "same day, same requests"
+        );
+        assert_ne!(a, town::requests_for(&s.catalog, "2026-10-13"));
+        let mut items: Vec<i32> = a.iter().map(|r| r.item).collect();
+        items.sort();
+        items.dedup();
+        assert_eq!(items.len(), a.len(), "no repeats within a day");
+
+        // Delivering: without the goods it fails; with them it pays, once.
+        let app = app(s.clone());
+        let p = player(&s).await;
+        let me = bearer_for(&s, p, "Bo");
+        let (_, list) = call(&app, &me, "GET", "/api/town/requests", Value::Null).await;
+        let r = list["requests"][0].clone();
+        assert_eq!(r["done"], false);
+        let deliver = "/api/town/requests/0/deliver";
+        let (st, _) = call(&app, &me, "POST", deliver, json!({})).await;
+        assert_eq!(st, StatusCode::CONFLICT, "nothing to deliver yet");
+        let item = r["item"].as_i64().unwrap() as i32;
+        let qty = r["qty"].as_i64().unwrap() as i32;
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            p,
+            &[Op { item, delta: qty }],
+            "test",
+            &format!("t:{p}:goods"),
+        )
+        .await
+        .unwrap();
+        let (st, applied) = call(&app, &me, "POST", deliver, json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        let coins = applied["totals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t[0] == 1)
+            .unwrap()[1]
+            .as_i64()
+            .unwrap();
+        assert_eq!(coins, 100 + r["reward"].as_i64().unwrap());
+        let (st, _) = call(&app, &me, "POST", deliver, json!({})).await;
+        assert_eq!(st, StatusCode::CONFLICT, "only once a day");
+        let (_, list) = call(&app, &me, "GET", "/api/town/requests", Value::Null).await;
+        assert_eq!(list["requests"][0]["done"], true);
+    }
+}

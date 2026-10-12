@@ -11,6 +11,8 @@ const GLYPH: Record<string, string> = {
 };
 
 const STATUS = { WAITING: 0, PLAYING: 1, WHITE_WON: 2, BLACK_WON: 3, DRAW: 4 };
+/** The Park Elder, the computer opponent (server: protocol ELDER_ID). */
+export const ELDER_ID = 0xfffffffe;
 
 /** 8×8 array of piece letters ("" for empty), rank 8 first. */
 export function parseFen(fen: string): string[][] {
@@ -104,11 +106,13 @@ export class ChessPanel {
   private render() {
     const s = this.state!;
     const side = this.mySide();
-    const name = (id: number) => (id ? this.h.nameOf(id) : "empty seat");
+    const name = (id: number) => (id === ELDER_ID ? "Park Elder 🧓" : id ? this.h.nameOf(id) : "empty seat");
     const toMove = s.fen.split(" ")[1] === "w" ? "White" : "Black";
     const status =
       s.status === STATUS.WAITING
-        ? "Waiting for two players: sit on the benches either side of the table."
+        ? side
+          ? "Waiting for someone to sit opposite, or play the Park Elder."
+          : "Waiting for two players: sit on the benches either side of the table."
         : s.status === STATUS.PLAYING
           ? this.myTurn()
             ? "Your move."
@@ -156,6 +160,10 @@ export class ChessPanel {
     this.actionsEl.innerHTML = "";
     if (side && s.status === STATUS.PLAYING) this.actionsEl.append(this.button("Resign", () => this.h.move(this.table, "resign")));
     if (side && s.status >= STATUS.WHITE_WON) this.actionsEl.append(this.button("Rematch", () => this.h.move(this.table, "new")));
+    // Sitting alone: the Park Elder will take the other side.
+    if (side && s.status === STATUS.WAITING && (!s.white || !s.black)) {
+      this.actionsEl.append(this.button("Play the Park Elder 🧓", () => this.h.move(this.table, "elder")));
+    }
   }
 
   private button(label: string, run: () => void) {

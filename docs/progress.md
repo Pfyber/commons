@@ -250,6 +250,34 @@ See docs/adr/0002-m3-economy.md for the decisions behind this.
 
 See docs/adr/0003-m4-social.md.
 
+## Town life: quiet-launch batch (2026-10-12)
+
+Things to do with few people around, and a shared sense of "town".
+
+- **Topic corners** (seeds of future quarters): Sports (a pitch with goals),
+  Art (easels by the pond), Music (a bandstand) and Games (arcade cabinets),
+  each with a board. Join as many as you like; post with `#tags`; tags many
+  people use show **"street forming"**, the seed of a future alley.
+- **Town goal** at the fountain: everyone donates coins. Reaching a goal
+  changes the park for everyone, in order: lanterns around the fountain →
+  wildflowers along the paths → fireworks over the pond at night.
+- **Notice board** by the plaza: three neighbours' requests a day (fish or
+  flowers), paying more than the market. Each can be done once a day.
+- **The Park Elder**: sit alone at a chess table and press "Play the Park
+  Elder" for a gentle computer opponent. It hands its seat over to anyone
+  who sits down.
+- **Two-seat benches** in the park; a polish pass (camera, signs, labels,
+  mobile HUD); crisp pixel art at any display scaling.
+
+Tests: API integration tests (quarters and streets, donations capped and
+idempotent, requests stable per day and done once); Park Elder engine tests
+(takes free material, finds mate, varies its replies, finishes games) and a
+table test (asks in, yields its seat, leaves with the player); a browser run
+through every corner, the board, the notice board, a donation and a game
+against the Elder; M2–M4 flows re-run.
+
+See docs/adr/0004-town-life.md.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

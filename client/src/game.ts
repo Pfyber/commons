@@ -8,7 +8,9 @@ import { DayNight } from "./ambient/daynight";
 import type { Economy } from "./economy";
 import type { ServerMsg } from "./net/protocol.gen";
 import type { Social } from "./social";
+import type { Town } from "./town";
 import type { FriendsPanel } from "./ui/social";
+import type { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame } from "./ui/panels";
@@ -20,6 +22,7 @@ import { compress, findPath } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
 import { TILE } from "./world/art";
+import { Milestones } from "./world/milestones";
 import { Scene } from "./world/scene";
 
 /** Error codes from server/crates/protocol (error_code). */
@@ -46,6 +49,10 @@ export interface Ui {
   menu: ActionMenu;
   social: Social;
   friends: FriendsPanel;
+  town: Town;
+  quarter: QuarterPanel;
+  requests: RequestsPanel;
+  goal: GoalPanel;
 }
 
 /** Where this Game is: label for the HUD and, for homes, whose. */
@@ -98,6 +105,7 @@ export class Game {
   private hud: Hud;
   private ambient: Ambient;
   private daynight: DayNight;
+  readonly milestones: Milestones;
 
   constructor(
     private app: Application,
@@ -120,6 +128,13 @@ export class Game {
     }
     this.ambient = new Ambient(this.scene, map);
     this.daynight = new DayNight(app, this.scene, map);
+    this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
+    if (zoneId === "founders_park") {
+      ui.town
+        .loadGoal()
+        .then((g) => this.milestones.apply(g.reached))
+        .catch(() => {});
+    }
     this.chess = new ChessPanel(document.body, () => this.selfId, {
       move: (table, uci) => this.socket?.send({ t: "GameMove", table, uci }),
       close: () => this.chess.hide(),
@@ -433,6 +448,17 @@ export class Game {
       ui.market.show();
       return true;
     }
+    if (obj && (obj.kind.startsWith("board_") || obj.kind === "notice_board" || obj.kind === "fountain")) {
+      // Walk over if it's far, and open its panel straight away.
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 4) {
+        const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      if (obj.kind === "notice_board") ui.requests.show();
+      else if (obj.kind === "fountain") ui.goal.show();
+      else void ui.quarter.openFor(obj.kind.slice("board_".length));
+      return true;
+    }
     if (obj?.kind === "homes_gate") {
       this.events.onTravel("home");
       return true;
@@ -638,6 +664,7 @@ export class Game {
     this.props.update(wallNow);
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
     this.daynight.update();
+    this.milestones.update(wallNow, this.daynight.dark);
     if (this.screen && self) {
       const c = this.screen.center;
       this.screen.update(serverNow, Math.abs(c.x - self.pos.x) < 30 && Math.abs(c.y - self.pos.y) < 20);
@@ -655,6 +682,7 @@ export class Game {
     for (const d of this.disposers) d();
     this.chess.el.remove();
     this.daynight.destroy();
+    this.milestones.destroy();
     for (const p of [this.ui.plot, this.ui.menu, this.ui.market]) p.hide();
     this.ui.reel.stop();
     this.ui.place.hide();

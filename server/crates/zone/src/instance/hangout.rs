@@ -3,11 +3,21 @@
 
 use super::Instance;
 use crate::games::MoveError;
-use commons_protocol::{SEAT_GROUND, ServerMsg, error_code, game_status, state};
+use commons_protocol::{ELDER_ID, SEAT_GROUND, ServerMsg, error_code, game_status, state};
 use commons_sim::furniture::{Side, adjacent};
 
 /// The zone's single big screen.
 const SCREEN_ID: u32 = 1;
+/// How long the Park Elder "thinks" before moving.
+const ELDER_THINK_MS: u32 = 900;
+
+/// The Park Elder playing one side of a table.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Elder {
+    side: Side,
+    /// When to make the next move, if it's the elder's turn.
+    due: Option<u32>,
+}
 
 impl Instance {
     // ---- sitting -----------------------------------------------------------
@@ -117,10 +127,61 @@ impl Instance {
 
     // ---- table games -------------------------------------------------------
 
+    /// Who plays white and black: a seated player, the Park Elder, or 0.
     fn players(&self, table: u32) -> (u32, u32) {
+        let t = &self.zone.furniture.tables[&table];
+        let elder = self.elders.get(&table).map(|e| e.side);
+        let occ = |s, side| match self.seat_occupant.get(&s) {
+            Some(&id) => id,
+            None if elder == Some(side) => ELDER_ID,
+            None => 0,
+        };
+        (
+            occ(t.white_seat, Side::White),
+            occ(t.black_seat, Side::Black),
+        )
+    }
+
+    /// Seated players only (the elder doesn't count).
+    fn humans(&self, table: u32) -> (u32, u32) {
         let t = &self.zone.furniture.tables[&table];
         let occ = |s| self.seat_occupant.get(&s).copied().unwrap_or(0);
         (occ(t.white_seat), occ(t.black_seat))
+    }
+
+    /// Schedules the elder's reply if it's its turn.
+    fn elder_schedule(&mut self, table: u32, now: u32) {
+        let Some(game) = self.games.get(&table) else {
+            return;
+        };
+        let turn = if game.white_to_move() {
+            Side::White
+        } else {
+            Side::Black
+        };
+        let playing = game.status == game_status::PLAYING;
+        if let Some(e) = self.elders.get_mut(&table) {
+            e.due = (playing && e.side == turn).then_some(now + ELDER_THINK_MS);
+        }
+    }
+
+    /// Plays the elder's due moves (called every tick).
+    pub(super) fn elder_tick(&mut self, now: u32) {
+        let due: Vec<u32> = self
+            .elders
+            .iter()
+            .filter(|(_, e)| e.due.is_some_and(|d| d <= now))
+            .map(|(&t, _)| t)
+            .collect();
+        for table in due {
+            let side = self.elders[&table].side;
+            self.elders.get_mut(&table).unwrap().due = None;
+            let game = self.games.entry(table).or_default();
+            if let Some(mv) = game.elder_move(now as u64 ^ ((table as u64) << 32)) {
+                let _ = game.play(side == Side::White, &mv);
+            }
+            self.broadcast_game(table);
+        }
     }
 
     fn game_state(&self, table: u32) -> ServerMsg {
@@ -144,7 +205,22 @@ impl Instance {
     }
 
     /// Starts a game when both seats fill; abandons it when a player leaves.
+    /// The elder leaves when the table empties or someone takes its seat.
     fn table_changed(&mut self, table: u32) {
+        if let Some(e) = self.elders.get(&table) {
+            let (hw, hb) = self.humans(table);
+            let taken = match e.side {
+                Side::White => hw != 0,
+                Side::Black => hb != 0,
+            };
+            if taken || (hw == 0 && hb == 0) {
+                self.elders.remove(&table);
+                if taken {
+                    // A real opponent sat down: a fresh game between people.
+                    self.games.entry(table).or_default().reset_waiting();
+                }
+            }
+        }
         let (white, black) = self.players(table);
         let both = white != 0 && black != 0;
         let game = self.games.entry(table).or_default();
@@ -181,6 +257,17 @@ impl Instance {
             _ => return self.error(id, error_code::TOO_FAR, "sit at the table to play"),
         };
         let (wp, bp) = self.players(table);
+        if uci == "elder" {
+            // Only for someone sitting alone at a free table.
+            if (wp == 0) == (bp == 0) || self.elders.contains_key(&table) {
+                return;
+            }
+            let side = if wp == 0 { Side::White } else { Side::Black };
+            self.elders.insert(table, Elder { side, due: None });
+            self.table_changed(table);
+            self.elder_schedule(table, now);
+            return;
+        }
         let game = self.games.entry(table).or_default();
         match uci {
             "new" if wp != 0 && bp != 0 && game.is_over() => game.start(),
@@ -200,6 +287,7 @@ impl Instance {
             },
         }
         self.broadcast_game(table);
+        self.elder_schedule(table, now);
     }
 
     // ---- big screen ----------------------------------------------------------
@@ -323,6 +411,77 @@ mod tests {
             }
         )));
         a.pump();
+    }
+
+    #[test]
+    fn the_park_elder_plays_when_nobody_else_is_around() {
+        let mut inst = chess_instance();
+        let mut a = connect(&mut inst, 1, "black", (20, 12));
+        let (bs, table) = (5 * 16 + 6, 5 * 16 + 5);
+        place(&mut inst, 1, (6, 4));
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::Sit { seat: bs },
+        });
+        let ask = |inst: &mut Instance| {
+            inst.handle(Cmd::Msg {
+                conn: 1,
+                msg: ClientMsg::GameMove {
+                    table,
+                    uci: "elder".into(),
+                },
+            })
+        };
+        ask(&mut inst);
+        assert_eq!(inst.games[&table].status, game_status::PLAYING);
+        assert_eq!(inst.players(table), (commons_protocol::ELDER_ID, 1));
+
+        // The elder has white and moves first, after thinking a moment.
+        let now = inst.clock.now_ms();
+        inst.elder_tick(now);
+        assert!(inst.games[&table].white_to_move(), "not yet");
+        inst.elder_tick(now + 1000);
+        assert!(!inst.games[&table].white_to_move(), "the elder moved");
+        let reply = inst.games[&table].legal()[0].clone();
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::GameMove { table, uci: reply },
+        });
+        inst.elder_tick(now + 3000);
+        assert!(!inst.games[&table].white_to_move(), "and answered");
+
+        // Someone real takes the elder's seat: a fresh game between people.
+        let mut b = connect(&mut inst, 2, "white", (20, 12));
+        place(&mut inst, 2, (4, 6));
+        inst.handle(Cmd::Msg {
+            conn: 2,
+            msg: ClientMsg::Sit { seat: 5 * 16 + 4 },
+        });
+        assert!(inst.elders.is_empty());
+        assert_eq!(inst.players(table), (2, 1));
+        assert_eq!(inst.games[&table].status, game_status::PLAYING);
+        assert_eq!(inst.games[&table].last, "", "a new game");
+
+        // Asking for the elder at a full table does nothing.
+        ask(&mut inst);
+        assert!(inst.elders.is_empty());
+
+        // Alone again and the elder sits in; leaving sends it home too.
+        inst.handle(Cmd::Msg {
+            conn: 2,
+            msg: ClientMsg::MoveTo { x: 10, y: 10 },
+        });
+        ask(&mut inst);
+        assert_eq!(inst.players(table), (commons_protocol::ELDER_ID, 1));
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::MoveTo { x: 10, y: 10 },
+        });
+        assert!(inst.elders.is_empty());
+        assert_eq!(inst.games[&table].status, game_status::WAITING);
+        inst.flush();
+        a.pump();
+        b.pump();
     }
 
     #[test]

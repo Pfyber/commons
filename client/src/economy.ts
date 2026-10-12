@@ -19,7 +19,7 @@ export interface AlbumEntry {
   first_at: number;
 }
 
-interface Applied {
+export interface Applied {
   duplicate: boolean;
   totals: [number, number][];
   added: [number, number][];
@@ -85,7 +85,8 @@ export class Economy {
     this.emit();
   }
 
-  private applyResult(r: Applied) {
+  /** Takes new totals from any economy response. */
+  applyResult(r: Applied) {
     for (const [item, qty] of r.totals) this.inventory.set(item, qty);
     this.emit();
   }

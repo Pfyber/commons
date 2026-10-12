@@ -31,6 +31,9 @@ bench to sit (🪑 sits on the ground); sit beside a chess table to play. Add
 soil plot to garden, visit the market cart by the fountain, and take the west
 gate home. 🎒 is your bag (B), 📖 your album (L), 👥 friends (F) and 🔔
 notifications (N). Tap another player to befriend, message or block them.
+Tap a corner's board (sports, art, music, games) to read and post, the
+notice board for daily requests, and the fountain for the town goal. Sit
+alone at a chess table to play the Park Elder.
 
 Valkey, NATS, MinIO, Prometheus and Grafana aren't needed yet. To run the full
 set of backing services, including a containerised Postgres:

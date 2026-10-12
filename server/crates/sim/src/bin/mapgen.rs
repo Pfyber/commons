@@ -1,6 +1,7 @@
 //! Generates `assets/maps/founders_park.json`, the ≈96×96 founding map (spec §11):
 //! central plaza with fountain, pond, chess tables, benches, garden plots,
-//! big screen, town hall, homes gate and one fogged bridge to the east.
+//! big screen, town hall, homes gate, one fogged bridge to the east, a
+//! notice board and four topic corners (sports, art, music, games).
 //!
 //! Deterministic: rerunning produces the same file. Hand-authored maps will
 //! replace this once `tools/mapedit` exists.
@@ -23,6 +24,7 @@ const GROUND: &[&str] = &[
     "bridge",
     "fog",
     "floor",
+    "pitch",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -270,6 +272,28 @@ fn park() -> MapFile {
 
     // The market cart: sell your catches and harvest, buy seeds and furniture.
     b.object("market_cart", 54, 51, 2, 1, Some("Market"), true);
+
+    // The notice board: neighbours' small requests, new every day.
+    b.object("notice_board", 38, 44, 2, 1, Some("Notice Board"), true);
+
+    // Topic corners: the seeds of future quarters (spec §9). Each has a
+    // landmark to do things at and a board to talk on.
+    // Sports: a small pitch with goals, north-east.
+    b.rect(59, 24, 14, 9, "pitch");
+    b.object("goal", 59, 27, 1, 3, None, true);
+    b.object("goal", 72, 27, 1, 3, None, true);
+    b.object("board_sports", 55, 27, 2, 1, Some("Sports Corner"), true);
+    // Art: easels on the pond's east shore.
+    b.object("easels", 39, 61, 3, 1, None, true);
+    b.object("board_art", 40, 58, 2, 1, Some("Art Corner"), true);
+    // Music: a bandstand south of the plaza.
+    b.rect(52, 68, 7, 6, "plaza");
+    b.object("bandstand", 53, 69, 5, 3, None, true);
+    b.object("board_music", 54, 74, 2, 1, Some("Music Corner"), true);
+    // Games: arcade cabinets west of the plaza.
+    b.rect(22, 39, 10, 6, "plaza");
+    b.object("arcade", 24, 41, 3, 1, None, true);
+    b.object("board_games", 28, 41, 2, 1, Some("Games Corner"), true);
 
     // The fogged bridge across the river: built but closed until the first vote.
     b.rect(84, 47, 4, 3, "bridge");
