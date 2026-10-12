@@ -78,6 +78,33 @@ impl Instance {
         self.broadcast(cell, &msg, None);
         if let Some((table, _)) = self.zone.furniture.seats.get(&seat).and_then(|s| s.table) {
             self.table_changed(table);
+        } else if seat != SEAT_GROUND {
+            // Sharing a bench: anyone seated right next to us.
+            let near: Vec<u32> = self
+                .seat_occupant
+                .iter()
+                .filter(|&(&s, &who)| {
+                    who != id
+                        && self.zone.furniture.seats.get(&s).is_some_and(|s| {
+                            (s.tile.0 as i32 - seat_tile.0 as i32).abs() <= 1
+                                && (s.tile.1 as i32 - seat_tile.1 as i32).abs() <= 1
+                        })
+                })
+                .map(|(_, &who)| who)
+                .collect();
+            if !near.is_empty() {
+                self.sat_together(&[id]);
+                self.sat_together(&near);
+            }
+        }
+    }
+
+    /// Marks avatars as having sat with someone (reported with activity).
+    fn sat_together(&mut self, ids: &[u32]) {
+        for id in ids {
+            if let Some(a) = self.avatars.get_mut(id) {
+                a.sat_together = true;
+            }
         }
     }
 
@@ -226,6 +253,8 @@ impl Instance {
         let game = self.games.entry(table).or_default();
         if both && game.status == game_status::WAITING {
             game.start();
+            // A game with someone (the Park Elder counts) is sitting together.
+            self.sat_together(&[white, black]);
         } else if !both && game.status != game_status::WAITING {
             game.reset_waiting();
         }
@@ -351,6 +380,10 @@ mod tests {
         assert_eq!(inst.avatars[&1].state, state::SITTING);
         assert_eq!(inst.avatars[&1].tile, (4, 5));
         assert_eq!(inst.games[&table].status, game_status::PLAYING);
+        assert!(
+            inst.avatars[&1].sat_together && inst.avatars[&2].sat_together,
+            "a game together counts for the Caretaker's 'sit with someone'"
+        );
 
         inst.handle(Cmd::Msg {
             conn: 2,

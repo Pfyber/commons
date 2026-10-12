@@ -393,6 +393,52 @@ from the avatar menu reaches the Caretaker.
 
 See docs/adr/0007-governance.md.
 
+## Launch batch: the founding experience and running for real (2026-10-12)
+
+Spec §11, plus what a real launch needs.
+
+- **The Caretaker:** a gardener NPC on a clock-driven round, the same for
+  everyone, waiting at the fountain during gatherings. They welcome
+  newcomers (the panel opens on a first visit) with three tasks: catch a
+  fish, plant a seed, sit with someone (a shared bench or a chess game; the
+  Park Elder counts). A chip under the place name tracks progress, and the
+  Caretaker chats when you're close.
+- **The Founders' Grove** east of the chess tables. Finishing the tasks in
+  the founding season plants a seedling with your name. It grows over real
+  months (seedling, then sapling at 7 days, young tree at 30, grown at 90),
+  in five species. You also get your name on the Founders' Stone, a 🌱 by
+  your name for everyone, and a Founder's Lantern. The season closes when
+  the 80 spots are filled, or on a set date.
+- **Gathering hours:** an evening at the fountain (daily 18:00 UTC) and chess
+  night (Thursdays 18:30 UTC), shown in the player's own time zone with a
+  nudge 10 minutes before.
+- **Sign-in emails** over SMTP (any provider), checked at startup. In
+  production a missing mailer is a visible error, not a silent "sent".
+- **`infra/prod`:** one host, with Caddy for automatic HTTPS and the client,
+  one image for the four services, Postgres, and nightly backups (14 kept).
+  It comes with a deploy guide and a launch-day checklist.
+- **Link previews** (Open Graph) for sharing the address.
+
+### Tests
+
+API on Postgres: tasks from a fish, a planting and a zone `sat_together`
+report; founder #1 gets slot 0 and a lantern; planting twice changes
+nothing; the founders list is public. Unit tests: tree stages. Zone: a
+chess game marks both players as having sat together. Client: gathering
+times, daily and weekly. Browser: a newcomer sees the Caretaker's panel
+on their first visit, taps the Caretaker, sits at chess with another
+player, sees the chip turn to "Plant your seedling!", plants, finds the
+tree in the grove and the name on the Stone, and another player sees the
+🌱. No errors.
+
+### Botswarm (500 bots)
+
+| Tick p99 | Client KB/s p99 | Gate |
+|---|---|---|
+| 3.8 ms | 3.38 | PASS |
+
+See docs/adr/0008-founding-and-launch.md.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

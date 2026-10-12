@@ -1,0 +1,13 @@
+# The client, built and served by Caddy (which also terminates TLS and
+# routes /api and /ws to the services).
+FROM node:22-bookworm-slim AS build
+WORKDIR /src
+COPY assets assets
+COPY client/package.json client/package-lock.json client/
+RUN cd client && npm ci
+COPY client client
+RUN cd client && npm run build
+
+FROM caddy:2-alpine
+COPY --from=build /src/client/dist /srv/client
+COPY infra/prod/Caddyfile /etc/caddy/Caddyfile

@@ -259,13 +259,29 @@ async fn magic_link(
         .put_magic(&token, &email, now + MAGIC_TTL_SECS)
         .await?;
     let link = format!("{}/?login={token}", state.client_url);
+    if let Some(mailer) = &state.mailer {
+        if let Err(e) = mailer.send_link(&email, &link).await {
+            tracing::error!(error = %e, "sending a sign-in email failed");
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "mail_failed",
+                "We couldn't send the email just now. Try again in a minute.",
+            ));
+        }
+        if !state.dev {
+            return Ok(Json(serde_json::json!({ "sent": true })));
+        }
+    }
     if state.dev {
         tracing::info!(%email, %link, "magic link (dev)");
         return Ok(Json(serde_json::json!({ "sent": true, "dev_link": link })));
     }
-    // No mail provider is wired up yet; production deployments must add one here.
-    tracing::warn!(%email, "magic link requested but no mailer is configured");
-    Ok(Json(serde_json::json!({ "sent": true })))
+    tracing::error!(%email, "magic link requested but SMTP_URL is not set");
+    Err(ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "mail_unavailable",
+        "Sign-in emails aren't set up yet.",
+    ))
 }
 
 #[derive(Deserialize)]

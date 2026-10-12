@@ -189,6 +189,9 @@ impl Builder {
     }
 }
 
+/// The Founders' Grove: (x0, y0, x1, y1), inclusive.
+const GROVE_AREAS: [(u16, u16, u16, u16); 2] = [(64, 33, 82, 44), (73, 18, 82, 31)];
+
 fn park() -> MapFile {
     let n = W as usize * H as usize;
     let mut b = Builder {
@@ -470,7 +473,7 @@ fn park() -> MapFile {
         1,
         1,
         Some(
-            "South: the Town Hall · East: the bridge (closed for now) · Further south: the orchard",
+            "South: the Town Hall · East: the bridge (closed for now) · North-east: the Founders' Grove · Further south: the orchard",
         ),
         true,
     );
@@ -512,6 +515,52 @@ fn park() -> MapFile {
     for (x, y) in [(43, 44), (52, 44), (43, 52), (52, 52)] {
         b.decor(x, y, "bench");
         b.decor(x + 1, y, "bench");
+    }
+
+    // The Founders' Grove (spec §11), east of the chess tables: a stone with
+    // every founder's name and a seedling for each, filling out from the stone.
+    let stone = (72u16, 38u16);
+    b.stroke(
+        &[(68.0, 47.0), (70.0, 43.0), (72.5, 39.5)],
+        0.8,
+        Brush::Path,
+    );
+    b.object(
+        "founders_stone",
+        stone.0,
+        stone.1,
+        2,
+        1,
+        Some("Founders' Stone"),
+        true,
+    );
+    let mut slots = vec![];
+    for (x0, y0, x1, y1) in GROVE_AREAS {
+        for (r, y) in (y0 + 1..=y1).step_by(2).enumerate() {
+            for x in (x0 + 1 + (r % 2) as u16..=x1).step_by(2) {
+                let near_stone = (x as i32 - stone.0 as i32 - 1).abs() <= 2
+                    && (y as i32 - stone.1 as i32).abs() <= 1;
+                if b.free(x, y) && !near_stone {
+                    slots.push((x, y));
+                }
+            }
+        }
+    }
+    let d2 = |&(x, y): &(u16, u16)| {
+        let (dx, dy) = (
+            x as i32 * 2 - (stone.0 as i32 * 2 + 1),
+            y as i32 - stone.1 as i32,
+        );
+        (dx * dx + dy * dy * 4, y, x)
+    };
+    slots.sort_by_key(d2);
+    assert!(
+        slots.len() >= commons_sim::GROVE_SLOTS,
+        "only {} grove slots",
+        slots.len()
+    );
+    for &(x, y) in &slots[..commons_sim::GROVE_SLOTS] {
+        b.object("grove_slot", x, y, 1, 1, None, false);
     }
 
     // ---- planting -------------------------------------------------------------------
@@ -558,7 +607,11 @@ fn park() -> MapFile {
             }
             let in_maze = (mx..mx + mw).contains(&x) && (my..my + mh).contains(&y);
             let in_garden = (19..37).contains(&x) && (24..38).contains(&y);
-            if near_plaza || screen_lawn || in_maze || in_garden || near_path(&b, x, y) {
+            let in_grove = GROVE_AREAS
+                .iter()
+                .any(|&(x0, y0, x1, y1)| (x0..=x1).contains(&x) && (y0..=y1).contains(&y));
+            if near_plaza || screen_lawn || in_maze || in_garden || in_grove || near_path(&b, x, y)
+            {
                 continue;
             }
             let meadow = ground == g("flowers");

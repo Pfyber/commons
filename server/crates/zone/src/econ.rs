@@ -17,6 +17,18 @@ pub enum CallError {
     Unavailable,
 }
 
+/// One player's activity since the last report.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActivityRow {
+    pub player: String,
+    pub secs: u32,
+    pub interactions: u32,
+    /// Sat down with someone (a shared bench, a game of chess): one of the
+    /// Caretaker's first tasks.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub sat_together: bool,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Applied {
     #[serde(default)]
@@ -208,10 +220,8 @@ impl EconomyClient {
 
     /// Time present and interactions per player, for activity days.
     /// Fire-and-forget: a lost report only costs a minute of activity.
-    pub fn report_activity(self: &Arc<Self>, rows: Vec<(String, u32, u32)>) {
-        let body = serde_json::json!({
-            "rows": rows.iter().map(|(p, s, n)| serde_json::json!({ "player": p, "secs": s, "interactions": n })).collect::<Vec<_>>(),
-        });
+    pub fn report_activity(self: &Arc<Self>, rows: Vec<ActivityRow>) {
+        let body = serde_json::json!({ "rows": rows });
         let this = self.clone();
         tokio::spawn(async move {
             if let Err(e) = this

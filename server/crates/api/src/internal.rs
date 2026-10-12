@@ -515,6 +515,8 @@ struct ActivityRow {
     player: String,
     secs: i32,
     interactions: i32,
+    #[serde(default)]
+    sat_together: bool,
 }
 
 #[derive(Deserialize)]
@@ -544,6 +546,11 @@ async fn activity(
         )
         .await
         .map_err(db_err)?;
+        if r.sat_together {
+            crate::welcome::mark(&mut conn, player, crate::welcome::SAT_TOGETHER)
+                .await
+                .map_err(db_err)?;
+        }
     }
     Ok(Json(serde_json::json!({ "ok": true })))
 }

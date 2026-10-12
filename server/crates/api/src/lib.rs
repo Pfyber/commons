@@ -8,11 +8,13 @@ pub mod economy;
 pub mod error;
 pub mod gov;
 pub mod internal;
+pub mod mail;
 pub mod play;
 pub mod store;
 #[cfg(test)]
 mod tests;
 pub mod town;
+pub mod welcome;
 
 use anyhow::Context;
 use economy::Catalog;
@@ -28,6 +30,8 @@ pub struct AppState {
     pub catalog: Arc<Catalog>,
     /// Garden growth period per stage (spec: plants grow over real days).
     pub stage_ms: i64,
+    /// Sends sign-in links; `None` in dev (links are returned instead).
+    pub mailer: Option<mail::Mailer>,
 }
 
 /// Connects to Postgres and applies `server/migrations`.

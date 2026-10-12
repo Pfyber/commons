@@ -1,0 +1,111 @@
+# Commons on one server: Caddy (HTTPS + the client), the four services,
+# Postgres and nightly backups. See infra/prod/README.md.
+#
+#   cp infra/prod/.env.example infra/prod/.env   # then fill it in
+#   docker compose -f infra/prod/docker-compose.yml --env-file infra/prod/.env up -d --build
+
+name: commons-prod
+
+x-app: &app
+  build: { context: ../.., dockerfile: infra/prod/Dockerfile }
+  image: commons-server
+  restart: unless-stopped
+  environment: &env
+    COMMONS_SECRET: ${COMMONS_SECRET:?set COMMONS_SECRET (64 random characters)}
+    DATABASE_URL: postgres://commons:${POSTGRES_PASSWORD}@postgres:5432/commons
+    COMMONS_CLIENT_URL: https://${COMMONS_DOMAIN}
+    COMMONS_API_INTERNAL_URL: http://api:8080
+    COMMONS_SOCIAL_INTERNAL_URL: http://social:8083
+    ZONE_PUBLIC_URL: wss://${COMMONS_DOMAIN}/ws
+    COMMONS_CARETAKERS: ${COMMONS_CARETAKERS:-}
+    SMTP_URL: ${SMTP_URL:-}
+    MAIL_FROM: ${MAIL_FROM:-}
+    COMMONS_FOUNDING_SEASON_END: ${COMMONS_FOUNDING_SEASON_END:-}
+    RUST_LOG: ${RUST_LOG:-info}
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: commons
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: commons
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commons"]
+      interval: 5s
+      retries: 20
+
+  api:
+    <<: *app
+    command: ["api"]
+    depends_on: { postgres: { condition: service_healthy } }
+    healthcheck: &health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 15s
+      retries: 5
+
+  social:
+    <<: *app
+    command: ["social"]
+    depends_on: { api: { condition: service_healthy } }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/healthz"]
+
+  orchestrator:
+    <<: *app
+    command: ["orchestrator"]
+    depends_on: { api: { condition: service_healthy } }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/healthz"]
+
+  zone:
+    <<: *app
+    command: ["zone"]
+    depends_on: { api: { condition: service_healthy } }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/healthz"]
+
+  web:
+    build: { context: ../.., dockerfile: infra/prod/Dockerfile.web }
+    restart: unless-stopped
+    environment:
+      COMMONS_DOMAIN: ${COMMONS_DOMAIN:?set COMMONS_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes: [caddy_data:/data, caddy_config:/config]
+    depends_on: [api, social, orchestrator, zone]
+
+  # A compressed dump every night, the last 14 kept (plus the newest
+  # copied to ./backups on the host for off-site syncing).
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: commons
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: commons
+    volumes: [./backups:/backups]
+    depends_on: { postgres: { condition: service_healthy } }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          f=/backups/commons-$$(date -u +%Y%m%d-%H%M).sql.gz
+          if pg_dump --no-owner | gzip > "$$f.tmp"; then mv "$$f.tmp" "$$f"; echo "backup $$f"; else echo "backup FAILED"; rm -f "$$f.tmp"; fi
+          ls -1t /backups/commons-*.sql.gz | tail -n +15 | xargs -r rm --
+          sleep 86400
+        done
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

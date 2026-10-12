@@ -38,6 +38,7 @@ async fn state(db: PgPool, stage_ms: i64) -> Arc<AppState> {
         db,
         catalog,
         stage_ms,
+        mailer: None,
     })
 }
 
@@ -1342,5 +1343,159 @@ mod governance {
             .execute(&db)
             .await
             .unwrap();
+    }
+}
+
+mod founding {
+    use super::*;
+    use crate::welcome;
+    use axum::Router;
+    use serde_json::{Value, json};
+
+    fn app(s: Arc<AppState>) -> Router {
+        Router::new()
+            .nest("/api", welcome::routes())
+            .nest("/internal", internal::routes())
+            .with_state(s)
+    }
+
+    async fn call(
+        app: &Router,
+        auth: &str,
+        method: &str,
+        uri: &str,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(if method == "GET" {
+                Body::empty()
+            } else {
+                Body::from(body.to_string())
+            })
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    fn bearer_for(s: &AppState, id: Uuid, name: &str) -> String {
+        let claims = token::AccessClaims {
+            sub: id.to_string(),
+            name: name.into(),
+            look: 1,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        )
+    }
+
+    #[tokio::test]
+    async fn three_first_tasks_make_a_founder_with_a_seedling() {
+        let Some(db) = db().await else { return };
+        // A fresh grove for this test (test database only).
+        sqlx::query("DELETE FROM founders")
+            .execute(&db)
+            .await
+            .unwrap();
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let p = player(&s).await;
+        let name: String = sqlx::query_scalar("SELECT display_name FROM players WHERE id = $1")
+            .bind(p)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        let me = bearer_for(&s, p, &name);
+        let svc = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &ServiceClaims { svc: "zone".into() }, 60)
+        );
+
+        let (st, w) = call(&app, &me, "GET", "/api/welcome", json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            w["tasks"],
+            json!({ "fish": false, "plant": false, "sit": false })
+        );
+        assert!(w["founder"].is_null());
+        assert_eq!(w["season"]["open"], true);
+        let (st, e) = call(&app, &me, "POST", "/api/welcome/plant", json!({})).await;
+        assert_eq!(st, StatusCode::CONFLICT, "{e}");
+        assert_eq!(e["error"], "tasks_left");
+
+        // A fish (the album), a seed planted (through the zone's endpoint),
+        // and sitting with someone (reported with activity).
+        sqlx::query("INSERT INTO collection (player_id, item_id, total) VALUES ($1, 100, 1)")
+            .bind(p)
+            .execute(&db)
+            .await
+            .unwrap();
+        let (st, r) = call(
+            &app,
+            &svc,
+            "POST",
+            "/internal/plots/plant",
+            json!({ "space": format!("test:{p}"), "x": 1, "y": 1, "player": p.to_string(), "seed": 200, "key": format!("plant:{p}") }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let (st, _) = call(
+            &app,
+            &svc,
+            "POST",
+            "/internal/activity",
+            json!({ "rows": [{ "player": p.to_string(), "secs": 30, "interactions": 1, "sat_together": true }] }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, w) = call(&app, &me, "GET", "/api/welcome", json!({})).await;
+        assert_eq!(
+            w["tasks"],
+            json!({ "fish": true, "plant": true, "sit": true })
+        );
+
+        let (st, r) = call(&app, &me, "POST", "/api/welcome/plant", json!({})).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["founder"]["no"], 1);
+        assert_eq!(
+            r["founder"]["slot"], 0,
+            "the first seedling goes next to the stone"
+        );
+        assert_eq!(r["founder"]["stage"], 0);
+        assert_eq!(r["founder"]["name"], name.as_str());
+        let lanterns: i32 =
+            sqlx::query_scalar("SELECT qty FROM inventory WHERE player_id = $1 AND item_id = $2")
+                .bind(p)
+                .bind(welcome::LANTERN)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(lanterns, 1, "a Founder's Lantern");
+
+        // Planting twice changes nothing.
+        let (st, r) = call(&app, &me, "POST", "/api/welcome/plant", json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(r["already"], true);
+        assert_eq!(r["founder"]["no"], 1);
+
+        // Everyone can see the founders (no sign-in).
+        let (st, f) = call(&app, "", "GET", "/api/founders", json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(f["founders"].as_array().unwrap().len(), 1);
+        assert_eq!(f["season"]["left"], commons_sim::GROVE_SLOTS as i64 - 1);
     }
 }

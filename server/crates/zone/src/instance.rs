@@ -139,12 +139,27 @@ struct Avatar {
     /// Activity not yet reported: instance time counted up to, interactions.
     counted_until: u32,
     interactions: u32,
+    /// Sat with someone since the last report.
+    sat_together: bool,
     fish: Option<fishing::FishSession>,
 }
 
 impl Avatar {
     fn send(&mut self, msg: &[u8]) {
         push_framed(&mut self.out, msg);
+    }
+
+    fn take_activity(&mut self, now: u32) -> crate::econ::ActivityRow {
+        let row = crate::econ::ActivityRow {
+            player: self.player_id.clone(),
+            secs: now.saturating_sub(self.counted_until) / 1000,
+            interactions: self.interactions,
+            sat_together: self.sat_together,
+        };
+        self.counted_until = now;
+        self.interactions = 0;
+        self.sat_together = false;
+        row
     }
 
     fn info(&self, now: u32) -> EntityInfo {
@@ -190,7 +205,7 @@ pub struct Instance {
     /// The pitch's ball, if the zone has a pitch.
     ball: Option<play::Ball>,
     /// Activity of players who left since the last report.
-    activity_left: Vec<(String, u32, u32)>,
+    activity_left: Vec<crate::econ::ActivityRow>,
     next_activity_report: u32,
     /// Index of the programme last announced on the big screen.
     screen_index: Option<usize>,
@@ -318,19 +333,16 @@ impl Instance {
         }
     }
 
-    /// Activity since the last report: (player, seconds, interactions).
-    fn take_activity(&mut self, now: u32) -> Vec<(String, u32, u32)> {
+    /// Activity since the last report.
+    fn take_activity(&mut self, now: u32) -> Vec<crate::econ::ActivityRow> {
         let mut rows = std::mem::take(&mut self.activity_left);
         for a in self.avatars.values_mut() {
-            rows.push((
-                a.player_id.clone(),
-                now.saturating_sub(a.counted_until) / 1000,
-                a.interactions,
-            ));
-            a.counted_until = now;
-            a.interactions = 0;
+            rows.push(a.take_activity(now));
         }
-        rows.retain(|(p, secs, n)| crate::social::is_account(p) && (*secs > 0 || *n > 0));
+        rows.retain(|r| {
+            crate::social::is_account(&r.player)
+                && (r.secs > 0 || r.interactions > 0 || r.sat_together)
+        });
         rows
     }
 
@@ -557,6 +569,7 @@ impl Instance {
             muted_until: claims.muted_until,
             counted_until: now,
             interactions: 0,
+            sat_together: false,
         };
         avatar.send(
             &ServerMsg::Welcome {
@@ -592,12 +605,9 @@ impl Instance {
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
+        let mut a = a;
         let now = self.clock.now_ms();
-        self.activity_left.push((
-            a.player_id.clone(),
-            now.saturating_sub(a.counted_until) / 1000,
-            a.interactions,
-        ));
+        self.activity_left.push(a.take_activity(now));
         self.by_conn.remove(&a.conn);
         if self.by_player.get(&a.player_id) == Some(&id) {
             self.by_player.remove(&a.player_id);
@@ -1232,8 +1242,8 @@ pub(crate) mod tests {
         let now = inst.clock.now_ms() + 60_000;
         let rows = inst.take_activity(now);
         assert_eq!(rows.len(), 1, "{rows:?}");
-        assert_eq!(rows[0].0, account);
-        assert!(rows[0].1 >= 59 && rows[0].2 == 1, "{rows:?}");
+        assert_eq!(rows[0].player, account);
+        assert!(rows[0].secs >= 59 && rows[0].interactions == 1, "{rows:?}");
         assert!(inst.take_activity(now).is_empty(), "nothing twice");
     }
 

@@ -4,7 +4,7 @@
 
 use axum::Router;
 use commons_api::economy::Catalog;
-use commons_api::{AppState, auth, economy, gov, internal, play, store, town};
+use commons_api::{AppState, auth, economy, gov, internal, play, store, town, welcome};
 use commons_common::{config, telemetry};
 use std::sync::Arc;
 
@@ -20,6 +20,19 @@ async fn main() -> anyhow::Result<()> {
     let catalog = Arc::new(Catalog::load(&db).await?);
     tracing::info!(items = catalog.items.len(), "catalogue loaded");
 
+    let mailer = commons_api::mail::Mailer::from_env()?;
+    match &mailer {
+        Some(m) => match m.check().await {
+            Ok(()) => tracing::info!("mailer ready"),
+            Err(e) => {
+                tracing::error!(error = %e, "mailer check failed; sign-in emails may not arrive")
+            }
+        },
+        None if !config::dev_mode() => {
+            tracing::error!("SMTP_URL is not set: nobody can sign in outside dev mode")
+        }
+        None => {}
+    }
     let state = Arc::new(AppState {
         secret: config::secret(),
         dev: config::dev_mode(),
@@ -28,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
         db,
         catalog,
         stage_ms: config::growth_stage_ms(),
+        mailer,
     });
     if state.dev {
         tracing::warn!(
@@ -43,7 +57,8 @@ async fn main() -> anyhow::Result<()> {
                 .merge(economy::routes())
                 .merge(town::routes())
                 .merge(play::routes())
-                .merge(gov::routes()),
+                .merge(gov::routes())
+                .merge(welcome::routes()),
         )
         .nest("/internal", internal::routes())
         .with_state(state)
