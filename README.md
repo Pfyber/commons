@@ -35,7 +35,10 @@ Tap a corner's board (sports, art, music, games) to read and post, the
 notice board for daily requests, and the fountain for the town goal. Sit
 alone at a chess table to play the Park Elder. Corner activities: jam at
 the bandstand (keys 1–8), paint at the easels, kick the ball on the pitch
-(walk into it), and solve the town word at the arcade.
+(walk into it), and solve the town word at the arcade. Explore: the Old
+Oak, the wishing well, the hedge maze, the Whispering Wood (there's a tiny
+door somewhere), and pet Biscuit the cat. 🔊 or M toggles sound;
+`?weather=rain` (clear, cloudy, rain, mist) previews the weather.
 
 Valkey, NATS, MinIO, Prometheus and Grafana aren't needed yet. To run the full
 set of backing services, including a containerised Postgres:

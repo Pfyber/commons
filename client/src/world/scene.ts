@@ -7,6 +7,10 @@ import { type ZoneMap, groundAt } from "./map";
 import type { TileXY } from "./motion";
 
 const CHUNK = 16;
+/** Decor drawn flat on the ground. */
+const FLAT = new Set(["blanket", "lilypad", "mushrooms"]);
+/** Decor that sways in the wind. */
+const SWAY = new Set(["tree", "pine", "apple_tree", "bush", "tallgrass", "reeds"]);
 
 /** Side-by-side bench tiles draw as one long bench (one seat per tile). */
 function benchPiece(map: ZoneMap, x: number, y: number): string {
@@ -24,6 +28,9 @@ export class Scene {
   private markerUntil = 0;
   scale = 2;
   private cam: TileXY = { x: 0, y: 0 };
+  private swaying: { s: Sprite; x: number; y: number; phase: number }[] = [];
+  /** 0 calm … 1 blustery; set by the weather. */
+  wind = 0.3;
 
   constructor(
     private app: Application,
@@ -52,8 +59,10 @@ export class Scene {
         const s = new Sprite(tex);
         s.anchor.set(0.5, 1);
         s.position.set(x * TILE + TILE / 2, y * TILE + TILE - 2);
-        s.zIndex = y * TILE + TILE - 2;
+        // Flat things lie under whoever stands on them.
+        s.zIndex = FLAT.has(kind) ? y * TILE + 1 : y * TILE + TILE - 2;
         this.sorted.addChild(s);
+        if (SWAY.has(kind)) this.swaying.push({ s, x, y, phase: hash(x, y, 13) % 628 });
       }
     }
 
@@ -140,7 +149,17 @@ export class Scene {
   }
 
   update() {
-    const left = this.markerUntil - performance.now();
+    const now = performance.now();
+    const left = this.markerUntil - now;
     this.marker.alpha = left > 0 ? Math.min(1, left / 300) : 0;
+    // Wind: plants on screen lean gently, each a little out of step.
+    const v = this.viewRect();
+    const t = now / 1000;
+    const amp = 0.015 + this.wind * 0.05;
+    for (const p of this.swaying) {
+      if (p.x < v.x0 - 2 || p.x > v.x1 + 2 || p.y < v.y0 - 2 || p.y > v.y1 + 3) continue;
+      const gust = Math.sin(t * 0.7 + p.x * 0.15) * 0.5 + 0.5;
+      p.s.skew.x = Math.sin(t * 1.6 + p.phase / 100) * amp * (0.4 + gust);
+    }
   }
 }

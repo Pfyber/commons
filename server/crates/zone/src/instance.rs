@@ -41,7 +41,7 @@ pub const TICK: Duration = Duration::from_millis(100);
 const MOVE_LEAD_MS: u32 = 100;
 /// Proximity chat radius in tiles (spec §7).
 const CHAT_RADIUS: i32 = 8;
-const MAX_PATH_EXPANSIONS: usize = 8_000;
+const MAX_PATH_EXPANSIONS: usize = 12_000;
 const MAX_VIEW_W: u8 = 64;
 const MAX_VIEW_H: u8 = 48;
 /// Entities per CellEnter message, keeping each well under the u16 frame limit.

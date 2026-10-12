@@ -6,6 +6,10 @@ import { ChessPanel, type GameStateMsg } from "./activities/chess";
 import { EaselDisplays, type EaselPanel } from "./activities/easel";
 import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
+import { Cat } from "./ambient/cat";
+import { Critters } from "./ambient/critters";
+import type { Soundscape } from "./ambient/sound";
+import { Weather } from "./ambient/weather";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
 import { DayNight } from "./ambient/daynight";
@@ -59,6 +63,37 @@ export interface Ui {
   goal: GoalPanel;
   easel: EaselPanel;
   word: WordPanel;
+  sound: Soundscape;
+}
+
+/** Things to find in the park; remembered per browser. */
+const DISCOVERIES: Record<string, string> = {
+  old_oak: "The Old Oak. They say it was here long before the town.",
+  well: "You make a wish at the well.",
+  maze_heart: "You found the heart of the maze 🌿",
+  tiny_door: "You knock on the tiny door. Someone very small giggles inside.",
+  fairy_ring: "A ring of mushrooms in a hidden clearing. It feels like a secret.",
+};
+const WISHES = [
+  "The water ripples. Somewhere, something nice is on its way.",
+  "A coin glints at the bottom. Someone else wished here too.",
+  "The echo says your wish back, a little softer.",
+  "A frog surfaces, considers you, and approves.",
+  "You feel lighter. Wishes are like that.",
+];
+const PURRS = [
+  "Biscuit purrs and headbutts your hand.",
+  "Biscuit rolls over. It's a trap, but a nice one.",
+  "Biscuit blinks slowly at you. That's cat for ‘friend’.",
+  "Biscuit purrs like a tiny engine.",
+];
+const FOUND_KEY = "commons.discoveries";
+function found(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(FOUND_KEY) ?? "[]"));
+  } catch {
+    return new Set();
+  }
 }
 
 /** Where this Game is: label for the HUD and, for homes, whose. */
@@ -116,6 +151,11 @@ export class Game {
   private jam: JamPanel | null = null;
   easels: EaselDisplays | null = null;
   private ball: Ball | null = null;
+  private weather: Weather;
+  private critters: Critters;
+  private cat: Cat | null = null;
+  private waterNear = 0;
+  private waterCheckAt = 0;
 
   constructor(
     private app: Application,
@@ -146,6 +186,12 @@ export class Game {
         .catch(() => {});
     }
     this.setupCorners(map);
+    this.weather = new Weather(app, this.scene, map);
+    this.critters = new Critters(app, this.scene, map);
+    if (zoneId === "founders_park") {
+      this.cat = new Cat(map);
+      if (this.cat.active) this.scene.sorted.addChild(this.cat.sprite);
+    }
     this.chess = new ChessPanel(document.body, () => this.selfId, {
       move: (table, uci) => this.socket?.send({ t: "GameMove", table, uci }),
       close: () => this.chess.hide(),
@@ -335,6 +381,50 @@ export class Game {
     }
   }
 
+  /** Shows a discovery; the first time, counts it. */
+  private discover(key: string, text: string) {
+    const f = found();
+    const fresh = !f.has(key);
+    f.add(key);
+    try {
+      localStorage.setItem(FOUND_KEY, JSON.stringify([...f]));
+    } catch {
+      // storage unavailable
+    }
+    const total = Object.keys(DISCOVERIES).length;
+    this.hud.toast(fresh ? `✨ ${text} (Discovery ${f.size} of ${total})` : text, 5500);
+  }
+
+  /** Petting Biscuit. */
+  private tapCat(sx: number, sy: number): boolean {
+    if (!this.cat?.active) return false;
+    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
+    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    if (!this.cat.hit(x, y)) return false;
+    this.cat.hearts = performance.now() + 1500;
+    this.ui.sound.purr();
+    this.hud.toast(`🐈 ${PURRS[Math.floor(Math.random() * PURRS.length)]}`, 3500);
+    return true;
+  }
+
+  /** How close running water is to you (0 far … 1 beside it), for the soundscape. */
+  private measureWater(): number {
+    const self = this.self;
+    if (!self) return 0;
+    const sx = Math.round(self.pos.x);
+    const sy = Math.round(self.pos.y);
+    let best = 99;
+    for (let dy = -7; dy <= 7; dy++) {
+      for (let dx = -7; dx <= 7; dx++) {
+        if (groundAt(this.scene.map, sx + dx, sy + dy) === "water") best = Math.min(best, Math.hypot(dx, dy));
+      }
+    }
+    for (const o of this.scene.map.objects) {
+      if (o.kind === "fountain") best = Math.min(best, Math.hypot(o.x + 1 - sx, o.y + 1 - sy) - 1);
+    }
+    return Math.max(0, 1 - best / 7);
+  }
+
   /** Live easel stroke to people nearby. */
   sendPaint(easel: number, cell: number, color: number) {
     this.socket?.send({ t: "Paint", easel, cell, color });
@@ -401,6 +491,7 @@ export class Game {
     const tap = (e: FederatedPointerEvent) => {
       const t = this.scene.screenToTile(e.global.x, e.global.y);
       if (this.tapBall(e.global.x, e.global.y)) return;
+      if (this.tapCat(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
       if (this.tapGift(t)) return;
       if (this.tapCollect(t)) return;
@@ -535,6 +626,19 @@ export class Game {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
       ui.market.show();
+      return true;
+    }
+    if (obj && obj.kind === "signpost") {
+      this.hud.toast(`🪧 ${obj.label ?? ""}`, 6000);
+      return true;
+    }
+    if (obj && obj.kind in DISCOVERIES) {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+        const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      const extra = obj.kind === "well" ? ` ${WISHES[Math.floor(Math.random() * WISHES.length)]}` : "";
+      this.discover(obj.kind, DISCOVERIES[obj.kind] + extra);
       return true;
     }
     if (obj && ["bandstand", "easels", "arcade"].includes(obj.kind)) {
@@ -766,6 +870,19 @@ export class Game {
     this.daynight.update();
     this.milestones.update(wallNow, this.daynight.dark);
     this.ball?.update(serverNow);
+    const hour = this.daynight.hour();
+    this.weather.update(wallNow, hour);
+    this.critters.update(wallNow, this.daynight.dark);
+    this.cat?.update(Date.now());
+    if (wallNow > this.waterCheckAt) {
+      this.waterCheckAt = wallNow + 400;
+      this.waterNear = this.measureWater();
+      // The fairy ring is found by walking into the hidden clearing.
+      if (self && this.zoneId === "founders_park" && Math.hypot(self.pos.x - 9, self.pos.y - 14) < 1.6 && !found().has("fairy_ring")) {
+        this.discover("fairy_ring", DISCOVERIES.fairy_ring);
+      }
+    }
+    this.ui.sound.update(wallNow, { dark: this.daynight.dark, water: this.waterNear, weather: this.weather.kind, wind: this.weather.wind });
     // The jam pads go away when you walk off from the bandstand.
     if (this.jam?.open && self) {
       const b = this.scene.map.objects.find((o) => o.kind === "bandstand");
@@ -789,6 +906,8 @@ export class Game {
     this.chess.el.remove();
     this.daynight.destroy();
     this.milestones.destroy();
+    this.weather.destroy();
+    this.critters.destroy();
     for (const p of [this.ui.plot, this.ui.menu, this.ui.market, this.ui.easel, this.ui.word]) p.hide();
     this.ui.reel.stop();
     this.ui.place.hide();

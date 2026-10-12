@@ -4,7 +4,7 @@
 
 import { Texture } from "pixi.js";
 import type { MapObject } from "./map";
-import { disc, polygon } from "./pixeldraw";
+import { disc, oval, polygon } from "./pixeldraw";
 import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 
 export const TILE = 32;
@@ -199,7 +199,78 @@ export function bakeChunk(x0: number, y0: number, w: number, h: number, at: Grou
       if (kind) drawGround(ctx, kind, x0 + x, y0 + y, x * TILE, y * TILE, at);
     }
   }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const kind = at(x0 + x, y0 + y);
+      if (kind) soften(ctx, kind, x0 + x, y0 + y, x * TILE, y * TILE, at);
+    }
+  }
   return toTexture(c);
+}
+
+/** Ground that paths and water round off into, and blend over. */
+const SOFT = new Set(["grass", "grass_dark", "flowers", "sand"]);
+/** Ground whose outer corners are rounded. */
+const ROUNDED = new Set(["path", "water", "sand", "flowers", "grass_dark"]);
+const CORNER = 9;
+
+function groundColor(kind: string): string {
+  const P = PALETTE;
+  return (
+    { grass: P.grass, grass_dark: P.grassDark, flowers: P.grass, sand: P.sand, path: P.path, water: P.water } as Record<string, string>
+  )[kind] ?? P.grass;
+}
+
+/**
+ * Second pass over a baked chunk: rounds the outer corners of paths, water,
+ * sand and dark grass where both sides open onto softer ground, and dithers
+ * the seam between light and dark grass, so diagonal edges read as curves
+ * instead of staircases.
+ */
+function soften(ctx: CanvasRenderingContext2D, kind: string, tx: number, ty: number, ox: number, oy: number, at: GroundAt) {
+  const P = PALETTE;
+  if (ROUNDED.has(kind)) {
+    for (const [sx, sy] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ]) {
+      const a = at(tx + sx, ty);
+      const b = at(tx, ty + sy);
+      const d = at(tx + sx, ty + sy);
+      if (!a || !b || a !== b || a === kind || !SOFT.has(a) || d === kind) continue;
+      if (kind === "grass_dark" && a !== "grass") continue;
+      const fill = groundColor(a);
+      const edge = kind === "path" ? P.pathEdge : kind === "water" ? P.foam : null;
+      for (let i = 0; i < CORNER; i++) {
+        const len = CORNER - i;
+        const x = sx < 0 ? ox : ox + TILE - len;
+        const y = sy < 0 ? oy + i : oy + TILE - 1 - i;
+        px(ctx, fill, x, y, len, 1);
+        if (edge) px(ctx, edge, sx < 0 ? ox + len : ox + TILE - len - 2, y, 2, 1);
+      }
+    }
+  }
+  // Dither light grass into dark grass along their seam.
+  if (kind === "grass") {
+    for (const [dx, dy] of [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+    ]) {
+      if (at(tx + dx, ty + dy) !== "grass_dark") continue;
+      for (let i = 0; i < 14; i++) {
+        const hh = hash(tx * 4 + dx + 7, ty * 4 + dy + 7, i);
+        const along = hh % TILE;
+        const depth = Math.floor(((hh >>> 8) % 100) ** 2 / 1700); // mostly near the edge
+        const x = dx === 0 ? along : dx < 0 ? depth : TILE - 1 - depth;
+        const y = dy === 0 ? along : dy < 0 ? depth : TILE - 1 - depth;
+        px(ctx, P.grassDark, ox + x - (x % 2), oy + y - (y % 2), 2, 2);
+      }
+    }
+  }
 }
 
 // ---- decor (single-tile props, anchored at bottom centre) -----------------
@@ -319,6 +390,107 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       px(ctx, "#cdbb9c", 1, 39, 30, 8);
       for (let y = 10; y < 38; y += 8) px(ctx, "#ddcdb0", 1, y, 30, 1);
       px(ctx, "#b5544a", 0, 0, 32, 6);
+      break;
+    }
+    case "hedge": {
+      // Clipped hedge: fills the tile edge to edge so neighbours join up.
+      [c, ctx] = makeCanvas(32, 44);
+      px(ctx, "rgba(0,0,0,0.18)", 0, 40, 32, 4);
+      px(ctx, "#2f5e34", 0, 4, 32, 38);
+      px(ctx, "#3f7a4a", 0, 2, 32, 34);
+      px(ctx, "#4c8a55", 0, 2, 32, 4);
+      for (let i = 0; i < 9; i++) {
+        const sx = (hash(i, v, 77) % 28) + 1;
+        const sy = (hash(i, v, 78) % 28) + 6;
+        px(ctx, i % 2 ? "#579463" : "#2f5e34", sx, sy, 3, 2);
+      }
+      break;
+    }
+    case "apple_tree": {
+      [c, ctx] = makeCanvas(40, 56);
+      px(ctx, "rgba(0,0,0,0.18)", 8, 50, 24, 4);
+      px(ctx, P.outline, 17, 34, 7, 18);
+      px(ctx, P.trunk, 18, 34, 5, 17);
+      circle(ctx, P.outline, 20, 22, 16);
+      circle(ctx, "#6aa24e", 20, 22, 15);
+      circle(ctx, P.leafLight, 14, 16, 6);
+      for (const [ax, ay] of [[10, 22], [27, 17], [22, 29], [15, 30], [29, 26], [19, 12]]) {
+        px(ctx, "#d94a4a", ax, ay, 3, 3);
+        px(ctx, "#ff8a7a", ax, ay, 1, 1);
+      }
+      break;
+    }
+    case "stump": {
+      [c, ctx] = makeCanvas(32, 22);
+      px(ctx, "rgba(0,0,0,0.15)", 6, 18, 20, 3);
+      px(ctx, P.outline, 7, 6, 18, 14);
+      px(ctx, P.trunk, 8, 9, 16, 10);
+      oval(ctx, P.outline, 16, 7, 9, 4);
+      oval(ctx, "#c99a6a", 16, 7, 8, 3);
+      oval(ctx, "#a97b50", 16, 7, 4, 1.5);
+      break;
+    }
+    case "log": {
+      [c, ctx] = makeCanvas(32, 18);
+      px(ctx, "rgba(0,0,0,0.15)", 2, 14, 28, 3);
+      px(ctx, P.outline, 4, 4, 24, 11);
+      px(ctx, P.trunk, 4, 5, 23, 9);
+      px(ctx, "#8b6a4b", 6, 7, 18, 1);
+      oval(ctx, P.outline, 27, 9.5, 4, 5.5);
+      oval(ctx, "#c99a6a", 27, 9.5, 3, 4.5);
+      px(ctx, P.leaf, 10, 3, 4, 2);
+      break;
+    }
+    case "mushrooms": {
+      [c, ctx] = makeCanvas(32, 16);
+      for (const [mx, my, r] of [[9, 9, 4], [18, 11, 3], [24, 8, 3.5]] as [number, number, number][]) {
+        px(ctx, "#efe3cf", mx - 1, my, 2, 5);
+        oval(ctx, P.outline, mx, my, r + 1, r * 0.7 + 1);
+        oval(ctx, "#d94a4a", mx, my, r, r * 0.7);
+        px(ctx, "#fff", mx - 1, my - 1, 1, 1);
+        px(ctx, "#fff", mx + 1, my, 1, 1);
+      }
+      break;
+    }
+    case "tallgrass": {
+      [c, ctx] = makeCanvas(32, 24);
+      const greens = ["#6aa24e", "#7dbb5c", "#5f9a48"];
+      for (let i = 0; i < 9; i++) {
+        const bx = 2 + i * 3 + (hash(i, v, 5) % 2);
+        const bh = 10 + (hash(i, v, 6) % 12);
+        px(ctx, greens[(i + v) % 3], bx, 24 - bh, 2, bh);
+        px(ctx, P.leafLight, bx, 24 - bh, 1, 2);
+      }
+      break;
+    }
+    case "lilypad": {
+      [c, ctx] = makeCanvas(32, 20);
+      oval(ctx, "#3f7a4a", 15, 11, 9, 6);
+      oval(ctx, "#5f9a48", 15, 10, 8, 5);
+      polygon(ctx, P.water, [[15, 10], [23, 7], [24, 12]]);
+      if (v === 0) {
+        px(ctx, "#f4a7b9", 10, 6, 4, 3);
+        px(ctx, "#fff", 11, 5, 2, 2);
+      }
+      break;
+    }
+    case "blanket": {
+      // A checked picnic blanket (flat, drawn under people).
+      [c, ctx] = makeCanvas(32, 22);
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 8; x++) px(ctx, (x + y) % 2 ? "#e8566b" : "#fff6ec", x * 4, 4 + y * 4, 4, 4);
+      }
+      px(ctx, "rgba(0,0,0,0.12)", 0, 20, 32, 2);
+      break;
+    }
+    case "swing": {
+      // A rope swing hanging from the Old Oak's branch above.
+      [c, ctx] = makeCanvas(32, 128);
+      px(ctx, "#8b6a4b", 7, 0, 1, 116);
+      px(ctx, "#8b6a4b", 24, 0, 1, 116);
+      px(ctx, P.outline, 4, 115, 24, 6);
+      px(ctx, P.wood, 5, 116, 22, 3);
+      px(ctx, "rgba(0,0,0,0.15)", 6, 124, 20, 3);
       break;
     }
     case "lantern": {
@@ -607,6 +779,101 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
         px(ctx, "#e8566b", x + 6, 32, 2, 2);
         px(ctx, "#f6c343", x + 14, 32, 2, 2);
       }
+      break;
+    }
+    case "old_oak": {
+      // The Old Oak: a great gnarled tree, older than the town.
+      [c, ctx] = makeCanvas(w, h + 72);
+      overhang = 72;
+      const ox = 0;
+      px(ctx, "rgba(0,0,0,0.2)", ox + 4, h + 60, w - 8, 10);
+      // Trunk and roots.
+      px(ctx, P.outline, ox + 34, 70, 30, h - 4);
+      px(ctx, P.trunk, ox + 36, 70, 26, h - 6);
+      px(ctx, "#6a4a2c", ox + 42, 80, 3, h - 20);
+      px(ctx, "#6a4a2c", ox + 52, 90, 3, h - 30);
+      px(ctx, P.outline, ox + 22, h + 58, 54, 6);
+      px(ctx, P.trunk, ox + 24, h + 58, 50, 4);
+      // A low branch reaching out for the swing.
+      px(ctx, P.outline, ox + 58, 98, 36, 7);
+      px(ctx, P.trunk, ox + 59, 99, 34, 5);
+      // Canopy: layered blobs.
+      for (const [bx, by, r, col] of [
+        [ox + 48, 46, 46, P.outline],
+        [ox + 48, 46, 45, "#4f8a3d"],
+        [ox + 22, 56, 26, "#4f8a3d"],
+        [ox + 76, 58, 26, "#4f8a3d"],
+        [ox + 48, 38, 34, P.leaf],
+        [ox + 30, 34, 18, P.leafLight],
+        [ox + 64, 30, 14, P.leafLight],
+        [ox + 50, 64, 18, P.leaf],
+      ] as [number, number, number, string][]) {
+        circle(ctx, col, bx, by, r);
+      }
+      for (let i = 0; i < 14; i++) px(ctx, "#8fca6b", ox + 16 + (hash(i, 1, 9) % 64), 12 + (hash(i, 2, 9) % 60), 3, 2);
+      break;
+    }
+    case "well": {
+      // The wishing well: a stone ring, a little roof, a bucket.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "rgba(0,0,0,0.18)", 6, top + h - 10, w - 12, 8);
+      px(ctx, P.outline, 6, top + 16, w - 12, h - 20);
+      for (let r = 0; r < 4; r++) {
+        for (let k = 0; k < 4; k++) px(ctx, (r + k) % 2 ? P.stone : P.stoneDark, 8 + k * 12, top + 18 + r * 9, 11, 8);
+      }
+      oval(ctx, P.outline, w / 2, top + 16, w / 2 - 6, 9);
+      oval(ctx, "#2b4a5a", w / 2, top + 16, w / 2 - 9, 6);
+      px(ctx, P.outline, 10, 6, 4, top + 12);
+      px(ctx, P.outline, w - 14, 6, 4, top + 12);
+      polygon(ctx, P.outline, [[2, 12], [w / 2, -2], [w - 2, 12]]);
+      polygon(ctx, "#b5544a", [[5, 11], [w / 2, 1], [w - 5, 11]]);
+      px(ctx, "#8b6a4b", w / 2, 12, 1, 16);
+      px(ctx, P.outline, w / 2 - 4, 28, 9, 7);
+      px(ctx, P.wood, w / 2 - 3, 29, 7, 5);
+      break;
+    }
+    case "maze_heart": {
+      // A stone sundial among flowers at the heart of the maze.
+      [c, ctx] = makeCanvas(w, h + 20);
+      overhang = 20;
+      px(ctx, P.outline, 10, 18, 12, h);
+      px(ctx, P.stone, 11, 19, 10, h - 2);
+      oval(ctx, P.outline, 16, 16, 12, 6);
+      oval(ctx, "#cfc9bb", 16, 16, 11, 5);
+      polygon(ctx, P.outline, [[16, 4], [16, 16], [22, 16]]);
+      for (const [fx, col] of [[3, "#f4a7b9"], [26, "#ffe08a"], [6, "#c9a7f4"], [24, "#ffffff"]] as [number, string][]) {
+        px(ctx, col, fx, h + 12, 3, 3);
+      }
+      break;
+    }
+    case "tiny_door": {
+      // A hollow stump with a tiny round door, and a light on inside.
+      [c, ctx] = makeCanvas(w, h + 20);
+      overhang = 20;
+      px(ctx, P.outline, 3, 6, 26, h + 12);
+      px(ctx, P.trunk, 4, 9, 24, h + 8);
+      oval(ctx, P.outline, 16, 7, 13, 5);
+      oval(ctx, "#c99a6a", 16, 7, 12, 4);
+      disc(ctx, P.outline, 16, h + 8, 7);
+      disc(ctx, "#5d8a4e", 16, h + 8, 6);
+      px(ctx, "#5d8a4e", 10, h + 8, 12, 9);
+      px(ctx, "#f6c343", 19, h + 10, 2, 2);
+      px(ctx, "#ffe39a", 12, 18, 4, 4);
+      break;
+    }
+    case "signpost": {
+      [c, ctx] = makeCanvas(w, h + 28);
+      overhang = 28;
+      px(ctx, P.outline, 14, 4, 4, h + 22);
+      px(ctx, P.wood, 15, 5, 2, h + 20);
+      polygon(ctx, P.outline, [[3, 6], [26, 6], [30, 10], [26, 14], [3, 14]]);
+      polygon(ctx, "#efe3cf", [[4, 7], [25, 7], [28, 10], [25, 13], [4, 13]]);
+      polygon(ctx, P.outline, [[29, 16], [6, 16], [2, 20], [6, 24], [29, 24]]);
+      polygon(ctx, "#efe3cf", [[28, 17], [7, 17], [4, 20], [7, 23], [28, 23]]);
+      px(ctx, P.woodDark, 8, 10, 14, 1);
+      px(ctx, P.woodDark, 10, 20, 14, 1);
       break;
     }
     case "garden_sign": {

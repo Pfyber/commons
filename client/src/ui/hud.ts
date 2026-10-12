@@ -14,6 +14,8 @@ export interface HudHandlers {
   onAlbum(): void;
   onFriends(): void;
   onNotifications(): void;
+  /** Toggles sound; returns whether it's now muted. */
+  onSound(): boolean;
 }
 
 export class Hud {
@@ -37,6 +39,7 @@ export class Hud {
           <button type="button" class="pill btn album-btn" title="Album (L)">📖</button>
           <button type="button" class="pill btn friends-btn" title="Friends (F)">👥</button>
           <button type="button" class="pill btn notes-btn" title="Notifications (N)">🔔<span class="badge-count" hidden></span></button>
+          <button type="button" class="pill btn sound-btn" title="Sound (M)">🔊</button>
           <div class="pill nearby" title="People in view"></div>
         </div>
       </div>
@@ -60,12 +63,16 @@ export class Hud {
     root.querySelector<HTMLButtonElement>(".friends-btn")!.onclick = () => h.onFriends();
     root.querySelector<HTMLButtonElement>(".notes-btn")!.onclick = () => h.onNotifications();
     this.badgeEl = root.querySelector(".badge-count")!;
+    const soundBtn = root.querySelector<HTMLButtonElement>(".sound-btn")!;
+    const sound = () => (soundBtn.textContent = h.onSound() ? "🔇" : "🔊");
+    soundBtn.onclick = sound;
     window.addEventListener("keydown", (e) => {
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === "b" || e.key === "B") h.onBag();
       if (e.key === "l" || e.key === "L") h.onAlbum();
       if (e.key === "f" || e.key === "F") h.onFriends();
       if (e.key === "n" || e.key === "N") h.onNotifications();
+      if (e.key === "m" || e.key === "M") sound();
     });
 
     const form = root.querySelector<HTMLFormElement>(".chat")!;
@@ -112,6 +119,12 @@ export class Hud {
   setBadge(n: number) {
     this.badgeEl.hidden = n === 0;
     this.badgeEl.textContent = n > 9 ? "9+" : String(n);
+  }
+
+  /** Shows the current sound state on the button. */
+  setMuted(muted: boolean) {
+    const b = document.querySelector<HTMLButtonElement>(".sound-btn");
+    if (b) b.textContent = muted ? "🔇" : "🔊";
   }
 
   setCoins(n: number) {

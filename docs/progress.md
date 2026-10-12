@@ -316,6 +316,33 @@ word guesses.
 
 See docs/adr/0005-corner-activities.md.
 
+## A living park (2026-10-12)
+
+The park went from a grid to a place.
+
+- **Landscape:** winding paths, a brook from a spring in the Whispering Wood
+  through the pond to the south edge (footbridges where paths cross), groves,
+  a wildflower meadow, an orchard, tall grass, stumps, logs, mushrooms and
+  lily pads. Soft rounded edges instead of tile staircases.
+- **Landmarks:** the Old Oak with a rope swing (sit on it), the wishing well,
+  a fishing pier, a picnic lawn, a hedge maze with a sundial at its heart,
+  signposts at junctions (tap to read).
+- **Discoveries:** the Old Oak, the well, the maze's heart, the tiny door in
+  the wood, the fairy ring. Each tells a little story; "Discovery n of 5".
+- **Weather everyone shares:** clear, cloudy (drifting cloud shadows), rain
+  (streaks, ripples, a grey cast) and morning mist; wind sways the trees.
+- **Life:** Biscuit the park cat wanders between favourite spots and naps
+  (the same for everyone, and you can pet it); fireflies at night; fish
+  jumping in the pond.
+- **Sound:** birdsong, crickets, running water, wind and rain, all
+  synthesised; 🔊 / M to mute.
+
+Every earlier flow re-run on the new map (corners, activities, Elder, goals,
+friends, fishing, gardening, chess); botswarm 500 bots PASS (tick p99
+3.07 ms, 3.40 KB/s).
+
+See docs/adr/0006-living-park.md.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

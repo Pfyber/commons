@@ -61,7 +61,7 @@ class Heap {
   }
 }
 
-export function findPath(map: ZoneMap, from: TileXY, to: TileXY, maxExpansions = 8000): TileXY[] | null {
+export function findPath(map: ZoneMap, from: TileXY, to: TileXY, maxExpansions = 12000): TileXY[] | null {
   if (!walkable(map, from.x, from.y) || !walkable(map, to.x, to.y)) return null;
   if (from.x === to.x && from.y === to.y) return [{ ...from }];
   const w = map.width;

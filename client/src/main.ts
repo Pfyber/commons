@@ -7,6 +7,7 @@ import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
 import { Social } from "./social";
 import { Town } from "./town";
+import { Soundscape } from "./ambient/sound";
 import { Hud } from "./ui/hud";
 import { signIn } from "./ui/login";
 import { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
@@ -82,6 +83,7 @@ async function main() {
   const eco = new Economy(auth);
   const social = new Social(auth, auth.player!.id);
   const town = new Town(auth);
+  const sound = new Soundscape();
   const place = new PlaceBanner(() => place.hide());
   const friendActions = {
     join: (f: { id: string }) => void travel({ friend: f.id }),
@@ -97,7 +99,9 @@ async function main() {
     onAlbum: () => ui.album.toggle(),
     onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
     onNotifications: () => notifications.toggle(),
+    onSound: () => sound.toggle(),
   });
+  hud.setMuted(sound.muted);
   const ui: Ui = {
     eco,
     hud,
@@ -125,6 +129,7 @@ async function main() {
       displays: () => game?.easels ?? null,
     }),
     word: new WordPanel(town, () => void eco.load().catch(() => {})),
+    sound,
   };
   const notifications = new NotificationsPanel(social, friendActions);
   eco.onChange(() => hud.setCoins(eco.coins));
