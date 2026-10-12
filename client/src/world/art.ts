@@ -671,13 +671,14 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
     case "board_art":
     case "board_music":
     case "board_games":
-    case "notice_board": {
+    case "notice_board":
+    case "story_board": {
       // A wooden board on two posts: a coloured header with the corner's
       // name over a cork panel with pinned notes.
       [c, ctx] = makeCanvas(w, h + 30);
       overhang = 30;
       const slug = o.kind.replace("board_", "");
-      const accent = QUARTER_COLORS[slug] ?? "#b5544a";
+      const accent = o.kind === "story_board" ? "#3f7a8a" : (QUARTER_COLORS[slug] ?? "#b5544a");
       px(ctx, "rgba(0,0,0,0.15)", 6, h + 24, w - 12, 5);
       px(ctx, P.outline, 8, 26, 4, h + 4);
       px(ctx, P.outline, w - 12, 26, 4, h + 4);
@@ -692,7 +693,7 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
         px(ctx, "#b5544a", nx + 4, ny, 1, 1);
       }
       px(ctx, accent, 4, 4, w - 8, 9);
-      const title = o.kind === "notice_board" ? "NOTICES" : slug.toUpperCase();
+      const title = o.kind === "notice_board" ? "NOTICES" : o.kind === "story_board" ? "OUR TOWN" : slug.toUpperCase();
       label(ctx, title, w / 2, 9, "#fff9ec", 7);
       break;
     }

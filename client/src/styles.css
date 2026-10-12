@@ -1374,3 +1374,102 @@ body.fading #stage {
     width: 26px;
   }
 }
+
+/* ---- governance: Story of the Town, Town Hall, reports ---- */
+
+.story,
+.townhall,
+.report {
+  width: min(420px, calc(100vw - 24px));
+}
+
+.panel .story-phase {
+  margin: 0;
+  font-weight: 800;
+  color: #3f7a8a;
+}
+
+.panel .story-next,
+.panel .story-me,
+.panel .result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--paper-2);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.panel .ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panel .ledger-row {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.panel .ledger-row .time {
+  flex: none;
+  width: 70px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.panel .proposal-body {
+  margin: 0;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.panel .rank-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panel button.rank {
+  text-align: left;
+  border: 2px solid var(--paper-2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 14px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.panel button.rank.on {
+  border-color: var(--leaf);
+  background: #eaf3e4;
+  font-weight: 700;
+}
+
+.panel .btns.wrap {
+  flex-wrap: wrap;
+}
+
+.panel .gov-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel select,
+.panel textarea {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--paper-2);
+  background: #fff;
+}
+
+.panel textarea {
+  min-height: 70px;
+  resize: vertical;
+}

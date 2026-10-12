@@ -1348,11 +1348,20 @@ async fn report(
     if !REASONS.contains(&req.reason.as_str()) {
         return Err(ApiError::bad_request("reason", "Pick a reason."));
     }
-    let target = req
+    let mut conn = state.db.acquire().await.map_err(db_err)?;
+    // Avatars in the world carry names, not account ids; names are unique.
+    let target = match req
         .target_id
         .as_deref()
-        .and_then(|t| Uuid::parse_str(t).ok());
-    let mut conn = state.db.acquire().await.map_err(db_err)?;
+        .and_then(|t| Uuid::parse_str(t).ok())
+    {
+        Some(t) => Some(t),
+        None => sqlx::query_scalar("SELECT id FROM players WHERE lower(display_name) = lower($1)")
+            .bind(&req.target_name)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(db_err)?,
+    };
     let today: i64 = sqlx::query_scalar("SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > now() - interval '1 day'")
         .bind(me.id)
         .fetch_one(&mut *conn)

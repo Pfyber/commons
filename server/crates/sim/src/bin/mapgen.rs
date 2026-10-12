@@ -312,6 +312,8 @@ fn park() -> MapFile {
     // The market cart and the notice board by the plaza.
     b.object("market_cart", 54, 51, 2, 1, Some("Market"), true);
     b.object("notice_board", 38, 44, 2, 1, Some("Notice Board"), true);
+    // The Story of the Town, the first thing you see (spec §10.1).
+    b.object("story_board", 44, 55, 2, 1, Some("Story of the Town"), true);
 
     // Topic corners (spec §9): a landmark to do things at and a board.
     b.rect(59, 24, 14, 9, "pitch");

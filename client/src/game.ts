@@ -16,8 +16,10 @@ import { DayNight } from "./ambient/daynight";
 import type { Economy } from "./economy";
 import type { ServerMsg } from "./net/protocol.gen";
 import type { Social } from "./social";
+import type { Gov } from "./gov";
 import type { Town } from "./town";
 import type { FriendsPanel } from "./ui/social";
+import type { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
 import type { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
@@ -64,6 +66,10 @@ export interface Ui {
   easel: EaselPanel;
   word: WordPanel;
   sound: Soundscape;
+  gov: Gov;
+  townhall: TownHallPanel;
+  story: StoryPanel;
+  report: ReportPanel;
 }
 
 /** Things to find in the park; remembered per browser. */
@@ -541,6 +547,7 @@ export class Game {
       const actions: [string, () => void][] = friend
         ? [["Message", () => this.ui.friends.chatWith(friend)]]
         : [["Add friend", () => void say(social.request(name))]];
+      actions.push(["Report", () => this.ui.report.openFor(name)]);
       actions.push(["Block", () => confirm(`Block ${name}? You won't see their chat, and they can't contact you.`) && void say(social.block(name).then(() => `Blocked ${name}.`))]);
       this.ui.menu.showWith(name, friend ? (friend.level >= 2 ? "Close friend" : "Friend") : "", actions);
       return true;
@@ -606,6 +613,15 @@ export class Game {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
       ui.market.show();
+      return true;
+    }
+    if (obj && (obj.kind === "town_hall" || obj.kind === "story_board")) {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+        const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      if (obj.kind === "town_hall") void ui.townhall.openAt({ kind: "list" });
+      else ui.story.show();
       return true;
     }
     if (obj && obj.kind === "signpost") {
@@ -887,7 +903,7 @@ export class Game {
     this.milestones.destroy();
     this.weather.destroy();
     this.critters.destroy();
-    for (const p of [this.ui.plot, this.ui.menu, this.ui.market, this.ui.easel, this.ui.word]) p.hide();
+    for (const p of [this.ui.plot, this.ui.menu, this.ui.market, this.ui.easel, this.ui.word, this.ui.townhall, this.ui.story]) p.hide();
     this.ui.reel.stop();
     this.ui.place.hide();
     this.app.stage.removeChild(this.scene.world);

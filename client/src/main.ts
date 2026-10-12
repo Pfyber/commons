@@ -7,6 +7,8 @@ import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
 import { Social } from "./social";
 import { Town } from "./town";
+import { Gov } from "./gov";
+import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
 import { Soundscape } from "./ambient/sound";
 import { Hud } from "./ui/hud";
 import { signIn } from "./ui/login";
@@ -84,6 +86,8 @@ async function main() {
   const social = new Social(auth, auth.player!.id);
   const town = new Town(auth);
   const sound = new Soundscape();
+  const gov = new Gov(auth);
+  const townhall = new TownHallPanel(gov);
   const place = new PlaceBanner(() => place.hide());
   const friendActions = {
     join: (f: { id: string }) => void travel({ friend: f.id }),
@@ -130,6 +134,10 @@ async function main() {
     }),
     word: new WordPanel(town, () => void eco.load().catch(() => {})),
     sound,
+    gov,
+    townhall,
+    story: new StoryPanel(gov, (id) => void townhall.openAt({ kind: "proposal", id })),
+    report: new ReportPanel(gov),
   };
   const notifications = new NotificationsPanel(social, friendActions);
   eco.onChange(() => hud.setCoins(eco.coins));
@@ -201,6 +209,18 @@ async function main() {
   };
 
   await enter();
+  // A gentle nudge when there's a vote you can take part in.
+  gov
+    .loadStory()
+    .then((s) => {
+      const me = s.me;
+      if (!me) return;
+      const open = s.open.find((o) => !me.voted.includes(o.id) && (o.status === "voting" || o.status === "collecting"));
+      if (open && (me.can_vote_founding || me.can_vote)) {
+        hud.toast(`🗳 ${open.status === "voting" ? "A town vote is open" : "The town is collecting ideas"}: “${open.title}”. Visit the Town Hall.`, 7000);
+      }
+    })
+    .catch(() => {});
   // A small daily gift, no streaks (spec §8.3).
   eco
     .daily()

@@ -342,6 +342,57 @@ friends, fishing, gardening, chess); botswarm 500 bots PASS (tick p99
 
 See docs/adr/0006-living-park.md.
 
+## M6 · Govern: done (2026-10-12)
+
+"The people here decide what comes next", ready for launch.
+
+- **Activity days and trust tiers:** time present plus things done with
+  others, reported by zone servers each minute (bots excluded) and by the
+  API. Visitor → Newcomer → Resident → Steward.
+- **The Story of the Town** board by the fountain: the town's name, the
+  phase and what unlocks the next one, your standing, open votes, recent
+  decisions.
+- **The Town Hall:** votes (ideas with support, discussion, ranked-choice or
+  yes/no ballots, results round by round), the archive (the public,
+  append-only ledger), proposing (Residents, from Phase 1) and the
+  Caretaker's desk (open founding votes, end a stage early, post temporary
+  decisions, handle reports).
+- **Founding votes** (decided for launch): the Caretaker opens "Name the
+  town" and "Beyond the bridge"; anyone with 3 active days votes, one vote
+  each. The name vote renames the town; the bridge vote opens a
+  construction pool.
+- **Secret ballots:** who voted and what was voted live in separate tables.
+- **Reports and mutes:** Report from any player's menu; the Caretaker can
+  warn or mute (1 h / 24 h). Mutes stop chat, posts, comments and
+  proposals.
+
+### Tests
+
+API on Postgres: activity → tiers and zone activity reports; the founders
+name the town by ranked choice (suggest, support, shortlist, rank, result,
+the Story board, the ledger can't be edited, ballots have no voter column);
+town rules need 60%; the bridge vote opens a pool; reports, mutes and
+permissions. Unit: instant runoff, thresholds, voice weight, tiers. Zone: a
+muted player can't chat; activity is counted for accounts, not bots.
+Browser: the Caretaker opens "Name the town", three founders suggest,
+support and rank, the town is named, the Story board shows it, and a report
+from the avatar menu reaches the Caretaker.
+
+### Botswarm (500 bots)
+
+| Tick p99 | Client KB/s p99 | Gate |
+|---|---|---|
+| 3.1 ms | 3.44 | PASS |
+
+### Launch checklist
+
+1. Set `COMMONS_CARETAKERS=you@example.org` on the API.
+2. Once a few people have 3 active days, open **Name the town** at the
+   Town Hall (Caretaker tab), then **Beyond the bridge**.
+3. Watch the report queue in the Caretaker tab.
+
+See docs/adr/0007-governance.md.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,
