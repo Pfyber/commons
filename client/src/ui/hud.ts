@@ -16,6 +16,7 @@ export interface HudHandlers {
   onNotifications(): void;
   /** Toggles sound; returns whether it's now muted. */
   onSound(): boolean;
+  onTasks(): void;
 }
 
 export class Hud {
@@ -28,6 +29,7 @@ export class Hud {
   private coinsEl: HTMLDivElement;
   private badgeEl!: HTMLSpanElement;
   private toastTimer = 0;
+  private tasksEl: HTMLButtonElement;
 
   constructor(root: HTMLElement, h: HudHandlers) {
     root.innerHTML = `
@@ -43,6 +45,7 @@ export class Hud {
           <div class="pill nearby" title="People in view"></div>
         </div>
       </div>
+      <button type="button" class="pill btn tasks-chip" hidden></button>
       <div class="toast" role="status" hidden></div>
       <div class="bottom">
         <div class="log" aria-live="polite"></div>
@@ -58,6 +61,8 @@ export class Hud {
     this.toastEl = root.querySelector(".toast")!;
     if (matchMedia("(pointer: coarse)").matches) this.input.placeholder = "Tap to chat";
     this.coinsEl = root.querySelector(".coins")!;
+    this.tasksEl = root.querySelector(".tasks-chip")!;
+    this.tasksEl.onclick = () => h.onTasks();
     root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
     root.querySelector<HTMLButtonElement>(".album-btn")!.onclick = () => h.onAlbum();
     root.querySelector<HTMLButtonElement>(".friends-btn")!.onclick = () => h.onFriends();
@@ -125,6 +130,12 @@ export class Hud {
   setMuted(muted: boolean) {
     const b = document.querySelector<HTMLButtonElement>(".sound-btn");
     if (b) b.textContent = muted ? "🔇" : "🔊";
+  }
+
+  /** The Caretaker's tasks chip under the place name; null hides it. */
+  setTasks(text: string | null) {
+    this.tasksEl.hidden = text === null;
+    if (text !== null) this.tasksEl.textContent = text;
   }
 
   setCoins(n: number) {

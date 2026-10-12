@@ -877,6 +877,24 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.woodDark, 10, 20, 14, 1);
       break;
     }
+    case "founders_stone": {
+      // A low standing stone with names cut into it and a seedling carved on top.
+      [c, ctx] = makeCanvas(w, h + 22);
+      overhang = 22;
+      const top = 22;
+      px(ctx, "rgba(0,0,0,0.2)", 4, top + h - 8, w - 8, 7);
+      polygon(ctx, P.outline, [[6, top + h - 4], [4, 12], [12, 3], [w - 12, 3], [w - 4, 12], [w - 6, top + h - 4]]);
+      polygon(ctx, "#a9a493", [[7, top + h - 5], [6, 12], [13, 5], [w - 13, 5], [w - 6, 12], [w - 7, top + h - 5]]);
+      px(ctx, "#bdb8a6", 9, 8, w - 18, 3);
+      for (let r = 0; r < 6; r++) px(ctx, "#827d6c", 12 + (r % 2) * 4, 16 + r * 4, w - 26 - (r % 3) * 6, 1);
+      px(ctx, "#5d8a4e", w / 2 - 1, 0, 2, 5);
+      px(ctx, "#8fca6b", w / 2 - 5, 0, 4, 2);
+      px(ctx, "#8fca6b", w / 2 + 1, -1, 4, 2);
+      for (const [fx, col] of [[2, "#ffe08a"], [w - 5, "#f4a7b9"], [10, "#ffffff"], [w - 13, "#c9a7f4"]] as [number, string][]) {
+        px(ctx, col, fx, top + h - 6, 3, 3);
+      }
+      break;
+    }
     case "garden_sign": {
       [c, ctx] = makeCanvas(w, h + 16);
       overhang = 16;
@@ -896,6 +914,8 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
 // ---- avatars ------------------------------------------------------------------
 
 const SKIN = ["#f5d0b0", "#e0ac84", "#b97c55", "#7d5136"];
+/** The Caretaker NPC's look: a gardener in a straw sun hat and green apron. */
+export const CARETAKER_LOOK = 0xfffffff1;
 const HAIR = ["#2b211c", "#5a3b25", "#a5662f", "#e3c16f", "#c4c4c4", "#b4473a", "#3f4f8f", "#6f4d8f"];
 
 /** Decodes the 32-bit look seed into avatar parts (modular layers later). */
@@ -921,7 +941,10 @@ export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
   const key = `${look}:${frame}`;
   const cached = avatarCache.get(key);
   if (cached) return cached;
-  const p = lookParts(look);
+  const caretaker = look === CARETAKER_LOOK;
+  const p = caretaker
+    ? { outfit: "#e8dcc0", outfitDark: "#5f8f4e", skin: SKIN[1], hair: "#c4c4c4", hat: 0, hatColor: "" }
+    : lookParts(look);
   const [c, ctx] = makeCanvas(24, 34);
   const o = PALETTE.outline;
   px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
@@ -966,6 +989,18 @@ export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
   } else if (p.hat === 3) {
     px(ctx, "#ffd1e0", 15, 3, 4, 4);
     px(ctx, "#f7d35c", 16, 4, 2, 2);
+  }
+  if (caretaker) {
+    // Green apron with a pocket and a trowel; a wide straw hat with a band.
+    px(ctx, "#5f8f4e", 8, 18, 8, 8);
+    px(ctx, "#4c7a3e", 9, 21, 4, 3);
+    px(ctx, "#9aa3a8", 14, 20, 1, 3);
+    px(ctx, o, 1, 4, 22, 3);
+    px(ctx, "#e6c46a", 2, 5, 20, 1);
+    px(ctx, o, 6, 0, 12, 5);
+    px(ctx, "#e6c46a", 7, 1, 10, 4);
+    px(ctx, "#b5544a", 7, 3, 10, 1);
+    px(ctx, "#8fca6b", 15, 1, 2, 2);
   }
   const t = toTexture(c);
   avatarCache.set(key, t);

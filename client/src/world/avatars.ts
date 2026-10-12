@@ -69,6 +69,29 @@ export class Avatar {
     this.apply(info, now);
   }
 
+  /** Styles the name tag as a non-player character's. */
+  markNpc() {
+    this.label.classList.add("npc");
+  }
+
+  /** Shows a founder's leaf by the name (title: "Founder #n"). */
+  setFounder(no: number | null) {
+    let leaf = this.nameEl.querySelector<HTMLSpanElement>(".founder");
+    if (no === null) {
+      leaf?.remove();
+      this.nameW = 0;
+      return;
+    }
+    if (!leaf) {
+      leaf = document.createElement("span");
+      leaf.className = "founder";
+      leaf.textContent = "🌱";
+      this.nameEl.appendChild(leaf);
+      this.nameW = 0;
+    }
+    leaf.title = `Founder #${no}`;
+  }
+
   /** Updates from a Spawn/CellEnter snapshot. */
   apply(info: EntityInfo, now: number) {
     this.info = info;

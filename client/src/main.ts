@@ -9,6 +9,8 @@ import { Social } from "./social";
 import { Town } from "./town";
 import { Gov } from "./gov";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
+import { FoundersPanel, WelcomePanel } from "./ui/welcome";
+import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
 import { Hud } from "./ui/hud";
 import { signIn } from "./ui/login";
@@ -88,6 +90,12 @@ async function main() {
   const sound = new Soundscape();
   const gov = new Gov(auth);
   const townhall = new TownHallPanel(gov);
+  const welcome = new Welcome(auth);
+  const welcomePanel = new WelcomePanel(
+    welcome,
+    (t) => game?.walkTo(t),
+    (no) => hud.toast(`🌱 Founder #${no}! Your seedling is in the Founders' Grove, east of the chess tables.`, 7000),
+  );
   const place = new PlaceBanner(() => place.hide());
   const friendActions = {
     join: (f: { id: string }) => void travel({ friend: f.id }),
@@ -104,6 +112,7 @@ async function main() {
     onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
     onNotifications: () => notifications.toggle(),
     onSound: () => sound.toggle(),
+    onTasks: () => welcomePanel.show(),
   });
   hud.setMuted(sound.muted);
   const ui: Ui = {
@@ -138,7 +147,16 @@ async function main() {
     townhall,
     story: new StoryPanel(gov, (id) => void townhall.openAt({ kind: "proposal", id })),
     report: new ReportPanel(gov),
+    welcome,
+    welcomePanel,
+    founders: new FoundersPanel(welcome, () => auth.player?.display_name ?? ""),
   };
+  // The Caretaker's tasks chip, until you're a founder (or the season closes).
+  welcome.onChange(() => {
+    const s = welcome.status;
+    if (!s || s.founder || (!s.season.open && welcome.done < 3)) return hud.setTasks(null);
+    hud.setTasks(welcome.done === 3 ? "🌱 Plant your seedling!" : `🌿 Caretaker's tasks ${welcome.done}/3`);
+  });
   const notifications = new NotificationsPanel(social, friendActions);
   eco.onChange(() => hud.setCoins(eco.coins));
   social.onChange(() => hud.setBadge(social.unreadCount));
@@ -209,6 +227,41 @@ async function main() {
   };
 
   await enter();
+  // First visit: the Caretaker says hello. Afterwards, keep the tasks fresh
+  // (sitting together is reported by the zone about once a minute).
+  welcome
+    .load()
+    .then((s) => {
+      let met = false;
+      try {
+        met = localStorage.getItem("commons.metCaretaker") === "1";
+        localStorage.setItem("commons.metCaretaker", "1");
+      } catch {
+        // storage unavailable
+      }
+      if (!met && !s.founder) window.setTimeout(() => welcomePanel.show(), 1500);
+    })
+    .catch(() => {});
+  window.setInterval(() => {
+    const s = welcome.status;
+    if (s && !s.founder && welcome.done < 3) void welcome.load().catch(() => {});
+  }, 20_000);
+  // Gathering hours: a nudge when one is about to start, or has just begun.
+  const nudged = new Set<string>();
+  const gatherings = () => {
+    const now = Date.now();
+    for (const g of GATHERINGS) {
+      const { start } = nextOccurrence(g, now);
+      const key = `${g.key}:${start}`;
+      if (nudged.has(key)) continue;
+      if (start - now <= 10 * 60_000 && now - start <= 15 * 60_000) {
+        nudged.add(key);
+        hud.toast(start > now ? `🌆 ${g.title} starts in ${Math.ceil((start - now) / 60_000)} min, at ${g.where}.` : `🌆 ${g.title} has begun, at ${g.where}. Come along!`, 7000);
+      }
+    }
+  };
+  window.setTimeout(gatherings, 9000);
+  window.setInterval(gatherings, 60_000);
   // A gentle nudge when there's a vote you can take part in.
   gov
     .loadStory()

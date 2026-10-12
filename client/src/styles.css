@@ -1473,3 +1473,95 @@ body.fading #stage {
   min-height: 70px;
   resize: vertical;
 }
+
+/* ---- the founding experience: the Caretaker, founders, the grove ---- */
+
+.label.npc .name {
+  background: rgba(79, 122, 62, 0.85);
+}
+
+.label .name .founder {
+  margin-left: 3px;
+  font-size: 11px;
+}
+
+.tasks-chip {
+  position: fixed;
+  top: max(58px, calc(env(safe-area-inset-top) + 50px));
+  left: 12px;
+  font-size: 13px !important;
+  padding: 6px 12px !important;
+  background: rgba(240, 248, 228, 0.95) !important;
+  border: 2px solid #8fb875;
+  cursor: pointer;
+}
+
+.tasks-chip:hover {
+  background: #fff !important;
+}
+
+.panel.welcome .intro {
+  margin: 0 0 10px;
+  line-height: 1.45;
+}
+
+.panel.welcome .tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.panel.welcome .task {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(59, 58, 46, 0.06);
+}
+
+.panel.welcome .task.done {
+  background: rgba(95, 143, 78, 0.14);
+  color: #3f6b32;
+}
+
+.panel.welcome .task-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.panel.welcome .founder-card,
+.panel.welcome .plant-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(95, 143, 78, 0.14);
+}
+
+.panel.founders .search {
+  width: 100%;
+  margin: 4px 0 8px;
+}
+
+.panel.founders .founder-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.panel.founders .row .no {
+  min-width: 36px;
+  color: #6b7563;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel.founders .row.me {
+  background: rgba(95, 143, 78, 0.14);
+  border-radius: 8px;
+}

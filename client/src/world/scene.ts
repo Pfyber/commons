@@ -67,6 +67,7 @@ export class Scene {
     }
 
     for (const o of map.objects) {
+      if (o.kind === "grove_slot") continue; // drawn by the Founders' Grove
       const { texture, overhang } = objectTexture(o);
       const s = new Sprite(texture);
       s.position.set(o.x * TILE, o.y * TILE - overhang);

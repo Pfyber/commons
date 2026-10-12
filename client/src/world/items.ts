@@ -160,6 +160,18 @@ function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
         for (let b = 0; b < 6; b++) px(ctx, ["#b5544a", "#5d8a4e", "#3f6fa0", "#e6b450"][(b + r) % 4], 6 + b * 3.6, 2 + r * 9, 3, 7);
       }
       break;
+    case "founders_lantern":
+      // A lantern on a post with a leaf on its cap: every founder's keepsake.
+      px(ctx, O, 14, 12, 4, 18);
+      px(ctx, PALETTE.woodDark, 15, 13, 2, 16);
+      px(ctx, O, 9, 29, 14, 3);
+      px(ctx, O, 9, 2, 14, 13);
+      px(ctx, "#ffe39a", 10, 4, 12, 9);
+      px(ctx, "#fff5c8", 13, 6, 6, 5);
+      px(ctx, O, 8, 1, 16, 2);
+      px(ctx, "#5d8a4e", 14, -1, 4, 2);
+      px(ctx, "#8fca6b", 17, -2, 3, 2);
+      break;
     case "cozy_bed":
       px(ctx, O, 1, 4, 30, 27);
       px(ctx, D, 2, 5, 28, 25);

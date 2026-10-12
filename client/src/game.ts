@@ -7,6 +7,7 @@ import { EaselDisplays, type EaselPanel } from "./activities/easel";
 import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
+import { Caretaker } from "./ambient/caretaker";
 import { Critters } from "./ambient/critters";
 import type { Soundscape } from "./ambient/sound";
 import { Weather } from "./ambient/weather";
@@ -21,6 +22,9 @@ import type { Town } from "./town";
 import type { FriendsPanel } from "./ui/social";
 import type { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
 import type { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
+import { type FoundersPanel, STAGES, type WelcomePanel } from "./ui/welcome";
+import { type Welcome, happeningNow } from "./welcome";
+import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame } from "./ui/panels";
@@ -70,6 +74,9 @@ export interface Ui {
   townhall: TownHallPanel;
   story: StoryPanel;
   report: ReportPanel;
+  welcome: Welcome;
+  welcomePanel: WelcomePanel;
+  founders: FoundersPanel;
 }
 
 /** Things to find in the park; remembered per browser. */
@@ -160,6 +167,9 @@ export class Game {
   private weather: Weather;
   private critters: Critters;
   private cat: Cat | null = null;
+  private caretaker: Caretaker | null = null;
+  private grove: Grove | null = null;
+  private caretakerTalkAt = 0;
   private ringCheckAt = 0;
 
   constructor(
@@ -196,7 +206,14 @@ export class Game {
     if (zoneId === "founders_park") {
       this.cat = new Cat(map);
       if (this.cat.active) this.scene.sorted.addChild(this.cat.sprite);
+      const grove = new Grove(map, this.scene.sorted);
+      if (grove.active) this.grove = grove;
+      if (map.objects.some((o) => o.kind === "founders_stone")) this.caretaker = new Caretaker(map, this.scene, labels);
     }
+    // Founders: trees in the grove and a leaf by their names.
+    this.disposers.push(ui.welcome.onChange(() => this.applyFounders()));
+    this.applyFounders();
+    void ui.welcome.loadFounders().catch(() => {});
     this.chess = new ChessPanel(document.body, () => this.selfId, {
       move: (table, uci) => this.socket?.send({ t: "GameMove", table, uci }),
       close: () => this.chess.hide(),
@@ -232,7 +249,62 @@ export class Game {
     // CellEnter after crossing a cell) would only pull it back in time.
     if (existing && info.id === this.selfId) return;
     if (existing) existing.apply(info, now);
-    else this.avatars.set(info.id, new Avatar(info, this.scene, this.labels, info.id === this.selfId, now));
+    else {
+      const a = new Avatar(info, this.scene, this.labels, info.id === this.selfId, now);
+      a.setFounder(this.ui.welcome.founderNamed(info.name)?.no ?? null);
+      this.avatars.set(info.id, a);
+    }
+  }
+
+  private applyFounders() {
+    this.grove?.setFounders(this.ui.welcome.founders);
+    for (const a of this.avatars.values()) a.setFounder(this.ui.welcome.founderNamed(a.info.name)?.no ?? null);
+  }
+
+  /** Walks to (near) `t`, e.g. where the Caretaker's tasks point. */
+  walkTo(t: TileXY) {
+    const spot = nearestWalkable(this.scene.map, t.x, t.y, 3);
+    if (spot) this.moveTo(spot, true);
+  }
+
+  /** Tapping the Caretaker opens their panel. */
+  private tapCaretaker(sx: number, sy: number): boolean {
+    if (!this.caretaker) return false;
+    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
+    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    if (!this.caretaker.hit(x, y)) return false;
+    const self = this.self;
+    if (self && cheb(self.destination, this.caretaker.pos) > 3) this.walkTo(this.caretaker.avatar.destination);
+    this.ui.welcomePanel.show();
+    return true;
+  }
+
+  /** The Caretaker says something now and then when you're close by. */
+  private caretakerChat(now: number) {
+    const self = this.self;
+    const c = this.caretaker;
+    if (!self || !c || now < this.caretakerTalkAt) return;
+    if (Math.hypot(self.pos.x - c.pos.x, self.pos.y - c.pos.y) > 3.5) return;
+    this.caretakerTalkAt = now + 40_000;
+    const w = this.ui.welcome;
+    const s = w.status;
+    const gathering = happeningNow(Date.now());
+    let lines: string[];
+    if (gathering) lines = [`${gathering.title}! Stay a while.`, "It's nice when everyone comes by, isn't it?"];
+    else if (!s) lines = ["Hello! Lovely day for it."];
+    else if (s.founder) lines = [`Your ${STAGES[s.founder.stage]} is doing nicely, Founder #${s.founder.no}.`, "The grove fills up a little every day.", "Have you met Biscuit? Mind the tail.", "Lovely day for the garden."];
+    else if (w.done === 3 && s.season.open) lines = ["You've done all three! Tap me and we'll plant your seedling."];
+    else if (!s.tasks.fish) lines = ["Hello there! Tap me if you'd like a little something to do.", "The fish are biting by the pier today."];
+    else if (!s.tasks.plant) lines = ["The garden could use a seed or two. You've got some in your bag!"];
+    else lines = ["A bench is nicer with two. Or try a game of chess: the Park Elder is always up for one."];
+    c.say(lines[Math.floor(Math.random() * lines.length)]);
+  }
+
+  /** Re-checks the Caretaker's tasks soon after something that may finish one. */
+  private taskMaybeDone(delay = 1200) {
+    const w = this.ui.welcome;
+    if (w.status?.founder || (w.status && w.done === 3)) return;
+    window.setTimeout(() => void w.load().catch(() => {}), delay);
   }
 
   private remove(id: number) {
@@ -478,6 +550,7 @@ export class Game {
       const t = this.scene.screenToTile(e.global.x, e.global.y);
       if (this.tapBall(e.global.x, e.global.y)) return;
       if (this.tapCat(e.global.x, e.global.y)) return;
+      if (this.tapCaretaker(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
       if (this.tapGift(t)) return;
       if (this.tapCollect(t)) return;
@@ -607,6 +680,12 @@ export class Game {
       ui.menu.showWith(ui.eco.name(placed), "", [["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]]);
       return true;
     }
+    const tree = this.grove?.at(t);
+    if (tree) {
+      const f = tree.founder;
+      this.hud.toast(f ? `🌳 ${f.name}'s ${STAGES[f.stage]} · Founder #${f.no} · planted ${new Date(f.planted_at * 1000).toLocaleDateString()}` : "🌱 A spot waiting for a founder's seedling. Ask the Caretaker.", 5000);
+      return true;
+    }
     // Map objects: the drawn art reaches a couple of tiles above the footprint.
     const obj = map.objects.find((o) => t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 2 && t.y < o.y + o.h);
     if (obj?.kind === "market_cart") {
@@ -622,6 +701,14 @@ export class Game {
       }
       if (obj.kind === "town_hall") void ui.townhall.openAt({ kind: "list" });
       else ui.story.show();
+      return true;
+    }
+    if (obj?.kind === "founders_stone") {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+        const spot = nearestWalkable(map, obj.x + 1, obj.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      ui.founders.show();
       return true;
     }
     if (obj && obj.kind === "signpost") {
@@ -722,7 +809,10 @@ export class Game {
         break;
       case FISH.CAUGHT: {
         this.props.reelIn(m.id);
-        if (isSelf) this.ui.reel.stop();
+        if (isSelf) {
+          this.ui.reel.stop();
+          this.taskMaybeDone();
+        }
         this.avatars.get(m.id)?.say(`🎣 ${this.ui.eco.name(m.item)}!`);
         break;
       }
@@ -745,6 +835,7 @@ export class Game {
       this.moveTo(spot, true);
     }
     this.socket.send({ t: "PlotAction", x, y, action, item });
+    this.taskMaybeDone(3000);
   }
 
   // ---- sitting & tables ---------------------------------------------------
@@ -870,6 +961,10 @@ export class Game {
     this.weather.update(wallNow, hour);
     this.critters.update(wallNow, this.daynight.dark);
     this.cat?.update(Date.now());
+    if (this.caretaker) {
+      this.caretaker.update(Date.now(), wallNow);
+      this.caretakerChat(wallNow);
+    }
     if (wallNow > this.ringCheckAt) {
       this.ringCheckAt = wallNow + 400;
       // The fairy ring is found by walking into the hidden clearing.
@@ -903,6 +998,8 @@ export class Game {
     this.milestones.destroy();
     this.weather.destroy();
     this.critters.destroy();
+    this.caretaker?.destroy();
+    for (const p of [this.ui.welcomePanel, this.ui.founders]) p.hide();
     for (const p of [this.ui.plot, this.ui.menu, this.ui.market, this.ui.easel, this.ui.word, this.ui.townhall, this.ui.story]) p.hide();
     this.ui.reel.stop();
     this.ui.place.hide();
