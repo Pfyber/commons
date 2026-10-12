@@ -4,6 +4,7 @@
 //! account code.
 
 pub mod auth;
+pub mod bottles;
 pub mod economy;
 pub mod error;
 pub mod gov;

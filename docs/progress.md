@@ -439,6 +439,65 @@ tree in the grove and the name on the Stone, and another player sees the
 
 See docs/adr/0008-founding-and-launch.md.
 
+## A dreamier park: secret places and gentle ways to meet (2026-10-12)
+
+For people who come here lonely: ways to signal you'd welcome company, small
+gestures that need both people, something to talk about, private places to
+talk, and moments everyone shares.
+
+- **Secret nooks**, where chat is heard only inside (checked on the zone
+  server). It's the words that are private; people inside can still be seen.
+  - **The Willow Hideaway:** in the meadow; walk through the curtain of
+    branches.
+  - **The Moss Grotto:** in the Whispering Wood, behind a "pine" that isn't
+    one.
+  - **The Little Island:** stepping stones from the pier.
+  - **The Heart of the Maze.**
+
+  Each counts as a discovery. Inside, the screen edges soften and the chat
+  box tells you who can hear.
+- **Moods:** 💬 open to chat, 🌙 quiet company, ♟ up for a game, shown before
+  your name and remembered.
+- **Hugs, high fives, dancing together:** offered from someone's menu,
+  accepted on a card. Each counts as "sitting with someone" for the
+  Caretaker's tasks.
+- **The campfire circle** on the west field: log seats, crackling flames, and
+  a shared question every 4 minutes for whoever sits there.
+- **Wish lanterns** at the picnic lawn: a wish rises glowing into the sky
+  for everyone nearby.
+- **Stargazing:** picnic blankets and logs are seats. After dark, shooting
+  stars everyone sees at the same moment.
+- **Messages in bottles** at the pier:
+  - write a kind anonymous note (3 a day);
+  - find a stranger's (one an hour, never from someone you've blocked);
+  - send a thank-you back, or report the note to the Caretaker.
+- **Gathering hours:** campfire stories nightly, and stargazing on Saturdays.
+- **The Caretaker** drops hints about the secret places.
+- Protocol v5.
+
+### Tests
+
+- **Zone:** nooks keep chat inside, both ways; a hug needs an offer and
+  matching acceptance; moods show to newcomers; one sky lantern per half
+  minute.
+- **API:** a bottle reaches a stranger, never its author, once an hour;
+  only the finder can thank; three a day.
+- **Client:** the campfire question cycles through every question; shooting
+  stars are shared and occasional.
+- **Browser:** moods seen by others; a hug offered and returned; chat in the
+  hideaway heard inside and not just outside the curtain; the campfire
+  question; a wish lantern seen by a neighbour; a bottle thrown, found and
+  thanked; walking to the island and through the grotto's passage; a
+  shooting star. No errors.
+
+### Botswarm (500 bots)
+
+| Tick p99 | Client KB/s p99 | Gate |
+|---|---|---|
+| 4.4 ms | 3.42 | PASS |
+
+See docs/adr/0009-a-dreamier-park.md.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

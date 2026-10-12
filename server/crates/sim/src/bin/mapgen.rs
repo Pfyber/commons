@@ -28,6 +28,7 @@ const GROUND: &[&str] = &[
     "fog",
     "floor",
     "pitch",
+    "stones",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -51,6 +52,11 @@ const DECOR: &[&str] = &[
     "lilypad",
     "apple_tree",
     "blanket",
+    "willow",
+    "willow_curtain",
+    "pine_secret",
+    "log_seat",
+    "lantern",
 ];
 
 fn g(name: &str) -> u8 {
@@ -161,6 +167,9 @@ impl Builder {
             d("tallgrass"),
             d("mushrooms"),
             d("blanket"),
+            // Secret passages look like the trees around them.
+            d("willow_curtain"),
+            d("pine_secret"),
         ];
         let blocked_ground = [g("water"), g("fog")];
         let collision: Vec<u8> = (0..self.ground.len())
@@ -187,6 +196,15 @@ impl Builder {
             objects: self.objects,
         }
     }
+}
+
+/// A nook (a secret place where chat stays private) over `tiles`.
+fn nook(b: &mut Builder, tiles: &[(u16, u16)], name: &str) {
+    let x0 = tiles.iter().map(|t| t.0).min().unwrap();
+    let x1 = tiles.iter().map(|t| t.0).max().unwrap();
+    let y0 = tiles.iter().map(|t| t.1).min().unwrap();
+    let y1 = tiles.iter().map(|t| t.1).max().unwrap();
+    b.object("nook", x0, y0, x1 - x0 + 1, y1 - y0 + 1, Some(name), false);
 }
 
 /// The Founders' Grove: (x0, y0, x1, y1), inclusive.
@@ -563,7 +581,126 @@ fn park() -> MapFile {
         b.object("grove_slot", x, y, 1, 1, None, false);
     }
 
-    // ---- planting -------------------------------------------------------------------
+    // ---- secret places and cosy corners ------------------------------------------------
+    //
+    // Nooks (spec: "more intimate conversations"): chat inside one is heard
+    // only inside it. Each is reached through a passage that looks like the
+    // trees around it, or across stepping stones.
+
+    // The Willow Hideaway: a ring of weeping willows in the meadow; one
+    // curtain of branches on the east side parts as you walk through.
+    let (hx, hy, hrx, hry) = (9.0f32, 82.0f32, 4.6f32, 3.4f32);
+    let mut inside = vec![];
+    for y in 76..90u16 {
+        for x in 2..18u16 {
+            let (dx, dy) = ((x as f32 - hx) / hrx, (y as f32 - hy) / hry);
+            let e = dx * dx + dy * dy;
+            if e < 1.0 {
+                b.ground(x, y, "flowers");
+                b.decor(x, y, "none");
+                inside.push((x, y));
+            } else if e < 1.9 {
+                b.ground(x, y, "grass_dark");
+                b.decor(x, y, "willow");
+            }
+        }
+    }
+    let gap_x = (hx + hrx).ceil() as u16;
+    for x in gap_x..gap_x + 2 {
+        b.decor(x, hy as u16, "willow_curtain");
+    }
+    b.decor(8, 80, "bench");
+    b.decor(9, 80, "bench");
+    b.decor(11, 80, "lantern");
+    nook(&mut b, &inside, "The Willow Hideaway");
+
+    // The Moss Grotto, deep in the Whispering Wood, east of the fairy ring:
+    // the third pine from the top on its west side isn't quite a pine.
+    let mut inside = vec![];
+    for y in 9..=15u16 {
+        for x in 13..=17u16 {
+            if (14..=16).contains(&x) && (10..=14).contains(&y) {
+                b.ground(x, y, "grass_dark");
+                b.decor(x, y, "none");
+                inside.push((x, y));
+            } else {
+                b.decor(x, y, "pine");
+            }
+        }
+    }
+    b.decor(13, 12, "pine_secret");
+    b.decor(12, 12, "none");
+    b.decor(15, 10, "log_seat");
+    b.decor(16, 10, "log_seat");
+    b.decor(14, 10, "lantern");
+    for (x, y) in [(14u16, 13u16), (16, 14), (14, 14), (16, 12)] {
+        b.decor(x, y, "mushrooms");
+    }
+    nook(&mut b, &inside, "The Moss Grotto");
+
+    // The Little Island in the pond, across stepping stones from the pier.
+    let mut inside = vec![];
+    for y in 61..68u16 {
+        for x in 21..31u16 {
+            let (dx, dy) = ((x as f32 - 25.5) / 2.9, (y as f32 - 64.0) / 1.9);
+            let e = dx * dx + dy * dy;
+            if e <= 1.0 {
+                b.ground(x, y, if e < 0.55 { "grass" } else { "sand" });
+                b.decor(x, y, "none");
+                inside.push((x, y));
+            }
+        }
+    }
+    for x in 24..34u16 {
+        if b.ground[b.i(x, 66)] == g("water") {
+            b.ground(x, 66, "stones");
+            b.decor(x, 66, "none");
+        }
+    }
+    b.decor(25, 63, "bench");
+    b.decor(26, 63, "bench");
+    b.decor(23, 64, "lantern");
+    nook(&mut b, &inside, "The Little Island");
+
+    // The heart of the maze is a nook too.
+    let (hcx, hcy) = (mx + mw / 2, my + mh / 2);
+    b.object(
+        "nook",
+        hcx - 1,
+        hcy - 1,
+        3,
+        3,
+        Some("The Heart of the Maze"),
+        false,
+    );
+
+    // The campfire circle on the west field: logs to sit on, and a question
+    // to talk about (client side).
+    let (fx, fy) = (7u16, 40u16);
+    for y in fy - 2..=fy + 2 {
+        for x in fx - 2..=fx + 2 {
+            b.ground(x, y, "sand");
+            b.decor(x, y, "none");
+        }
+    }
+    b.object("campfire", fx, fy, 1, 1, Some("Campfire"), true);
+    for (x, y) in [
+        (fx - 2, fy - 1),
+        (fx - 2, fy + 1),
+        (fx + 2, fy - 1),
+        (fx + 2, fy + 1),
+        (fx, fy - 2),
+        (fx, fy + 2),
+    ] {
+        b.decor(x, y, "log_seat");
+    }
+    b.stroke(&[(10.0, 47.5), (9.0, 45.0), (8.0, 43.0)], 0.8, Brush::Path);
+
+    // Messages in bottles, at the land end of the pier.
+    b.object("bottles", 38, 64, 1, 1, Some("Messages in bottles"), true);
+
+    // Wish lanterns on the picnic lawn, for sending a wish up into the sky.
+    b.object("lantern_stand", 49, 86, 1, 1, Some("Wish lanterns"), true);
 
     // Reeds and lily pads around the water.
     for y in 1..H - 1 {
@@ -607,10 +744,25 @@ fn park() -> MapFile {
             }
             let in_maze = (mx..mx + mw).contains(&x) && (my..my + mh).contains(&y);
             let in_garden = (19..37).contains(&x) && (24..38).contains(&y);
+            let in_dream = [
+                (2u16, 76u16, 17u16, 89u16),
+                (12, 12, 12, 12),
+                (14, 10, 16, 14),
+                (21, 61, 30, 67),
+                (3, 36, 11, 44),
+            ]
+            .iter()
+            .any(|&(x0, y0, x1, y1)| (x0..=x1).contains(&x) && (y0..=y1).contains(&y));
             let in_grove = GROVE_AREAS
                 .iter()
                 .any(|&(x0, y0, x1, y1)| (x0..=x1).contains(&x) && (y0..=y1).contains(&y));
-            if near_plaza || screen_lawn || in_maze || in_garden || in_grove || near_path(&b, x, y)
+            if near_plaza
+                || screen_lawn
+                || in_maze
+                || in_garden
+                || in_grove
+                || in_dream
+                || near_path(&b, x, y)
             {
                 continue;
             }

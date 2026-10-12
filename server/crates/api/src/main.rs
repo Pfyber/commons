@@ -4,7 +4,7 @@
 
 use axum::Router;
 use commons_api::economy::Catalog;
-use commons_api::{AppState, auth, economy, gov, internal, play, store, town, welcome};
+use commons_api::{AppState, auth, bottles, economy, gov, internal, play, store, town, welcome};
 use commons_common::{config, telemetry};
 use std::sync::Arc;
 
@@ -58,7 +58,8 @@ async fn main() -> anyhow::Result<()> {
                 .merge(town::routes())
                 .merge(play::routes())
                 .merge(gov::routes())
-                .merge(welcome::routes()),
+                .merge(welcome::routes())
+                .merge(bottles::routes()),
         )
         .nest("/internal", internal::routes())
         .with_state(state)

@@ -444,6 +444,11 @@ mod town_life {
         // is too soon.
         let tag = format!("t{}", &Uuid::new_v4().simple().to_string()[..8]);
         let board = "/api/town/quarters/music/board";
+        // Earlier runs' tags would crowd the top eight (test database only).
+        sqlx::query("UPDATE board_posts SET hidden = true WHERE quarter = 'music'")
+            .execute(&db)
+            .await
+            .unwrap();
         let (st, r) = call(
             &app,
             &me,
@@ -1497,5 +1502,106 @@ mod founding {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(f["founders"].as_array().unwrap().len(), 1);
         assert_eq!(f["season"]["left"], commons_sim::GROVE_SLOTS as i64 - 1);
+    }
+}
+
+mod bottles {
+    use super::*;
+    use axum::Router;
+    use serde_json::{Value, json};
+
+    fn app(s: Arc<AppState>) -> Router {
+        Router::new()
+            .nest("/api", crate::bottles::routes())
+            .with_state(s)
+    }
+
+    async fn call(app: &Router, auth: &str, uri: &str, body: Value) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    fn bearer_for(s: &AppState, id: Uuid) -> String {
+        let claims = token::AccessClaims {
+            sub: id.to_string(),
+            name: "t".into(),
+            look: 1,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        )
+    }
+
+    #[tokio::test]
+    async fn a_bottle_reaches_a_stranger_who_can_say_thanks() {
+        let Some(db) = db().await else { return };
+        // Only this test's bottles are adrift (test database only).
+        sqlx::query("UPDATE bottles SET hidden = true WHERE found_by IS NULL")
+            .execute(&db)
+            .await
+            .unwrap();
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let (writer, finder) = (player(&s).await, player(&s).await);
+        let (w, f) = (bearer_for(&s, writer), bearer_for(&s, finder));
+
+        let (st, r) = call(
+            &app,
+            &w,
+            "/api/bottles",
+            json!({ "text": "You're doing better than you think." }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        // You never find your own.
+        let (_, r) = call(&app, &w, "/api/bottles/find", json!({})).await;
+        assert_eq!(r["found"], false);
+        let (_, r) = call(&app, &f, "/api/bottles/find", json!({})).await;
+        assert_eq!(r["found"], true, "{r}");
+        assert_eq!(r["bottle"]["text"], "You're doing better than you think.");
+        let id = r["bottle"]["id"].as_i64().unwrap();
+        // One find an hour.
+        let (_, r) = call(&app, &f, "/api/bottles/find", json!({})).await;
+        assert_eq!(r["found"], false);
+        assert!(r["wait_min"].as_i64().unwrap() > 0);
+
+        let (st, _) = call(&app, &w, &format!("/api/bottles/{id}/thanks"), json!({})).await;
+        assert_eq!(st, StatusCode::CONFLICT, "only the finder can thank");
+        let (st, _) = call(&app, &f, &format!("/api/bottles/{id}/thanks"), json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        let notes: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM notifications WHERE player_id = $1 AND kind = 'bottle_thanks'",
+        )
+        .bind(writer)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(notes, 1);
+
+        // Three a day.
+        for _ in 0..2 {
+            let (st, _) = call(&app, &w, "/api/bottles", json!({ "text": "hello there" })).await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        let (st, r) = call(&app, &w, "/api/bottles", json!({ "text": "one more" })).await;
+        assert_eq!(st, StatusCode::CONFLICT, "{r}");
     }
 }

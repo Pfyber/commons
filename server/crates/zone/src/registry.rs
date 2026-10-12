@@ -26,6 +26,8 @@ pub struct ZoneDef {
     pub playlist: Option<Arc<Playlist>>,
     /// Present when the map has a pitch with two goals.
     pub pitch: Option<crate::instance::play::Pitch>,
+    /// For each tile, the nook it's in (0: none); chat stays inside nooks.
+    pub nooks: Vec<u8>,
 }
 
 impl ZoneDef {
@@ -35,6 +37,7 @@ impl ZoneDef {
         let cells_h = map.height.div_ceil(CELL_TILES);
         let furniture = Furniture::from_map(&map);
         let pitch = crate::instance::play::Pitch::from_map(&map);
+        let nooks = crate::instance::nook_map(&map);
         let playlist = playlist.filter(|_| map.objects.iter().any(|o| o.kind == "big_screen"));
         ZoneDef {
             id,
@@ -45,6 +48,7 @@ impl ZoneDef {
             furniture,
             playlist,
             pitch,
+            nooks,
         }
     }
 }

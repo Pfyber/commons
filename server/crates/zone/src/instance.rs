@@ -13,6 +13,9 @@ mod fishing;
 mod garden;
 mod hangout;
 mod home;
+mod together;
+
+pub use together::nook_map;
 pub(crate) mod play;
 
 use crate::econ::EconomyClient;
@@ -141,6 +144,10 @@ struct Avatar {
     interactions: u32,
     /// Sat with someone since the last report.
     sat_together: bool,
+    /// What the avatar signals to others (`mood::*`).
+    mood: u8,
+    /// Instance time the next sky lantern may go up.
+    next_lantern: u32,
     fish: Option<fishing::FishSession>,
 }
 
@@ -181,6 +188,7 @@ impl Avatar {
             speed_x10,
             t0,
             path,
+            mood: self.mood,
         }
     }
 }
@@ -202,6 +210,8 @@ pub struct Instance {
     games: HashMap<u32, ChessGame>,
     /// Tables where the Park Elder has the empty side.
     elders: HashMap<u32, hangout::Elder>,
+    /// Open offers to do something together: (from, to) → (kind, expires).
+    offers: HashMap<(u32, u32), (u8, u32)>,
     /// The pitch's ball, if the zone has a pitch.
     ball: Option<play::Ball>,
     /// Activity of players who left since the last report.
@@ -263,6 +273,7 @@ impl Instance {
             seat_occupant: HashMap::new(),
             games: HashMap::new(),
             elders: HashMap::new(),
+            offers: HashMap::new(),
             ball,
             activity_left: Vec::new(),
             next_activity_report: ACTIVITY_EVERY_MS,
@@ -570,6 +581,8 @@ impl Instance {
             counted_until: now,
             interactions: 0,
             sat_together: false,
+            mood: 0,
+            next_lantern: 0,
         };
         avatar.send(
             &ServerMsg::Welcome {
@@ -677,6 +690,10 @@ impl Instance {
                 beat,
             } => self.jam_note(id, instrument, pitch, beat, now),
             ClientMsg::Paint { easel, cell, color } => self.paint(id, easel, cell, color, now),
+            ClientMsg::SetMood { mood } => self.set_mood(id, mood, now),
+            ClientMsg::Offer { to, kind } => self.offer(id, to, kind, now),
+            ClientMsg::Accept { from, kind } => self.accept(id, from, kind, now),
+            ClientMsg::SkyLantern { text } => self.sky_lantern(id, &text, now),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }
@@ -749,6 +766,10 @@ impl Instance {
         }
         let Some(text) = clean_chat(text) else { return };
         let origin = a.tile;
+        // In a nook, only those inside hear you; outside, nobody inside does.
+        let nook = self.nook_at(origin);
+        let nooks = &self.zone.nooks;
+        let w = self.zone.map.width as usize;
         let bytes = ServerMsg::ChatBubble { id, text }.to_bytes();
         // Everyone within CHAT_RADIUS tiles, found through the cells around the speaker.
         let (cw, ch) = (self.zone.cells_w as i32, self.zone.cells_h as i32);
@@ -765,7 +786,12 @@ impl Instance {
                     };
                     let dx = listener.tile.0 as i32 - origin.0 as i32;
                     let dy = listener.tile.1 as i32 - origin.1 as i32;
-                    if dx * dx + dy * dy <= CHAT_RADIUS * CHAT_RADIUS {
+                    let same_nook = nooks
+                        .get(listener.tile.1 as usize * w + listener.tile.0 as usize)
+                        .copied()
+                        .unwrap_or(0)
+                        == nook;
+                    if dx * dx + dy * dy <= CHAT_RADIUS * CHAT_RADIUS && same_nook {
                         listener.send(&bytes);
                     }
                 }
@@ -962,7 +988,7 @@ pub(crate) mod tests {
     use commons_sim::MapFile;
     use commons_sim::map::Spawn;
 
-    fn map(w: u16, h: u16) -> MapFile {
+    pub(crate) fn map(w: u16, h: u16) -> MapFile {
         let n = w as usize * h as usize;
         MapFile {
             name: "test".into(),
@@ -978,7 +1004,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn instance_for(zone: Arc<ZoneDef>) -> Instance {
+    pub(crate) fn instance_for(zone: Arc<ZoneDef>) -> Instance {
         Instance::new(zone, 1, None, None, None)
     }
 

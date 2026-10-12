@@ -1,5 +1,5 @@
-//! Interactive furniture derived from a map: seats (benches, the swing) and
-//! game tables.
+//! Interactive furniture derived from a map: seats (benches, the swing,
+//! picnic blankets, logs round the campfire) and game tables.
 //! Ids are tile indices (`y * width + x`), so client, server and bots agree
 //! without extra data. Mirrored in `client/src/world/furniture.ts`.
 
@@ -43,10 +43,11 @@ impl Furniture {
                 .map(|i| i as u8)
         };
         let (bench, swing, table) = (kind("bench"), kind("swing"), kind("chess_table"));
+        let (blanket, log_seat) = (kind("blanket"), kind("log_seat"));
         let mut f = Furniture::default();
         for (i, &d) in map.decor.iter().enumerate() {
             let tile = ((i as u32 % w) as u16, (i as u32 / w) as u16);
-            if Some(d) == bench || Some(d) == swing {
+            if Some(d) == bench || Some(d) == swing || Some(d) == blanket || Some(d) == log_seat {
                 f.seats.insert(i as u32, Seat { tile, table: None });
             }
         }

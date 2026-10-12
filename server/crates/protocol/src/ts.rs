@@ -227,6 +227,7 @@ pub fn sample_vectors() -> String {
         speed_x10: 40,
         t0: 4_000_000_000,
         path: vec![Tile { x: 95, y: 0 }, Tile { x: 90, y: 5 }],
+        mood: 1,
     };
     let client = [
         ClientMsg::Hello {
@@ -263,6 +264,12 @@ pub fn sample_vectors() -> String {
             y: 4,
         },
         ClientMsg::Pickup { x: 5, y: 4 },
+        ClientMsg::SetMood { mood: 2 },
+        ClientMsg::Offer { to: 7, kind: 1 },
+        ClientMsg::Accept { from: 7, kind: 1 },
+        ClientMsg::SkyLantern {
+            text: "for everyone here 🏮".into(),
+        },
     ];
     let server = [
         ServerMsg::Welcome {
@@ -342,6 +349,19 @@ pub fn sample_vectors() -> String {
             added: 20,
             total: 4_000_000_000,
             first: true,
+        },
+        ServerMsg::MoodShown { id: 9, mood: 3 },
+        ServerMsg::Offered { from: 9, kind: 2 },
+        ServerMsg::Together {
+            a: 9,
+            b: 4,
+            kind: 3,
+        },
+        ServerMsg::LanternRise {
+            id: 9,
+            x: 48,
+            y: 88,
+            text: "a wish".into(),
         },
     ];
     let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();

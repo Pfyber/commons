@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -22,7 +22,8 @@ records! {
     Tile { x: u16, y: u16 }
 
     /// Everything a client needs to render another avatar, including any
-    /// walk in progress so it can be simulated locally.
+    /// walk in progress so it can be simulated locally, and what it signals
+    /// to others (`mood::*`).
     EntityInfo {
         id: u32,
         name: String,
@@ -33,6 +34,7 @@ records! {
         speed_x10: u8,
         t0: u32,
         path: Vec<Tile>,
+        mood: u8,
     }
 }
 
@@ -69,6 +71,14 @@ message_enum! {
         /// palette colour (0 erases). Saving goes through the API; this is
         /// the live relay to people nearby.
         15 Paint { easel: u8, cell: u16, color: u8 }
+        /// Show others how you'd like company (`mood::*`; 0 clears).
+        16 SetMood { mood: u8 }
+        /// Offer avatar `to` something done together (`together::*`).
+        17 Offer { to: u32, kind: u8 }
+        /// Accept `from`'s offer.
+        18 Accept { from: u32, kind: u8 }
+        /// Release a sky lantern carrying a short wish.
+        19 SkyLantern { text: String }
     }
 }
 
@@ -135,6 +145,14 @@ message_enum! {
         /// second, offset by `BALL_V_OFFSET` (they can be negative). `left`
         /// and `right` are the goals scored at each end.
         21 Ball { x: u16, y: u16, vx: u16, vy: u16, t0: u32, left: u8, right: u8 }
+        /// Avatar `id` changed its mood.
+        22 MoodShown { id: u32, mood: u8 }
+        /// `from` offers you something together; answer with `Accept`.
+        23 Offered { from: u32, kind: u8 }
+        /// `a` and `b` do something together (a hug, a high five, a dance).
+        24 Together { a: u32, b: u32, kind: u8 }
+        /// Someone nearby released a sky lantern from (x, y).
+        25 LanternRise { id: u32, x: u16, y: u16, text: String }
     }
 }
 
@@ -148,6 +166,26 @@ pub mod emote {
     pub const CHEER: u8 = 6;
     pub const HEART: u8 = 7;
     pub const MAX: u8 = HEART;
+}
+
+/// `SetMood.mood` / `EntityInfo.mood`.
+pub mod mood {
+    pub const NONE: u8 = 0;
+    /// Happy to chat with anyone: come say hi.
+    pub const OPEN: u8 = 1;
+    /// Quiet company: sit with me, no need to talk.
+    pub const QUIET: u8 = 2;
+    /// Up for a game.
+    pub const PLAY: u8 = 3;
+    pub const MAX: u8 = PLAY;
+}
+
+/// `Offer.kind` / `Together.kind`.
+pub mod together {
+    pub const HUG: u8 = 1;
+    pub const HIGH_FIVE: u8 = 2;
+    pub const DANCE: u8 = 3;
+    pub const MAX: u8 = DANCE;
 }
 
 /// Codes for `Error`.
@@ -245,6 +283,7 @@ mod tests {
             speed_x10: 40,
             t0: 1234,
             path: vec![Tile { x: 3, y: 4 }, Tile { x: 9, y: 4 }],
+            mood: 2,
         };
         let msgs = vec![
             ServerMsg::Welcome {
