@@ -52,6 +52,27 @@ export interface Request {
   done: boolean;
 }
 
+export interface Painting {
+  id: number;
+  title: string;
+  cells: number[];
+  painters: string[];
+  hung_by: string;
+  at: number;
+}
+
+export interface WordState {
+  day: string;
+  guesses: { name: string; guess: string; marks: string }[];
+  solved_by: string | null;
+  answer: string | null;
+  town_left: number;
+  mine_left: number;
+  helpers: number;
+  /** Only on a guess's response. */
+  won?: boolean;
+}
+
 export class Town {
   quarters: Quarter[] = [];
   goal: Goal | null = null;
@@ -101,5 +122,31 @@ export class Town {
 
   deliver(n: number): Promise<Applied> {
     return this.auth.send<Applied>(`/api/town/requests/${n}/deliver`, {});
+  }
+
+  // ---- corner activities (api play.rs) ----
+
+  easel(n: number): Promise<{ id: number; cells: number[]; painters: string[] }> {
+    return this.auth.get(`/api/play/easels/${n}`);
+  }
+
+  async paint(n: number, cells: [number, number][]): Promise<void> {
+    await this.auth.send(`/api/play/easels/${n}/paint`, { cells });
+  }
+
+  hang(n: number, title: string): Promise<{ id: number; painters: string[] }> {
+    return this.auth.send(`/api/play/easels/${n}/hang`, { title });
+  }
+
+  gallery(): Promise<Painting[]> {
+    return this.auth.get("/api/play/gallery");
+  }
+
+  word(): Promise<WordState> {
+    return this.auth.get("/api/play/word");
+  }
+
+  guess(guess: string): Promise<WordState> {
+    return this.auth.send("/api/play/word/guess", { guess });
   }
 }

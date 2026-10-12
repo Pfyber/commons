@@ -12,6 +12,8 @@ import { signIn } from "./ui/login";
 import { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
 import { FriendsPanel, NotificationsPanel } from "./ui/social";
 import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
+import { EaselPanel } from "./activities/easel";
+import { WordPanel } from "./activities/word";
 import type { ZoneMap } from "./world/map";
 import "./styles.css";
 
@@ -118,6 +120,11 @@ async function main() {
       game?.milestones.apply(g.reached);
       hud.toast(`The town reached “${g.title}”! 🎉`, 6000);
     }),
+    easel: new EaselPanel(town, {
+      sendPaint: (e, c, col) => game?.sendPaint(e, c, col),
+      displays: () => game?.easels ?? null,
+    }),
+    word: new WordPanel(town, () => void eco.load().catch(() => {})),
   };
   const notifications = new NotificationsPanel(social, friendActions);
   eco.onChange(() => hud.setCoins(eco.coins));

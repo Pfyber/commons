@@ -24,6 +24,8 @@ pub struct ZoneDef {
     pub furniture: Furniture,
     /// Present when the map has a big screen.
     pub playlist: Option<Arc<Playlist>>,
+    /// Present when the map has a pitch with two goals.
+    pub pitch: Option<crate::instance::play::Pitch>,
 }
 
 impl ZoneDef {
@@ -32,6 +34,7 @@ impl ZoneDef {
         let cells_w = map.width.div_ceil(CELL_TILES);
         let cells_h = map.height.div_ceil(CELL_TILES);
         let furniture = Furniture::from_map(&map);
+        let pitch = crate::instance::play::Pitch::from_map(&map);
         let playlist = playlist.filter(|_| map.objects.iter().any(|o| o.kind == "big_screen"));
         ZoneDef {
             id,
@@ -41,6 +44,7 @@ impl ZoneDef {
             cells_h,
             furniture,
             playlist,
+            pitch,
         }
     }
 }

@@ -13,6 +13,7 @@ mod fishing;
 mod garden;
 mod hangout;
 mod home;
+pub(crate) mod play;
 
 use crate::econ::EconomyClient;
 use crate::games::ChessGame;
@@ -121,6 +122,8 @@ struct Avatar {
     chat_rl: Bucket,
     emote_rl: Bucket,
     game_rl: Bucket,
+    /// Jam notes and paint strokes.
+    play_rl: Bucket,
     /// Occupied bench, if sitting on one.
     seat: Option<u32>,
     /// Where the avatar stands up to.
@@ -175,6 +178,8 @@ pub struct Instance {
     games: HashMap<u32, ChessGame>,
     /// Tables where the Park Elder has the empty side.
     elders: HashMap<u32, hangout::Elder>,
+    /// The pitch's ball, if the zone has a pitch.
+    ball: Option<play::Ball>,
     /// Index of the programme last announced on the big screen.
     screen_index: Option<usize>,
     /// Collision grid; a copy so placed furniture can block tiles.
@@ -215,6 +220,7 @@ impl Instance {
             .filter(|(_, g)| Some(**g as usize) == soil_kind)
             .map(|(i, _)| ((i % w) as u16, (i / w) as u16))
             .collect();
+        let ball = zone.pitch.as_ref().map(play::Ball::new);
         Instance {
             grid: zone.grid.clone(),
             zone,
@@ -230,6 +236,7 @@ impl Instance {
             seat_occupant: HashMap::new(),
             games: HashMap::new(),
             elders: HashMap::new(),
+            ball,
             screen_index: None,
             owner,
             economy,
@@ -330,6 +337,7 @@ impl Instance {
             let now = self.clock.now_ms();
             self.step(now);
             self.elder_tick(now);
+            self.ball_tick(now);
             self.screen_tick(now);
             self.fish_tick(now);
             self.garden_tick(now);
@@ -497,6 +505,7 @@ impl Instance {
             chat_rl: Bucket::new(3.0, 0.5),
             emote_rl: Bucket::new(3.0, 1.0),
             game_rl: Bucket::new(5.0, 2.0),
+            play_rl: Bucket::new(24.0, 12.0),
             seat: None,
             stand_tile: tile,
             pending: None,
@@ -586,6 +595,12 @@ impl Instance {
             }
             ClientMsg::Place { item, x, y } => self.place(id, item, (x, y)),
             ClientMsg::Pickup { x, y } => self.pickup(id, (x, y)),
+            ClientMsg::JamNote {
+                instrument,
+                pitch,
+                beat,
+            } => self.jam_note(id, instrument, pitch, beat, now),
+            ClientMsg::Paint { easel, cell, color } => self.paint(id, easel, cell, color, now),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }
@@ -800,6 +815,7 @@ impl Instance {
         }
         for &c in desired.iter().filter(|c| current.binary_search(c).is_err()) {
             out.extend(self.games_in_cell(c).iter().map(|m| m.to_bytes()));
+            out.extend(self.ball_in_cell(c).iter().map(|m| m.to_bytes()));
             out.extend(self.plots_in_cell(c, now_ms()).iter().map(|m| m.to_bytes()));
             out.extend(self.objects_in_cell(c).iter().map(|m| m.to_bytes()));
         }
@@ -915,6 +931,39 @@ pub(crate) mod tests {
             Some(econ),
             None,
         )
+    }
+
+    /// 40×40 park with a pitch (x 10..=25, y 10..=20) and goals at both
+    /// ends (mouth y 14..17), a bandstand at (0,0) and three easels at (4,0).
+    pub(crate) fn pitch_instance() -> Instance {
+        use commons_sim::map::MapObject;
+        let mut m = map(40, 40);
+        m.ground_legend = vec!["grass".into(), "pitch".into()];
+        for y in 10..=20usize {
+            for x in 10..=25usize {
+                m.ground[y * 40 + x] = 1;
+            }
+        }
+        let obj = |kind: &str, x: u16, y: u16, w: u16, h: u16| MapObject {
+            kind: kind.into(),
+            x,
+            y,
+            w,
+            h,
+            label: None,
+        };
+        m.objects = vec![
+            obj("goal", 10, 14, 1, 3),
+            obj("goal", 25, 14, 1, 3),
+            obj("bandstand", 0, 0, 3, 1),
+            obj("easels", 4, 0, 3, 1),
+        ];
+        for (x, y0) in [(10usize, 14usize), (25, 14)] {
+            for y in y0..y0 + 3 {
+                m.collision[y * 40 + x] = 1;
+            }
+        }
+        instance_for(Arc::new(ZoneDef::new("test".into(), m, None)))
     }
 
     /// Teleports an idle avatar (test setup only).

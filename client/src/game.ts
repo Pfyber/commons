@@ -1,7 +1,11 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
 import { type Application, type FederatedPointerEvent, Sprite } from "pixi.js";
+import { Ball } from "./activities/ball";
 import { ChessPanel, type GameStateMsg } from "./activities/chess";
+import { EaselDisplays, type EaselPanel } from "./activities/easel";
+import { JamPanel, beatTime, playNote } from "./activities/jam";
+import type { WordPanel } from "./activities/word";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
 import { DayNight } from "./ambient/daynight";
@@ -53,6 +57,8 @@ export interface Ui {
   quarter: QuarterPanel;
   requests: RequestsPanel;
   goal: GoalPanel;
+  easel: EaselPanel;
+  word: WordPanel;
 }
 
 /** Where this Game is: label for the HUD and, for homes, whose. */
@@ -106,6 +112,10 @@ export class Game {
   private ambient: Ambient;
   private daynight: DayNight;
   readonly milestones: Milestones;
+  /** Corner activities, where the map has them. */
+  private jam: JamPanel | null = null;
+  easels: EaselDisplays | null = null;
+  private ball: Ball | null = null;
 
   constructor(
     private app: Application,
@@ -135,6 +145,7 @@ export class Game {
         .then((g) => this.milestones.apply(g.reached))
         .catch(() => {});
     }
+    this.setupCorners(map);
     this.chess = new ChessPanel(document.body, () => this.selfId, {
       move: (table, uci) => this.socket?.send({ t: "GameMove", table, uci }),
       close: () => this.chess.hide(),
@@ -267,7 +278,83 @@ export class Game {
         break;
       case "Pong":
         break;
+      case "JamNote": {
+        const self = this.self;
+        const who = this.avatars.get(m.id);
+        if (!self || !who || !this.socket) break;
+        const when = beatTime(m.beat, this.socket.clock.now());
+        const vol = Math.max(0, 1 - Math.hypot(who.pos.x - self.pos.x, who.pos.y - self.pos.y) / 14);
+        if (when !== null) playNote(m.instrument, m.pitch, when, vol);
+        who.flash(m.instrument === 2 ? "🥁" : "♪");
+        break;
+      }
+      case "Painted":
+        this.ui.easel.remote(m.easel, m.cell, m.color);
+        break;
+      case "Ball": {
+        const scored = this.ball?.apply(m);
+        const self = this.self;
+        if (scored && self && this.ball && Math.abs(this.ball.at(this.socket?.clock.now() ?? 0).x - self.pos.x) < 24) {
+          this.hud.toast(`⚽ Goal! West ${this.ball.left} – ${this.ball.right} East`, 3000);
+        }
+        break;
+      }
     }
+  }
+
+  // ---- corner activities ---------------------------------------------------
+
+  private setupCorners(map: ZoneMap) {
+    if (map.objects.some((o) => o.kind === "bandstand")) {
+      this.jam = new JamPanel({
+        serverNow: () => this.socket?.clock.now() ?? 0,
+        send: (instrument, pitch, beat) => this.socket?.send({ t: "JamNote", instrument, pitch, beat }),
+        sparkle: () => this.self?.flash("♪"),
+      });
+      this.disposers.push(() => this.jam?.destroy());
+    }
+    const easels = map.objects.find((o) => o.kind === "easels");
+    if (easels) {
+      // Each easel's canvas sits at (i * 32 + 8, 6) in the easels' texture,
+      // which starts 30px above the footprint.
+      this.easels = new EaselDisplays(easels.w, (i, s) => {
+        s.position.set(easels.x * TILE + i * 32 + 8, easels.y * TILE - 30 + 6);
+        s.zIndex = (easels.y + easels.h) * TILE - 0.5;
+        this.scene.sorted.addChild(s);
+      });
+      for (let i = 0; i < easels.w; i++) {
+        this.ui.town
+          .easel(i)
+          .then((e) => this.easels?.set(i, e.cells))
+          .catch(() => {});
+      }
+    }
+    if (map.objects.filter((o) => o.kind === "goal").length === 2) {
+      this.ball = new Ball();
+      this.scene.sorted.addChild(this.ball.sprite);
+    }
+  }
+
+  /** Live easel stroke to people nearby. */
+  sendPaint(easel: number, cell: number, color: number) {
+    this.socket?.send({ t: "Paint", easel, cell, color });
+  }
+
+  /** Tapping the ball: run through it, which kicks it on. */
+  private tapBall(sx: number, sy: number): boolean {
+    const self = this.self;
+    if (!this.ball?.seen || !self || !this.socket) return false;
+    const b = this.ball.at(this.socket.clock.now());
+    const p = this.scene.tileToScreen(b.x, b.y);
+    if (Math.hypot(p.x - sx, p.y - (sy + 6)) > 22) return false;
+    const fx = self.pos.x + 0.5;
+    const fy = self.pos.y + 0.5;
+    const len = Math.hypot(b.x - fx, b.y - fy) || 1;
+    const tx = Math.floor(b.x + ((b.x - fx) / len) * 2);
+    const ty = Math.floor(b.y + ((b.y - fy) / len) * 2);
+    const target = nearestWalkable(this.scene.map, tx, ty, 2);
+    if (target) this.moveTo(target, true);
+    return true;
   }
 
   // ---- input -------------------------------------------------------------
@@ -313,6 +400,7 @@ export class Game {
     stage.hitArea = this.app.screen;
     const tap = (e: FederatedPointerEvent) => {
       const t = this.scene.screenToTile(e.global.x, e.global.y);
+      if (this.tapBall(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
       if (this.tapGift(t)) return;
       if (this.tapCollect(t)) return;
@@ -329,7 +417,8 @@ export class Game {
 
     const down = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (!Panel.closeCurrent()) this.ui.place.hide();
+        if (this.jam?.open) this.jam.hide();
+        else if (!Panel.closeCurrent()) this.ui.place.hide();
         return;
       }
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
@@ -446,6 +535,17 @@ export class Game {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
       ui.market.show();
+      return true;
+    }
+    if (obj && ["bandstand", "easels", "arcade"].includes(obj.kind)) {
+      // Walk up to it (you need to be close to play), and open it.
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+        const spot = nearestWalkable(map, Math.min(Math.max(t.x, obj.x), obj.x + obj.w - 1), obj.y + obj.h, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      if (obj.kind === "bandstand") this.jam?.show();
+      else if (obj.kind === "easels") void ui.easel.openFor(Math.min(obj.w - 1, Math.max(0, t.x - obj.x)));
+      else ui.word.show();
       return true;
     }
     if (obj && (obj.kind.startsWith("board_") || obj.kind === "notice_board" || obj.kind === "fountain")) {
@@ -665,6 +765,12 @@ export class Game {
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
     this.daynight.update();
     this.milestones.update(wallNow, this.daynight.dark);
+    this.ball?.update(serverNow);
+    // The jam pads go away when you walk off from the bandstand.
+    if (this.jam?.open && self) {
+      const b = this.scene.map.objects.find((o) => o.kind === "bandstand");
+      if (b && cheb({ x: Math.round(self.pos.x), y: Math.round(self.pos.y) }, { x: b.x + 2, y: b.y + 1 }) > 7) this.jam.hide();
+    }
     if (this.screen && self) {
       const c = this.screen.center;
       this.screen.update(serverNow, Math.abs(c.x - self.pos.x) < 30 && Math.abs(c.y - self.pos.y) < 20);
@@ -683,7 +789,7 @@ export class Game {
     this.chess.el.remove();
     this.daynight.destroy();
     this.milestones.destroy();
-    for (const p of [this.ui.plot, this.ui.menu, this.ui.market]) p.hide();
+    for (const p of [this.ui.plot, this.ui.menu, this.ui.market, this.ui.easel, this.ui.word]) p.hide();
     this.ui.reel.stop();
     this.ui.place.hide();
     this.app.stage.removeChild(this.scene.world);

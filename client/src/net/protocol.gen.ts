@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -137,6 +137,8 @@ export type ClientMsg =
   | { t: "PlotAction"; x: number; y: number; action: number; item: number }
   | { t: "Place"; item: number; x: number; y: number }
   | { t: "Pickup"; x: number; y: number }
+  | { t: "JamNote"; instrument: number; pitch: number; beat: number }
+  | { t: "Paint"; easel: number; cell: number; color: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -205,6 +207,18 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u16(m.x);
       w.u16(m.y);
       break;
+    case "JamNote":
+      w.u8(14);
+      w.u8(m.instrument);
+      w.u8(m.pitch);
+      w.u32(m.beat);
+      break;
+    case "Paint":
+      w.u8(15);
+      w.u8(m.easel);
+      w.u16(m.cell);
+      w.u8(m.color);
+      break;
   }
   return w.finish();
 }
@@ -253,6 +267,12 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 13:
       m = { t: "Pickup", x: r.u16(), y: r.u16() };
       break;
+    case 14:
+      m = { t: "JamNote", instrument: r.u8(), pitch: r.u8(), beat: r.u32() };
+      break;
+    case 15:
+      m = { t: "Paint", easel: r.u8(), cell: r.u16(), color: r.u8() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -279,6 +299,9 @@ export type ServerMsg =
   | { t: "PlotState"; x: number; y: number; plant: number; stage: number; watered: boolean; owner: string; stageLeftMs: number }
   | { t: "ObjectUpdate"; x: number; y: number; item: number }
   | { t: "Granted"; item: number; added: number; total: number; first: boolean }
+  | { t: "JamNote"; id: number; instrument: number; pitch: number; beat: number }
+  | { t: "Painted"; id: number; easel: number; cell: number; color: number }
+  | { t: "Ball"; x: number; y: number; vx: number; vy: number; t0: number; left: number; right: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -398,6 +421,30 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.total);
       w.bool(m.first);
       break;
+    case "JamNote":
+      w.u8(19);
+      w.u32(m.id);
+      w.u8(m.instrument);
+      w.u8(m.pitch);
+      w.u32(m.beat);
+      break;
+    case "Painted":
+      w.u8(20);
+      w.u32(m.id);
+      w.u8(m.easel);
+      w.u16(m.cell);
+      w.u8(m.color);
+      break;
+    case "Ball":
+      w.u8(21);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u16(m.vx);
+      w.u16(m.vy);
+      w.u32(m.t0);
+      w.u8(m.left);
+      w.u8(m.right);
+      break;
   }
   return w.finish();
 }
@@ -460,6 +507,15 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 18:
       m = { t: "Granted", item: r.u32(), added: r.u16(), total: r.u32(), first: r.bool() };
+      break;
+    case 19:
+      m = { t: "JamNote", id: r.u32(), instrument: r.u8(), pitch: r.u8(), beat: r.u32() };
+      break;
+    case 20:
+      m = { t: "Painted", id: r.u32(), easel: r.u8(), cell: r.u16(), color: r.u8() };
+      break;
+    case 21:
+      m = { t: "Ball", x: r.u16(), y: r.u16(), vx: r.u16(), vy: r.u16(), t0: r.u32(), left: r.u8(), right: r.u8() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

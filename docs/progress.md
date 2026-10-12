@@ -278,6 +278,44 @@ against the Elder; M2–M4 flows re-run.
 
 See docs/adr/0004-town-life.md.
 
+## Corner activities (2026-10-12)
+
+Something to do at every corner, aimed at what people miss online: playing,
+making music and making things together, with no metrics.
+
+- **Bandstand jam** (music): eight pentatonic pads × bells, bass and drums.
+  Notes snap to a shared beat from the server clock, so everyone nearby hears
+  each other in time. Keys 1–8.
+- **Shared easels** (art): three 16×16 canvases anyone can paint on, live
+  for people nearby and saved for the next visitor. The easels in the world
+  show the current paintings. Hang a finished painting in the gallery,
+  credited to everyone who painted it.
+- **Kickabout** (sports): a ball on the pitch, simulated on the server. Walk
+  into it to kick it, or stand in its way to block it. Goals are counted
+  (West – East).
+- **The town word** (games): one five-letter word a day for the whole town.
+  Every guess stays up for the next person; when it's solved, everyone who
+  helped gets coins.
+
+Protocol v4 (`JamNote`, `Paint`, `Ball`); migration 0005.
+
+### Tests
+
+Zone: a walk-in kick scoring a goal and the ball resetting, friction and
+bounces, jam/paint only near the bandstand/easels. API: shared painting and
+hanging with credits, word marks (repeated letters), a shared solve that
+rewards helpers, limits. Browser, two players: jam notes arrive before their
+beat (22–159 ms early), live strokes, the gallery, a walk-in goal, shared
+word guesses.
+
+### Botswarm (500 bots, mixed behaviour, the ball in play)
+
+| Tick p99 | Client KB/s p99 | Gate |
+|---|---|---|
+| 3.0 ms | 3.35 | PASS |
+
+See docs/adr/0005-corner-activities.md.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

@@ -7,6 +7,7 @@ pub mod auth;
 pub mod economy;
 pub mod error;
 pub mod internal;
+pub mod play;
 pub mod store;
 #[cfg(test)]
 mod tests;

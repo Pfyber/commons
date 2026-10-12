@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -62,6 +62,13 @@ message_enum! {
         12 Place { item: u32, x: u16, y: u16 }
         /// Pick up the furniture at (x, y) in your home.
         13 Pickup { x: u16, y: u16 }
+        /// Play a note at the bandstand (`instrument::*`, `pitch` 0–7 of a
+        /// pentatonic scale) on shared beat `beat` (server time / `BEAT_MS`).
+        14 JamNote { instrument: u8, pitch: u8, beat: u32 }
+        /// Paint one cell (`y * EASEL_SIZE + x`) of an easel's canvas with a
+        /// palette colour (0 erases). Saving goes through the API; this is
+        /// the live relay to people nearby.
+        15 Paint { easel: u8, cell: u16, color: u8 }
     }
 }
 
@@ -118,6 +125,16 @@ message_enum! {
         /// Your inventory changed: `added` received now, `total` held, and
         /// whether it's a first-ever find for the album.
         18 Granted { item: u32, added: u16, total: u32, first: bool }
+        /// Someone nearby played a note; play it on `beat`.
+        19 JamNote { id: u32, instrument: u8, pitch: u8, beat: u32 }
+        /// Someone painted an easel cell.
+        20 Painted { id: u32, easel: u8, cell: u16, color: u8 }
+        /// The pitch's ball: at (`x`, `y`) at time `t0`, moving at (`vx`,
+        /// `vy`) and slowing by `BALL_FRICTION`. Positions are in
+        /// 1/`BALL_UNITS` tiles; velocities in 1/`BALL_UNITS` tiles per
+        /// second, offset by `BALL_V_OFFSET` (they can be negative). `left`
+        /// and `right` are the goals scored at each end.
+        21 Ball { x: u16, y: u16, vx: u16, vy: u16, t0: u32, left: u8, right: u8 }
     }
 }
 
@@ -165,6 +182,28 @@ pub mod fish_event {
     pub const CAUGHT: u8 = 2;
     pub const ESCAPED: u8 = 3;
 }
+
+/// Shared jam beat length (a sixteenth note at 120 bpm).
+pub const BEAT_MS: u32 = 125;
+
+/// `JamNote.instrument`.
+pub mod instrument {
+    pub const BELLS: u8 = 0;
+    pub const BASS: u8 = 1;
+    pub const DRUMS: u8 = 2;
+    pub const MAX: u8 = DRUMS;
+}
+
+/// Easel canvases are `EASEL_SIZE`² cells; colours index a shared palette of
+/// `EASEL_COLORS` (0 = blank).
+pub const EASEL_SIZE: u16 = 16;
+pub const EASEL_COLORS: u8 = 16;
+
+/// Ball units: positions and velocities are sent in 1/64 tile.
+pub const BALL_UNITS: f64 = 64.0;
+pub const BALL_V_OFFSET: u16 = 32768;
+/// Deceleration in tiles/s².
+pub const BALL_FRICTION: f64 = 3.5;
 
 /// `Sit.seat` value for sitting on the ground where you stand.
 pub const SEAT_GROUND: u32 = u32::MAX;

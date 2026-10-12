@@ -586,3 +586,231 @@ mod town_life {
         assert_eq!(list["requests"][0]["done"], true);
     }
 }
+
+// ---- corner activities: easels, gallery, town word ----------------------------------
+
+mod corner_play {
+    use super::*;
+    use crate::play;
+    use axum::Router;
+    use serde_json::{Value, json};
+
+    fn app(s: Arc<AppState>) -> Router {
+        Router::new().nest("/api", play::routes()).with_state(s)
+    }
+
+    fn bearer_for(s: &AppState, id: Uuid, name: &str) -> String {
+        let claims = token::AccessClaims {
+            sub: id.to_string(),
+            name: name.into(),
+            look: 1,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+        };
+        format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        )
+    }
+
+    async fn call(
+        app: &Router,
+        auth: &str,
+        method: &str,
+        uri: &str,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(if method == "GET" {
+                Body::empty()
+            } else {
+                Body::from(body.to_string())
+            })
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    #[test]
+    fn word_marks_follow_the_classic_rules() {
+        assert_eq!(play::marks("bench", "bench"), "ggggg");
+        assert_eq!(play::marks("bench", "chess"), "yyy..");
+        // A repeated letter only counts as often as it's in the word.
+        assert_eq!(play::marks("apple", "paper"), "yygy.");
+        assert_eq!(play::marks("lemon", "level"), "gg...");
+        for w in play::WORDS {
+            assert!(
+                w.len() == 5 && w.bytes().all(|b| b.is_ascii_lowercase()),
+                "{w}"
+            );
+        }
+        assert_eq!(play::word_for("2026-10-12"), play::word_for("2026-10-12"));
+    }
+
+    #[tokio::test]
+    async fn painting_together_and_hanging_it() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let (a, b) = (player(&s).await, player(&s).await);
+        let (ta, tb) = (bearer_for(&s, a, "Ana"), bearer_for(&s, b, "Ben"));
+        let easel = "/api/play/easels/2";
+        // Start from a clean easel (other tests and people share it).
+        sqlx::query("UPDATE easels SET cells = decode(repeat('00', 256), 'hex') WHERE id = 2")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM easel_painters WHERE easel = 2")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let stroke = |from: u16, color: u8| json!({ "cells": (from..from + 16).map(|c| (c, color)).collect::<Vec<_>>() });
+        let (st, _) = call(&app, &ta, "POST", &format!("{easel}/paint"), stroke(0, 3)).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = call(
+            &app,
+            &ta,
+            "POST",
+            "/api/play/easels/2/hang",
+            json!({ "title": "Too soon" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "16 cells aren't enough to hang");
+        call(&app, &tb, "POST", &format!("{easel}/paint"), stroke(16, 5)).await;
+        let (st, _) = call(
+            &app,
+            &tb,
+            "POST",
+            &format!("{easel}/paint"),
+            json!({ "cells": [[300, 1]] }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        let (_, e) = call(&app, &ta, "GET", easel, Value::Null).await;
+        assert_eq!(e["cells"][0], 3);
+        assert_eq!(e["cells"][16], 5);
+        assert_eq!(e["painters"], json!(["Ana", "Ben"]));
+
+        let title = format!("Sunrise {}", &Uuid::new_v4().simple().to_string()[..6]);
+        let (st, r) = call(
+            &app,
+            &tb,
+            "POST",
+            &format!("{easel}/hang"),
+            json!({ "title": title }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["painters"], json!(["Ana", "Ben"]));
+        let (_, e) = call(&app, &ta, "GET", easel, Value::Null).await;
+        assert!(
+            e["cells"].as_array().unwrap().iter().all(|c| c == 0),
+            "wiped for the next painting"
+        );
+        let (_, g) = call(&app, &ta, "GET", "/api/play/gallery", Value::Null).await;
+        let hung = g
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["title"] == title.as_str())
+            .unwrap();
+        assert_eq!(hung["hung_by"], "Ben");
+        assert_eq!(hung["cells"][16], 5);
+    }
+
+    #[tokio::test]
+    async fn the_town_solves_the_word_together() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        sqlx::query("DELETE FROM word_guesses WHERE day = (now() AT TIME ZONE 'utc')::date")
+            .execute(&db)
+            .await
+            .unwrap();
+        let answer = play::word_for(&chrono::Utc::now().date_naive().to_string());
+        let wrong = if answer == "zebra" { "apple" } else { "zebra" };
+        let (a, b) = (player(&s).await, player(&s).await);
+        let (ta, tb) = (bearer_for(&s, a, "Ana"), bearer_for(&s, b, "Ben"));
+
+        let (st, r) = call(
+            &app,
+            &ta,
+            "POST",
+            "/api/play/word/guess",
+            json!({ "guess": wrong }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["won"], false);
+        assert_eq!(r["marks"], json!(play::marks(answer, wrong)));
+        let (st, _) = call(
+            &app,
+            &ta,
+            "POST",
+            "/api/play/word/guess",
+            json!({ "guess": "abcd" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = call(
+            &app,
+            &ta,
+            "POST",
+            "/api/play/word/guess",
+            json!({ "guess": wrong }),
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::TOO_MANY_REQUESTS,
+            "a moment between guesses"
+        );
+
+        // Ben sees Ana's guess, then solves it: both are rewarded.
+        let (_, v) = call(&app, &tb, "GET", "/api/play/word", Value::Null).await;
+        assert_eq!(v["guesses"][0]["name"], "Ana");
+        assert_eq!(v["answer"], Value::Null, "not revealed while unsolved");
+        let (st, r) = call(
+            &app,
+            &tb,
+            "POST",
+            "/api/play/word/guess",
+            json!({ "guess": answer.to_uppercase() }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(r["won"], true);
+        assert_eq!(r["solved_by"], "Ben");
+        assert_eq!(r["answer"], answer);
+        let mut conn = db.acquire().await.unwrap();
+        let ana = crate::economy::totals(&mut conn, a, &[1]).await.unwrap();
+        assert_eq!(ana, vec![(1, 100 + play::HELPER_REWARD)]);
+        let ben = crate::economy::totals(&mut conn, b, &[1]).await.unwrap();
+        assert_eq!(
+            ben,
+            vec![(1, 100 + play::HELPER_REWARD + play::SOLVER_REWARD)]
+        );
+        let (st, _) = call(
+            &app,
+            &ta,
+            "POST",
+            "/api/play/word/guess",
+            json!({ "guess": "zzzzz" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "solved for today");
+    }
+}

@@ -126,16 +126,22 @@ export class Avatar {
   emote(id: number) {
     const e = EMOTES[id];
     if (!e) return;
+    this.flash(e.icon);
+    this.emoteId = id;
+  }
+
+  /** Pops `icon` above the head for a moment (emotes, jam notes). */
+  flash(icon: string) {
     if (!this.emoteEl) {
       this.emoteEl = document.createElement("div");
       this.emoteEl.className = "emote";
       this.stack.appendChild(this.emoteEl);
     }
-    this.emoteEl.textContent = e.icon;
+    this.emoteEl.textContent = icon;
     this.emoteEl.classList.remove("pop");
     void this.emoteEl.offsetWidth; // restart the animation
     this.emoteEl.classList.add("pop");
-    this.emoteId = id;
+    this.emoteId = 0;
     this.emoteUntil = performance.now() + EMOTE_MS;
   }
 
