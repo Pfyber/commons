@@ -97,6 +97,9 @@ pub struct AccessClaims {
     pub tier: TrustTier,
     /// Under 16: friends-only DMs and filtered chat (spec §12).
     pub minor: bool,
+    /// Unix time a moderation mute ends (0: not muted).
+    #[serde(default)]
+    pub muted_until: u64,
 }
 
 impl Claims for AccessClaims {
@@ -116,6 +119,9 @@ pub struct JoinClaims {
     /// For private spaces (homes): whose space this instance is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Unix time a moderation mute ends (0: not muted).
+    #[serde(default)]
+    pub muted_until: u64,
 }
 
 impl Claims for JoinClaims {
@@ -146,6 +152,7 @@ mod tests {
             look: 3,
             tier: TrustTier::Visitor,
             minor: false,
+            muted_until: 0,
         }
     }
 

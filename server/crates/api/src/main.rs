@@ -4,7 +4,7 @@
 
 use axum::Router;
 use commons_api::economy::Catalog;
-use commons_api::{AppState, auth, economy, internal, play, store, town};
+use commons_api::{AppState, auth, economy, gov, internal, play, store, town};
 use commons_common::{config, telemetry};
 use std::sync::Arc;
 
@@ -35,13 +35,15 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    gov::spawn_ticker(state.db.clone());
     let app = Router::new()
         .nest(
             "/api",
             auth::routes()
                 .merge(economy::routes())
                 .merge(town::routes())
-                .merge(play::routes()),
+                .merge(play::routes())
+                .merge(gov::routes()),
         )
         .nest("/internal", internal::routes())
         .with_state(state)

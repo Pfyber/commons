@@ -69,6 +69,7 @@ async fn player(s: &State) -> P {
         look: 1,
         tier: TrustTier::Visitor,
         minor: false,
+        muted_until: 0,
     };
     P {
         id: Uuid::parse_str(&p.id).unwrap(),

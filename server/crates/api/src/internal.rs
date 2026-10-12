@@ -36,6 +36,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/home/{owner}/objects", get(home_objects))
         .route("/home/place", post(place))
         .route("/home/pickup", post(pickup))
+        .route("/activity", post(activity))
 }
 
 fn service(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
@@ -507,4 +508,42 @@ async fn pickup(
     .await?;
     tx.commit().await.map_err(db_err)?;
     Ok(Json(applied))
+}
+
+#[derive(Deserialize)]
+struct ActivityRow {
+    player: String,
+    secs: i32,
+    interactions: i32,
+}
+
+#[derive(Deserialize)]
+struct ActivityReq {
+    rows: Vec<ActivityRow>,
+}
+
+/// Time present and interactions from a zone server, for activity days
+/// (spec §10.2). Batched every minute; bots never appear here.
+async fn activity(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<ActivityReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    service(&state, &headers)?;
+    let mut conn = state.db.acquire().await.map_err(db_err)?;
+    for r in req.rows.iter().take(5000) {
+        let Ok(player) = Uuid::parse_str(&r.player) else {
+            continue;
+        };
+        // Clamp to a minute and a half per report and a sane interaction count.
+        crate::gov::record_activity(
+            &mut conn,
+            player,
+            r.secs.clamp(0, 90),
+            r.interactions.clamp(0, 60),
+        )
+        .await
+        .map_err(db_err)?;
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }

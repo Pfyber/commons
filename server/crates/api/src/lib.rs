@@ -1,11 +1,12 @@
 //! Commons API library: auth, the economy service, town life (quarters,
-//! goals, requests) and internal endpoints.
+//! goals, requests), governance and internal endpoints.
 //! The `api` binary serves it; the social gateway reuses the economy and
 //! account code.
 
 pub mod auth;
 pub mod economy;
 pub mod error;
+pub mod gov;
 pub mod internal;
 pub mod play;
 pub mod store;

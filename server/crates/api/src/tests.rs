@@ -361,6 +361,7 @@ mod town_life {
             look: 1,
             tier: token::TrustTier::Newcomer,
             minor: false,
+            muted_until: 0,
         };
         format!(
             "Bearer {}",
@@ -606,6 +607,7 @@ mod corner_play {
             look: 1,
             tier: token::TrustTier::Newcomer,
             minor: false,
+            muted_until: 0,
         };
         format!(
             "Bearer {}",
@@ -812,5 +814,533 @@ mod corner_play {
         )
         .await;
         assert_eq!(st, StatusCode::CONFLICT, "solved for today");
+    }
+}
+
+// ---- governance -------------------------------------------------------------------------
+
+mod governance {
+    use super::*;
+    use crate::gov;
+    use axum::Router;
+    use serde_json::{Value, json};
+
+    fn app(s: Arc<AppState>) -> Router {
+        Router::new()
+            .nest("/api", gov::routes())
+            .nest("/internal", internal::routes())
+            .with_state(s)
+    }
+
+    fn bearer_for(s: &AppState, id: Uuid, name: &str) -> String {
+        let claims = token::AccessClaims {
+            sub: id.to_string(),
+            name: name.into(),
+            look: 1,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        )
+    }
+
+    async fn call(
+        app: &Router,
+        auth: &str,
+        method: &str,
+        uri: &str,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(if method == "GET" {
+                Body::empty()
+            } else {
+                Body::from(body.to_string())
+            })
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// Gives a player `n` active days (in the past, so today stays clear).
+    async fn active(db: &PgPool, p: Uuid, n: i64) {
+        sqlx::query(
+            "INSERT INTO activity_days (player_id, day, seconds, interactions)
+             SELECT $1, (now() AT TIME ZONE 'utc')::date - g, 900, 5 FROM generate_series(1, $2) g
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(p)
+        .bind(n as i32)
+        .execute(db)
+        .await
+        .unwrap();
+    }
+
+    /// The dev Caretaker account (`caretaker@dev.commons.local`).
+    async fn caretaker(s: &AppState) -> Uuid {
+        let existing: Option<Uuid> = sqlx::query_scalar(
+            "SELECT p.id FROM players p JOIN accounts a ON a.id = p.account_id WHERE a.email = 'caretaker@dev.commons.local'",
+        )
+        .fetch_optional(&s.db)
+        .await
+        .unwrap();
+        if let Some(id) = existing {
+            return id;
+        }
+        let name = format!("Caretaker{}", &Uuid::new_v4().simple().to_string()[..6]);
+        let made = s
+            .store
+            .create_player("caretaker@dev.commons.local", &name, 1980, 7, |_, _| {
+                Box::pin(async { Ok(()) })
+            })
+            .await;
+        match made {
+            Ok(Ok(p)) => Uuid::parse_str(&p.id).unwrap(),
+            // Another test made it at the same moment.
+            _ => sqlx::query_scalar(
+                "SELECT p.id FROM players p JOIN accounts a ON a.id = p.account_id WHERE a.email = 'caretaker@dev.commons.local'",
+            )
+            .fetch_one(&s.db)
+            .await
+            .unwrap(),
+        }
+    }
+
+    /// Ends the proposal's current stage (Caretaker tool) and checks status.
+    async fn advance(app: &Router, ct: &str, id: i64, expect: &str) -> Value {
+        let (st, r) = call(
+            app,
+            ct,
+            "POST",
+            &format!("/api/gov/proposals/{id}/advance"),
+            json!({}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let (_, d) = call(
+            app,
+            ct,
+            "GET",
+            &format!("/api/gov/proposals/{id}"),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(d["status"], expect, "{d}");
+        d
+    }
+
+    /// Open proposals left by earlier runs would otherwise linger.
+    async fn no_quorum(db: &PgPool, id: i64) {
+        sqlx::query("UPDATE proposals SET quorum = 0 WHERE id = $1")
+            .bind(id)
+            .execute(db)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn activity_becomes_tiers_and_zone_reports_add_up() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let p = player(&s).await;
+        assert_eq!(
+            gov::refresh_tier(&db, p).await.unwrap(),
+            token::TrustTier::Visitor
+        );
+        // Short visits don't make active days.
+        sqlx::query("INSERT INTO activity_days (player_id, day, seconds, interactions) VALUES ($1, current_date - 30, 120, 9)")
+            .bind(p)
+            .execute(&db)
+            .await
+            .unwrap();
+        active(&db, p, 7).await;
+        assert_eq!(
+            gov::refresh_tier(&db, p).await.unwrap(),
+            token::TrustTier::Resident
+        );
+
+        // A zone server reports a minute and two interactions.
+        let svc = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &ServiceClaims { svc: "zone".into() }, 60)
+        );
+        for _ in 0..2 {
+            let (st, _) = call(
+                &app,
+                &svc,
+                "POST",
+                "/internal/activity",
+                json!({ "rows": [{ "player": p.to_string(), "secs": 60, "interactions": 2 }] }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        let (secs, n): (i32, i32) = sqlx::query_as(
+            "SELECT seconds, interactions FROM activity_days WHERE player_id = $1 AND day = (now() AT TIME ZONE 'utc')::date",
+        )
+        .bind(p)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!((secs, n), (120, 4));
+        let player_auth = bearer_for(&s, p, "P");
+        let (st, _) = call(
+            &app,
+            &player_auth,
+            "POST",
+            "/internal/activity",
+            json!({ "rows": [] }),
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::UNAUTHORIZED,
+            "players can't report activity"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_founders_name_the_town_by_ranked_choice() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let ct = bearer_for(&s, caretaker(&s).await, "Caretaker");
+        let mut founders = vec![];
+        for i in 0..4 {
+            let p = player(&s).await;
+            active(&db, p, 3).await;
+            founders.push((p, bearer_for(&s, p, &format!("F{i}"))));
+        }
+        let fresh = player(&s).await;
+        let fresh_auth = bearer_for(&s, fresh, "New");
+
+        // Only the Caretaker opens founding votes.
+        let (st, _) = call(
+            &app,
+            &founders[0].1,
+            "POST",
+            "/api/gov/proposals",
+            json!({ "kind": "town_name", "title": "Name the town", "collect": true }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (st, r) = call(&app, &ct, "POST", "/api/gov/proposals", json!({ "kind": "town_name", "title": "Name the town", "body": "What should we be called?", "collect": true })).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let id = r["id"].as_i64().unwrap();
+        no_quorum(&db, id).await;
+
+        // Suggestions: founders suggest and support; a newcomer can't.
+        let tag = &Uuid::new_v4().simple().to_string()[..5];
+        let names = [
+            format!("Willowmere{tag}"),
+            format!("Lanternfield{tag}"),
+            format!("Brookhaven{tag}"),
+        ];
+        let mut sids = vec![];
+        for (k, name) in names.iter().enumerate() {
+            let (st, r) = call(
+                &app,
+                &founders[k].1,
+                "POST",
+                &format!("/api/gov/proposals/{id}/suggest"),
+                json!({ "text": name }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+            sids.push(r["id"].as_i64().unwrap());
+        }
+        let (st, _) = call(
+            &app,
+            &founders[0].1,
+            "POST",
+            &format!("/api/gov/proposals/{id}/suggest"),
+            json!({ "text": "Another" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "one suggestion each");
+        let (st, _) = call(
+            &app,
+            &fresh_auth,
+            "POST",
+            &format!("/api/gov/proposals/{id}/suggest"),
+            json!({ "text": "Newtown" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "founding votes need active days");
+        call(
+            &app,
+            &founders[3].1,
+            "POST",
+            &format!("/api/gov/proposals/{id}/support/{}", sids[1]),
+            json!({}),
+        )
+        .await;
+
+        // Voting: the best-supported suggestion is listed first.
+        let d = advance(&app, &ct, id, "voting").await;
+        let options: Vec<String> = serde_json::from_value(d["options"].clone()).unwrap();
+        assert_eq!(options[0], names[1]);
+        let idx = |n: &str| options.iter().position(|o| o == n).unwrap();
+        let (w, l, b) = (idx(&names[0]), idx(&names[1]), idx(&names[2]));
+        // First preferences: W 2, L 1, B 1. B's voter ranks L second, and
+        // so does one W voter... but W keeps its 2, L gets 2: tie broken by
+        // order. Make it decisive: B's voter → L, giving L 2 vs W 2 after
+        // B goes; then the fourth ballot decides.
+        let ballots = [vec![l, w], vec![w, l], vec![b, l], vec![l]];
+        for ((_, auth), ranking) in founders.iter().zip(ballots.iter()) {
+            let (st, r) = call(
+                &app,
+                auth,
+                "POST",
+                &format!("/api/gov/proposals/{id}/vote"),
+                json!({ "ranking": ranking }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+        }
+        let (st, _) = call(
+            &app,
+            &founders[0].1,
+            "POST",
+            &format!("/api/gov/proposals/{id}/vote"),
+            json!({ "ranking": [w] }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "one vote each");
+        let (st, _) = call(
+            &app,
+            &fresh_auth,
+            "POST",
+            &format!("/api/gov/proposals/{id}/vote"),
+            json!({ "ranking": [w] }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (st, _) = call(
+            &app,
+            &ct,
+            "POST",
+            &format!("/api/gov/proposals/{id}/vote"),
+            json!({ "ranking": [w, w] }),
+        )
+        .await;
+        assert!(
+            st == StatusCode::BAD_REQUEST || st == StatusCode::FORBIDDEN,
+            "repeated options are refused"
+        );
+
+        // Ballots are secret: nothing links a ballot to its voter.
+        let cols: Vec<String> = sqlx::query_scalar("SELECT column_name::text FROM information_schema.columns WHERE table_name = 'proposal_ballots'")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+        assert!(!cols.iter().any(|c| c.contains("voter")), "{cols:?}");
+
+        let d = advance(&app, &ct, id, "passed").await;
+        assert_eq!(d["result"]["winner_text"], names[1].as_str(), "{d}");
+        let (_, story) = call(&app, &fresh_auth, "GET", "/api/gov/story", Value::Null).await;
+        assert_eq!(story["name"], names[1].as_str());
+        assert_eq!(story["me"]["can_vote_founding"], false);
+        let (_, ledger) = call(&app, &fresh_auth, "GET", "/api/gov/ledger", Value::Null).await;
+        assert!(
+            ledger
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["summary"].as_str().unwrap().contains(&names[1]))
+        );
+
+        // The ledger can't be rewritten.
+        let r = sqlx::query("UPDATE governance_ledger SET summary = 'nothing happened' WHERE id = (SELECT max(id) FROM governance_ledger)")
+            .execute(&db)
+            .await;
+        assert!(r.is_err(), "append-only");
+    }
+
+    #[tokio::test]
+    async fn rules_need_sixty_percent_and_the_bridge_opens_a_pool() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let ct = bearer_for(&s, caretaker(&s).await, "Caretaker");
+        let mut voters = vec![];
+        for i in 0..5 {
+            let p = player(&s).await;
+            active(&db, p, 8).await;
+            voters.push(bearer_for(&s, p, &format!("V{i}")));
+        }
+        // In the founding phase residents can't propose yet.
+        let (st, _) = call(
+            &app,
+            &voters[0],
+            "POST",
+            "/api/gov/proposals",
+            json!({ "kind": "town_rule", "title": "No running on the plaza" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+
+        // A town rule at exactly 60% passes; at 40% it doesn't.
+        for (yes, expect) in [(3, "passed"), (2, "failed")] {
+            let (_, r) = call(&app, &ct, "POST", "/api/gov/proposals", json!({ "kind": "town_rule", "title": "Quiet hours after midnight", "body": "Be gentle." })).await;
+            let id = r["id"].as_i64().unwrap();
+            no_quorum(&db, id).await;
+            advance(&app, &ct, id, "voting").await;
+            for (k, auth) in voters.iter().enumerate() {
+                let choice = if k < yes { 0 } else { 1 };
+                call(
+                    &app,
+                    auth,
+                    "POST",
+                    &format!("/api/gov/proposals/{id}/vote"),
+                    json!({ "ranking": [choice] }),
+                )
+                .await;
+            }
+            let d = advance(&app, &ct, id, expect).await;
+            assert!(
+                (d["result"]["detail"]["share"].as_f64().unwrap() - yes as f64 / 5.0).abs() < 1e-6
+            );
+        }
+
+        // Beyond the bridge: the winner opens a construction pool.
+        let (_, r) = call(
+            &app,
+            &ct,
+            "POST",
+            "/api/gov/proposals",
+            json!({
+                "kind": "bridge", "title": "What lies beyond the bridge?",
+                "options": ["A lakeside village", "A wild forest", "A market street"],
+            }),
+        )
+        .await;
+        let id = r["id"].as_i64().unwrap();
+        no_quorum(&db, id).await;
+        advance(&app, &ct, id, "voting").await;
+        for auth in &voters {
+            call(
+                &app,
+                auth,
+                "POST",
+                &format!("/api/gov/proposals/{id}/vote"),
+                json!({ "ranking": [1, 0] }),
+            )
+            .await;
+        }
+        let d = advance(&app, &ct, id, "passed").await;
+        assert_eq!(d["result"]["winner_text"], "A wild forest");
+        let title: String = sqlx::query_scalar("SELECT title FROM town_goals WHERE key = $1")
+            .bind(format!("bridge_{id}"))
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(title, "Build beyond the bridge: A wild forest");
+        sqlx::query("DELETE FROM town_goals WHERE key = $1")
+            .bind(format!("bridge_{id}"))
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reports_reach_the_caretaker_and_mutes_hold() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = app(s.clone());
+        let ct = bearer_for(&s, caretaker(&s).await, "Caretaker");
+        let (a, b) = (player(&s).await, player(&s).await);
+        active(&db, b, 2).await;
+        let (aa, ba) = (bearer_for(&s, a, "Ann"), bearer_for(&s, b, "Bob"));
+        let (st, _) = call(&app, &aa, "POST", "/api/gov/report", json!({ "target_id": b.to_string(), "target_name": "Bob", "reason": "harassment", "context": "said mean things" })).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = call(&app, &aa, "GET", "/api/gov/reports", Value::Null).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "only the Caretaker sees reports");
+        let (_, list) = call(&app, &ct, "GET", "/api/gov/reports", Value::Null).await;
+        let rep = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["target_id"] == b.to_string().as_str())
+            .unwrap()
+            .clone();
+        assert_eq!(rep["reason"], "harassment");
+        let rid = rep["id"].as_i64().unwrap();
+        let (st, _) = call(
+            &app,
+            &ct,
+            "POST",
+            &format!("/api/gov/reports/{rid}/resolve"),
+            json!({ "action": "mute_1h" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(gov::muted_until(&db, b).await.unwrap() > 0);
+        // Muted: no comments or proposals for now; votes still count.
+        let (_, r) = call(
+            &app,
+            &ct,
+            "POST",
+            "/api/gov/proposals",
+            json!({ "kind": "event", "title": "Chess night on Fridays" }),
+        )
+        .await;
+        let id = r["id"].as_i64().unwrap();
+        let (st, _) = call(
+            &app,
+            &ba,
+            "POST",
+            &format!("/api/gov/proposals/{id}/comment"),
+            json!({ "text": "yes please" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (st, _) = call(
+            &app,
+            &aa,
+            "POST",
+            &format!("/api/gov/proposals/{id}/comment"),
+            json!({ "text": "yes please" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "commenting needs an active day");
+        // Resolving twice is refused; the ledger mentions no names.
+        let (st, _) = call(
+            &app,
+            &ct,
+            "POST",
+            &format!("/api/gov/reports/{rid}/resolve"),
+            json!({ "action": "dismiss" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        let (_, ledger) = call(&app, &aa, "GET", "/api/gov/ledger", Value::Null).await;
+        let m = ledger
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == "moderation")
+            .unwrap();
+        assert!(!m["summary"].as_str().unwrap().contains("Bob"));
+        sqlx::query("UPDATE proposals SET status = 'withdrawn' WHERE id = $1")
+            .bind(id)
+            .execute(&db)
+            .await
+            .unwrap();
     }
 }

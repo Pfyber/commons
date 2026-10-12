@@ -285,6 +285,17 @@ async fn post_board(
     Json(req): Json<NewPost>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let (me, name) = me(&state, &headers)?;
+    if crate::gov::muted_until(&state.db, me)
+        .await
+        .map_err(db_err)?
+        > 0
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "muted",
+            "You're muted for a little while.",
+        ));
+    }
     let body = clean_post(&req.body)
         .ok_or_else(|| ApiError::bad_request("empty", "Write something first."))?;
     let mut tx = state.db.begin().await.map_err(db_err)?;
@@ -327,6 +338,7 @@ async fn post_board(
     .await
     .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    crate::gov::touch(&state.db, me).await;
     Ok(Json(serde_json::json!({ "id": id, "tags": tags })))
 }
 
@@ -509,6 +521,7 @@ async fn donate(
         )
     })?;
     let d = donate_to(&state, open, me, req.amount, &req.key).await?;
+    crate::gov::touch(&state.db, me).await;
     let mut conn = state.db.acquire().await.map_err(db_err)?;
     let mut coins = economy::totals(&mut conn, me, &[COIN])
         .await
@@ -650,5 +663,6 @@ async fn deliver(
             "You've already helped with that one today.",
         ));
     }
+    crate::gov::touch(&state.db, me).await;
     Ok(Json(applied))
 }

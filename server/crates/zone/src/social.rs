@@ -24,7 +24,7 @@ pub struct Presence<'a> {
 }
 
 /// Bots and other non-account players have ids that aren't UUIDs.
-fn is_account(id: &str) -> bool {
+pub(crate) fn is_account(id: &str) -> bool {
     id.len() == 36 && id.chars().filter(|c| *c == '-').count() == 4
 }
 

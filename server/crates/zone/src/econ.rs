@@ -206,6 +206,27 @@ impl EconomyClient {
         Err(CallError::Rejected(msg))
     }
 
+    /// Time present and interactions per player, for activity days.
+    /// Fire-and-forget: a lost report only costs a minute of activity.
+    pub fn report_activity(self: &Arc<Self>, rows: Vec<(String, u32, u32)>) {
+        let body = serde_json::json!({
+            "rows": rows.iter().map(|(p, s, n)| serde_json::json!({ "player": p, "secs": s, "interactions": n })).collect::<Vec<_>>(),
+        });
+        let this = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = this
+                .call::<_, serde_json::Value>(
+                    reqwest::Method::POST,
+                    "/internal/activity",
+                    Some(&body),
+                )
+                .await
+            {
+                tracing::debug!(?e, "activity report failed");
+            }
+        });
+    }
+
     pub async fn grant(
         &self,
         player: &str,

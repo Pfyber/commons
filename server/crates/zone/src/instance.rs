@@ -42,6 +42,10 @@ const MOVE_LEAD_MS: u32 = 100;
 /// Proximity chat radius in tiles (spec §7).
 const CHAT_RADIUS: i32 = 8;
 const MAX_PATH_EXPANSIONS: usize = 12_000;
+/// Activity (time present, interactions) is reported to the API this often.
+const ACTIVITY_EVERY_MS: u32 = 60_000;
+/// Cap on interactions counted per avatar per report.
+const MAX_INTERACTIONS_PER_REPORT: u32 = 30;
 const MAX_VIEW_W: u8 = 64;
 const MAX_VIEW_H: u8 = 48;
 /// Entities per CellEnter message, keeping each well under the u16 frame limit.
@@ -130,6 +134,11 @@ struct Avatar {
     stand_tile: TilePos,
     /// Requested while walking; applied on arrival.
     pending: Option<Pending>,
+    /// Unix time a moderation mute ends (0: not muted).
+    muted_until: u64,
+    /// Activity not yet reported: instance time counted up to, interactions.
+    counted_until: u32,
+    interactions: u32,
     fish: Option<fishing::FishSession>,
 }
 
@@ -180,6 +189,9 @@ pub struct Instance {
     elders: HashMap<u32, hangout::Elder>,
     /// The pitch's ball, if the zone has a pitch.
     ball: Option<play::Ball>,
+    /// Activity of players who left since the last report.
+    activity_left: Vec<(String, u32, u32)>,
+    next_activity_report: u32,
     /// Index of the programme last announced on the big screen.
     screen_index: Option<usize>,
     /// Collision grid; a copy so placed furniture can block tiles.
@@ -237,6 +249,8 @@ impl Instance {
             games: HashMap::new(),
             elders: HashMap::new(),
             ball,
+            activity_left: Vec::new(),
+            next_activity_report: ACTIVITY_EVERY_MS,
             screen_index: None,
             owner,
             economy,
@@ -294,6 +308,32 @@ impl Instance {
         format!("{kind}:{}:{}", self.key_prefix, self.key_seq)
     }
 
+    /// Reports each player's time present and interactions since the last
+    /// report (for activity days, spec §10.2). Bots aren't accounts and are
+    /// left out.
+    fn report_activity(&mut self, now: u32) {
+        let rows = self.take_activity(now);
+        if let (Some(econ), false) = (&self.economy, rows.is_empty()) {
+            econ.report_activity(rows);
+        }
+    }
+
+    /// Activity since the last report: (player, seconds, interactions).
+    fn take_activity(&mut self, now: u32) -> Vec<(String, u32, u32)> {
+        let mut rows = std::mem::take(&mut self.activity_left);
+        for a in self.avatars.values_mut() {
+            rows.push((
+                a.player_id.clone(),
+                now.saturating_sub(a.counted_until) / 1000,
+                a.interactions,
+            ));
+            a.counted_until = now;
+            a.interactions = 0;
+        }
+        rows.retain(|(p, secs, n)| crate::social::is_account(p) && (*secs > 0 || *n > 0));
+        rows
+    }
+
     fn report_presence(&self, player: &str, present: bool) {
         if let Some(social) = &self.social {
             social.report(Presence {
@@ -338,6 +378,10 @@ impl Instance {
             self.step(now);
             self.elder_tick(now);
             self.ball_tick(now);
+            if now >= self.next_activity_report {
+                self.next_activity_report = now + ACTIVITY_EVERY_MS;
+                self.report_activity(now);
+            }
             self.screen_tick(now);
             self.fish_tick(now);
             self.garden_tick(now);
@@ -510,6 +554,9 @@ impl Instance {
             stand_tile: tile,
             pending: None,
             fish: None,
+            muted_until: claims.muted_until,
+            counted_until: now,
+            interactions: 0,
         };
         avatar.send(
             &ServerMsg::Welcome {
@@ -545,6 +592,12 @@ impl Instance {
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
+        let now = self.clock.now_ms();
+        self.activity_left.push((
+            a.player_id.clone(),
+            now.saturating_sub(a.counted_until) / 1000,
+            a.interactions,
+        ));
         self.by_conn.remove(&a.conn);
         if self.by_player.get(&a.player_id) == Some(&id) {
             self.by_player.remove(&a.player_id);
@@ -565,6 +618,19 @@ impl Instance {
 
     fn on_message(&mut self, id: u32, msg: ClientMsg) {
         let now = self.clock.now_ms();
+        if matches!(
+            msg,
+            ClientMsg::ChatSay { .. }
+                | ClientMsg::GameMove { .. }
+                | ClientMsg::FishCast { .. }
+                | ClientMsg::PlotAction { .. }
+                | ClientMsg::Place { .. }
+                | ClientMsg::JamNote { .. }
+                | ClientMsg::Paint { .. }
+        ) && let Some(a) = self.avatars.get_mut(&id)
+        {
+            a.interactions = (a.interactions + 1).min(MAX_INTERACTIONS_PER_REPORT);
+        }
         match msg {
             ClientMsg::MoveTo { x, y } => self.move_to(id, (x, y), now),
             ClientMsg::Emote { emote: e } => {
@@ -659,6 +725,14 @@ impl Instance {
 
     fn chat(&mut self, id: u32, text: &str, now: u32) {
         let a = self.avatars.get_mut(&id).unwrap();
+        if a.muted_until > now_ms().max(0) as u64 / 1000 {
+            self.error(
+                id,
+                error_code::NOT_ALLOWED,
+                "you're muted for a little while",
+            );
+            return;
+        }
         if !a.chat_rl.try_take(now as u64) {
             self.error(id, error_code::RATE_LIMITED, "slow down a little");
             return;
@@ -1005,6 +1079,7 @@ pub(crate) mod tests {
             zone: "test".into(),
             instance: 1,
             owner: None,
+            muted_until: 0,
         }
     }
 
@@ -1109,6 +1184,57 @@ pub(crate) mod tests {
         for (i, t) in targets.iter().enumerate() {
             assert_eq!(inst.avatars[&(i as u32 + 1)].tile, *t);
         }
+    }
+
+    #[test]
+    fn muted_players_cant_chat_and_activity_is_counted_for_accounts() {
+        let mut inst = instance();
+        let account = "99083e44-0c20-4878-982a-065ea718d9e4";
+        let mut claims = claims(account);
+        claims.muted_until = (now_ms() / 1000) as u64 + 3600;
+        let (tx, mut rx) = mpsc::channel(256);
+        inst.handle(Cmd::Join {
+            conn: 1,
+            claims,
+            view: (20, 12),
+            out: tx,
+        });
+        let mut b = connect(&mut inst, 2, "bot-7", (20, 12));
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::ChatSay {
+                text: "hello".into(),
+            },
+        });
+        inst.handle(Cmd::Msg {
+            conn: 2,
+            msg: ClientMsg::ChatSay { text: "hi".into() },
+        });
+        inst.flush();
+        let mut muted = false;
+        while let Ok(frame) = rx.try_recv() {
+            for m in split_frame(&frame) {
+                if let Ok(ServerMsg::Error { code, .. }) = ServerMsg::decode(m.unwrap()) {
+                    muted |= code == error_code::NOT_ALLOWED;
+                }
+            }
+        }
+        assert!(muted, "the muted player is told");
+        b.pump();
+        assert!(
+            !b.log
+                .iter()
+                .any(|m| matches!(m, ServerMsg::ChatBubble { text, .. } if text == "hello"))
+        );
+
+        // A minute later: the account's time and interaction are reported;
+        // the bot isn't.
+        let now = inst.clock.now_ms() + 60_000;
+        let rows = inst.take_activity(now);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].0, account);
+        assert!(rows[0].1 >= 59 && rows[0].2 == 1, "{rows:?}");
+        assert!(inst.take_activity(now).is_empty(), "nothing twice");
     }
 
     #[test]

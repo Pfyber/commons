@@ -7,7 +7,7 @@
 use crate::AppState;
 use crate::economy::{Op, WELCOME, apply};
 use crate::error::{ApiError, ApiResult};
-use crate::store::{CreateError, Player};
+use crate::store::{CreateError, Player, db_err};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -132,12 +132,25 @@ fn validate_name(raw: &str) -> ApiResult<String> {
 }
 
 async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
+    // Trust tier and any mute come from activity and moderation (spec §10.6).
+    let uid = uuid::Uuid::parse_str(&p.id).map_err(|_| ApiError::unauthorized("bad player id"))?;
+    let tier = crate::gov::refresh_tier(&state.db, uid)
+        .await
+        .map_err(db_err)?;
+    let muted_until = crate::gov::muted_until(&state.db, uid)
+        .await
+        .map_err(db_err)?;
+    let p = &Player {
+        trust_tier: tier,
+        ..p.clone()
+    };
     let claims = AccessClaims {
         sub: p.id.clone(),
         name: p.display_name.clone(),
         look: p.look,
         tier: p.trust_tier,
         minor: is_minor(p),
+        muted_until,
     };
     let refresh_token = random_token();
     state

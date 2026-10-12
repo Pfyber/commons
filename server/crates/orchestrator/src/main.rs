@@ -177,6 +177,7 @@ async fn join(
         zone: zone.clone(),
         instance,
         owner: owner.clone(),
+        muted_until: who.muted_until,
     };
     Ok(Json(JoinResp {
         server_url: state.zone_server_url.clone(),

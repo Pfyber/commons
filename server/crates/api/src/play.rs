@@ -444,6 +444,7 @@ async fn guess(
             .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
 
+    crate::gov::touch(&state.db, me).await;
     let won = g == answer;
     if won {
         // Everyone who guessed today helped; the solver gets a bit more.
