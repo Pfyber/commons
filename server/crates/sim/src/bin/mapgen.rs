@@ -283,22 +283,25 @@ fn park() -> MapFile {
         true,
     );
 
-    // Benches along the main paths, lamps at intervals.
+    // Two-seat benches along the main paths (one seat per tile), lamps at intervals.
     for x in (6..82).step_by(8) {
         if (x as i32 - cx).abs() > 10 {
             b.decor(x, 46, "bench");
+            b.decor(x + 1, 46, "bench");
             b.decor(x + 4, 50, "lamp");
         }
     }
     for y in (16..90).step_by(8) {
         if (y as i32 - cy).abs() > 10 {
+            b.decor(45, y, "bench");
             b.decor(46, y, "bench");
             b.decor(50, y + 4, "lamp");
         }
     }
     // Plaza benches facing the fountain.
-    for (x, y) in [(44, 44), (52, 44), (44, 52), (52, 52)] {
+    for (x, y) in [(43, 44), (52, 44), (43, 52), (52, 52)] {
         b.decor(x, y, "bench");
+        b.decor(x + 1, y, "bench");
     }
 
     // Border tree line and scattered trees, bushes, rocks.

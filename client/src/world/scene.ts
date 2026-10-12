@@ -8,6 +8,14 @@ import type { TileXY } from "./motion";
 
 const CHUNK = 16;
 
+/** Side-by-side bench tiles draw as one long bench (one seat per tile). */
+function benchPiece(map: ZoneMap, x: number, y: number): string {
+  const bench = (xx: number) => xx >= 0 && xx < map.width && map.decor_legend[map.decor[y * map.width + xx]] === "bench";
+  const l = bench(x - 1);
+  const r = bench(x + 1);
+  return l && r ? "bench_mid" : l ? "bench_right" : r ? "bench_left" : "bench";
+}
+
 export class Scene {
   readonly world = new Container();
   /** Props and avatars, sorted by their foot position. */
@@ -39,7 +47,7 @@ export class Scene {
       for (let x = 0; x < map.width; x++) {
         const kind = map.decor_legend[map.decor[y * map.width + x]];
         if (kind === "none") continue;
-        const tex = decorTexture(kind, hash(x, y, 5));
+        const tex = decorTexture(kind === "bench" ? benchPiece(map, x, y) : kind, hash(x, y, 5));
         if (!tex) continue;
         const s = new Sprite(tex);
         s.anchor.set(0.5, 1);

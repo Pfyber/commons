@@ -232,14 +232,22 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       if (v === 1) [8, 20, 15].forEach((x, i) => px(ctx, "#e86f6f", x, 12 + i * 3, 2, 2));
       break;
     }
-    case "bench": {
+    // A bench, or one end/the middle of a longer bench joined across tiles.
+    case "bench":
+    case "bench_left":
+    case "bench_right":
+    case "bench_mid": {
       [c, ctx] = makeCanvas(32, 24);
-      px(ctx, P.outline, 3, 6, 26, 12);
-      px(ctx, P.wood, 4, 7, 24, 3);
-      px(ctx, P.wood, 4, 11, 24, 3);
-      px(ctx, P.woodDark, 4, 15, 24, 2);
-      px(ctx, P.outline, 6, 17, 2, 6);
-      px(ctx, P.outline, 24, 17, 2, 6);
+      const openL = kind === "bench_right" || kind === "bench_mid";
+      const openR = kind === "bench_left" || kind === "bench_mid";
+      const x0 = openL ? 0 : 3;
+      const x1 = openR ? 32 : 29;
+      px(ctx, P.outline, x0, 6, x1 - x0, 12);
+      px(ctx, P.wood, x0 + (openL ? 0 : 1), 7, x1 - x0 - (openL ? 0 : 1) - (openR ? 0 : 1), 3);
+      px(ctx, P.wood, x0 + (openL ? 0 : 1), 11, x1 - x0 - (openL ? 0 : 1) - (openR ? 0 : 1), 3);
+      px(ctx, P.woodDark, x0 + (openL ? 0 : 1), 15, x1 - x0 - (openL ? 0 : 1) - (openR ? 0 : 1), 2);
+      if (!openL) px(ctx, P.outline, 6, 17, 2, 6);
+      if (!openR) px(ctx, P.outline, 24, 17, 2, 6);
       break;
     }
     case "lamp": {
