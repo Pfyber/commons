@@ -334,8 +334,7 @@ The park went from a grid to a place.
 - **Life:** Biscuit the park cat wanders between favourite spots and naps
   (the same for everyone, and you can pet it); fireflies at night; fish
   jumping in the pond.
-- **Sound:** birdsong, crickets, running water, wind and rain, all
-  synthesised; 🔊 / M to mute.
+- **Sound:** birdsong by day, synthesised; 🔊 / M to mute.
 
 Every earlier flow re-run on the new map (corners, activities, Elder, goals,
 friends, fishing, gardening, chess); botswarm 500 bots PASS (tick p99

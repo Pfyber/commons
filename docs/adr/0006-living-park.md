@@ -39,9 +39,10 @@ None of this sends messages, and all of it agrees between players:
   80 s between favourite spots, walked with the same pathfinding every client
   runs, then a nap until the leg ends. Everyone sees Biscuit in the same place.
 - **Fireflies, jumping fish and the soundscape** are local and random by
-  design. The sounds are birdsong by day, crickets at night, water by
-  proximity, wind and rain, all synthesised with WebAudio. They can be muted
-  (🔊 or M), and the choice is remembered.
+  design. The only ambient sound is birdsong by day, synthesised with
+  WebAudio (water, wind, rain, crickets and the cat's purr were tried and
+  removed: just birds keeps it calm). It can be muted (🔊 or M), and the
+  choice is remembered.
 
 ## 3. Discoveries
 

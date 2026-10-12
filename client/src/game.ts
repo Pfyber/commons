@@ -154,8 +154,7 @@ export class Game {
   private weather: Weather;
   private critters: Critters;
   private cat: Cat | null = null;
-  private waterNear = 0;
-  private waterCheckAt = 0;
+  private ringCheckAt = 0;
 
   constructor(
     private app: Application,
@@ -402,27 +401,8 @@ export class Game {
     const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
     if (!this.cat.hit(x, y)) return false;
     this.cat.hearts = performance.now() + 1500;
-    this.ui.sound.purr();
     this.hud.toast(`🐈 ${PURRS[Math.floor(Math.random() * PURRS.length)]}`, 3500);
     return true;
-  }
-
-  /** How close running water is to you (0 far … 1 beside it), for the soundscape. */
-  private measureWater(): number {
-    const self = this.self;
-    if (!self) return 0;
-    const sx = Math.round(self.pos.x);
-    const sy = Math.round(self.pos.y);
-    let best = 99;
-    for (let dy = -7; dy <= 7; dy++) {
-      for (let dx = -7; dx <= 7; dx++) {
-        if (groundAt(this.scene.map, sx + dx, sy + dy) === "water") best = Math.min(best, Math.hypot(dx, dy));
-      }
-    }
-    for (const o of this.scene.map.objects) {
-      if (o.kind === "fountain") best = Math.min(best, Math.hypot(o.x + 1 - sx, o.y + 1 - sy) - 1);
-    }
-    return Math.max(0, 1 - best / 7);
   }
 
   /** Live easel stroke to people nearby. */
@@ -874,15 +854,14 @@ export class Game {
     this.weather.update(wallNow, hour);
     this.critters.update(wallNow, this.daynight.dark);
     this.cat?.update(Date.now());
-    if (wallNow > this.waterCheckAt) {
-      this.waterCheckAt = wallNow + 400;
-      this.waterNear = this.measureWater();
+    if (wallNow > this.ringCheckAt) {
+      this.ringCheckAt = wallNow + 400;
       // The fairy ring is found by walking into the hidden clearing.
       if (self && this.zoneId === "founders_park" && Math.hypot(self.pos.x - 9, self.pos.y - 14) < 1.6 && !found().has("fairy_ring")) {
         this.discover("fairy_ring", DISCOVERIES.fairy_ring);
       }
     }
-    this.ui.sound.update(wallNow, { dark: this.daynight.dark, water: this.waterNear, weather: this.weather.kind, wind: this.weather.wind });
+    this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
     // The jam pads go away when you walk off from the bandstand.
     if (this.jam?.open && self) {
       const b = this.scene.map.objects.find((o) => o.kind === "bandstand");
