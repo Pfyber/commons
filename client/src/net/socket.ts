@@ -58,6 +58,8 @@ export class ZoneSocket {
     private onMessage: (m: ServerMsg) => void,
     private onClose: (reason: CloseReason) => void,
   ) {
+    // A path ("/ws") means the game server sits behind this page's own host.
+    if (url.startsWith("/")) url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${url}`;
     this.ws = new WebSocket(url);
     this.ws.binaryType = "arraybuffer";
     this.ws.onopen = () => {

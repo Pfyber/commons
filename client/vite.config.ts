@@ -13,7 +13,11 @@ const backend = (port: number) => `http://localhost:${base + port}`;
 export default defineConfig({
   server: {
     port: Number(process.env.COMMONS_DEV_WEB_PORT ?? 5173),
+    // Tunnels (VS Code port forwarding, ngrok, Cloudflare) reach the dev
+    // server under their own host names; COMMONS_ALLOWED_HOSTS adds more.
+    allowedHosts: [".devtunnels.ms", ".ngrok-free.app", ".ngrok.app", ".trycloudflare.com", ...(process.env.COMMONS_ALLOWED_HOSTS ?? "").split(",").filter(Boolean)],
     proxy: {
+      "/ws": { target: backend(82), ws: true },
       "/api/join": backend(81),
       "/api/social": { target: backend(83), ws: true },
       "/api": backend(80),

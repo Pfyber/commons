@@ -19,6 +19,10 @@ process.env.PATH = [process.env.PATH, path.join(os.homedir(), ".cargo", "bin")].
 // Plants grow one stage per minute in dev (production: hours), so gardening
 // can be tried in a single session.
 process.env.COMMONS_GROWTH_STAGE_SECS ??= "60";
+// The game socket goes through the web server (/ws), so the park works from
+// other devices and through a tunnel (VS Code port forwarding, ngrok…), not
+// just on this machine.
+process.env.ZONE_PUBLIC_URL ??= "/ws";
 
 const botsIdx = args.indexOf("--bots");
 const bots = botsIdx >= 0 ? Number(args[botsIdx + 1] ?? 50) : 20;
