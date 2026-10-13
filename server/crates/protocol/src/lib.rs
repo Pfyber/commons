@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -79,6 +79,8 @@ message_enum! {
         18 Accept { from: u32, kind: u8 }
         /// Release a sky lantern carrying a short wish.
         19 SkyLantern { text: String }
+        /// You changed clothes (saved through the API); show it to people nearby.
+        20 SetLook { look: u32 }
     }
 }
 
@@ -153,6 +155,8 @@ message_enum! {
         24 Together { a: u32, b: u32, kind: u8 }
         /// Someone nearby released a sky lantern from (x, y).
         25 LanternRise { id: u32, x: u16, y: u16, text: String }
+        /// Avatar `id` changed its look.
+        26 LookChanged { id: u32, look: u32 }
     }
 }
 
@@ -167,6 +171,9 @@ pub mod emote {
     pub const HEART: u8 = 7;
     pub const MAX: u8 = HEART;
 }
+
+/// Looks reserved for non-player characters (the Caretaker).
+pub const NPC_LOOKS: [u32; 1] = [0xffff_fff1];
 
 /// `SetMood.mood` / `EntityInfo.mood`.
 pub mod mood {

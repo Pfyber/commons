@@ -1605,3 +1605,62 @@ mod bottles {
         assert_eq!(st, StatusCode::CONFLICT, "{r}");
     }
 }
+
+mod changing_room {
+    use super::*;
+    use axum::Router;
+    use serde_json::{Value, json};
+
+    #[tokio::test]
+    async fn a_new_look_is_saved_and_carried_by_the_fresh_session() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app: Router = Router::new()
+            .nest("/api", crate::auth::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let claims = token::AccessClaims {
+            sub: p.to_string(),
+            name: "t".into(),
+            look: 1,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        let auth = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        );
+        let post = |body: Value| {
+            Request::post("/api/me/look")
+                .header("authorization", auth.clone())
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        let res = app
+            .clone()
+            .oneshot(post(json!({ "look": 0xC800_1234u32 })))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let session: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(session["player"]["look"], 0xC800_1234u32);
+        let token = session["access_token"].as_str().unwrap();
+        let c: token::AccessClaims = token::verify(&s.secret, token).unwrap();
+        assert_eq!(c.look, 0xC800_1234, "the new token carries it");
+
+        let res = app
+            .oneshot(post(json!({ "look": 0xffff_fff1u32 })))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "nobody dresses as the Caretaker"
+        );
+    }
+}

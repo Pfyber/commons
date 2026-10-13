@@ -12,6 +12,7 @@ import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
 import { type MoodPicker, type OfferCard, TOGETHER } from "./activities/together";
 import type { BottlesPanel, WishPanel } from "./ui/dream";
+import type { WardrobePanel } from "./ui/wardrobe";
 import { Critters } from "./ambient/critters";
 import type { Soundscape } from "./ambient/sound";
 import { Weather } from "./ambient/weather";
@@ -85,6 +86,7 @@ export interface Ui {
   wish: WishPanel;
   offer: OfferCard;
   mood: MoodPicker;
+  wardrobe: WardrobePanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -425,6 +427,16 @@ export class Game {
     if (other) this.hud.toast(`${t.icon} You and ${other.info.name} ${t.done}${kind === 1 ? " 💞" : "!"}`, 3500);
   }
 
+  /** You changed clothes: show it here and to everyone nearby. */
+  changeLook(look: number) {
+    const self = this.self;
+    if (self) {
+      self.info = { ...self.info, look };
+      self.flash("✨");
+    }
+    this.socket?.send({ t: "SetLook", look });
+  }
+
   /** Sends a wish up on a sky lantern. */
   releaseLantern(text: string) {
     this.socket?.send({ t: "SkyLantern", text });
@@ -566,6 +578,13 @@ export class Game {
       case "MoodShown":
         this.avatars.get(m.id)?.setMood(m.mood);
         break;
+      case "LookChanged": {
+        const a = this.avatars.get(m.id);
+        if (!a || m.id === this.selfId) break;
+        a.info = { ...a.info, look: m.look };
+        a.flash("✨");
+        break;
+      }
       case "Offered": {
         const from = this.avatars.get(m.from);
         if (!from || this.ui.social.isBlockedName(from.info.name)) break;
@@ -883,6 +902,14 @@ export class Game {
       if (obj.kind === "lantern_stand") this.near(ui.wish, obj).show();
       else if (obj.kind === "bottles") this.near(ui.bottles, obj).show();
       else this.hud.toast("🔥 Sit on a log to join the circle. There's always something to talk about.", 4500);
+      return true;
+    }
+    if (obj && (obj.kind === "tailor" || obj.kind === "wardrobe")) {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+        const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.wardrobe, { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }).openAs(obj.label ?? "Changing room");
       return true;
     }
     if (obj?.kind === "founders_stone") {

@@ -11,6 +11,7 @@ import { Gov } from "./gov";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
+import { WardrobePanel } from "./ui/wardrobe";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -170,6 +171,14 @@ async function main() {
     wish: new WishPanel((text) => game?.releaseLantern(text)),
     offer: new OfferCard(),
     mood: moodPicker,
+    wardrobe: new WardrobePanel(
+      () => auth.player?.look ?? 0,
+      async (look) => {
+        await auth.saveLook(look);
+        (game as Game | null)?.changeLook(look);
+        hud.toast("✨ Looking good!", 3000);
+      },
+    ),
   };
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
   welcome.onChange(() => {

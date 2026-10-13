@@ -696,6 +696,14 @@ fn park() -> MapFile {
     }
     b.stroke(&[(10.0, 47.5), (9.0, 45.0), (8.0, 43.0)], 0.8, Brush::Path);
 
+    // The tailor's tent by the plaza: the changing room. It goes on the
+    // nearest free grass to the south-east of the fountain.
+    let tent = (0..12u16)
+        .flat_map(|r| (0..=r).flat_map(move |dx| [(56 + dx, 54 + r - dx), (56 + r - dx, 54 + dx)]))
+        .find(|&(x, y)| (0..3).all(|dx| (0..3).all(|dy| b.free(x + dx, y + dy))))
+        .expect("room for the tailor's tent");
+    b.object("tailor", tent.0, tent.1, 3, 2, Some("Tailor"), true);
+
     // Messages in bottles, at the land end of the pier.
     b.object("bottles", 38, 64, 1, 1, Some("Messages in bottles"), true);
 
@@ -1043,6 +1051,8 @@ fn home() -> MapFile {
     b.decor(1, 0, "pine");
     b.decor(18, 0, "pine");
     b.object("park_gate", 9, h - 1, 2, 1, Some("To the park"), true);
+    // A wardrobe against the back wall: change clothes at home.
+    b.object("wardrobe", 15, 2, 2, 1, Some("Wardrobe"), true);
     b.finish("Home", (10, 11))
 }
 

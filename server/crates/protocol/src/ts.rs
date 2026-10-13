@@ -270,6 +270,7 @@ pub fn sample_vectors() -> String {
         ClientMsg::SkyLantern {
             text: "for everyone here 🏮".into(),
         },
+        ClientMsg::SetLook { look: 0xc123_4567 },
     ];
     let server = [
         ServerMsg::Welcome {
@@ -362,6 +363,10 @@ pub fn sample_vectors() -> String {
             x: 48,
             y: 88,
             text: "a wish".into(),
+        },
+        ServerMsg::LookChanged {
+            id: 9,
+            look: 0x8000_0001,
         },
     ];
     let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();

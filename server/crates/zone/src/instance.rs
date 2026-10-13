@@ -694,6 +694,7 @@ impl Instance {
             ClientMsg::Offer { to, kind } => self.offer(id, to, kind, now),
             ClientMsg::Accept { from, kind } => self.accept(id, from, kind, now),
             ClientMsg::SkyLantern { text } => self.sky_lantern(id, &text, now),
+            ClientMsg::SetLook { look } => self.set_look(id, look, now),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }

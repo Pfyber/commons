@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -146,6 +146,7 @@ export type ClientMsg =
   | { t: "Offer"; to: number; kind: number }
   | { t: "Accept"; from: number; kind: number }
   | { t: "SkyLantern"; text: string }
+  | { t: "SetLook"; look: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -244,6 +245,10 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(19);
       w.str(m.text);
       break;
+    case "SetLook":
+      w.u8(20);
+      w.u32(m.look);
+      break;
   }
   return w.finish();
 }
@@ -310,6 +315,9 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 19:
       m = { t: "SkyLantern", text: r.str() };
       break;
+    case 20:
+      m = { t: "SetLook", look: r.u32() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -343,6 +351,7 @@ export type ServerMsg =
   | { t: "Offered"; from: number; kind: number }
   | { t: "Together"; a: number; b: number; kind: number }
   | { t: "LanternRise"; id: number; x: number; y: number; text: string }
+  | { t: "LookChanged"; id: number; look: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -509,6 +518,11 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.y);
       w.str(m.text);
       break;
+    case "LookChanged":
+      w.u8(26);
+      w.u32(m.id);
+      w.u32(m.look);
+      break;
   }
   return w.finish();
 }
@@ -592,6 +606,9 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 25:
       m = { t: "LanternRise", id: r.u32(), x: r.u16(), y: r.u16(), text: r.str() };
+      break;
+    case 26:
+      m = { t: "LookChanged", id: r.u32(), look: r.u32() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

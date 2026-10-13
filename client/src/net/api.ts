@@ -97,6 +97,11 @@ export class Auth {
     storage()?.removeItem(REFRESH_KEY);
   }
 
+  /** Saves a new look (the changing room); the fresh session carries it. */
+  async saveLook(look: number) {
+    this.adopt(await this.send<Session>("/api/me/look", { look }));
+  }
+
   /** Restores a session from the stored refresh token, if any. */
   async resume(): Promise<boolean> {
     const token = storage()?.getItem(REFRESH_KEY);

@@ -6,6 +6,7 @@ import { Texture } from "pixi.js";
 import type { MapObject } from "./map";
 import { disc, oval, polygon } from "./pixeldraw";
 import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
+import { decodeLook } from "./look";
 
 export const TILE = 32;
 
@@ -944,6 +945,48 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.woodDark, 10, 20, 14, 1);
       break;
     }
+    case "tailor": {
+      // The tailor's tent: striped canvas, a sign with a coat hanger, and a
+      // curtain to change behind.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "rgba(0,0,0,0.18)", 4, top + h - 6, w - 8, 6);
+      polygon(ctx, P.outline, [[2, top + h - 2], [2, top - 6], [w / 2, top - 30], [w - 2, top - 6], [w - 2, top + h - 2]]);
+      for (let i = 0; i < 8; i++) {
+        const x0 = 4 + i * ((w - 8) / 8);
+        polygon(ctx, i % 2 ? "#f4f1d8" : "#c8553d", [[x0, top + h - 3], [x0, top - 5], [w / 2, top - 27], [x0 + (w - 8) / 8, top - 5], [x0 + (w - 8) / 8, top + h - 3]]);
+      }
+      px(ctx, P.outline, w / 2 - 12, top + 4, 24, h - 6);
+      px(ctx, "#7a4a8c", w / 2 - 11, top + 5, 22, h - 8);
+      px(ctx, "#9a6aac", w / 2 - 11, top + 5, 3, h - 8);
+      px(ctx, "#9a6aac", w / 2 + 2, top + 5, 3, h - 8);
+      // the sign
+      px(ctx, P.outline, w / 2 - 10, top - 20, 20, 12);
+      px(ctx, P.wood, w / 2 - 9, top - 19, 18, 10);
+      px(ctx, P.outline, w / 2 - 1, top - 18, 2, 2);
+      polygon(ctx, P.outline, [[w / 2 - 6, top - 11], [w / 2, top - 16], [w / 2 + 6, top - 11]]);
+      polygon(ctx, P.wood, [[w / 2 - 4, top - 12], [w / 2, top - 15], [w / 2 + 4, top - 12]]);
+      px(ctx, "#f6c343", w / 2 - 1, top - 31, 2, 3);
+      break;
+    }
+    case "wardrobe": {
+      // A tall wooden wardrobe with a mirror on one door.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, P.outline, 3, top - 36, w - 6, h + 34);
+      px(ctx, P.wood, 4, top - 35, w - 8, h + 32);
+      px(ctx, P.woodDark, 4, top - 35, w - 8, 3);
+      px(ctx, P.woodDark, w / 2 - 1, top - 32, 2, h + 28);
+      px(ctx, P.outline, 8, top - 28, w / 2 - 12, h + 14);
+      px(ctx, "#cfe3ea", 9, top - 27, w / 2 - 14, h + 12);
+      px(ctx, "#ffffff", 11, top - 25, 2, 8);
+      px(ctx, "#f6c343", w / 2 - 4, top - 10, 2, 3);
+      px(ctx, "#f6c343", w / 2 + 2, top - 10, 2, 3);
+      px(ctx, P.outline, 3, top + h - 3, w - 6, 3);
+      break;
+    }
     case "campfire": {
       // A ring of stones and crossed logs; the flames are animated on top.
       [c, ctx] = makeCanvas(w + 16, h + 8);
@@ -1037,21 +1080,25 @@ const SKIN = ["#f5d0b0", "#e0ac84", "#b97c55", "#7d5136"];
 /** The Caretaker NPC's look: a gardener in a straw sun hat and green apron. */
 export const CARETAKER_LOOK = 0xfffffff1;
 const HAIR = ["#2b211c", "#5a3b25", "#a5662f", "#e3c16f", "#c4c4c4", "#b4473a", "#3f4f8f", "#6f4d8f"];
+export const SKIN_COLORS = SKIN;
+export const HAIR_COLORS = HAIR;
 
-/** Decodes the 32-bit look seed into avatar parts (modular layers later). */
+/** Colours for a look (see world/look.ts for the bit layout). */
 export function lookParts(look: number) {
-  const hue = (look & 0xff) * (360 / 256);
+  const l = decodeLook(look);
+  const hue = l.hue * (360 / 256);
   return {
-    outfit: `hsl(${hue.toFixed(0)} 45% 58%)`,
+    ...l,
+    outfitColor: `hsl(${hue.toFixed(0)} 45% 58%)`,
     outfitDark: `hsl(${hue.toFixed(0)} 40% 42%)`,
-    skin: SKIN[(look >>> 8) & 3],
-    hair: HAIR[(look >>> 10) & 7],
-    hat: (look >>> 13) & 3, // 0 none, 1 beanie, 2 cap, 3 flower
-    hatColor: `hsl(${(((look >>> 16) & 0xff) * (360 / 256)).toFixed(0)} 55% 55%)`,
+    skinColor: SKIN[l.skin],
+    hairColor: HAIR[l.hair],
+    hatColor: `hsl(${(l.hatHue * (360 / 256)).toFixed(0)} 55% 55%)`,
   };
 }
 
 const avatarCache = new Map<string, Texture>();
+const canvasCache = new Map<string, HTMLCanvasElement>();
 
 /**
  * 24×34 avatar sprite, feet at the bottom centre. Frames 0/1 alternate the
@@ -1061,12 +1108,23 @@ export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
   const key = `${look}:${frame}`;
   const cached = avatarCache.get(key);
   if (cached) return cached;
+  const t = toTexture(avatarCanvas(look, frame));
+  avatarCache.set(key, t);
+  return t;
+}
+
+/** The avatar drawn on a 24×34 canvas (also for previews in the changing room). */
+export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement {
+  const key = `${look}:${frame}`;
+  const cached = canvasCache.get(key);
+  if (cached) return cached;
   const caretaker = look === CARETAKER_LOOK;
   const p = caretaker
-    ? { outfit: "#e8dcc0", outfitDark: "#5f8f4e", skin: SKIN[1], hair: "#c4c4c4", hat: 0, hatColor: "" }
+    ? { ...lookParts(0), outfitColor: "#e8dcc0", outfitDark: "#5f8f4e", skinColor: SKIN[1], hairColor: "#c4c4c4", hat: 0 }
     : lookParts(look);
   const [c, ctx] = makeCanvas(24, 34);
   const o = PALETTE.outline;
+  const hair = p.hairColor;
   px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
   // legs
   if (frame === 2) {
@@ -1081,23 +1139,151 @@ export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
     px(ctx, "#4a4a5a", frame ? 8 : 9, 25, 2, 6);
     px(ctx, "#4a4a5a", frame ? 15 : 14, 25, 2, 6);
   }
-  // body
+
+  // ---- behind the body: long hair, curls, buns, a ponytail, a backpack ----
+  if (p.style === 1) {
+    px(ctx, o, 5, 7, 14, 12);
+    px(ctx, hair, 6, 8, 12, 10);
+  } else if (p.style === 7) {
+    px(ctx, o, 3, 1, 18, 14);
+    px(ctx, o, 4, 0, 16, 16);
+    px(ctx, hair, 4, 1, 16, 14);
+    px(ctx, hair, 5, 0, 14, 1);
+  } else if (p.style === 4) {
+    for (const bx of [3, 16]) {
+      px(ctx, o, bx, 0, 5, 5);
+      px(ctx, hair, bx + 1, 1, 3, 3);
+    }
+  } else if (p.style === 3) {
+    px(ctx, o, 17, 4, 5, 10);
+    px(ctx, hair, 18, 5, 3, 8);
+    px(ctx, "#f28c6b", 17, 6, 2, 2);
+  }
+  if (p.accessory === 4) {
+    px(ctx, o, 3, 15, 18, 10);
+    px(ctx, "#a0703f", 4, 16, 16, 8);
+  }
+
+  // ---- body and outfit ----
+  const shirt = p.outfitColor;
+  const dark = p.outfitDark;
   px(ctx, o, 5, 15, 14, 12);
-  px(ctx, p.outfit, 6, 16, 12, 10);
-  px(ctx, p.outfitDark, 6, 23, 12, 3);
-  px(ctx, p.skin, 4, 18, 2, 5);
-  px(ctx, p.skin, 18, 18, 2, 5);
-  // head
+  px(ctx, shirt, 6, 16, 12, 10);
+  switch (p.outfit) {
+    case 0: // tee
+      px(ctx, dark, 6, 23, 12, 3);
+      break;
+    case 1: // overalls over a shirt
+      px(ctx, "#4f6fa0", 6, 21, 12, 5);
+      px(ctx, "#4f6fa0", 9, 18, 6, 4);
+      px(ctx, "#4f6fa0", 7, 16, 2, 3);
+      px(ctx, "#4f6fa0", 15, 16, 2, 3);
+      px(ctx, "#f6c343", 9, 18, 1, 1);
+      px(ctx, "#f6c343", 14, 18, 1, 1);
+      break;
+    case 2: // stripes
+      for (const y of [17, 19, 21, 23]) px(ctx, dark, 6, y, 12, 1);
+      px(ctx, dark, 6, 25, 12, 1);
+      break;
+    case 3: // dress
+      px(ctx, o, 4, 22, 16, 6);
+      px(ctx, shirt, 5, 22, 14, 5);
+      px(ctx, dark, 5, 26, 14, 1);
+      px(ctx, dark, 6, 21, 12, 1);
+      break;
+    case 4: // hoodie
+      px(ctx, dark, 6, 16, 12, 2);
+      px(ctx, dark, 8, 21, 8, 3);
+      px(ctx, "#fff8e3", 10, 18, 1, 3);
+      px(ctx, "#fff8e3", 13, 18, 1, 3);
+      break;
+    case 5: // open jacket over a white shirt
+      px(ctx, "#f4f1d8", 10, 16, 4, 10);
+      px(ctx, dark, 9, 16, 1, 6);
+      px(ctx, dark, 14, 16, 1, 6);
+      px(ctx, dark, 6, 24, 12, 2);
+      break;
+    case 6: // jumper with a heart
+      px(ctx, dark, 6, 24, 12, 2);
+      px(ctx, "#e8566b", 9, 18, 2, 1);
+      px(ctx, "#e8566b", 13, 18, 2, 1);
+      px(ctx, "#e8566b", 9, 19, 6, 1);
+      px(ctx, "#e8566b", 10, 20, 4, 1);
+      px(ctx, "#e8566b", 11, 21, 2, 1);
+      break;
+    case 7: // shirt, waistcoat and tie
+      px(ctx, "#f4f1d8", 6, 16, 12, 10);
+      px(ctx, shirt, 6, 17, 4, 8);
+      px(ctx, shirt, 14, 17, 4, 8);
+      px(ctx, dark, 6, 24, 4, 1);
+      px(ctx, dark, 14, 24, 4, 1);
+      px(ctx, "#b5443a", 11, 16, 2, 6);
+      break;
+  }
+  // arms: long sleeves for stripes, hoodies, jackets and jumpers
+  const sleeves = p.outfit === 2 || p.outfit === 4 || p.outfit === 5 || p.outfit === 6;
+  for (const ax of [4, 18]) {
+    px(ctx, sleeves ? dark : p.skinColor, ax, 18, 2, 5);
+    if (sleeves) px(ctx, p.skinColor, ax, 22, 2, 1);
+  }
+  if (p.accessory === 4) {
+    px(ctx, "#6e4b30", 7, 16, 2, 7);
+    px(ctx, "#6e4b30", 15, 16, 2, 7);
+  }
+
+  // ---- head ----
   px(ctx, o, 5, 3, 14, 13);
-  px(ctx, p.skin, 6, 4, 12, 11);
-  px(ctx, p.hair, 6, 4, 12, 4);
-  px(ctx, p.hair, 6, 8, 2, 4);
-  px(ctx, p.hair, 16, 8, 2, 4);
+  px(ctx, p.skinColor, 6, 4, 12, 11);
+  switch (p.style) {
+    case 0: // short
+      px(ctx, hair, 6, 4, 12, 4);
+      px(ctx, hair, 6, 8, 2, 4);
+      px(ctx, hair, 16, 8, 2, 4);
+      break;
+    case 1: // long
+      px(ctx, hair, 6, 4, 12, 4);
+      px(ctx, hair, 6, 8, 2, 7);
+      px(ctx, hair, 16, 8, 2, 7);
+      break;
+    case 2: // bob with a fringe
+      px(ctx, hair, 6, 4, 12, 4);
+      px(ctx, o, 4, 7, 2, 8);
+      px(ctx, o, 18, 7, 2, 8);
+      px(ctx, hair, 5, 7, 3, 7);
+      px(ctx, hair, 16, 7, 3, 7);
+      break;
+    case 3: // ponytail
+    case 4: // buns
+      px(ctx, hair, 6, 4, 12, 3);
+      px(ctx, hair, 6, 7, 1, 3);
+      px(ctx, hair, 17, 7, 1, 3);
+      break;
+    case 5: // spiky
+      px(ctx, hair, 6, 4, 12, 3);
+      for (const sx of [6, 9, 12, 15]) {
+        px(ctx, o, sx, 0, 3, 4);
+        px(ctx, hair, sx + 1, 1, 1, 3);
+      }
+      px(ctx, hair, 6, 7, 2, 2);
+      px(ctx, hair, 16, 7, 2, 2);
+      break;
+    case 6: // shaved
+      px(ctx, hair, 6, 4, 12, 1);
+      for (const sx of [7, 10, 13, 16]) px(ctx, hair, sx, 5, 1, 1);
+      break;
+    case 7: // curly
+      px(ctx, hair, 6, 4, 12, 4);
+      for (const sx of [7, 11, 15]) px(ctx, hair, sx, 8, 2, 1);
+      px(ctx, hair, 6, 8, 1, 6);
+      px(ctx, hair, 17, 8, 1, 6);
+      break;
+  }
   px(ctx, o, 9, 10, 2, 2);
   px(ctx, o, 14, 10, 2, 2);
   px(ctx, "#e89a8f", 8, 12, 2, 1);
   px(ctx, "#e89a8f", 15, 12, 2, 1);
-  // hat
+
+  // ---- hat ----
   if (p.hat === 1) {
     px(ctx, o, 5, 1, 14, 5);
     px(ctx, p.hatColor, 6, 2, 12, 3);
@@ -1110,6 +1296,54 @@ export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
     px(ctx, "#ffd1e0", 15, 3, 4, 4);
     px(ctx, "#f7d35c", 16, 4, 2, 2);
   }
+
+  // ---- accessories in front ----
+  switch (p.accessory) {
+    case 1: // glasses
+      px(ctx, o, 8, 9, 4, 4);
+      px(ctx, o, 13, 9, 4, 4);
+      px(ctx, "#dff1f7", 9, 10, 2, 2);
+      px(ctx, "#dff1f7", 14, 10, 2, 2);
+      px(ctx, o, 12, 10, 1, 1);
+      px(ctx, o, 9, 10, 1, 1);
+      px(ctx, o, 14, 10, 1, 1);
+      break;
+    case 2: // sunglasses
+      px(ctx, o, 7, 9, 11, 1);
+      px(ctx, "#2b2a24", 8, 10, 4, 2);
+      px(ctx, "#2b2a24", 13, 10, 4, 2);
+      px(ctx, "#6b8ab0", 8, 10, 1, 1);
+      px(ctx, "#6b8ab0", 13, 10, 1, 1);
+      break;
+    case 3: // scarf
+      px(ctx, o, 5, 14, 14, 4);
+      px(ctx, p.hatColor, 6, 15, 12, 2);
+      px(ctx, o, 13, 17, 4, 6);
+      px(ctx, p.hatColor, 14, 17, 2, 5);
+      px(ctx, "#ffffff", 14, 21, 2, 1);
+      break;
+    case 5: // a bow in the hair
+      px(ctx, o, 14, 1, 7, 5);
+      px(ctx, "#e8566b", 15, 2, 2, 3);
+      px(ctx, "#e8566b", 18, 2, 2, 3);
+      px(ctx, "#b5443a", 17, 3, 1, 1);
+      break;
+    case 6: // headphones
+      px(ctx, o, 5, 1, 14, 2);
+      px(ctx, o, 3, 7, 4, 6);
+      px(ctx, o, 17, 7, 4, 6);
+      px(ctx, p.hatColor, 4, 8, 2, 4);
+      px(ctx, p.hatColor, 18, 8, 2, 4);
+      break;
+    case 7: // a flower crown
+      for (const [fx, col] of [[6, "#f4a7b9"], [9, "#ffe08a"], [12, "#ffffff"], [15, "#c9a7f4"]] as [number, string][]) {
+        px(ctx, o, fx, 2, 4, 3);
+        px(ctx, col, fx + 1, 2, 2, 2);
+      }
+      px(ctx, "#5f9a48", 6, 4, 12, 1);
+      break;
+  }
+
   if (caretaker) {
     // Green apron with a pocket and a trowel; a wide straw hat with a band.
     px(ctx, "#5f8f4e", 8, 18, 8, 8);
@@ -1122,9 +1356,8 @@ export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
     px(ctx, "#b5544a", 7, 3, 10, 1);
     px(ctx, "#8fca6b", 15, 1, 2, 2);
   }
-  const t = toTexture(c);
-  avatarCache.set(key, t);
-  return t;
+  canvasCache.set(key, c);
+  return c;
 }
 
 // ---- ambient creatures (client-only, spec §7.1) -------------------------

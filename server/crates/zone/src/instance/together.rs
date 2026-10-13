@@ -45,6 +45,21 @@ impl Instance {
             .unwrap_or(0)
     }
 
+    /// New clothes: everyone nearby sees them at once. (The API saved them;
+    /// a look is only cosmetic, so any non-NPC look is fine here.)
+    pub(super) fn set_look(&mut self, id: u32, look: u32, now: u32) {
+        let a = self.avatars.get_mut(&id).unwrap();
+        if commons_protocol::NPC_LOOKS.contains(&look)
+            || a.look == look
+            || !a.emote_rl.try_take(now as u64)
+        {
+            return;
+        }
+        a.look = look;
+        let cell = a.cell;
+        self.broadcast(cell, &ServerMsg::LookChanged { id, look }, None);
+    }
+
     pub(super) fn set_mood(&mut self, id: u32, m: u8, now: u32) {
         let a = self.avatars.get_mut(&id).unwrap();
         if m > mood::MAX || a.mood == m || !a.emote_rl.try_take(now as u64) {
@@ -268,6 +283,39 @@ mod tests {
         assert!(inst.avatars[&1].sat_together && inst.avatars[&2].sat_together);
         // A newcomer sees the mood in the snapshot.
         assert_eq!(inst.avatars[&1].info(inst.clock.now_ms()).mood, mood::OPEN);
+    }
+
+    #[test]
+    fn new_clothes_are_seen_at_once_but_npc_looks_are_refused() {
+        let mut inst = nook_instance();
+        let mut a = connect(&mut inst, 1, "a", (20, 12));
+        let mut b = connect(&mut inst, 2, "b", (20, 12));
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::SetLook { look: 0x8100_00ff },
+        });
+        inst.flush();
+        b.pump();
+        assert!(b.log.iter().any(|m| matches!(
+            m,
+            ServerMsg::LookChanged {
+                id: 1,
+                look: 0x8100_00ff
+            }
+        )));
+        assert_eq!(inst.avatars[&1].info(inst.clock.now_ms()).look, 0x8100_00ff);
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::SetLook {
+                look: commons_protocol::NPC_LOOKS[0],
+            },
+        });
+        inst.flush();
+        a.pump();
+        assert_eq!(
+            inst.avatars[&1].look, 0x8100_00ff,
+            "nobody dresses as the Caretaker"
+        );
     }
 
     #[test]
