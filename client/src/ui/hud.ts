@@ -2,6 +2,7 @@
 // targets, nothing persistent beyond what's needed.
 
 import { EMOTES } from "../world/avatars";
+import { EMOTE_ICONS, iconUrl, pxIcon } from "./icons";
 
 const LOG_LINES = 6;
 const LOG_MS = 12_000;
@@ -40,11 +41,11 @@ export class Hud {
         <div class="pill place"></div>
         <div class="top-right">
           <div class="pill coins" title="Coins"></div>
-          <button type="button" class="pill btn bag-btn" title="Bag (B)">🎒</button>
-          <button type="button" class="pill btn album-btn" title="Album (L)">📖</button>
-          <button type="button" class="pill btn friends-btn" title="Friends (F)">👥</button>
-          <button type="button" class="pill btn notes-btn" title="Notifications (N)">🔔<span class="badge-count" hidden></span></button>
-          <button type="button" class="pill btn sound-btn" title="Sound (M)">🔊</button>
+          <button type="button" class="pill btn bag-btn" title="Bag (B)" aria-label="Bag"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bag")}" /></button>
+          <button type="button" class="pill btn album-btn" title="Album (L)" aria-label="Album"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("book")}" /></button>
+          <button type="button" class="pill btn friends-btn" title="Friends (F)" aria-label="Friends"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("friends")}" /></button>
+          <button type="button" class="pill btn notes-btn" title="Notifications (N)" aria-label="Notifications"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bell")}" /><span class="badge-count" hidden></span></button>
+          <button type="button" class="pill btn sound-btn" title="Sound (M)" aria-label="Sound"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("sound")}" /></button>
           <div class="pill nearby" title="People in view"></div>
         </div>
       </div>
@@ -72,7 +73,7 @@ export class Hud {
     root.querySelector<HTMLButtonElement>(".notes-btn")!.onclick = () => h.onNotifications();
     this.badgeEl = root.querySelector(".badge-count")!;
     const soundBtn = root.querySelector<HTMLButtonElement>(".sound-btn")!;
-    const sound = () => (soundBtn.textContent = h.onSound() ? "🔇" : "🔊");
+    const sound = () => this.setMuted(h.onSound());
     soundBtn.onclick = sound;
     window.addEventListener("keydown", (e) => {
       if (e.target instanceof HTMLInputElement) return;
@@ -102,7 +103,7 @@ export class Hud {
     this.moodBtn.className = "mood-btn";
     this.moodBtn.title = "How you'd like company";
     this.moodBtn.setAttribute("aria-label", this.moodBtn.title);
-    this.moodBtn.textContent = "💬";
+    this.moodBtn.replaceChildren(pxIcon("chat"));
     this.moodBtn.onclick = () => h.onMood();
     bar.appendChild(this.moodBtn);
     this.sitBtn = document.createElement("button");
@@ -114,7 +115,7 @@ export class Hud {
     for (const [id, e] of Object.entries(EMOTES)) {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = e.icon;
+      b.append(pxIcon(EMOTE_ICONS[Number(id)] ?? "heart"));
       b.title = `${e.label} (${id})`;
       b.setAttribute("aria-label", e.label);
       b.onclick = () => h.onEmote(Number(id));
@@ -123,7 +124,7 @@ export class Hud {
   }
 
   setSitting(sitting: boolean) {
-    this.sitBtn.textContent = sitting ? "🧍" : "🪑";
+    this.sitBtn.replaceChildren(pxIcon(sitting ? "stand" : "sit"));
     this.sitBtn.title = sitting ? "Stand up" : "Sit down here";
     this.sitBtn.setAttribute("aria-label", this.sitBtn.title);
   }
@@ -139,13 +140,13 @@ export class Hud {
 
   /** Shows the current sound state on the button. */
   setMuted(muted: boolean) {
-    const b = document.querySelector<HTMLButtonElement>(".sound-btn");
-    if (b) b.textContent = muted ? "🔇" : "🔊";
+    const img = document.querySelector<HTMLImageElement>(".sound-btn img");
+    if (img) img.src = iconUrl(muted ? "mute" : "sound");
   }
 
   /** Shows the current mood on its button. */
   setMood(icon: string, on: boolean) {
-    this.moodBtn.textContent = icon;
+    this.moodBtn.title = on ? `Your sign: ${icon}` : "How you'd like company";
     this.moodBtn.classList.toggle("on", on);
   }
 
@@ -163,7 +164,7 @@ export class Hud {
   }
 
   setCoins(n: number) {
-    this.coinsEl.textContent = `🪙 ${n}`;
+    this.coinsEl.replaceChildren(pxIcon("coin"), document.createTextNode(String(n)));
   }
 
   setNearby(n: number) {

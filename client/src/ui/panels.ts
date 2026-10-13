@@ -4,6 +4,7 @@
 import { COIN, type Economy, type Item } from "../economy";
 import { ApiError } from "../net/api";
 import { itemIconUrl } from "../world/items";
+import { pxIcon } from "./icons";
 
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -30,6 +31,14 @@ export function button(label: string, run: () => void, cls = ""): HTMLButtonElem
 export class Panel {
   /** Panels share one spot on screen, so only one is open at a time. */
   private static current: Panel | null = null;
+  /** Where in the world the panel belongs (a board, a stall…): it closes
+   * when you walk away. Null for panels opened from the HUD. */
+  anchor: { x: number; y: number; range: number } | null = null;
+
+  /** The open panel, if any. */
+  static get open(): Panel | null {
+    return Panel.current;
+  }
   readonly el: HTMLDivElement;
   protected body: HTMLDivElement;
   protected titleEl: HTMLElement;
@@ -39,7 +48,10 @@ export class Panel {
     this.el.hidden = true;
     const head = el("div", "panel-head");
     this.titleEl = el("strong", "", title);
-    head.append(this.titleEl, button("✕", () => this.hide(), "x"));
+    const close = button("", () => this.hide(), "x");
+    close.setAttribute("aria-label", "Close");
+    close.append(pxIcon("close", 2));
+    head.append(this.titleEl, close);
     this.body = el("div", "panel-body");
     this.el.append(head, this.body);
     document.body.appendChild(this.el);
@@ -65,6 +77,7 @@ export class Panel {
 
   hide() {
     this.el.hidden = true;
+    this.anchor = null;
     if (Panel.current === this) Panel.current = null;
   }
 

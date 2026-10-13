@@ -89,6 +89,12 @@ export class MoodPicker {
       this.el.append(b);
     }
     document.body.appendChild(this.el);
+    // Escape or a tap anywhere else puts it away.
+    window.addEventListener("keydown", (e) => e.key === "Escape" && this.hide());
+    window.addEventListener("pointerdown", (e) => {
+      const t = e.target as Element | null;
+      if (!this.el.hidden && t && !this.el.contains(t) && !t.closest(".mood-btn")) this.hide();
+    });
   }
 
   setCurrent(mood: number) {

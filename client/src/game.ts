@@ -313,6 +313,22 @@ export class Game {
     for (const a of this.avatars.values()) a.setFounder(this.ui.welcome.founderNamed(a.info.name)?.no ?? null);
   }
 
+  /** Ties `panel` to a place: it closes once you walk away from it. */
+  private near<P extends Panel>(panel: P, at: { x: number; y: number }, range = 5): P {
+    panel.anchor = { x: at.x, y: at.y, range };
+    return panel;
+  }
+
+  /** Closes a place's panel when you've walked off (not while walking there). */
+  private closeIfWalkedAway() {
+    const p = Panel.open;
+    const self = this.self;
+    if (!p?.anchor || !self) return;
+    const a = p.anchor;
+    const here = { x: Math.round(self.pos.x), y: Math.round(self.pos.y) };
+    if (cheb(self.destination, a) > a.range && cheb(here, a) > a.range) p.hide();
+  }
+
   /** Walks to (near) `t`, e.g. where the Caretaker's tasks point. */
   walkTo(t: TileXY) {
     const spot = nearestWalkable(this.scene.map, t.x, t.y, 3);
@@ -327,7 +343,7 @@ export class Game {
     if (!this.caretaker.hit(x, y)) return false;
     const self = this.self;
     if (self && cheb(self.destination, this.caretaker.pos) > 3) this.walkTo(this.caretaker.avatar.destination);
-    this.ui.welcomePanel.show();
+    this.near(this.ui.welcomePanel, this.caretaker.avatar.destination, 6).show();
     return true;
   }
 
@@ -777,7 +793,7 @@ export class Game {
       }
       actions.push(["Report", () => this.ui.report.openFor(name)]);
       actions.push(["Block", () => confirm(`Block ${name}? You won't see their chat, and they can't contact you.`) && void say(social.block(name).then(() => `Blocked ${name}.`))]);
-      this.ui.menu.showWith(name, friend ? (friend.level >= 2 ? "Close friend" : "Friend") : "", actions);
+      this.near(this.ui.menu, this.self?.destination ?? { x: 0, y: 0 }, 6).showWith(name, friend ? (friend.level >= 2 ? "Close friend" : "Friend") : "", actions);
       return true;
     }
     return false;
@@ -832,7 +848,7 @@ export class Game {
     }
     const placed = this.props.objectAt(t.x, t.y);
     if (placed && this.zoneId === "home") {
-      ui.menu.showWith(ui.eco.name(placed), "", [["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]]);
+      this.near(ui.menu, t).showWith(ui.eco.name(placed), "", [["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]]);
       return true;
     }
     const tree = this.grove?.at(t);
@@ -846,7 +862,7 @@ export class Game {
     if (obj?.kind === "market_cart") {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
-      ui.market.show();
+      this.near(ui.market, obj).show();
       return true;
     }
     if (obj && (obj.kind === "town_hall" || obj.kind === "story_board")) {
@@ -854,8 +870,9 @@ export class Game {
         const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
-      if (obj.kind === "town_hall") void ui.townhall.openAt({ kind: "list" });
-      else ui.story.show();
+      const at = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (obj.kind === "town_hall") void this.near(ui.townhall, at, 8).openAt({ kind: "list" });
+      else this.near(ui.story, at).show();
       return true;
     }
     if (obj && (obj.kind === "lantern_stand" || obj.kind === "bottles" || obj.kind === "campfire")) {
@@ -863,8 +880,8 @@ export class Game {
         const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
-      if (obj.kind === "lantern_stand") ui.wish.show();
-      else if (obj.kind === "bottles") ui.bottles.show();
+      if (obj.kind === "lantern_stand") this.near(ui.wish, obj).show();
+      else if (obj.kind === "bottles") this.near(ui.bottles, obj).show();
       else this.hud.toast("🔥 Sit on a log to join the circle. There's always something to talk about.", 4500);
       return true;
     }
@@ -873,7 +890,7 @@ export class Game {
         const spot = nearestWalkable(map, obj.x + 1, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
-      ui.founders.show();
+      this.near(ui.founders, obj).show();
       return true;
     }
     if (obj && obj.kind === "signpost") {
@@ -896,8 +913,8 @@ export class Game {
         if (spot) this.moveTo(spot, true);
       }
       if (obj.kind === "bandstand") this.jam?.show();
-      else if (obj.kind === "easels") void ui.easel.openFor(Math.min(obj.w - 1, Math.max(0, t.x - obj.x)));
-      else ui.word.show();
+      else if (obj.kind === "easels") void this.near(ui.easel, obj).openFor(Math.min(obj.w - 1, Math.max(0, t.x - obj.x)));
+      else this.near(ui.word, obj).show();
       return true;
     }
     if (obj && (obj.kind.startsWith("board_") || obj.kind === "notice_board" || obj.kind === "fountain")) {
@@ -906,9 +923,9 @@ export class Game {
         const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
-      if (obj.kind === "notice_board") ui.requests.show();
-      else if (obj.kind === "fountain") ui.goal.show();
-      else void ui.quarter.openFor(obj.kind.slice("board_".length));
+      if (obj.kind === "notice_board") this.near(ui.requests, obj).show();
+      else if (obj.kind === "fountain") this.near(ui.goal, obj, 7).show();
+      else void this.near(ui.quarter, obj).openFor(obj.kind.slice("board_".length));
       return true;
     }
     if (obj?.kind === "homes_gate") {
@@ -925,7 +942,7 @@ export class Game {
       return true;
     }
     if (ground === "soil") {
-      ui.plot.showFor(t.x, t.y, this.props.plotAt(t.x, t.y));
+      this.near(ui.plot, t, 4).showFor(t.x, t.y, this.props.plotAt(t.x, t.y));
       return true;
     }
     return false;
@@ -1142,6 +1159,7 @@ export class Game {
         this.discover("fairy_ring", DISCOVERIES.fairy_ring);
       }
       if (self) this.checkNook(self.pos);
+      this.closeIfWalkedAway();
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
     // The jam pads go away when you walk off from the bandstand.

@@ -22,6 +22,10 @@ import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { EaselPanel } from "./activities/easel";
 import { WordPanel } from "./activities/word";
 import type { ZoneMap } from "./world/map";
+import "@fontsource/pixelify-sans/400.css";
+import "@fontsource/pixelify-sans/500.css";
+import "@fontsource/pixelify-sans/600.css";
+import "@fontsource/pixelify-sans/700.css";
 import "./styles.css";
 
 const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl };

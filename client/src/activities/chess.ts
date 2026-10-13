@@ -2,6 +2,7 @@
 // the legal moves, so the client only renders the position and offers them.
 
 import type { ServerMsg } from "../net/protocol.gen";
+import { iconUrl } from "../ui/icons";
 
 export type GameStateMsg = Extract<ServerMsg, { t: "GameState" }>;
 
@@ -53,7 +54,7 @@ export class ChessPanel {
     this.el.className = "panel chess";
     this.el.hidden = true;
     this.el.innerHTML = `
-      <div class="panel-head"><strong>Chess</strong><button type="button" class="x" aria-label="Close">✕</button></div>
+      <div class="panel-head"><strong>Chess</strong><button type="button" class="x" aria-label="Close"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("close")}" /></button></div>
       <div class="chess-info"></div>
       <div class="chess-board" role="grid" aria-label="Chess board"></div>
       <div class="chess-actions"></div>`;

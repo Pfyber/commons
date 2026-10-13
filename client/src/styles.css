@@ -84,7 +84,7 @@ body {
   color: #fff;
   white-space: nowrap;
   background: rgba(46, 44, 34, 0.5);
-  border-radius: 999px;
+  border-radius: 0;
   padding: 0 6px;
   margin-bottom: 2px;
 }
@@ -99,7 +99,7 @@ body {
   padding: 6px 10px;
   margin-bottom: 6px;
   background: var(--paper);
-  border-radius: 12px;
+  border-radius: 0;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   font-size: 13px;
   line-height: 1.3;
@@ -166,7 +166,7 @@ body {
 
 .pill {
   background: rgba(255, 250, 240, 0.92);
-  border-radius: 999px;
+  border-radius: 0;
   padding: 8px 14px;
   font-weight: 700;
   font-size: 14px;
@@ -188,7 +188,7 @@ body {
   text-align: center;
   background: rgba(59, 58, 46, 0.88);
   color: #fff;
-  border-radius: 999px;
+  border-radius: 0;
   padding: 8px 16px;
   font-size: 14px;
   animation: toast-in 0.2s ease-out;
@@ -249,7 +249,7 @@ body {
 .log .line {
   align-self: flex-start;
   background: rgba(255, 250, 240, 0.85);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 3px 10px;
   font-size: 13px;
   max-width: 100%;
@@ -271,7 +271,7 @@ body {
   font-size: 16px; /* no zoom-on-focus on iOS */
   padding: 12px 16px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: 0;
   background: rgba(255, 250, 240, 0.94);
   box-shadow: var(--shadow);
   color: var(--ink);
@@ -295,7 +295,7 @@ body {
   height: 44px;
   font-size: 22px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 0;
   background: rgba(255, 250, 240, 0.94);
   box-shadow: var(--shadow);
   cursor: pointer;
@@ -325,7 +325,7 @@ body {
 .card {
   width: min(400px, 100%);
   background: var(--paper);
-  border-radius: 20px;
+  border-radius: 0;
   padding: 28px 24px;
   box-shadow: var(--shadow);
   display: flex;
@@ -374,7 +374,7 @@ body {
   font-weight: 400;
   padding: 11px 14px;
   border: 2px solid var(--paper-2);
-  border-radius: 12px;
+  border-radius: 0;
   background: #fff;
   color: var(--ink);
   min-width: 0;
@@ -392,7 +392,7 @@ body {
   font-weight: 700;
   font-size: 16px;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: 0;
   border: 0;
   background: var(--paper-2);
   color: var(--ink);
@@ -465,7 +465,7 @@ body {
   top: 64px;
   z-index: 5;
   background: var(--paper);
-  border-radius: var(--radius);
+  border-radius: 0;
   box-shadow: var(--shadow);
   padding: 12px;
   display: flex;
@@ -509,7 +509,7 @@ body {
   grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr);
   aspect-ratio: 1;
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
   border: 3px solid var(--wood-dark, #8a5d36);
 }
@@ -568,7 +568,7 @@ body {
   font-weight: 700;
   padding: 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--paper-2);
   cursor: pointer;
 }
@@ -631,7 +631,7 @@ body.fading #stage {
   color: #fff;
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: 0;
   transform: rotate(-4deg);
 }
 
@@ -665,7 +665,7 @@ body.fading #stage {
 
 .item-grid .item {
   background: var(--paper-2);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -733,7 +733,7 @@ body.fading #stage {
   font-weight: 700;
   font-size: 13px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 0;
   padding: 6px 10px;
   background: var(--paper-2);
   cursor: pointer;
@@ -769,7 +769,7 @@ body.fading #stage {
   z-index: 6;
   width: min(360px, calc(100vw - 24px));
   background: var(--paper);
-  border-radius: var(--radius);
+  border-radius: 0;
   box-shadow: var(--shadow);
   padding: 12px;
   display: flex;
@@ -782,7 +782,7 @@ body.fading #stage {
 .reel .bar {
   position: relative;
   height: 22px;
-  border-radius: 11px;
+  border-radius: 0;
   background: linear-gradient(90deg, #d9cdb4, #efe3c8 35%, #efe3c8 65%, #d9cdb4);
   overflow: hidden;
 }
@@ -803,14 +803,14 @@ body.fading #stage {
   width: 4px;
   margin-left: -2px;
   background: var(--ink);
-  border-radius: 2px;
+  border-radius: 0;
 }
 
 .reel button {
   font: inherit;
   font-size: 16px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 0;
   padding: 12px;
   background: var(--leaf);
   color: #fff;
@@ -824,7 +824,7 @@ body.fading #stage {
   transform: translateX(-50%);
   z-index: 6;
   background: var(--paper);
-  border-radius: 999px;
+  border-radius: 0;
   box-shadow: var(--shadow);
   padding: 6px 8px 6px 12px;
   display: flex;
@@ -843,7 +843,7 @@ body.fading #stage {
 .place-banner button {
   font: inherit;
   border: 0;
-  border-radius: 999px;
+  border-radius: 0;
   padding: 6px 12px;
   background: var(--paper-2);
   cursor: pointer;
@@ -862,7 +862,7 @@ body.fading #stage {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: 0;
   background: var(--danger);
   color: #fff;
   font-size: 11px;
@@ -886,7 +886,7 @@ body.fading #stage {
   font: inherit;
   font-size: 15px;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: 0;
   border: 2px solid var(--paper-2);
   background: #fff;
   min-width: 0;
@@ -904,7 +904,7 @@ body.fading #stage {
 
 .panel .friend {
   background: var(--paper-2);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
@@ -926,7 +926,7 @@ body.fading #stage {
 .panel .dot {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: 0;
   background: #c9c2b2;
   flex: none;
 }
@@ -943,7 +943,7 @@ body.fading #stage {
   background: #f6c343;
   color: #5a3b2b;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: 0;
   vertical-align: middle;
 }
 
@@ -974,7 +974,7 @@ body.fading #stage {
 .chat-log .msg {
   align-self: flex-start;
   background: var(--paper-2);
-  border-radius: 12px 12px 12px 4px;
+  border-radius: 0;
   padding: 6px 10px;
   max-width: 80%;
   display: flex;
@@ -986,7 +986,7 @@ body.fading #stage {
 .chat-log .msg.mine {
   align-self: flex-end;
   background: #dceccf;
-  border-radius: 12px 12px 4px 12px;
+  border-radius: 0;
 }
 
 .chat-log .time,
@@ -1001,7 +1001,7 @@ body.fading #stage {
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: 0;
   font-size: 14px;
 }
 
@@ -1042,7 +1042,7 @@ body.fading #stage {
 
 .panel button.chip {
   border: 0;
-  border-radius: 999px;
+  border-radius: 0;
   padding: 4px 10px;
   font: inherit;
   font-size: 13px;
@@ -1063,7 +1063,7 @@ body.fading #stage {
 
 .panel .post {
   background: var(--paper-2);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 8px 10px;
 }
 
@@ -1102,7 +1102,7 @@ body.fading #stage {
 
 .panel .progress {
   height: 14px;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--paper-2);
   overflow: hidden;
 }
@@ -1110,7 +1110,7 @@ body.fading #stage {
 .panel .progress .fill {
   height: 100%;
   background: linear-gradient(90deg, #f6c343, #f28c6b);
-  border-radius: 999px;
+  border-radius: 0;
   transition: width 0.4s ease-out;
 }
 
@@ -1134,7 +1134,7 @@ body.fading #stage {
   z-index: 6;
   width: min(420px, calc(100vw - 24px));
   background: var(--paper);
-  border-radius: var(--radius);
+  border-radius: 0;
   box-shadow: var(--shadow);
   padding: 12px;
   display: flex;
@@ -1170,7 +1170,7 @@ body.fading #stage {
 .jam-tabs button {
   flex: 1;
   border: 0;
-  border-radius: 10px;
+  border-radius: 0;
   padding: 6px;
   font: inherit;
   font-size: 13px;
@@ -1194,7 +1194,7 @@ body.fading #stage {
   position: relative;
   aspect-ratio: 1.3;
   border: 0;
-  border-radius: 12px;
+  border-radius: 0;
   font: inherit;
   font-weight: 800;
   font-size: 16px;
@@ -1244,7 +1244,7 @@ body.fading #stage {
   align-self: center;
   image-rendering: pixelated;
   border: 3px solid var(--wood-dark, #8a5d36);
-  border-radius: 6px;
+  border-radius: 0;
   cursor: crosshair;
   touch-action: none;
 }
@@ -1260,7 +1260,7 @@ body.fading #stage {
   min-width: 0;
   padding: 0;
   border: 2px solid rgba(0, 0, 0, 0.15);
-  border-radius: 6px;
+  border-radius: 0;
   cursor: pointer;
   font-size: 10px;
 }
@@ -1287,7 +1287,7 @@ body.fading #stage {
   flex-direction: column;
   gap: 2px;
   background: var(--paper-2);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 8px;
   font-size: 13px;
 }
@@ -1297,7 +1297,7 @@ body.fading #stage {
   aspect-ratio: 1;
   image-rendering: pixelated;
   border: 3px solid #b07d4f;
-  border-radius: 4px;
+  border-radius: 0;
 }
 
 .panel .word-grid {
@@ -1325,7 +1325,7 @@ body.fading #stage {
   height: 30px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 0;
   font-weight: 800;
   text-transform: uppercase;
   color: #fff;
@@ -1351,7 +1351,7 @@ body.fading #stage {
   width: 28px;
   height: 34px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0;
   font: inherit;
   font-weight: 700;
   text-transform: uppercase;
@@ -1396,7 +1396,7 @@ body.fading #stage {
   flex-direction: column;
   gap: 4px;
   background: var(--paper-2);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 8px 10px;
   font-size: 13px;
 }
@@ -1435,7 +1435,7 @@ body.fading #stage {
 .panel button.rank {
   text-align: left;
   border: 2px solid var(--paper-2);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 8px 10px;
   font: inherit;
   font-size: 14px;
@@ -1464,7 +1464,7 @@ body.fading #stage {
   font: inherit;
   font-size: 14px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: 0;
   border: 2px solid var(--paper-2);
   background: #fff;
 }
@@ -1518,7 +1518,7 @@ body.fading #stage {
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: 0;
   background: rgba(59, 58, 46, 0.06);
 }
 
@@ -1541,7 +1541,7 @@ body.fading #stage {
   gap: 6px;
   padding: 10px 12px;
   margin-bottom: 10px;
-  border-radius: 10px;
+  border-radius: 0;
   background: rgba(95, 143, 78, 0.14);
 }
 
@@ -1563,7 +1563,7 @@ body.fading #stage {
 
 .panel.founders .row.me {
   background: rgba(95, 143, 78, 0.14);
-  border-radius: 8px;
+  border-radius: 0;
 }
 
 /* ---- the dreamier park: moods, together, nooks, the fire, bottles ---- */
@@ -1585,7 +1585,7 @@ body.fading #stage {
   padding: 10px 14px;
   background: rgba(255, 250, 240, 0.97);
   border: 2px solid #e6b450;
-  border-radius: 14px;
+  border-radius: 0;
   box-shadow: var(--shadow);
   font-weight: 600;
   z-index: 30;
@@ -1594,7 +1594,7 @@ body.fading #stage {
 
 .offer-card button {
   border: 0;
-  border-radius: 999px;
+  border-radius: 0;
   padding: 6px 12px;
   font-weight: 700;
   cursor: pointer;
@@ -1616,7 +1616,7 @@ body.fading #stage {
   width: min(300px, calc(100vw - 24px));
   padding: 12px;
   background: rgba(255, 250, 240, 0.97);
-  border-radius: 14px;
+  border-radius: 0;
   box-shadow: var(--shadow);
   z-index: 30;
 }
@@ -1632,7 +1632,7 @@ body.fading #stage {
   align-items: flex-start;
   gap: 1px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 0;
   padding: 8px 10px;
   text-align: left;
   font-weight: 700;
@@ -1669,7 +1669,7 @@ body.fading #stage {
   color: #fff7e6;
   background: rgba(58, 36, 24, 0.86);
   border: 2px solid #f6a14f;
-  border-radius: 14px;
+  border-radius: 0;
   box-shadow: 0 0 24px rgba(246, 161, 79, 0.35);
   pointer-events: none;
   z-index: 5;
@@ -1724,7 +1724,7 @@ body.in-nook::after {
   padding: 14px 16px;
   background: #fbf3dc;
   border: 1px solid #e3d3a6;
-  border-radius: 6px;
+  border-radius: 0;
   box-shadow: 2px 3px 0 rgba(59, 58, 46, 0.12);
   font-family: Georgia, "Times New Roman", serif;
   transform: rotate(-0.6deg);
@@ -1750,8 +1750,591 @@ body.in-nook::after {
   box-sizing: border-box;
   margin: 4px 0 8px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: 0;
   border: 1px solid rgba(59, 58, 46, 0.25);
   font: inherit;
   resize: vertical;
+}
+
+/* =====================================================================
+   The game's look: pixel frames, parchment and wood.
+   Everything above is layout; this layer gives it the same hand-drawn,
+   hard-edged style as the world: the sprites' dark outline (--ink),
+   notched corners, flat colour with a one-pixel bevel, and a pixel font.
+   ===================================================================== */
+
+:root {
+  --px: 3px; /* one UI "pixel": the outline weight of the art at its zoom */
+  --px2: 2px;
+  --ink: #3b3a2e;
+  --paper: #f6e7c8;
+  --paper-2: #ead3a8;
+  --paper-3: #fff6e0;
+  --wood: #a0703f;
+  --wood-light: #c08a52;
+  --wood-dark: #6e4b30;
+  --leaf: #6a9a4a;
+  --leaf-light: #8cbf63;
+  --leaf-dark: #4a7240;
+  --gold: #f6c343;
+  --muted: #7a6a50;
+  --danger: #b5443a;
+  --cream: #fff3d6;
+  /* A hard outline with notched corners, drawn outside the box. */
+  --frame: 0 calc(var(--px) * -1) 0 0 var(--ink), 0 var(--px) 0 0 var(--ink), calc(var(--px) * -1) 0 0 0 var(--ink),
+    var(--px) 0 0 0 var(--ink);
+  --frame-thin: 0 calc(var(--px2) * -1) 0 0 var(--ink), 0 var(--px2) 0 0 var(--ink), calc(var(--px2) * -1) 0 0 0 var(--ink),
+    var(--px2) 0 0 0 var(--ink);
+  --drop: var(--px) calc(var(--px) * 2) 0 0 rgba(28, 22, 12, 0.35);
+  --bevel: inset 0 var(--px) 0 0 rgba(255, 255, 255, 0.55), inset 0 calc(var(--px) * -1) 0 0 rgba(80, 50, 20, 0.18);
+  --shadow: var(--frame), var(--drop);
+  --radius: 0;
+  --font: "Pixelify Sans", "Trebuchet MS", system-ui, sans-serif;
+}
+
+html,
+body {
+  font-family: var(--font);
+  font-size: 16px;
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: var(--font) !important;
+}
+
+img.px-icon,
+.panel .icon {
+  image-rendering: pixelated;
+  display: block;
+  pointer-events: none;
+}
+
+/* ---- framed surfaces ------------------------------------------------- */
+
+.panel,
+.card,
+.reel,
+.place-banner,
+.offer-card,
+.mood-picker,
+.jam {
+  background: var(--paper);
+  box-shadow: var(--frame), var(--drop), var(--bevel);
+}
+
+.panel {
+  padding: 0 12px 12px;
+  gap: 10px;
+}
+
+/* The title bar: a wooden plank across the top of the panel. */
+.panel-head {
+  margin: 0 -12px;
+  padding: 6px 6px 6px 12px;
+  background: repeating-linear-gradient(180deg, var(--wood) 0 9px, var(--wood-dark) 9px 10px, var(--wood-light) 10px 12px, var(--wood) 12px 20px);
+  box-shadow: inset 0 calc(var(--px) * -1) 0 0 var(--ink);
+  color: var(--cream);
+}
+
+.panel-head strong {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-shadow: var(--px2) var(--px2) 0 #3b2414;
+}
+
+.panel .x {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: var(--danger);
+  box-shadow: var(--frame-thin), inset 0 var(--px2) 0 0 rgba(255, 255, 255, 0.35), inset 0 calc(var(--px2) * -1) 0 0 rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.panel .x:hover {
+  background: #cf5a4b;
+}
+
+.panel h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--wood-dark);
+  border-bottom: var(--px2) solid rgba(110, 75, 48, 0.35);
+  padding-bottom: 2px;
+}
+
+.panel .hint,
+.panel .empty {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* Wells inside panels (list rows, cards, chat messages): recessed parchment. */
+.item-grid .item,
+.panel .friend,
+.panel .post,
+.panel .request,
+.panel .story-me,
+.panel .result,
+.panel .task,
+.panel.welcome .founder-card,
+.panel.welcome .plant-box,
+.chat-log .msg,
+.panel .note {
+  background: var(--paper-2);
+  box-shadow: inset var(--px2) var(--px2) 0 0 rgba(110, 75, 48, 0.25), inset calc(var(--px2) * -1) calc(var(--px2) * -1) 0 0 rgba(255, 255, 255, 0.35);
+}
+
+.chat-log .msg.mine,
+.panel .task.done {
+  background: #d9e6bf;
+}
+
+/* ---- buttons ---------------------------------------------------------- */
+
+.panel button.small,
+.panel button.primary,
+.panel button.primary-sm,
+.panel .tabs button,
+.chess-actions button,
+.card button,
+.card .button,
+.reel button,
+.place-banner button,
+.offer-card button,
+.panel .chips button,
+.panel button.chip {
+  border: 0;
+  background: var(--paper-3);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--frame-thin), inset 0 calc(var(--px2) * -1) 0 0 rgba(110, 75, 48, 0.3);
+  margin: var(--px2);
+  cursor: pointer;
+  transition: none;
+}
+
+.panel button.small:hover,
+.panel .tabs button:hover,
+.chess-actions button:hover,
+.card button:hover,
+.place-banner button:hover,
+.offer-card button:hover {
+  background: #fffbef;
+}
+
+.panel button.primary,
+.panel button.primary-sm,
+.panel .tabs button.on,
+.card .primary,
+.reel button,
+.offer-card button.primary-sm {
+  background: var(--leaf);
+  color: #fff;
+  text-shadow: var(--px2) var(--px2) 0 var(--leaf-dark);
+  box-shadow: var(--frame-thin), inset 0 var(--px2) 0 0 var(--leaf-light), inset 0 calc(var(--px2) * -1) 0 0 var(--leaf-dark);
+}
+
+.panel button.primary:hover,
+.panel button.primary-sm:hover,
+.card .primary:hover,
+.reel button:hover {
+  background: #77a854;
+}
+
+.panel button:active:not(:disabled),
+.card button:active:not(:disabled),
+.offer-card button:active,
+.reel button:active,
+.emotes button:active,
+.pill.btn:active {
+  transform: translateY(var(--px2));
+  box-shadow: var(--frame-thin);
+}
+
+.panel button.subtle {
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+  text-decoration: underline;
+}
+
+.panel button:disabled,
+.card button:disabled {
+  opacity: 0.5;
+}
+
+/* ---- inputs ------------------------------------------------------------ */
+
+.panel input,
+.panel select,
+.panel textarea,
+.card input,
+.card select,
+.chat input {
+  border: 0 !important;
+  background: var(--paper-3);
+  color: var(--ink);
+  box-shadow: var(--frame-thin), inset var(--px2) var(--px2) 0 0 rgba(110, 75, 48, 0.25);
+  margin: var(--px2);
+}
+
+.panel input:focus,
+.panel textarea:focus,
+.card input:focus,
+.chat input:focus {
+  outline: none;
+  box-shadow: var(--frame-thin), inset var(--px2) var(--px2) 0 0 rgba(110, 75, 48, 0.25), 0 0 0 calc(var(--px2) * 2) var(--gold);
+}
+
+/* ---- the HUD -------------------------------------------------------------- */
+
+.pill {
+  background: var(--paper);
+  box-shadow: var(--frame), var(--drop), var(--bevel);
+  margin: var(--px);
+  padding: 6px 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Where you are: a wooden sign. */
+.pill.place {
+  background: var(--wood);
+  color: var(--cream);
+  text-shadow: var(--px2) var(--px2) 0 #3b2414;
+  box-shadow: var(--frame), var(--drop), inset 0 var(--px) 0 0 var(--wood-light), inset 0 calc(var(--px) * -1) 0 0 var(--wood-dark);
+}
+
+.pill.coins {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+}
+
+.pill.btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.pill.btn:hover {
+  background: var(--paper-3);
+}
+
+.badge-count {
+  border-radius: 0;
+  box-shadow: var(--frame-thin);
+  font-size: 12px;
+  top: -6px;
+  right: -6px;
+}
+
+.top-right {
+  gap: 4px;
+}
+
+.tasks-chip {
+  background: #e7f2d0 !important;
+  border: 0 !important;
+  box-shadow: var(--frame), var(--drop), var(--bevel);
+  font-size: 14px !important;
+  margin: var(--px);
+}
+
+.toast {
+  background: #3b2a1c;
+  color: var(--cream);
+  font-size: 15px;
+  padding: 8px 16px;
+  box-shadow: var(--frame), var(--drop), inset 0 0 0 var(--px2) var(--wood);
+}
+
+.chat input {
+  padding: 10px 14px;
+  font-size: 16px;
+}
+
+.chat input.whisper {
+  background: #efe6fb;
+  outline: none;
+}
+
+.emotes {
+  gap: 4px;
+}
+
+.emotes button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: var(--paper);
+  box-shadow: var(--frame), var(--drop), var(--bevel);
+  margin: var(--px);
+  transition: none;
+}
+
+.emotes button:hover {
+  background: var(--paper-3);
+}
+
+.emotes .mood-btn.on {
+  background: #d9e6bf;
+  outline: none;
+}
+
+/* The chat log: a dark, game-like scroll of lines. */
+.log .line {
+  background: rgba(36, 28, 18, 0.72);
+  color: var(--cream);
+  font-size: 14px;
+  padding: 3px 8px;
+}
+
+.log .line strong {
+  color: var(--gold);
+}
+
+.log .line.self strong {
+  color: var(--leaf-light);
+}
+
+/* ---- in the world: names and speech -------------------------------------- */
+
+.label .name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 15px;
+  padding: 1px 5px;
+  background: rgba(36, 28, 18, 0.62);
+  letter-spacing: 0.3px;
+}
+
+.label.npc .name {
+  background: rgba(64, 104, 48, 0.88);
+}
+
+.bubble {
+  background: var(--paper-3);
+  font-size: 14px;
+  line-height: 1.25;
+  padding: 5px 9px;
+  margin-bottom: 9px;
+  box-shadow: var(--frame-thin);
+}
+
+/* A stepped, pixel tail. */
+.bubble::after {
+  border: 0;
+  width: 6px;
+  height: 2px;
+  bottom: -4px;
+  margin-left: -3px;
+  background: var(--paper-3);
+  box-shadow:
+    -2px 0 0 0 var(--ink),
+    2px 0 0 0 var(--ink),
+    0 2px 0 0 var(--paper-3),
+    -2px 2px 0 0 var(--ink),
+    2px 2px 0 0 var(--ink),
+    0 4px 0 0 var(--ink);
+}
+
+/* ---- sign-in and other overlays ---------------------------------------------- */
+
+#overlay {
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.05) 0 3px, transparent 3px 6px),
+    #4f7a40;
+}
+
+.card {
+  padding: 26px 24px 22px;
+}
+
+.card h1 {
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--leaf);
+  text-shadow: var(--px) var(--px) 0 var(--leaf-dark), calc(var(--px) * 2) calc(var(--px) * 2) 0 var(--ink);
+  letter-spacing: 1px;
+}
+
+.card .tagline {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.card .dev {
+  border-top: var(--px2) dashed rgba(110, 75, 48, 0.35);
+}
+
+/* ---- smaller pieces ------------------------------------------------------------ */
+
+.offer-card {
+  font-weight: 600;
+  border: 0;
+}
+
+.mood-picker button.on,
+.mood-picker button:hover {
+  background: var(--paper-2);
+}
+
+.fire-card {
+  border: 0;
+  background: #3b2a1c;
+  box-shadow: var(--frame), 0 0 0 calc(var(--px) * 2) rgba(246, 161, 79, 0.45), var(--drop);
+}
+
+.fire-card span {
+  font-weight: 600;
+}
+
+.panel .stamp {
+  box-shadow: var(--frame-thin);
+}
+
+.panel .badge {
+  box-shadow: var(--frame-thin);
+  margin-left: 8px;
+}
+
+.panel .progress {
+  background: var(--paper-2);
+  box-shadow: var(--frame-thin);
+  height: 12px;
+}
+
+.panel .progress .fill {
+  background: repeating-linear-gradient(90deg, var(--leaf) 0 6px, var(--leaf-light) 6px 8px);
+}
+
+.panel .dot {
+  box-shadow: var(--frame-thin);
+}
+
+.panel.bottles .bottle-note {
+  border: 0;
+  font-family: var(--font);
+  background: var(--paper-3);
+  box-shadow: var(--frame-thin), var(--px) var(--px) 0 0 rgba(28, 22, 12, 0.25);
+}
+
+.chess-board {
+  border: 0;
+  box-shadow: var(--frame);
+  margin: var(--px);
+}
+
+.reel .bar {
+  box-shadow: var(--frame-thin);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--wood);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+::-webkit-scrollbar-track {
+  background: var(--paper-2);
+}
+
+/* Panels stay a readable width; buttons get room to breathe. */
+.panel {
+  max-width: min(440px, calc(100vw - 24px));
+}
+
+.panel button.small,
+.panel button.primary-sm,
+.panel .tabs button,
+.offer-card button,
+.place-banner button {
+  padding: 6px 12px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.panel button.primary {
+  padding: 10px 14px;
+  font-size: 16px;
+}
+
+.panel .row {
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.panel-body {
+  padding: 2px 4px 2px 2px;
+}
+
+@media (max-width: 520px) {
+  .panel {
+    max-width: none;
+  }
+  .pill.btn {
+    width: 36px;
+    height: 36px;
+  }
+  .emotes button {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* Phones: one row of emotes, and room for the HUD buttons. */
+@media (max-width: 520px) {
+  .pill.place {
+    display: none;
+  }
+  .emotes {
+    flex-wrap: nowrap;
+    gap: 1px;
+  }
+  .emotes button {
+    width: 31px;
+    height: 34px;
+    margin: var(--px2);
+  }
+  .emotes button img.px-icon {
+    width: 22px;
+    height: 22px;
+  }
+  .pill.btn {
+    width: 34px;
+    height: 34px;
+  }
+  .tasks-chip {
+    top: max(62px, calc(env(safe-area-inset-top) + 54px));
+  }
+}
+
+/* The tasks chip is a HUD button, but a wide one. */
+.pill.btn.tasks-chip {
+  width: auto;
+  height: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px !important;
+  white-space: nowrap;
 }

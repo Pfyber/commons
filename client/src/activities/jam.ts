@@ -4,6 +4,7 @@
 // Sound is synthesised with WebAudio: no samples to load.
 
 import { el } from "../ui/panels";
+import { pxIcon } from "../ui/icons";
 
 /** Mirrors protocol BEAT_MS and `instrument::*`. */
 export const BEAT_MS = 125;
@@ -181,7 +182,8 @@ export class JamPanel {
     this.el.replaceChildren();
     const head = el("div", "jam-head");
     head.append(el("strong", "", "🎵 Jam"), el("span", "hint", "Anything you play fits the beat. Keys 1–8."));
-    const close = el("button", "x", "✕");
+    const close = el("button", "x", "");
+    close.append(pxIcon("close", 2));
     close.onclick = () => this.hide();
     head.append(close);
     const tabs = el("div", "jam-tabs");
