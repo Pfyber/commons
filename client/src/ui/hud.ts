@@ -3,6 +3,7 @@
 
 import { EMOTES } from "../world/avatars";
 import { EMOTE_ICONS, iconUrl, pxIcon } from "./icons";
+import { isTyping } from "./panels";
 
 const LOG_LINES = 6;
 const LOG_MS = 12_000;
@@ -76,7 +77,7 @@ export class Hud {
     const sound = () => this.setMuted(h.onSound());
     soundBtn.onclick = sound;
     window.addEventListener("keydown", (e) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (isTyping(e)) return;
       if (e.key === "b" || e.key === "B") h.onBag();
       if (e.key === "l" || e.key === "L") h.onAlbum();
       if (e.key === "f" || e.key === "F") h.onFriends();

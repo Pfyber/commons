@@ -27,6 +27,12 @@ export function button(label: string, run: () => void, cls = ""): HTMLButtonElem
   return b;
 }
 
+/** Whether a key event belongs to a text field, so game keys must leave it alone. */
+export function isTyping(e: Event): boolean {
+  const t = e.target as HTMLElement | null;
+  return !!t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t.isContentEditable);
+}
+
 /** A closable floating panel. */
 export class Panel {
   /** Panels share one spot on screen, so only one is open at a time. */
@@ -303,6 +309,7 @@ export class ReelGame {
   private raf = 0;
   private done: ((q: number) => void) | null = null;
   private key = (e: KeyboardEvent) => {
+    if (isTyping(e)) return;
     if (e.code === "Space" || e.code === "Enter") {
       e.preventDefault();
       this.hit();

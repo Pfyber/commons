@@ -3,7 +3,7 @@
 // shared beat (server time / BEAT_MS), so people play in time without trying.
 // Sound is synthesised with WebAudio: no samples to load.
 
-import { el } from "../ui/panels";
+import { el, isTyping } from "../ui/panels";
 import { pxIcon } from "../ui/icons";
 
 /** Mirrors protocol BEAT_MS and `instrument::*`. */
@@ -128,7 +128,7 @@ export class JamPanel {
   private instrument = 0;
   private pads: HTMLButtonElement[] = [];
   private keyHandler = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement || e.repeat) return;
+    if (isTyping(e) || e.repeat) return;
     const i = KEYS.indexOf(e.key);
     if (i >= 0) {
       e.preventDefault();

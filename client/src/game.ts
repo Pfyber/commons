@@ -31,7 +31,7 @@ import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
-import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame } from "./ui/panels";
+import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
@@ -739,7 +739,7 @@ export class Game {
         else if (!Panel.closeCurrent()) this.ui.place.hide();
         return;
       }
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if (isTyping(e)) return;
       if (e.key === "Enter") {
         e.preventDefault();
         this.hud.focusChat();
