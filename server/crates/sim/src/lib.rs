@@ -9,7 +9,7 @@ pub mod motion;
 pub mod path;
 
 pub use map::{Grid, MapFile};
-pub use motion::{Motion, WALK_SPEED_X10};
+pub use motion::{Motion, SKATE_SPEED_X10, WALK_SPEED_X10};
 pub use path::{compress, find_path};
 
 pub type TilePos = (u16, u16);

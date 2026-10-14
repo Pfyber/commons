@@ -1606,6 +1606,49 @@ body.fading #stage {
   color: #fff;
 }
 
+/* Rock paper scissors: the three hands and a countdown. */
+.offer-card.rps-card {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.rps-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rps-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+.rps-clock.hurry {
+  color: var(--danger);
+}
+
+.rps-picks {
+  display: flex;
+  gap: 8px;
+}
+
+.offer-card .rps-picks button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+}
+
+.offer-card .rps-picks button.on {
+  background: #d9e6bf;
+}
+
+.rps-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
 .mood-picker {
   position: fixed;
   left: 12px;
@@ -2097,6 +2140,15 @@ img.px-icon,
   outline: none;
 }
 
+/* The skateboard: lit while you ride, faded indoors. */
+.emotes .skate.on {
+  background: #f6dfa0;
+}
+
+.emotes .skate.off {
+  opacity: 0.45;
+}
+
 /* The chat log: a dark, game-like scroll of lines. */
 .log .line {
   background: rgba(36, 28, 18, 0.72);
@@ -2446,6 +2498,74 @@ img.px-icon,
 
 .panel .swatches button.swatch.on {
   box-shadow: var(--frame-thin), 0 0 0 calc(var(--px2) * 2) var(--gold);
+}
+
+/* Clothes you don't own: locked in a changing room, priced in the shop. */
+.panel .wardrobe-tiles button.outfit-tile.locked {
+  cursor: default;
+  opacity: 0.55;
+  filter: grayscale(0.6);
+}
+
+.wardrobe-tiles .tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8a5a1c;
+}
+
+.wardrobe-tiles .tag.owned {
+  color: var(--leaf-dark);
+}
+
+.wardrobe-side .coins-line {
+  margin: 0;
+  font-weight: 700;
+}
+
+.wardrobe-footer,
+.shop-counter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.shop-counter h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.shop-counter .basket {
+  list-style: none;
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--paper-3);
+  box-shadow: var(--frame-thin);
+}
+
+.shop-counter .basket li {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.shop-counter .basket .price,
+.shop-counter .total {
+  font-weight: 700;
+}
+
+.shop-counter .total {
+  margin: 0;
+  text-align: right;
+}
+
+.shop-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.shop-buttons button.primary {
+  flex: 1;
 }
 
 @media (max-width: 520px) {

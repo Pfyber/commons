@@ -3,7 +3,8 @@
 
 import { Graphics, Sprite } from "pixi.js";
 import type { EntityInfo } from "../net/protocol.gen";
-import { TILE, avatarTexture } from "./art";
+import { type AvatarFrame, PUSH_CROUCH, SKIN_COLORS, TILE, avatarTexture } from "./art";
+import { decodeLook } from "./look";
 import { type Motion, type TileXY, headingAt, posAt } from "./motion";
 import type { Scene } from "./scene";
 import { moodIcon } from "../activities/together";
@@ -25,12 +26,56 @@ const BLEND_MS = 220;
 
 /** Protocol `state::FISHING`. */
 const FISHING = 2;
+/** Protocol `state::SKATING`: riding a skateboard. */
+const SKATING = 3;
+/** How far the board lifts you: a 2-pixel deck on 4-pixel wheels. */
+const BOARD_RISE = 4;
+/** Pixels rolled per quarter turn of a wheel (about a quarter of its rim). */
+const WHEEL_STEP = 3;
+/** The wheel's hub pixel, a quarter turn at a time (clockwise). */
+const HUB: [number, number][] = [
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+];
+/**
+ * A push, pose by pose like the walk cycle: the sprite frame (its knee bent
+ * 1–3 pixels, see art PUSH_CROUCH), how far the back leg leans back (pixels
+ * per row) and how long the pose is held. A quick plant just behind the
+ * front foot, the push, a hold at full stretch, a quick lift, and the foot
+ * coming back to the board.
+ */
+const PUSH_POSES: { frame: AvatarFrame; lean: number; ms: number }[] = [
+  { frame: 5, lean: 0.3, ms: 80 },
+  { frame: 3, lean: 0.5, ms: 110 },
+  { frame: 3, lean: 1, ms: 150 },
+  { frame: 6, lean: 0.7, ms: 90 },
+  { frame: 5, lean: 0.2, ms: 90 },
+];
+const PUSH_MS = PUSH_POSES.reduce((n, p) => n + p.ms, 0);
+/** Gliding with both feet on the board between pushes. */
+const GLIDE_MS = 750;
+
+/** The push pose after `ms` of rolling, or null while gliding. */
+function pushPose(ms: number): (typeof PUSH_POSES)[number] | null {
+  let t = ms % (PUSH_MS + GLIDE_MS);
+  for (const p of PUSH_POSES) {
+    if (t < p.ms) return p;
+    t -= p.ms;
+  }
+  return null;
+}
 /** The rod swings out over this long when casting; the bobber lands at the end. */
 export const CAST_SWING_MS = 450;
 /** How long a bite tugs the rod tip down. */
 const BITE_TUG_MS = 2500;
 /** The flick up when reeling in, before the rod is put away. */
 const REEL_FLICK_MS = 380;
+/** Rock paper scissors: three pumps of the fist before the hands are shown. */
+export const PUMP_MS = 1200;
+/** A fist, knuckles forward (mirrored when facing left). */
+const FIST = [".ooo.", "ossso", "ossso", ".ooo."];
 const ROD_LEN = 18;
 const DEG = Math.PI / 180;
 
@@ -56,6 +101,15 @@ export class Avatar {
   /** Where we stood before sitting down; standing up returns here. */
   standTile: TileXY | null = null;
   private rod = new Graphics();
+  private board = new Graphics();
+  /** Rock paper scissors: a fist pumping in front of you, from `pumpAt`. */
+  private hand = new Graphics();
+  private pumpAt = -Infinity;
+  /** Skateboard: when this ride began, the wheels' turn, and where they were last frame. */
+  private rolling = false;
+  private rollStart = 0;
+  private wheelSpin = 0;
+  private wheelAt: { x: number; y: number } | null = null;
   private fishing: { castAt: number; biteAt: number } | null = null;
   private reelAt = -Infinity;
   /** World position and depth of the rod's tip once the line is out, for drawing the line. */
@@ -82,7 +136,7 @@ export class Avatar {
     this.stack.appendChild(this.nameEl);
     this.label.appendChild(this.stack);
     labels.appendChild(this.label);
-    scene.sorted.addChild(this.sprite, this.rod);
+    scene.sorted.addChild(this.sprite, this.rod, this.board, this.hand);
     this.apply(info, now);
   }
 
@@ -244,17 +298,31 @@ export class Avatar {
 
     const walking = heading !== null;
     const sitting = this.state === 1 && !walking;
+    const skating = this.state === SKATING;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;
-    const frame: 0 | 1 | 2 = sitting ? 2 : walking || dancing ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
+    // On a board: push off with the back foot, then glide.
+    if (skating && walking && !this.rolling) this.rollStart = wallNow;
+    this.rolling = skating && walking;
+    const push = this.rolling ? pushPose(wallNow - this.rollStart) : null;
+    const stepping = (walking && !skating) || dancing;
+    const frame: AvatarFrame = sitting ? 2 : skating ? (push?.frame ?? 4) : stepping ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
     this.sprite.texture = avatarTexture(this.info.look, frame);
-    const bob = walking ? Math.abs(Math.sin(wallNow / 90)) * -1.5 : dancing && !sitting ? Math.sin(wallNow / 70) * 2 : 0;
+    const bob = skating
+      ? -BOARD_RISE
+      : walking
+        ? Math.abs(Math.sin(wallNow / 90)) * -1.5
+        : dancing && !sitting
+          ? Math.sin(wallNow / 70) * 2
+          : 0;
     const feetX = x * TILE + TILE / 2;
     // Seated avatars sit on the bench's slats, drawn just in front of it.
     const feetY = y * TILE + TILE - (sitting ? 6 : 4);
     this.sprite.position.set(Math.round(feetX), Math.round(feetY + bob));
     this.sprite.scale.x = this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
+    this.drawBoard(skating, feetX, feetY, push);
     this.drawRod(feetX, feetY + bob, walking, wallNow);
+    this.drawFist(feetX, Math.round(feetY + bob), wallNow);
 
     // DOM label above the head.
     const s = this.scene.tileToScreen(x + 0.5, y + 1 - 4 / TILE - 34 / TILE);
@@ -272,6 +340,88 @@ export class Avatar {
       this.emoteEl = null;
       this.emoteId = 0;
     }
+  }
+
+  /**
+   * The skateboard under your feet, in whole pixels like the sprites: a black
+   * deck on cream wheels whose mark ticks round as you roll, and, mid-push,
+   * the back leg reaching for the ground behind the board.
+   */
+  private drawBoard(on: boolean, feetX: number, feetY: number, push: (typeof PUSH_POSES)[number] | null) {
+    const g = this.board.clear();
+    if (!on) {
+      this.wheelAt = null;
+      return;
+    }
+    // Turn the wheels by how far we've rolled since the last frame.
+    if (this.wheelAt) this.wheelSpin += Math.hypot(feetX - this.wheelAt.x, feetY - this.wheelAt.y);
+    this.wheelAt = { x: feetX, y: feetY };
+    const x = Math.round(feetX);
+    const y = Math.round(feetY); // the ground under the wheels
+    const s = this.facing;
+    const O = 0x3b3a2e;
+    g.rect(x - 11, y, 22, 1).fill({ color: 0x000000, alpha: 0.18 });
+    // Round 4×4 wheels (the corners off), with a hub pixel turning a
+    // quarter at a time as they roll, the way you're going.
+    const q = Math.floor(this.wheelSpin / WHEEL_STEP) % 4;
+    const [hx, hy] = HUB[s > 0 ? q : (4 - q) % 4];
+    for (const wx of [x - 8, x + 4]) {
+      g.rect(wx + 1, y - 4, 2, 1).fill(O);
+      g.rect(wx, y - 3, 4, 2).fill(O);
+      g.rect(wx + 1, y - 3, 2, 2).fill(0xf1e9d2);
+      g.rect(wx + 1 + hx, y - 3 + hy, 1, 1).fill(0x9c8f73);
+      g.rect(wx + 1, y - 1, 2, 1).fill(O);
+    }
+    // The deck: 2 pixels of black, kicked up a pixel at each end.
+    g.rect(x - 11, y - 6, 22, 2).fill(0x141414);
+    g.rect(x - 10, y - 6, 20, 1).fill(0x2a2a2a);
+    g.rect(x - 12, y - 7, 2, 2).fill(0x141414);
+    g.rect(x + 10, y - 7, 2, 2).fill(0x141414);
+    if (push) {
+      // The back leg, pixel for pixel the sprite's own (7 rows: outline,
+      // trousers, a shoe row), each row stepped back by its lean. It starts
+      // at the hip, which sinks with the standing knee's bend.
+      const c = PUSH_CROUCH[push.frame];
+      const hipY = y - BOARD_RISE - 9 + c;
+      const left = s > 0 ? x - 4 : x;
+      for (let k = 0; k < 7; k++) {
+        const lx = left - s * Math.round(k * push.lean);
+        g.rect(lx, hipY + k, 4, 1).fill(O);
+        if (k < 6) g.rect(lx + 1, hipY + k, 2, 1).fill(0x4a4a5a);
+      }
+    }
+    this.board.zIndex = this.sprite.zIndex - 0.1;
+  }
+
+  /** Turns to face tile column `x` (standing still; walking turns you anyway). */
+  faceToward(x: number) {
+    if (Math.abs(x - this.pos.x) > 0.1) this.facing = x > this.pos.x ? 1 : -1;
+  }
+
+  /** "Rock, paper, scissors…": pumps a fist three times from now. */
+  pumpFist(now: number) {
+    this.pumpAt = now;
+  }
+
+  /** The pumping fist, in whole pixels at the end of the front arm. */
+  private drawFist(feetX: number, spriteBottom: number, now: number) {
+    const g = this.hand.clear();
+    const t = now - this.pumpAt;
+    if (t < 0 || t >= PUMP_MS) return;
+    const s = this.facing;
+    const x = Math.round(feetX);
+    // Up on the beats, down in between: three pumps, ending down.
+    const up = Math.floor(t / (PUMP_MS / 6)) % 2 === 0 ? 3 : 0;
+    const left = s > 0 ? x + 7 : x - 12;
+    const top = spriteBottom - 14 - up;
+    const skin = Number.parseInt((SKIN_COLORS[decodeLook(this.info.look).skin] ?? "#e9c4a0").slice(1), 16);
+    FIST.forEach((row, dy) => {
+      for (let dx = 0; dx < row.length; dx++) {
+        const c = row[s > 0 ? dx : row.length - 1 - dx];
+        if (c !== ".") g.rect(left + dx, top + dy, 1, 1).fill(c === "o" ? 0x3b3a2e : skin);
+      }
+    });
+    this.hand.zIndex = this.sprite.zIndex + 0.2;
   }
 
   /** The rod in the front hand while fishing: cast swing, gentle sway, bite tug, reel flick. */
@@ -316,6 +466,8 @@ export class Avatar {
   destroy() {
     this.sprite.destroy();
     this.rod.destroy();
+    this.board.destroy();
+    this.hand.destroy();
     this.label.remove();
   }
 }

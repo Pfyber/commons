@@ -987,6 +987,147 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.outline, 3, top + h - 3, w - 6, 3);
       break;
     }
+    case "clothes_shop": {
+      // A little boutique: teal roof, a pink-and-cream awning, two display
+      // windows with dressed mannequins, and a door in the middle.
+      [c, ctx] = makeCanvas(w, h + 56);
+      overhang = 56;
+      const top = 56;
+      px(ctx, "rgba(0,0,0,0.15)", 6, top + h - 8, w - 12, 8);
+      // walls
+      px(ctx, P.outline, 8, top - 8, w - 16, h + 4);
+      px(ctx, "#f3e6d3", 10, top - 6, w - 20, h);
+      px(ctx, "#e6d4bb", 10, top + h - 14, w - 20, 8);
+      // roof
+      polygon(ctx, P.outline, [[0, top + 2], [24, top - 46], [w - 24, top - 46], [w, top + 2]]);
+      polygon(ctx, "#4f8a8b", [[4, top], [27, top - 43], [w - 27, top - 43], [w - 4, top]]);
+      for (let i = 1; i < 4; i++) px(ctx, "#437778", 6 + i * 4, top - 43 + i * 11, w - 12 - i * 8, 2);
+      px(ctx, "#3d6c6d", 0, top - 2, w, 6);
+      // sign
+      px(ctx, P.outline, w / 2 - 66, top - 38, 132, 22);
+      px(ctx, "#fff6e0", w / 2 - 64, top - 36, 128, 18);
+      label(ctx, o.label ?? "Clothes Shop", w / 2, top - 27, "#7a3a5a", 14);
+      // awning
+      const aw = top + 6;
+      for (let i = 0; i < 14; i++) {
+        const x0 = 10 + i * ((w - 20) / 14);
+        const cw = (w - 20) / 14;
+        px(ctx, i % 2 ? "#fff6e0" : "#e88aa6", x0, aw, cw, 12);
+        oval(ctx, i % 2 ? "#fff6e0" : "#e88aa6", x0 + cw / 2, aw + 12, cw / 2, 4);
+      }
+      px(ctx, P.outline, 10, aw - 2, w - 20, 2);
+      // display windows, each with a mannequin in a dress or a jacket
+      for (const [wx, dress] of [[22, "#e8566b"], [w - 22 - 58, "#5d8ab8"]] as [number, string][]) {
+        const wy = top + 30;
+        px(ctx, P.outline, wx, wy, 58, 58);
+        px(ctx, "#cfe3ea", wx + 2, wy + 2, 54, 54);
+        px(ctx, "#e4f1f5", wx + 4, wy + 4, 6, 20);
+        const mx = wx + 29;
+        circle(ctx, P.outline, mx, wy + 16, 6);
+        circle(ctx, "#e9d3b5", mx, wy + 16, 5);
+        polygon(ctx, P.outline, [[mx - 9, wy + 22], [mx + 9, wy + 22], [mx + 15, wy + 48], [mx - 15, wy + 48]]);
+        polygon(ctx, dress, [[mx - 8, wy + 23], [mx + 8, wy + 23], [mx + 13, wy + 47], [mx - 13, wy + 47]]);
+        px(ctx, P.outline, mx - 1, wy + 48, 2, 6);
+        px(ctx, P.woodDark, wx + 2, wy + 52, 54, 4);
+      }
+      // door
+      const dx = w / 2 - 18;
+      px(ctx, P.outline, dx, top + h - 66, 36, 60);
+      px(ctx, P.woodDark, dx + 2, top + h - 64, 32, 58);
+      px(ctx, "#cfe3ea", dx + 7, top + h - 58, 22, 18);
+      px(ctx, "#f6c343", dx + 26, top + h - 34, 3, 3);
+      label(ctx, "OPEN", w / 2, top + h - 30, "#fff6e0", 7);
+      break;
+    }
+    case "clothes_rack": {
+      // A rail on two posts; what hangs on it depends on the rack.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "rgba(0,0,0,0.15)", 4, top + h - 8, w - 8, 6);
+      px(ctx, P.outline, 4, top - 34, 4, h + 26);
+      px(ctx, P.outline, w - 8, top - 34, 4, h + 26);
+      px(ctx, P.outline, 2, top + h - 10, 10, 4);
+      px(ctx, P.outline, w - 12, top + h - 10, 10, 4);
+      px(ctx, P.outline, 4, top - 34, w - 8, 3);
+      const colors = ["#e8566b", "#5d8ab8", "#f6c343", "#7fb069", "#9b7fd4", "#f28c9b", "#4f8a8b"];
+      const kind = o.label ?? "";
+      for (let i = 0; i < 6; i++) {
+        const x = 16 + i * ((w - 32) / 5);
+        const col = colors[(i + kind.length) % colors.length];
+        px(ctx, P.outline, x - 1, top - 31, 2, 4); // hanger hook
+        if (kind === "Hats") {
+          // hats on hooks: a beanie, a cap…
+          oval(ctx, P.outline, x, top - 18, 8, 7);
+          oval(ctx, col, x, top - 19, 7, 6);
+          px(ctx, i % 2 ? col : "#fff6e0", x - 7, top - 14, 14, 3);
+        } else if (kind === "Accessories") {
+          // scarves hanging down, with glasses and bows pinned on
+          px(ctx, P.outline, x - 4, top - 27, 8, 30);
+          px(ctx, col, x - 3, top - 26, 6, 28);
+          px(ctx, "#fff6e0", x - 3, top - 18, 6, 2);
+          if (i % 2) {
+            px(ctx, P.outline, x - 6, top - 22, 5, 3);
+            px(ctx, P.outline, x + 1, top - 22, 5, 3);
+          }
+        } else {
+          // shirts and dresses on hangers
+          polygon(ctx, P.outline, [[x - 9, top - 27], [x + 9, top - 27], [x + 11, top + 4], [x - 11, top + 4]]);
+          polygon(ctx, col, [[x - 8, top - 26], [x + 8, top - 26], [x + 10, top + 3], [x - 10, top + 3]]);
+          px(ctx, "rgba(255,255,255,0.25)", x - 6, top - 24, 3, 24);
+        }
+      }
+      break;
+    }
+    case "shop_counter": {
+      // A wooden counter with a till and a pile of folded jumpers.
+      [c, ctx] = makeCanvas(w, h + 24);
+      overhang = 24;
+      const top = 24;
+      px(ctx, P.outline, 0, top - 4, w, h + 2);
+      px(ctx, P.wood, 2, top - 2, w - 4, h - 2);
+      px(ctx, "#c99567", 0, top - 8, w, 6);
+      px(ctx, P.outline, 0, top - 9, w, 1);
+      for (let x = 14; x < w - 8; x += 24) px(ctx, P.woodDark, x, top + 2, 2, h - 8);
+      // till
+      px(ctx, P.outline, w - 46, top - 26, 30, 20);
+      px(ctx, "#9fb7c4", w - 44, top - 24, 26, 10);
+      px(ctx, "#6e8794", w - 44, top - 14, 26, 6);
+      px(ctx, "#f6c343", w - 36, top - 22, 10, 4);
+      // folded jumpers
+      for (const [i, col] of [[0, "#e8566b"], [1, "#7fb069"], [2, "#f6c343"]] as [number, string][]) {
+        px(ctx, P.outline, 18, top - 14 - i * 6, 28, 7);
+        px(ctx, col, 19, top - 13 - i * 6, 26, 5);
+      }
+      break;
+    }
+    case "fitting_room": {
+      // A booth with a curtain, and a little "Changing" sign.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, P.outline, 4, top - 30, w - 8, h + 28);
+      px(ctx, P.wood, 6, top - 28, w - 12, h + 24);
+      px(ctx, P.outline, 12, top - 18, w - 24, h + 14);
+      px(ctx, "#7a4a8c", 14, top - 16, w - 28, h + 12);
+      for (let x = 18; x < w - 16; x += 10) px(ctx, "#9a6aac", x, top - 16, 3, h + 12);
+      px(ctx, "#f6c343", 14, top - 18, w - 28, 2);
+      px(ctx, P.outline, w / 2 - 26, top - 40, 52, 14);
+      px(ctx, "#fff6e0", w / 2 - 25, top - 39, 50, 12);
+      label(ctx, "Changing", w / 2, top - 33, "#5a3b2b", 7);
+      break;
+    }
+    case "shop_exit": {
+      // The open door: daylight and a doormat.
+      [c, ctx] = makeCanvas(w, h + 16);
+      overhang = 16;
+      px(ctx, P.outline, 0, 0, w, h + 16);
+      px(ctx, "#cfe8b8", 3, 3, w - 6, h + 10);
+      px(ctx, "#a8d08d", 3, h, w - 6, 13);
+      px(ctx, "#b5544a", 6, h + 6, w - 12, 8);
+      label(ctx, "Exit", w / 2, h / 2 + 6, "#3b3a2e", 7);
+      break;
+    }
     case "campfire": {
       // A ring of stones and crossed logs; the flames are animated on top.
       [c, ctx] = makeCanvas(w + 16, h + 8);
@@ -1097,14 +1238,23 @@ export function lookParts(look: number) {
   };
 }
 
+/** 0, 1 walking; 2 sitting; 4 riding a skateboard; 3, 5, 6 pushing one. */
+export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+/** For the pushing frames: how many pixels the standing knee bends. */
+export const PUSH_CROUCH: Record<number, number> = { 5: 1, 6: 2, 3: 3 };
+
 const avatarCache = new Map<string, Texture>();
 const canvasCache = new Map<string, HTMLCanvasElement>();
 
 /**
  * 24×34 avatar sprite, feet at the bottom centre. Frames 0/1 alternate the
- * legs while walking; frame 2 is sitting (body lowered, legs forward).
+ * legs while walking; frame 2 is sitting (body lowered, legs forward); on a
+ * skateboard, frame 4 rides (no ground shadow) and frames 5, 6 and 3 push
+ * off, crouching 1–3 pixels (only the front leg; the back one is drawn with
+ * the board).
  */
-export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
+export function avatarTexture(look: number, frame: AvatarFrame): Texture {
   const key = `${look}:${frame}`;
   const cached = avatarCache.get(key);
   if (cached) return cached;
@@ -1114,7 +1264,7 @@ export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
 }
 
 /** The avatar drawn on a 24×34 canvas (also for previews in the changing room). */
-export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement {
+export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElement {
   const key = `${look}:${frame}`;
   const cached = canvasCache.get(key);
   if (cached) return cached;
@@ -1125,7 +1275,8 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement 
   const [c, ctx] = makeCanvas(24, 34);
   const o = PALETTE.outline;
   const hair = p.hairColor;
-  px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
+  // On a board the shadow is on the ground below it, drawn with the board.
+  if (frame < 3) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
   // legs
   if (frame === 2) {
     px(ctx, o, 6, 27, 12, 5);
@@ -1133,11 +1284,19 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement 
     px(ctx, o, 6, 31, 3, 2);
     px(ctx, o, 15, 31, 3, 2);
     ctx.translate(0, 4);
+  } else if (frame in PUSH_CROUCH) {
+    // Pushing a skateboard: the front leg stays on the board, its knee bent
+    // by `c` pixels (the body sinks with it); the back leg, the same 7
+    // pixels long, is drawn reaching for the ground (see Avatar.drawBoard).
+    const c = PUSH_CROUCH[frame];
+    px(ctx, o, 13, 25 + c, 4, 7 - c);
+    px(ctx, "#4a4a5a", 14, 25 + c, 2, 6 - c);
+    ctx.translate(0, c);
   } else {
-    px(ctx, o, frame ? 7 : 8, 25, 4, 7);
-    px(ctx, o, frame ? 14 : 13, 25, 4, 7);
-    px(ctx, "#4a4a5a", frame ? 8 : 9, 25, 2, 6);
-    px(ctx, "#4a4a5a", frame ? 15 : 14, 25, 2, 6);
+    px(ctx, o, frame === 1 ? 7 : 8, 25, 4, 7);
+    px(ctx, o, frame === 1 ? 14 : 13, 25, 4, 7);
+    px(ctx, "#4a4a5a", frame === 1 ? 8 : 9, 25, 2, 6);
+    px(ctx, "#4a4a5a", frame === 1 ? 15 : 14, 25, 2, 6);
   }
 
   // ---- behind the body: long hair, curls, buns, a ponytail, a backpack ----
@@ -1222,9 +1381,22 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement 
   }
   // arms: long sleeves for stripes, hoodies, jackets and jumpers
   const sleeves = p.outfit === 2 || p.outfit === 4 || p.outfit === 5 || p.outfit === 6;
-  for (const ax of [4, 18]) {
-    px(ctx, sleeves ? dark : p.skinColor, ax, 18, 2, 5);
-    if (sleeves) px(ctx, p.skinColor, ax, 22, 2, 1);
+  // On a skateboard the arms come out for balance: a pixel while riding,
+  // two while pushing off.
+  const out = frame === 4 ? 1 : frame in PUSH_CROUCH ? 2 : 0;
+  for (const [ax, dir] of [
+    [4, -1],
+    [18, 1],
+  ]) {
+    if (!out) {
+      px(ctx, sleeves ? dark : p.skinColor, ax, 18, 2, 5);
+      if (sleeves) px(ctx, p.skinColor, ax, 22, 2, 1);
+      continue;
+    }
+    const hx = ax + dir * out;
+    px(ctx, sleeves ? dark : p.skinColor, ax, 18, 2, 2);
+    px(ctx, sleeves ? dark : p.skinColor, hx, 20, 2, 3);
+    if (sleeves) px(ctx, p.skinColor, hx, 22, 2, 1);
   }
   if (p.accessory === 4) {
     px(ctx, "#6e4b30", 7, 16, 2, 7);

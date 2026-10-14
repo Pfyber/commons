@@ -62,6 +62,8 @@ export class DayNight {
     private app: Application,
     scene: Scene,
     map: ZoneMap,
+    /** Inside a building the lights are on: no night shade. */
+    private indoors = false,
   ) {
     const q = new URLSearchParams(location.search).get("hour");
     this.override = q !== null && !Number.isNaN(Number(q)) ? Number(q) : null;
@@ -82,10 +84,10 @@ export class DayNight {
       this.lights.addChild(s);
     });
     for (const o of map.objects) {
-      if (!["town_hall", "fountain", "campfire", "lantern_stand"].includes(o.kind)) continue;
+      if (!["town_hall", "clothes_shop", "fountain", "campfire", "lantern_stand"].includes(o.kind)) continue;
       const s = new Sprite(tex);
       s.anchor.set(0.5);
-      s.scale.set(o.kind === "town_hall" ? 4 : o.kind === "campfire" ? 3.2 : 1.6);
+      s.scale.set(o.kind === "town_hall" ? 4 : o.kind === "clothes_shop" ? 3 : o.kind === "campfire" ? 3.2 : 1.6);
       s.alpha = 0.7;
       s.position.set((o.x + o.w / 2) * TILE, (o.y + o.h / 2) * TILE);
       this.lights.addChild(s);
@@ -113,6 +115,12 @@ export class DayNight {
   }
 
   update() {
+    if (this.indoors) {
+      this.dark = 0;
+      this.shade.clear();
+      this.lights.visible = false;
+      return;
+    }
     const { tint, dark } = lightAt(this.hour());
     this.dark = dark;
     const { width, height } = this.app.screen;

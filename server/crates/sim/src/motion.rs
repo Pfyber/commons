@@ -7,6 +7,8 @@ use crate::TilePos;
 
 /// Walking speed in tenths of a tile per second.
 pub const WALK_SPEED_X10: u8 = 40;
+/// Skateboarding speed: nearly twice walking.
+pub const SKATE_SPEED_X10: u8 = 75;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Motion {

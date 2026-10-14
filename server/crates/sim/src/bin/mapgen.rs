@@ -704,6 +704,17 @@ fn park() -> MapFile {
         .expect("room for the tailor's tent");
     b.object("tailor", tent.0, tent.1, 3, 2, Some("Tailor"), true);
 
+    // The clothes shop on the lawn between the Story board and the Town Hall,
+    // its door facing the bandstand, with a little path down to the plaza.
+    // Walking in takes you to the "shop" zone.
+    let (sx, sy, sw, sh) = (52u16, 57u16, 7u16, 4u16);
+    assert!(
+        (sx..sx + sw).all(|x| (sy..sy + sh).all(|y| b.free(x, y))),
+        "room for the clothes shop"
+    );
+    b.object("clothes_shop", sx, sy, sw, sh, Some("Clothes Shop"), true);
+    b.rect(sx + sw / 2, sy + sh, 1, 68 - (sy + sh), "path");
+
     // Messages in bottles, at the land end of the pier.
     b.object("bottles", 38, 64, 1, 1, Some("Messages in bottles"), true);
 
@@ -1056,6 +1067,34 @@ fn home() -> MapFile {
     b.finish("Home", (10, 11))
 }
 
+/// Inside the clothes shop: racks of outfits, hats and accessories, the
+/// counter (the clerk stands behind it) and a changing room; the door leads
+/// back out to the park.
+fn shop() -> MapFile {
+    let (w, h) = (18u16, 11u16);
+    let mut b = Builder::new(w, h);
+    b.rect(0, 0, w, h, "floor");
+    for x in 0..w {
+        b.decor(x, 0, "wall");
+        if !(8..=9).contains(&x) {
+            b.decor(x, h - 1, "wall");
+        }
+    }
+    for y in 0..h {
+        b.decor(0, y, "wall");
+        b.decor(w - 1, y, "wall");
+    }
+    // A rug from the door to the middle of the shop.
+    b.rect(7, 4, 4, 6, "plaza");
+    b.object("clothes_rack", 2, 2, 3, 1, Some("Outfits"), true);
+    b.object("clothes_rack", 2, 5, 3, 1, Some("Hats"), true);
+    b.object("clothes_rack", 2, 8, 3, 1, Some("Accessories"), true);
+    b.object("shop_counter", 11, 3, 5, 1, Some("Counter"), true);
+    b.object("fitting_room", 13, 6, 3, 2, Some("Changing room"), true);
+    b.object("shop_exit", 8, h - 1, 2, 1, Some("To the park"), true);
+    b.finish("Clothes Shop", (9, 8))
+}
+
 fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
     let json = serde_json::to_string(map).unwrap();
     // Validate before writing.
@@ -1070,5 +1109,6 @@ fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
 
 fn main() -> std::io::Result<()> {
     write("founders_park", &park())?;
-    write("home", &home())
+    write("home", &home())?;
+    write("shop", &shop())
 }

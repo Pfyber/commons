@@ -35,6 +35,9 @@ struct JoinReq {
     /// For `zone_id: "home"`: whose home (default: your own).
     #[serde(default)]
     owner: Option<String>,
+    /// Arrive in front of this map object (e.g. "clothes_shop" when leaving it).
+    #[serde(default)]
+    arrive: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -178,6 +181,12 @@ async fn join(
         instance,
         owner: owner.clone(),
         muted_until: who.muted_until,
+        // Only a hint: the zone ignores kinds its map doesn't have.
+        arrive: req.arrive.filter(|a| {
+            req.friend.is_none()
+                && a.len() <= 32
+                && a.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+        }),
     };
     Ok(Json(JoinResp {
         server_url: state.zone_server_url.clone(),
@@ -196,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         secret: config::secret(),
         zone_server_url: config::env_str("ZONE_PUBLIC_URL", "ws://localhost:8082/ws"),
-        zones: config::env_str("COMMONS_ZONES", "founders_park,home")
+        zones: config::env_str("COMMONS_ZONES", "founders_park,home,shop")
             .split(',')
             .map(|s| s.trim().to_string())
             .collect(),

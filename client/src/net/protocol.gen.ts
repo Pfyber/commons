@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 8;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -147,6 +147,8 @@ export type ClientMsg =
   | { t: "Accept"; from: number; kind: number }
   | { t: "SkyLantern"; text: string }
   | { t: "SetLook"; look: number }
+  | { t: "Skate"; on: boolean }
+  | { t: "RpsPick"; pick: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -249,6 +251,14 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(20);
       w.u32(m.look);
       break;
+    case "Skate":
+      w.u8(21);
+      w.bool(m.on);
+      break;
+    case "RpsPick":
+      w.u8(22);
+      w.u8(m.pick);
+      break;
   }
   return w.finish();
 }
@@ -318,6 +328,12 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 20:
       m = { t: "SetLook", look: r.u32() };
       break;
+    case 21:
+      m = { t: "Skate", on: r.bool() };
+      break;
+    case 22:
+      m = { t: "RpsPick", pick: r.u8() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -352,6 +368,7 @@ export type ServerMsg =
   | { t: "Together"; a: number; b: number; kind: number }
   | { t: "LanternRise"; id: number; x: number; y: number; text: string }
   | { t: "LookChanged"; id: number; look: number }
+  | { t: "Rps"; a: number; b: number; phase: number; aPick: number; bPick: number; endsT: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -523,6 +540,15 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.id);
       w.u32(m.look);
       break;
+    case "Rps":
+      w.u8(27);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.phase);
+      w.u8(m.aPick);
+      w.u8(m.bPick);
+      w.u32(m.endsT);
+      break;
   }
   return w.finish();
 }
@@ -609,6 +635,9 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 26:
       m = { t: "LookChanged", id: r.u32(), look: r.u32() };
+      break;
+    case 27:
+      m = { t: "Rps", a: r.u32(), b: r.u32(), phase: r.u8(), aPick: r.u8(), bPick: r.u8(), endsT: r.u32() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

@@ -69,7 +69,8 @@ if (bots > 0) {
     for (let i = 0; i < 120; i++) {
       try {
         if ((await fetch("http://127.0.0.1:8082/debug/stats")).ok) {
-          run("bots", exe("botswarm"), ["--bots", String(bots), "--ramp", "5", "--duration", "86400", "--behaviour", "mix"]);
+          // As real (dev) players, so people can befriend them.
+          run("bots", exe("botswarm"), ["--bots", String(bots), "--ramp", "5", "--duration", "86400", "--behaviour", "mix", "--api", "http://127.0.0.1:8080"]);
           return;
         }
       } catch {

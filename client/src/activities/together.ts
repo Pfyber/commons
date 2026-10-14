@@ -13,6 +13,8 @@ export const TOGETHER: Record<number, { icon: string; offer: string; verb: strin
   1: { icon: "🤗", offer: "Offer a hug", verb: "a hug", done: "hug" },
   2: { icon: "✋", offer: "High five", verb: "a high five", done: "high-five" },
   3: { icon: "💃", offer: "Dance together", verb: "a dance", done: "dance together" },
+  // Rock paper scissors (see rps.ts): played out by the Rps messages.
+  6: { icon: "✊", offer: "Rock paper scissors", verb: "a game of rock paper scissors", done: "play" },
 };
 
 /** `together::FOLLOW` / `STOP_FOLLOW`: walking after someone. */
@@ -42,7 +44,7 @@ export class OfferCard {
     const yes = document.createElement("button");
     yes.type = "button";
     yes.className = "primary-sm";
-    yes.textContent = kind === FOLLOW ? "Sure, come along" : kind === 1 ? "Hug back" : kind === 2 ? "Slap it ✋" : "Dance!";
+    yes.textContent = kind === FOLLOW ? "Sure, come along" : kind === 1 ? "Hug back" : kind === 2 ? "Slap it ✋" : kind === 6 ? "Let's play ✊" : "Dance!";
     yes.onclick = () => {
       accept();
       this.hide();

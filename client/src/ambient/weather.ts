@@ -53,6 +53,8 @@ export class Weather {
     private app: Application,
     private scene: Scene,
     private map: ZoneMap,
+    /** Inside a building: always dry and still. */
+    private indoors = false,
   ) {
     const q = new URLSearchParams(location.search).get("weather");
     this.override = (["clear", "cloudy", "rain", "mist"] as const).find((k) => k === q) ?? null;
@@ -68,8 +70,8 @@ export class Weather {
 
   update(now: number, hour: number) {
     const w = weatherAt(Date.now(), hour);
-    this.kind = this.override ?? w.kind;
-    this.wind = this.kind === "rain" ? Math.max(0.5, w.wind) : w.wind;
+    this.kind = this.indoors ? "clear" : (this.override ?? w.kind);
+    this.wind = this.indoors ? 0 : this.kind === "rain" ? Math.max(0.5, w.wind) : w.wind;
     this.scene.wind = this.wind;
     this.drawShadows(now);
     this.drawRain(now);
@@ -79,7 +81,7 @@ export class Weather {
   /** Big soft cloud shadows drifting with the wind. */
   private drawShadows(now: number) {
     const g = this.shadows.clear();
-    const count = this.kind === "clear" ? 2 : this.kind === "mist" ? 0 : 7;
+    const count = this.indoors ? 0 : this.kind === "clear" ? 2 : this.kind === "mist" ? 0 : 7;
     const mw = this.map.width * TILE;
     const mh = this.map.height * TILE;
     const drift = (now / 1000) * (8 + this.wind * 22);

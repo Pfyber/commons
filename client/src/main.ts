@@ -1,6 +1,7 @@
 import { Application } from "pixi.js";
 import parkUrl from "../../assets/maps/founders_park.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
+import shopUrl from "../../assets/maps/shop.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { ApiError, Auth, type Destination } from "./net/api";
@@ -29,7 +30,7 @@ import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
 import "./styles.css";
 
-const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl };
+const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl, shop: shopUrl };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
 
@@ -114,6 +115,7 @@ async function main() {
     onChat: (text) => game?.chat(text),
     onEmote: (id) => game?.emote(id),
     onSit: () => game?.toggleSit(),
+    onSkate: () => game?.toggleSkate(),
     onBag: () => ui.bag.toggle(),
     onAlbum: () => ui.album.toggle(),
     onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
@@ -171,14 +173,20 @@ async function main() {
     wish: new WishPanel((text) => game?.releaseLantern(text)),
     offer: new OfferCard(),
     mood: moodPicker,
-    wardrobe: new WardrobePanel(
-      () => auth.player?.look ?? 0,
-      async (look) => {
-        await auth.saveLook(look);
+    wardrobe: new WardrobePanel(eco, {
+      current: () => auth.player?.look ?? 0,
+      wear: async (look) => {
+        eco.applyResult({ totals: await auth.saveLook(look) });
         (game as Game | null)?.changeLook(look);
         hud.toast("✨ Looking good!", 3000);
       },
-    ),
+      buy: async (look, price) => {
+        eco.applyResult({ totals: await auth.buyLook(look, price) });
+        (game as Game | null)?.changeLook(look);
+        hud.toast(price ? `🛍️ Bought for ${price} coins. Looking good!` : "✨ Looking good!", 3500);
+      },
+      preview: (look) => (game as Game | null)?.previewLook(look),
+    }),
   };
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
   welcome.onChange(() => {
@@ -205,7 +213,7 @@ async function main() {
         game = new Game(app, map, ticket.zone_id, placeInfo, ui, document.getElementById("labels")!, {
           onWelcome: () => (retry = 0),
           onDisconnect,
-          onTravel: (z) => void travel({ zone: z }),
+          onTravel: (z, arrive) => void travel({ zone: z, arrive }),
         });
         if (import.meta.env.DEV) (window as unknown as { __commons: Game }).__commons = game;
       }
@@ -223,7 +231,11 @@ async function main() {
       scheduleRetry();
     }
   };
+  let travelling = false;
   const travel = async (to: Destination) => {
+    // A second tap on a door while we're already on our way is ignored.
+    if (travelling) return;
+    travelling = true;
     const previous = dest;
     dest = to;
     document.body.classList.add("fading");
@@ -235,6 +247,7 @@ async function main() {
       hud.toast(e instanceof ApiError ? e.message : "You can't go there right now.", 4000);
     } finally {
       document.body.classList.remove("fading");
+      travelling = false;
     }
   };
   const scheduleRetry = () => {

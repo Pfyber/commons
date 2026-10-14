@@ -12,6 +12,8 @@ export interface HudHandlers {
   onChat(text: string): void;
   onEmote(id: number): void;
   onSit(): void;
+  /** Steps on or off your skateboard. */
+  onSkate(): void;
   onBag(): void;
   onAlbum(): void;
   onFriends(): void;
@@ -29,6 +31,9 @@ export class Hud {
   readonly input: HTMLInputElement;
   private toastEl: HTMLDivElement;
   private sitBtn: HTMLButtonElement;
+  private skateBtn: HTMLButtonElement;
+  /** Whether you're on your board (kept across places, to step back on outside). */
+  skating = false;
   private coinsEl: HTMLDivElement;
   private badgeEl!: HTMLSpanElement;
   private toastTimer = 0;
@@ -86,6 +91,7 @@ export class Hud {
       if (e.key === "f" || e.key === "F") h.onFriends();
       if (e.key === "n" || e.key === "N") h.onNotifications();
       if (e.key === "m" || e.key === "M") sound();
+      if ((e.key === "k" || e.key === "K") && !e.repeat) h.onSkate();
     });
 
     const form = root.querySelector<HTMLFormElement>(".chat")!;
@@ -116,6 +122,13 @@ export class Hud {
     this.sitBtn.onclick = () => h.onSit();
     bar.appendChild(this.sitBtn);
     this.setSitting(false);
+    this.skateBtn = document.createElement("button");
+    this.skateBtn.type = "button";
+    this.skateBtn.className = "skate";
+    this.skateBtn.append(pxIcon("skate"));
+    this.skateBtn.onclick = () => h.onSkate();
+    bar.appendChild(this.skateBtn);
+    this.setSkating(false);
     for (const [id, e] of Object.entries(EMOTES)) {
       const b = document.createElement("button");
       b.type = "button";
@@ -131,6 +144,19 @@ export class Hud {
     this.sitBtn.replaceChildren(pxIcon(sitting ? "stand" : "sit"));
     this.sitBtn.title = sitting ? "Stand up" : "Sit down here";
     this.sitBtn.setAttribute("aria-label", this.sitBtn.title);
+  }
+
+  setSkating(on: boolean) {
+    this.skating = on;
+    this.skateBtn.classList.toggle("on", on);
+    this.skateBtn.title = on ? "Step off your skateboard (K)" : "Ride your skateboard (K)";
+    this.skateBtn.setAttribute("aria-label", this.skateBtn.title);
+    this.skateBtn.setAttribute("aria-pressed", String(on));
+  }
+
+  /** Indoors the board stays under your arm. */
+  setSkateAllowed(allowed: boolean) {
+    this.skateBtn.classList.toggle("off", !allowed);
   }
 
   setPlace(name: string, instance: number) {

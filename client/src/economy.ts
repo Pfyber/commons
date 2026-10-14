@@ -10,7 +10,17 @@ export interface Item {
   kind: "currency" | "fish" | "junk" | "seed" | "plant" | "furniture" | string;
   name: string;
   rarity: number;
-  meta: { sell?: number; buy?: number; grows?: number; seed?: number; night?: boolean };
+  meta: {
+    sell?: number;
+    buy?: number;
+    grows?: number;
+    seed?: number;
+    night?: boolean;
+    /** Clothing: price in coins, the look field it fills and its value there. */
+    price?: number;
+    slot?: "outfit" | "hat" | "accessory";
+    index?: number;
+  };
 }
 
 export interface AlbumEntry {
@@ -86,9 +96,15 @@ export class Economy {
   }
 
   /** Takes new totals from any economy response. */
-  applyResult(r: Applied) {
+  applyResult(r: Pick<Applied, "totals">) {
     for (const [item, qty] of r.totals) this.inventory.set(item, qty);
     this.emit();
+  }
+
+  /** The clothing item for a look field's value (none for the free tee, no hat, no accessory). */
+  clothing(slot: "outfit" | "hat" | "accessory", index: number): Item | undefined {
+    for (const it of this.items.values()) if (it.kind === "clothing" && it.meta.slot === slot && it.meta.index === index) return it;
+    return undefined;
   }
 
   async sell(item: number, qty: number) {

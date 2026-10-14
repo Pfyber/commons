@@ -5,18 +5,27 @@
 //! and p99 outbound bandwidth per client < 8 KB/s, measured after ramp-up.
 //!
 //! Bots mint their own join tokens with the shared secret, so only the zone
-//! server needs to be running.
+//! server needs to be running. With `--api` (the dev stack) each bot also
+//! signs in as a real player, "Bot 3", so people can befriend it.
+//!
+//! Bots are good sports: they accept friend requests, being followed, hugs,
+//! high fives, dances and rock paper scissors (picking at random), wave back
+//! at people who wave at them, and stop walking when someone comes close.
 
 use anyhow::{Context, bail};
 use clap::{Parser, ValueEnum};
-use commons_common::token::{self, JoinClaims, TrustTier};
-use commons_protocol::{ClientMsg, PROTOCOL_VERSION, ServerMsg, emote, push_framed, split_frame};
+use commons_common::token::{self, AccessClaims, JoinClaims, TrustTier};
+use commons_protocol::{
+    ClientMsg, EntityInfo, PROTOCOL_VERSION, ServerMsg, emote, push_framed, rps, split_frame,
+    together,
+};
 use commons_sim::furniture::{Furniture, Side};
 use commons_sim::{Grid, MapFile, Motion, TilePos};
 use futures_util::{SinkExt, StreamExt};
 use rand::rngs::SmallRng;
 use rand::seq::IndexedRandom;
 use rand::{Rng, SeedableRng};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -68,6 +77,120 @@ struct Args {
     max_tick_p99_ms: f64,
     #[arg(long, default_value_t = 8.0)]
     max_client_kbps: f64,
+    /// The API (dev mode only): bots sign in as real players, so they can be
+    /// befriended. Without it they're anonymous (load tests).
+    #[arg(long)]
+    api: Option<String>,
+    /// The social gateway, where bots answer friend requests (with `--api`).
+    #[arg(long, default_value = "http://127.0.0.1:8083")]
+    social: String,
+}
+
+/// Someone else a bot can see.
+struct Other {
+    /// A person, not another bot: the one worth waving back at.
+    human: bool,
+    tile: TilePos,
+    motion: Option<Motion>,
+}
+
+impl Other {
+    fn from(e: &EntityInfo) -> Self {
+        let motion = (e.path.len() >= 2).then(|| Motion {
+            path: e.path.iter().map(|t| (t.x, t.y)).collect(),
+            t0: e.t0,
+            speed_x10: e.speed_x10,
+        });
+        Other {
+            human: !e.name.starts_with("Bot "),
+            tile: (e.x, e.y),
+            motion,
+        }
+    }
+
+    fn at(&self, t: u32) -> TilePos {
+        self.motion.as_ref().map_or(self.tile, |m| m.tile_at(t))
+    }
+}
+
+/// How close (tiles) someone must come for a bot to stop and say hello.
+const STOP_NEAR: i32 = 2;
+/// How close a wave must be for a bot to wave back.
+const WAVE_BACK_NEAR: i32 = 8;
+
+fn cheb(a: TilePos, b: TilePos) -> i32 {
+    (a.0 as i32 - b.0 as i32).abs().max((a.1 as i32 - b.1 as i32).abs())
+}
+
+/// Signs in (dev mode) as `name`, creating the account the first time.
+/// Returns the player's id and look. Waits for the API to come up.
+async fn sign_in(api: &str, name: &str) -> anyhow::Result<(String, u32)> {
+    let http = reqwest::Client::new();
+    let mut last = anyhow::anyhow!("no answer");
+    for _ in 0..60 {
+        let res = http
+            .post(format!("{api}/api/auth/dev-login"))
+            .json(&serde_json::json!({ "display_name": name }))
+            .send()
+            .await;
+        match res {
+            Ok(r) if r.status().is_success() => {
+                let v: serde_json::Value = r.json().await?;
+                let id = v["player"]["id"].as_str().context("no player id")?.to_string();
+                let look = v["player"]["look"].as_u64().unwrap_or(0) as u32;
+                return Ok((id, look));
+            }
+            Ok(r) => last = anyhow::anyhow!("dev login: {}", r.status()),
+            Err(e) => last = e.into(),
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    Err(last)
+}
+
+/// Accepts every friend request a bot gets, the way a friendly player would.
+async fn answer_friends(social: String, secret: Vec<u8>, claims: AccessClaims, end: Instant) {
+    let http = reqwest::Client::new();
+    while Instant::now() < end {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let bearer = format!("Bearer {}", token::sign(&secret, &claims, 300));
+        let Ok(res) = http
+            .get(format!("{social}/api/social/notifications"))
+            .header("authorization", &bearer)
+            .send()
+            .await
+        else {
+            continue;
+        };
+        let Ok(list) = res.json::<serde_json::Value>().await else {
+            continue;
+        };
+        let mut unread = false;
+        for n in list.as_array().into_iter().flatten() {
+            if n["read"].as_bool() == Some(true) {
+                continue;
+            }
+            unread = true;
+            if n["kind"] == "friend_request"
+                && let Some(from) = n["body"]["from_id"].as_str()
+            {
+                let _ = http
+                    .post(format!("{social}/api/social/respond"))
+                    .header("authorization", &bearer)
+                    .json(&serde_json::json!({ "id": from, "accept": true }))
+                    .send()
+                    .await;
+            }
+        }
+        if unread {
+            let _ = http
+                .post(format!("{social}/api/social/notifications/read"))
+                .header("authorization", &bearer)
+                .json(&serde_json::json!({}))
+                .send()
+                .await;
+        }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -192,16 +315,33 @@ async fn bot_loop(
         }
         b => b,
     };
+    let name = format!("Bot {i}");
+    let (sub, look) = match &args.api {
+        Some(api) => sign_in(api, &name).await?,
+        None => (format!("bot-{i}"), rng.random()),
+    };
+    if args.api.is_some() {
+        let me = AccessClaims {
+            sub: sub.clone(),
+            name: name.clone(),
+            look,
+            tier: TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        tokio::spawn(answer_friends(args.social.clone(), secret.to_vec(), me, end));
+    }
     let claims = JoinClaims {
-        sub: format!("bot-{i}"),
-        name: format!("Bot {i}"),
-        look: rng.random(),
+        sub,
+        name,
+        look,
         tier: TrustTier::Visitor,
         minor: false,
         zone: args.zone.clone(),
         instance: args.instance,
         owner: None,
         muted_until: 0,
+        arrive: None,
     };
     let join_token = token::sign(secret, &claims, 300);
     let (ws, _) = tokio_tungstenite::connect_async(&args.url)
@@ -238,6 +378,12 @@ async fn bot_loop(
     let mut next_sit = Instant::now() + Duration::from_secs(rng.random_range(5..40));
     let mut stand_at = Instant::now();
     let mut chess_move: Option<(Instant, u32, String)> = None;
+    // Being a good sport: who's around, answers waiting to be sent, and a
+    // pause while someone stands close.
+    let mut others: HashMap<u32, Other> = HashMap::new();
+    let mut replies: Vec<(Instant, ClientMsg)> = Vec::new();
+    let mut paused_until = Instant::now();
+    let mut next_wave_back = Instant::now();
 
     loop {
         tokio::select! {
@@ -264,13 +410,46 @@ async fn bot_loop(
                         }
                         ServerMsg::CellEnter { entities, .. } => {
                             for e in entities {
-                                if e.id == self_id { me = (e.x, e.y); }
+                                if e.id == self_id { me = (e.x, e.y); } else { others.insert(e.id, Other::from(&e)); }
                                 known.insert(e.id);
                             }
                         }
-                        ServerMsg::Spawn { entity } => { known.insert(entity.id); }
-                        ServerMsg::CellLeave { ids, .. } => for id in ids { known.remove(&id); },
-                        ServerMsg::Despawn { id } => { known.remove(&id); }
+                        ServerMsg::Spawn { entity } => {
+                            if entity.id != self_id { others.insert(entity.id, Other::from(&entity)); }
+                            known.insert(entity.id);
+                        }
+                        ServerMsg::CellLeave { ids, .. } => for id in ids { known.remove(&id); others.remove(&id); },
+                        ServerMsg::Despawn { id } => { known.remove(&id); others.remove(&id); }
+                        ServerMsg::MoveStart { id, speed_x10, t0, path } if id != self_id => {
+                            if let Some(o) = others.get_mut(&id) {
+                                o.motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10 });
+                            }
+                        }
+                        ServerMsg::Snap { id, x, y } | ServerMsg::StateChange { id, x, y, .. } if id != self_id => {
+                            if let Some(o) = others.get_mut(&id) {
+                                o.tile = (x, y);
+                                o.motion = None;
+                            }
+                        }
+                        // Say yes to whatever's offered: following, a hug, a game…
+                        ServerMsg::Offered { from, kind } if kind != together::STOP_FOLLOW => {
+                            let after = Duration::from_millis(rng.random_range(500..1500));
+                            replies.push((Instant::now() + after, ClientMsg::Accept { from, kind }));
+                        }
+                        ServerMsg::Rps { a, b, phase, .. } if phase == rps::CHOOSING && (a == self_id || b == self_id) => {
+                            let after = Duration::from_millis(rng.random_range(1000..4000));
+                            let pick = rng.random_range(rps::ROCK..=rps::SCISSORS);
+                            replies.push((Instant::now() + after, ClientMsg::RpsPick { pick }));
+                        }
+                        // Someone nearby waved: wave back.
+                        ServerMsg::EmoteShown { id, emote: emote::WAVE } if Instant::now() >= next_wave_back => {
+                            let server_now = (local_ms() + server_offset).max(0) as u32;
+                            if others.get(&id).is_some_and(|o| o.human && cheb(o.at(server_now), me) <= WAVE_BACK_NEAR) {
+                                next_wave_back = Instant::now() + Duration::from_secs(3);
+                                let after = Duration::from_millis(rng.random_range(400..1000));
+                                replies.push((Instant::now() + after, ClientMsg::Emote { emote: emote::WAVE }));
+                            }
+                        }
                         ServerMsg::MoveStart { id, speed_x10, t0, path } if id == self_id => {
                             motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10 });
                         }
@@ -324,6 +503,23 @@ async fn bot_loop(
                     me = m.tile_at(server_now);
                     if m.is_done(server_now) { motion = None; }
                 }
+                // Answers that are due.
+                let (due, later): (Vec<_>, Vec<_>) = replies.drain(..).partition(|(at, _)| *at <= now);
+                replies = later;
+                for (_, msg) in due {
+                    tx.send(frame(&msg)).await?;
+                }
+                // Someone's right here: stop on the tile we're walking into and stay a while.
+                if others.values().any(|o| o.human && cheb(o.at(server_now), me) <= STOP_NEAR) {
+                    paused_until = now + Duration::from_secs(3);
+                    if let Some(m) = &motion
+                        && let Some((_, next, _)) = m.splice(server_now)
+                        && m.path.last() != Some(&next)
+                    {
+                        tx.send(frame(&ClientMsg::MoveTo { x: next.0, y: next.1 })).await?;
+                    }
+                }
+                let paused = now < paused_until;
                 if let Some((at, table, uci)) = chess_move.take() {
                     if now >= at {
                         tx.send(frame(&ClientMsg::GameMove { table, uci })).await?;
@@ -337,6 +533,8 @@ async fn bot_loop(
                         sitting = false;
                         next_move = now + Duration::from_secs(1);
                     }
+                } else if paused {
+                    // Standing still for the person close by.
                 } else if now >= next_sit && self_id != 0 && behaviour == Behaviour::Wander {
                     next_sit = now + Duration::from_secs(rng.random_range(30..90));
                     // Table seats a third of the time, so games actually happen.

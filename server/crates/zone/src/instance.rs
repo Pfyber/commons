@@ -13,6 +13,8 @@ mod fishing;
 mod garden;
 mod hangout;
 mod home;
+mod rps;
+mod skate;
 mod together;
 
 pub use together::nook_map;
@@ -30,7 +32,7 @@ use commons_common::token::JoinClaims;
 use commons_protocol::{
     CELL_TILES, ClientMsg, EntityInfo, ServerMsg, Tile, emote, error_code, push_framed, state,
 };
-use commons_sim::{Grid, Motion, TilePos, WALK_SPEED_X10, compress, find_path};
+use commons_sim::{Grid, Motion, SKATE_SPEED_X10, TilePos, WALK_SPEED_X10, compress, find_path};
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -212,6 +214,8 @@ pub struct Instance {
     elders: HashMap<u32, hangout::Elder>,
     /// Open offers to do something together: (from, to) → (kind, expires).
     offers: HashMap<(u32, u32), (u8, u32)>,
+    /// Rock paper scissors matches under way.
+    rps: Vec<rps::RpsMatch>,
     /// The pitch's ball, if the zone has a pitch.
     ball: Option<play::Ball>,
     /// Activity of players who left since the last report.
@@ -274,6 +278,7 @@ impl Instance {
             games: HashMap::new(),
             elders: HashMap::new(),
             offers: HashMap::new(),
+            rps: Vec::new(),
             ball,
             activity_left: Vec::new(),
             next_activity_report: ACTIVITY_EVERY_MS,
@@ -407,6 +412,7 @@ impl Instance {
             }
             self.screen_tick(now);
             self.fish_tick(now);
+            self.rps_tick(now);
             self.garden_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
@@ -542,14 +548,18 @@ impl Instance {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         let spawn = &self.zone.map.spawn;
+        // Coming out of a building: just in front of its door.
+        let door = claims.arrive.as_deref().and_then(|kind| {
+            let o = self.zone.map.objects.iter().find(|o| o.kind == kind)?;
+            self.grid.nearest_walkable((o.x + o.w / 2, o.y + o.h), 3)
+        });
         let mut rng = rand::rng();
         let jitter = (
             (spawn.x as i32 + rng.random_range(-3..=3)).clamp(0, self.grid.w as i32 - 1) as u16,
             (spawn.y as i32 + rng.random_range(-2..=2)).clamp(0, self.grid.h as i32 - 1) as u16,
         );
-        let tile = self
-            .grid
-            .nearest_walkable(jitter, 8)
+        let tile = door
+            .or_else(|| self.grid.nearest_walkable(jitter, 8))
             .unwrap_or((spawn.x, spawn.y));
         let cell = self.cell_of(tile);
         let now = self.clock.now_ms();
@@ -615,6 +625,7 @@ impl Instance {
     fn remove(&mut self, id: u32) {
         self.leave_seat(id);
         self.stop_fishing(id, false);
+        self.rps_leave(id);
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
@@ -695,6 +706,8 @@ impl Instance {
             ClientMsg::Accept { from, kind } => self.accept(id, from, kind, now),
             ClientMsg::SkyLantern { text } => self.sky_lantern(id, &text, now),
             ClientMsg::SetLook { look } => self.set_look(id, look, now),
+            ClientMsg::Skate { on } => self.skate(id, on, now),
+            ClientMsg::RpsPick { pick } => self.rps_pick(id, pick),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }
@@ -738,7 +751,11 @@ impl Instance {
         let motion = Motion {
             path: compress(&full),
             t0,
-            speed_x10: WALK_SPEED_X10,
+            speed_x10: if a.state == state::SKATING {
+                SKATE_SPEED_X10
+            } else {
+                WALK_SPEED_X10
+            },
         };
         let msg = ServerMsg::MoveStart {
             id,
@@ -1117,6 +1134,7 @@ pub(crate) mod tests {
             instance: 1,
             owner: None,
             muted_until: 0,
+            arrive: None,
         }
     }
 

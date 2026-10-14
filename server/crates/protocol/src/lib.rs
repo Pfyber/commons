@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 8;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -81,6 +81,10 @@ message_enum! {
         19 SkyLantern { text: String }
         /// You changed clothes (saved through the API); show it to people nearby.
         20 SetLook { look: u32 }
+        /// Step onto your skateboard (or off it, `on: false`). Outdoors only.
+        21 Skate { on: bool }
+        /// Your pick in a rock paper scissors match (`rps::ROCK`…).
+        22 RpsPick { pick: u8 }
     }
 }
 
@@ -157,6 +161,10 @@ message_enum! {
         25 LanternRise { id: u32, x: u16, y: u16, text: String }
         /// Avatar `id` changed its look.
         26 LookChanged { id: u32, look: u32 }
+        /// A rock paper scissors match between `a` and `b` (`rps::*` phase).
+        /// While choosing, picks are hidden (0) and `ends_t` is the deadline;
+        /// at the reveal they show what each chose (0: didn't choose in time).
+        27 Rps { a: u32, b: u32, phase: u8, a_pick: u8, b_pick: u8, ends_t: u32 }
     }
 }
 
@@ -196,7 +204,28 @@ pub mod together {
     pub const FOLLOW: u8 = 4;
     /// Either side ends a follow; just a notice, nothing to accept.
     pub const STOP_FOLLOW: u8 = 5;
-    pub const MAX: u8 = STOP_FOLLOW;
+    /// A game of rock paper scissors (see `rps`); anyone may be asked.
+    pub const RPS: u8 = 6;
+    pub const MAX: u8 = RPS;
+}
+
+/// Rock paper scissors: picks for `RpsPick` / `Rps`, and `Rps.phase`.
+pub mod rps {
+    pub const ROCK: u8 = 1;
+    pub const PAPER: u8 = 2;
+    pub const SCISSORS: u8 = 3;
+    /// Both choose within `CHOOSE_MS`.
+    pub const CHOOSING: u8 = 0;
+    pub const REVEAL: u8 = 1;
+    /// Someone left before the reveal.
+    pub const CANCELLED: u8 = 2;
+    pub const CHOOSE_MS: u32 = 10_000;
+
+    /// Whether pick `a` beats pick `b` (not choosing loses to any pick).
+    pub fn beats(a: u8, b: u8) -> bool {
+        matches!((a, b), (ROCK, SCISSORS) | (PAPER, ROCK) | (SCISSORS, PAPER))
+            || (a != 0 && b == 0)
+    }
 }
 
 /// Codes for `Error`.
@@ -276,6 +305,8 @@ pub mod state {
     pub const IDLE: u8 = 0;
     pub const SITTING: u8 = 1;
     pub const FISHING: u8 = 2;
+    /// On a skateboard: moves at `SKATE_SPEED_X10`.
+    pub const SKATING: u8 = 3;
 }
 
 #[cfg(test)]

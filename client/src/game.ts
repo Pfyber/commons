@@ -8,11 +8,13 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
+import { Clerk } from "./ambient/clerk";
+import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
 import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
 import { FOLLOW, type MoodPicker, type OfferCard, STOP_FOLLOW, TOGETHER } from "./activities/together";
 import type { BottlesPanel, WishPanel } from "./ui/dream";
-import type { WardrobePanel } from "./ui/wardrobe";
+import type { Tab, WardrobePanel } from "./ui/wardrobe";
 import { Critters } from "./ambient/critters";
 import type { Soundscape } from "./ambient/sound";
 import { Weather } from "./ambient/weather";
@@ -33,10 +35,10 @@ import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
-import { Avatar } from "./world/avatars";
+import { Avatar, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
-import { type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
-import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
+import { type MapObject, type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
+import { SKATE_SPEED_X10, type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
 import { compress, findPath } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
@@ -49,6 +51,8 @@ const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION
 /** Errors worth showing to the player as-is. */
 const TOAST_CODES = new Set([ERR.RATE_LIMITED, 9, 10, 11, 12, 13]);
 const FISHING = 2;
+/** Protocol `state::SKATING`. */
+const SKATING = 3;
 const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3 };
 /** Casts reach this far from where you stand (server: CAST_RANGE). */
 const CAST_RANGE = 2;
@@ -201,6 +205,13 @@ export class Game {
   private critters: Critters;
   private cat: Cat | null = null;
   private caretaker: Caretaker | null = null;
+  private clerk: Clerk | null = null;
+  /** Your three hands while a rock paper scissors match waits on your pick. */
+  private rpsPicker = new RpsPicker((pick) => this.socket?.send({ t: "RpsPick", pick }));
+  /** A building we're walking to the door of, to go in once we get there. */
+  private entering: { door: TileXY; zone: string } | null = null;
+  /** Inside a building: no weather, no night, no skateboards. */
+  private indoors = false;
   private grove: Grove | null = null;
   private caretakerTalkAt = 0;
   private sky: Sky;
@@ -225,7 +236,7 @@ export class Game {
     readonly place: Place,
     private ui: Ui,
     private labels: HTMLElement,
-    private events: { onWelcome(): void; onDisconnect(reason: CloseReason): void; onTravel(zone: string): void },
+    private events: { onWelcome(): void; onDisconnect(reason: CloseReason): void; onTravel(zone: string, arrive?: string): void },
   ) {
     this.hud = ui.hud;
     this.scene = new Scene(app, map);
@@ -238,7 +249,9 @@ export class Game {
       this.scene.sorted.addChild(this.screen.sprite);
     }
     this.ambient = new Ambient(this.scene, map);
-    this.daynight = new DayNight(app, this.scene, map);
+    const indoors = (this.indoors = zoneId === "shop");
+    ui.hud.setSkateAllowed(!indoors);
+    this.daynight = new DayNight(app, this.scene, map, indoors);
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     if (zoneId === "founders_park") {
       ui.town
@@ -247,7 +260,7 @@ export class Game {
         .catch(() => {});
     }
     this.setupCorners(map);
-    this.weather = new Weather(app, this.scene, map);
+    this.weather = new Weather(app, this.scene, map, indoors);
     this.critters = new Critters(app, this.scene, map);
     if (zoneId === "founders_park") {
       this.cat = new Cat(map);
@@ -256,6 +269,8 @@ export class Game {
       if (grove.active) this.grove = grove;
       if (map.objects.some((o) => o.kind === "founders_stone")) this.caretaker = new Caretaker(map, this.scene, labels);
     }
+    const counter = map.objects.find((o) => o.kind === "shop_counter");
+    if (counter) this.clerk = new Clerk(map, counter, this.scene, labels);
     this.sky = new Sky(app, this.scene, () => this.onShootingStar());
     const fire = map.objects.find((o) => o.kind === "campfire");
     if (fire) {
@@ -285,6 +300,9 @@ export class Game {
   }
 
   connect(serverUrl: string, joinToken: string) {
+    // One connection at a time: a second would show you twice, and the zone
+    // would then drop the first as "signed in elsewhere".
+    this.socket?.close();
     this.clearAvatars();
     this.socket = new ZoneSocket(serverUrl, joinToken, this.scene.viewTiles(), (m) => this.handle(m), (r) => {
       this.socket = null;
@@ -352,6 +370,57 @@ export class Game {
     if (self && cheb(self.destination, this.caretaker.pos) > 3) this.walkTo(this.caretaker.avatar.destination);
     this.near(this.ui.welcomePanel, this.caretaker.avatar.destination, 6).show();
     return true;
+  }
+
+  /** Tapping the clerk: a word of help, and the racks open. */
+  private tapClerk(sx: number, sy: number): boolean {
+    if (!this.clerk) return false;
+    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
+    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    if (!this.clerk.hit(x, y)) return false;
+    this.clerk.chat();
+    const counter = this.scene.map.objects.find((o) => o.kind === "shop_counter");
+    if (counter) this.openShop(counter);
+    return true;
+  }
+
+  /** The clothes shop's try-on panel, tied to the rack or counter `at`. */
+  private openShop(at: MapObject, tab?: Tab) {
+    const self = this.self;
+    const front = { x: at.x + Math.floor(at.w / 2), y: at.y + at.h };
+    if (self && cheb(self.destination, front) > 2) {
+      const spot = nearestWalkable(this.scene.map, front.x, front.y, 2);
+      if (spot) this.moveTo(spot, true);
+    }
+    this.near(this.ui.wardrobe, front, 6).openAs("Clothes Shop", "shop", tab);
+  }
+
+  /** Walks to a building's door and goes in on arrival (or at once if already there). */
+  private enter(door: TileXY, zone: string) {
+    const self = this.self;
+    if (!self) return;
+    if (cheb(self.destination, door) <= 1 && !self.moving) {
+      this.events.onTravel(zone);
+      return;
+    }
+    const spot = nearestWalkable(this.scene.map, door.x, door.y, 2);
+    if (!spot) return;
+    this.moveTo(spot, true);
+    this.entering = { door: spot, zone };
+  }
+
+  /** Goes in once we've walked up to the door we're entering. */
+  private checkEntering() {
+    const e = this.entering;
+    const self = this.self;
+    if (!e || !self) return;
+    if (self.destination.x !== e.door.x || self.destination.y !== e.door.y) {
+      this.entering = null; // walked somewhere else instead
+      return;
+    }
+    if (self.moving) return;
+    this.entering = null;
+    this.events.onTravel(e.zone);
   }
 
   /** The Caretaker says something now and then when you're close by. */
@@ -543,6 +612,60 @@ export class Game {
     if (other) this.hud.toast(`${t.icon} You and ${other.info.name} ${t.done}${kind === 1 ? " 💞" : "!"}`, 3500);
   }
 
+  /**
+   * Rock paper scissors: while choosing, the two face each other and the
+   * players get their picker; at the reveal everyone nearby sees them pump
+   * their fists three times, show their hands, and who won.
+   */
+  private onRps(m: Extract<ServerMsg, { t: "Rps" }>) {
+    const pa = this.avatars.get(m.a);
+    const pb = this.avatars.get(m.b);
+    const mine = m.a === this.selfId || m.b === this.selfId;
+    if (pa && pb) {
+      pa.faceToward(pb.pos.x);
+      pb.faceToward(pa.pos.x);
+    }
+    if (m.phase === CHOOSING) {
+      for (const p of [pa, pb]) p?.flash("🤔");
+      const other = m.a === this.selfId ? pb : pa;
+      if (mine) this.rpsPicker.show(other?.info.name ?? "someone", () => m.endsT - (this.socket?.clock.now() ?? m.endsT));
+      return;
+    }
+    if (mine) this.rpsPicker.hide();
+    if (m.phase === CANCELLED) {
+      if (mine) this.hud.toast("✊ The game was called off.");
+      return;
+    }
+    const now = performance.now();
+    pa?.pumpFist(now);
+    pb?.pumpFist(now);
+    window.setTimeout(() => {
+      this.avatars.get(m.a)?.flash(pickIcon(m.aPick));
+      this.avatars.get(m.b)?.flash(pickIcon(m.bPick));
+    }, PUMP_MS);
+    window.setTimeout(() => {
+      const winner = beats(m.aPick, m.bPick) ? m.a : beats(m.bPick, m.aPick) ? m.b : 0;
+      if (winner) this.avatars.get(winner)?.say("🏆 Wins!");
+      if (!mine) return;
+      const [me, them] = m.a === this.selfId ? [m.aPick, m.bPick] : [m.bPick, m.aPick];
+      const text =
+        !me && !them
+          ? "🤷 Nobody picked in time."
+          : winner === this.selfId
+            ? `🏆 You win! ${pickIcon(me)} beats ${pickIcon(them)}`
+            : winner
+              ? `You lose: ${pickIcon(them)} beats ${pickIcon(me)}`
+              : `A draw: ${pickIcon(me)} and ${pickIcon(them)}`;
+      this.hud.toast(text, 4000);
+    }, PUMP_MS + 900);
+  }
+
+  /** Trying clothes on: your avatar wears `look`, but only on your screen. */
+  previewLook(look: number) {
+    const self = this.self;
+    if (self && self.info.look !== look) self.info = { ...self.info, look };
+  }
+
   /** You changed clothes: show it here and to everyone nearby. */
   changeLook(look: number) {
     const self = this.self;
@@ -598,6 +721,9 @@ export class Game {
         this.hud.setPlace(this.place.label || this.scene.map.name, m.instance);
         if (this.isOwnHome) void this.loadGifts();
         if (this.mood) this.socket?.send({ t: "SetMood", mood: this.mood });
+        this.clerk?.hello();
+        // Back outside on the board you came in with.
+        if (this.hud.skating && !this.indoors) this.socket?.send({ t: "Skate", on: true });
         this.events.onWelcome();
         break;
       case "CellEnter":
@@ -721,6 +847,9 @@ export class Game {
       }
       case "Together":
         this.together(m.a, m.b, m.kind);
+        break;
+      case "Rps":
+        this.onRps(m);
         break;
       case "LanternRise": {
         const who = this.avatars.get(m.id);
@@ -852,7 +981,8 @@ export class Game {
       return;
     }
     if (sp) full.unshift(sp.prev);
-    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10: WALK_SPEED_X10 }, now);
+    const speedX10 = self.state === SKATING ? SKATE_SPEED_X10 : WALK_SPEED_X10;
+    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10 }, now);
     this.socket.send({ t: "MoveTo", x: t.x, y: t.y });
     if (marker) this.scene.showTarget(t);
   }
@@ -866,6 +996,7 @@ export class Game {
       if (this.tapBall(e.global.x, e.global.y)) return;
       if (this.tapCat(e.global.x, e.global.y)) return;
       if (this.tapCaretaker(e.global.x, e.global.y)) return;
+      if (this.tapClerk(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
       // Taking your own steps ends following someone.
       if (this.following !== null) this.stopFollowing(true);
@@ -1045,6 +1176,35 @@ export class Game {
       this.near(ui.wardrobe, { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }).openAs(obj.label ?? "Changing room");
       return true;
     }
+    // The clothes shop: walk in through the door; inside, racks and the
+    // counter open the shop, the booth is a changing room.
+    if (obj?.kind === "clothes_shop") {
+      this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "shop");
+      return true;
+    }
+    if (obj?.kind === "shop_exit") {
+      this.events.onTravel("founders_park", "clothes_shop");
+      return true;
+    }
+    if (obj?.kind === "clothes_rack") {
+      const tab: Tab = obj.label === "Hats" ? "hat" : obj.label === "Accessories" ? "extras" : "outfit";
+      this.openShop(obj, tab);
+      return true;
+    }
+    if (obj?.kind === "shop_counter") {
+      this.clerk?.chat();
+      this.openShop(obj);
+      return true;
+    }
+    if (obj?.kind === "fitting_room") {
+      const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 2) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.wardrobe, front).openAs("Changing room");
+      return true;
+    }
     if (obj?.kind === "founders_stone") {
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x + 1, obj.y + 1, 2);
@@ -1212,6 +1372,7 @@ export class Game {
 
   private onSelfState(state: number, at: TileXY) {
     this.hud.setSitting(state === SITTING);
+    this.hud.setSkating(state === SKATING);
     const seat = this.furniture.seats.get(this.furniture.idAt(at));
     if (state === SITTING && seat?.table) this.chess.show(seat.table.id, this.games.get(seat.table.id));
   }
@@ -1221,6 +1382,17 @@ export class Game {
     if (!self || !this.socket) return;
     if (self.state === SITTING) this.socket.send({ t: "Stand" });
     else if (!self.moving) this.socket.send({ t: "Sit", seat: SEAT_GROUND });
+  }
+
+  /** Outdoors you can step on your skateboard (and off it) any time. */
+  toggleSkate() {
+    const self = this.self;
+    if (!self || !this.socket) return;
+    if (this.indoors) {
+      this.hud.toast("🛹 No skating indoors. Try it outside!");
+      return;
+    }
+    this.socket.send({ t: "Skate", on: self.state !== SKATING });
   }
 
   emote(id: number) {
@@ -1258,13 +1430,16 @@ export class Game {
     const dirKey = `${dx},${dy}`;
     const dest = self.destination;
     const remaining = Math.hypot(dest.x - self.pos.x, dest.y - self.pos.y);
-    const due = dirKey !== this.lastKeyDir || remaining < 1.5;
+    // On a board we cover ground faster, so plan further ahead.
+    const skating = self.state === SKATING;
+    const steps = skating ? KEY_STEPS * 2 : KEY_STEPS;
+    const due = dirKey !== this.lastKeyDir || remaining < (skating ? 3 : 1.5);
     if (!due || wallNow - this.lastKeySend < KEY_RESEND_MS) return;
     // Plan from the tile we're heading into, so segments chain smoothly.
     const from = { x: Math.round(self.pos.x + dx * 0.49), y: Math.round(self.pos.y + dy * 0.49) };
     const target =
-      stepTarget(this.scene.map, from, dx, dy, KEY_STEPS) ??
-      (dx && dy ? stepTarget(this.scene.map, from, dx, 0, KEY_STEPS) ?? stepTarget(this.scene.map, from, 0, dy, KEY_STEPS) : null);
+      stepTarget(this.scene.map, from, dx, dy, steps) ??
+      (dx && dy ? stepTarget(this.scene.map, from, dx, 0, steps) ?? stepTarget(this.scene.map, from, 0, dy, steps) : null);
     if (!target) return;
     this.lastKeyDir = dirKey;
     this.lastKeySend = wallNow;
@@ -1312,6 +1487,8 @@ export class Game {
       this.caretaker.update(Date.now(), wallNow);
       this.caretakerChat(wallNow);
     }
+    this.clerk?.update(Date.now(), wallNow);
+    this.checkEntering();
     this.sky.update(wallNow, this.daynight.dark > 0.5);
     if (this.following !== null && wallNow > this.followCheckAt) {
       this.followCheckAt = wallNow + 350;
@@ -1357,6 +1534,8 @@ export class Game {
     this.weather.destroy();
     this.critters.destroy();
     this.caretaker?.destroy();
+    this.clerk?.destroy();
+    this.rpsPicker.destroy();
     this.campfire?.destroy();
     this.sky.destroy();
     this.ui.offer.hide();

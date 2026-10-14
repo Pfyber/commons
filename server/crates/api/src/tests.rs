@@ -1611,12 +1611,20 @@ mod changing_room {
     use axum::Router;
     use serde_json::{Value, json};
 
-    #[tokio::test]
-    async fn a_new_look_is_saved_and_carried_by_the_fresh_session() {
-        let Some(db) = db().await else { return };
-        let s = state(db.clone(), 1000).await;
+    /// A tee, no hat, no accessory: all free.
+    const PLAIN: u32 = 0x0000_1234;
+    /// The same with headphones (75 coins).
+    const HEADPHONES: u32 = PLAIN | (6 << 27);
+    /// The same with a flower crown (100 coins).
+    const CROWN: u32 = PLAIN | (7 << 27);
+    /// A dress (outfit 3: bit 15 and bit 30).
+    const DRESS: u32 = PLAIN | (1 << 15) | (1 << 30);
+
+    async fn setup() -> Option<(Arc<AppState>, Router, Uuid, String)> {
+        let db = db().await?;
+        let s = state(db, 1000).await;
         let app: Router = Router::new()
-            .nest("/api", crate::auth::routes())
+            .nest("/api", crate::shop::routes())
             .with_state(s.clone());
         let p = player(&s).await;
         let claims = token::AccessClaims {
@@ -1631,36 +1639,97 @@ mod changing_room {
             "Bearer {}",
             token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
         );
-        let post = |body: Value| {
-            Request::post("/api/me/look")
-                .header("authorization", auth.clone())
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap()
-        };
-        let res = app
-            .clone()
-            .oneshot(post(json!({ "look": 0xC800_1234u32 })))
-            .await
+        Some((s, app, p, auth))
+    }
+
+    async fn call(app: &Router, auth: &str, path: &str, body: Value) -> (StatusCode, Value) {
+        let req = Request::post(path)
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
             .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
         let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
             .await
             .unwrap();
-        let session: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(session["player"]["look"], 0xC800_1234u32);
-        let token = session["access_token"].as_str().unwrap();
-        let c: token::AccessClaims = token::verify(&s.secret, token).unwrap();
-        assert_eq!(c.look, 0xC800_1234, "the new token carries it");
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
 
-        let res = app
-            .oneshot(post(json!({ "look": 0xffff_fff1u32 })))
+    async fn qty(s: &AppState, p: Uuid, item: i32) -> i32 {
+        sqlx::query_scalar("SELECT COALESCE((SELECT qty FROM inventory WHERE player_id = $1 AND item_id = $2), 0)")
+            .bind(p)
+            .bind(item)
+            .fetch_one(&s.db)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_new_look_is_saved_and_carried_by_the_fresh_session() {
+        let Some((s, app, _, auth)) = setup().await else { return };
+        let (st, r) = call(&app, &auth, "/api/me/look", json!({ "look": PLAIN })).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["session"]["player"]["look"], PLAIN);
+        let token = r["session"]["access_token"].as_str().unwrap();
+        let c: token::AccessClaims = token::verify(&s.secret, token).unwrap();
+        assert_eq!(c.look, PLAIN, "the new token carries it");
+
+        let (st, _) = call(&app, &auth, "/api/me/look", json!({ "look": 0xffff_fff1u32 })).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "nobody dresses as the Caretaker");
+    }
+
+    #[tokio::test]
+    async fn clothes_are_bought_once_then_worn_freely() {
+        let Some((s, app, p, auth)) = setup().await else { return };
+        // Not yours yet.
+        let (st, r) = call(&app, &auth, "/api/me/look", json!({ "look": HEADPHONES })).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(r["error"], "not_owned");
+        // The counter refuses a stale price.
+        let buy = |look: u32, price: i64| json!({ "look": look, "price": price, "key": Uuid::new_v4().to_string() });
+        let (st, r) = call(&app, &auth, "/api/shop/buy", buy(HEADPHONES, 70)).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(r["error"], "price_changed");
+        // Bought and worn.
+        let (st, r) = call(&app, &auth, "/api/shop/buy", buy(HEADPHONES, 75)).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["session"]["player"]["look"], HEADPHONES);
+        assert_eq!(qty(&s, p, 1).await, 25, "100 coins less 75");
+        assert_eq!(qty(&s, p, 526).await, 1);
+        assert!(r["totals"].as_array().unwrap().contains(&json!([1, 25])));
+        // Can't afford the crown.
+        let (st, r) = call(&app, &auth, "/api/shop/buy", buy(CROWN, 100)).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(r["error"], "not_enough_coins");
+        assert_eq!(qty(&s, p, 1).await, 25, "nothing spent");
+        // Off and on again for free; buying what you own costs nothing.
+        let (st, _) = call(&app, &auth, "/api/me/look", json!({ "look": PLAIN })).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = call(&app, &auth, "/api/me/look", json!({ "look": HEADPHONES })).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = call(&app, &auth, "/api/shop/buy", buy(HEADPHONES, 0)).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(qty(&s, p, 1).await, 25);
+        assert_eq!(qty(&s, p, 526).await, 1);
+    }
+
+    #[tokio::test]
+    async fn what_you_wore_before_the_shop_is_yours_to_keep() {
+        let Some((s, app, p, auth)) = setup().await else { return };
+        sqlx::query("UPDATE players SET avatar = jsonb_build_object('look', $2::bigint) WHERE id = $1")
+            .bind(p)
+            .bind(DRESS as i64)
+            .execute(&s.db)
             .await
             .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::BAD_REQUEST,
-            "nobody dresses as the Caretaker"
-        );
+        let (st, r) = call(&app, &auth, "/api/me/look", json!({ "look": PLAIN })).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(qty(&s, p, 503).await, 1, "the dress is kept");
+        let (st, _) = call(&app, &auth, "/api/me/look", json!({ "look": DRESS })).await;
+        assert_eq!(st, StatusCode::OK, "and can be worn again");
+        let (st, _) = call(&app, &auth, "/api/me/look", json!({ "look": PLAIN })).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(qty(&s, p, 503).await, 1, "kept only once");
     }
 }

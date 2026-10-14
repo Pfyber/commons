@@ -37,7 +37,6 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/auth/refresh", post(refresh))
         .route("/auth/dev-login", post(dev_login))
         .route("/me", get(me))
-        .route("/me/look", post(set_look))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -132,7 +131,7 @@ fn validate_name(raw: &str) -> ApiResult<String> {
     Ok(name)
 }
 
-async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
+pub(crate) async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
     // Trust tier and any mute come from activity and moderation (spec §10.6).
     let uid = uuid::Uuid::parse_str(&p.id).map_err(|_| ApiError::unauthorized("bad player id"))?;
     let tier = crate::gov::refresh_tier(&state.db, uid)
@@ -235,43 +234,6 @@ pub fn bearer_with(secret: &[u8], headers: &HeaderMap) -> ApiResult<AccessClaims
 }
 
 // ---- handlers -------------------------------------------------------------
-
-#[derive(Deserialize)]
-struct LookReq {
-    look: u32,
-}
-
-/// Looks reserved for non-player characters (protocol `NPC_LOOKS`).
-const NPC_LOOKS: [u32; 1] = [0xffff_fff1];
-
-/// The changing room: saves your look and returns a fresh session carrying
-/// it, so the next zone you join already shows it.
-async fn set_look(
-    State(state): S,
-    headers: HeaderMap,
-    Json(req): Json<LookReq>,
-) -> ApiResult<Json<Session>> {
-    let who = bearer(&state, &headers)?;
-    if NPC_LOOKS.contains(&req.look) {
-        return Err(ApiError::bad_request("bad_look", "That look is taken."));
-    }
-    let id = uuid::Uuid::parse_str(&who.sub)
-        .map_err(|_| ApiError::unauthorized("not a player account"))?;
-    sqlx::query(
-        "UPDATE players SET avatar = jsonb_set(COALESCE(avatar, '{}'::jsonb), '{look}', to_jsonb($2::bigint)) WHERE id = $1",
-    )
-    .bind(id)
-    .bind(req.look as i64)
-    .execute(&state.db)
-    .await
-    .map_err(db_err)?;
-    let p = state
-        .store
-        .player(&who.sub)
-        .await?
-        .ok_or_else(|| ApiError::unauthorized("no such player"))?;
-    Ok(Json(issue_session(&state, &p).await?))
-}
 
 #[derive(Deserialize)]
 struct MagicLinkReq {

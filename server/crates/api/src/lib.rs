@@ -11,6 +11,7 @@ pub mod gov;
 pub mod internal;
 pub mod mail;
 pub mod play;
+pub mod shop;
 pub mod store;
 #[cfg(test)]
 mod tests;

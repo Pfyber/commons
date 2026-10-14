@@ -38,6 +38,14 @@ export interface Destination {
   zone?: string;
   friend?: string;
   owner?: string;
+  /** Arrive in front of this map object (the door of the shop you left). */
+  arrive?: string;
+}
+
+/** A look saved by the API, and inventory totals it changed. */
+interface Worn {
+  session: Session;
+  totals: [number, number][];
 }
 
 export class ApiError extends Error {
@@ -97,9 +105,22 @@ export class Auth {
     storage()?.removeItem(REFRESH_KEY);
   }
 
-  /** Saves a new look (the changing room); the fresh session carries it. */
-  async saveLook(look: number) {
-    this.adopt(await this.send<Session>("/api/me/look", { look }));
+  /**
+   * Wears a new look made of clothes you own (a changing room); the fresh
+   * session carries it. Returns inventory totals that changed (clothes you
+   * had on before the shop opened become yours to keep).
+   */
+  async saveLook(look: number): Promise<[number, number][]> {
+    const r = await this.send<Worn>("/api/me/look", { look });
+    this.adopt(r.session);
+    return r.totals;
+  }
+
+  /** The clothes shop: buys the new clothes in `look` for `price` coins and wears it. */
+  async buyLook(look: number, price: number): Promise<[number, number][]> {
+    const r = await this.send<Worn>("/api/shop/buy", { look, price, key: crypto.randomUUID() });
+    this.adopt(r.session);
+    return r.totals;
   }
 
   /** Restores a session from the stored refresh token, if any. */
@@ -160,6 +181,6 @@ export class Auth {
   }
 
   async join(dest: Destination): Promise<JoinTicket> {
-    return post<JoinTicket>("/api/join", { zone_id: dest.zone, friend: dest.friend, owner: dest.owner }, await this.accessToken());
+    return post<JoinTicket>("/api/join", { zone_id: dest.zone, friend: dest.friend, owner: dest.owner, arrive: dest.arrive }, await this.accessToken());
   }
 }

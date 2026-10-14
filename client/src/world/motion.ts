@@ -14,6 +14,8 @@ export interface Motion {
 
 /** Walking speed in tenths of a tile per second (sim::WALK_SPEED_X10). */
 export const WALK_SPEED_X10 = 40;
+/** On a skateboard (sim::SKATE_SPEED_X10). */
+export const SKATE_SPEED_X10 = 75;
 
 const segLen = (a: TileXY, b: TileXY) => Math.hypot(b.x - a.x, b.y - a.y);
 const msPerTile = (m: Motion) => 10_000 / Math.max(1, m.speedX10);
