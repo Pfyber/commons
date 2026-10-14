@@ -326,9 +326,10 @@ export class ReelGame {
   }
 
   private pos(t: number) {
-    // Back and forth, speeding up slightly.
+    // Back and forth at a steady, gentle pace: it crosses the green three
+    // times (0 s, ~1.05 s, ~2.1 s) inside the reel window.
     const s = (t - this.start) / 1000;
-    return 0.5 + 0.5 * Math.sin(s * (5 + s * 2));
+    return 0.5 + 0.5 * Math.sin(s * 3);
   }
 
   play(windowMs: number, done: (quality: number) => void) {

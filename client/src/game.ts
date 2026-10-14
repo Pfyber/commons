@@ -641,6 +641,8 @@ export class Game {
         const a = this.avatars.get(m.id);
         if (!a) break;
         a.setState(m.state, { x: m.x, y: m.y });
+        // Walking off mid-cast ends fishing without a FishEvent.
+        if (m.state !== FISHING) this.props.reelIn(m.id);
         if (m.id === this.selfId) this.onSelfState(m.state, { x: m.x, y: m.y });
         break;
       }
@@ -1142,13 +1144,16 @@ export class Game {
     switch (m.kind) {
       case FISH.CAST:
         this.props.cast(m.id, { x: m.x, y: m.y });
+        this.avatars.get(m.id)?.castLine({ x: m.x, y: m.y }, performance.now());
         break;
       case FISH.BITE:
         this.props.bite(m.id);
+        this.avatars.get(m.id)?.bite(performance.now());
         if (isSelf) this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }));
         break;
       case FISH.CAUGHT: {
         this.props.reelIn(m.id);
+        this.avatars.get(m.id)?.reelIn(performance.now());
         if (isSelf) {
           this.ui.reel.stop();
           this.taskMaybeDone();
@@ -1158,6 +1163,7 @@ export class Game {
       }
       case FISH.ESCAPED:
         this.props.reelIn(m.id);
+        this.avatars.get(m.id)?.reelIn(performance.now());
         if (isSelf) {
           this.ui.reel.stop();
           this.hud.toast("It got away…");
@@ -1293,7 +1299,7 @@ export class Game {
       this.hud.setNearby(this.avatars.size);
     }
     this.scene.update();
-    this.props.update(wallNow);
+    this.props.update(wallNow, (id) => this.avatars.get(id)?.rodTip ?? null);
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
     this.daynight.update();
     this.milestones.update(wallNow, this.daynight.dark);

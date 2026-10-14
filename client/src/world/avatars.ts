@@ -1,7 +1,7 @@
 // Avatars: a sprite in the y-sorted layer plus DOM labels (name, chat bubble,
 // emote) positioned in screen space so text stays crisp at any zoom.
 
-import { Sprite } from "pixi.js";
+import { Graphics, Sprite } from "pixi.js";
 import type { EntityInfo } from "../net/protocol.gen";
 import { TILE, avatarTexture } from "./art";
 import { type Motion, type TileXY, headingAt, posAt } from "./motion";
@@ -22,6 +22,17 @@ const BUBBLE_MS = 6000;
 const EMOTE_MS = 2200;
 /** How long a position correction (new path starting off our drawn spot) takes to blend out. */
 const BLEND_MS = 220;
+
+/** Protocol `state::FISHING`. */
+const FISHING = 2;
+/** The rod swings out over this long when casting; the bobber lands at the end. */
+export const CAST_SWING_MS = 450;
+/** How long a bite tugs the rod tip down. */
+const BITE_TUG_MS = 2500;
+/** The flick up when reeling in, before the rod is put away. */
+const REEL_FLICK_MS = 380;
+const ROD_LEN = 18;
+const DEG = Math.PI / 180;
 
 export class Avatar {
   readonly sprite: Sprite;
@@ -44,6 +55,11 @@ export class Avatar {
   state = 0;
   /** Where we stood before sitting down; standing up returns here. */
   standTile: TileXY | null = null;
+  private rod = new Graphics();
+  private fishing: { castAt: number; biteAt: number } | null = null;
+  private reelAt = -Infinity;
+  /** World position and depth of the rod's tip once the line is out, for drawing the line. */
+  rodTip: { x: number; y: number; z: number } | null = null;
 
   constructor(
     public info: EntityInfo,
@@ -66,7 +82,7 @@ export class Avatar {
     this.stack.appendChild(this.nameEl);
     this.label.appendChild(this.stack);
     labels.appendChild(this.label);
-    scene.sorted.addChild(this.sprite);
+    scene.sorted.addChild(this.sprite, this.rod);
     this.apply(info, now);
   }
 
@@ -124,8 +140,28 @@ export class Avatar {
   setState(state: number, at: TileXY) {
     if (state === 1 && this.state !== 1) this.standTile = this.destination;
     if (state !== 1) this.standTile = null;
+    if (state !== FISHING) this.fishing = null;
     this.state = state;
     this.snap(at);
+  }
+
+  /** FishEvent CAST: face the water and swing the rod out. */
+  castLine(target: TileXY, now: number) {
+    const dx = target.x - this.destination.x;
+    if (dx !== 0) this.facing = dx > 0 ? 1 : -1;
+    this.fishing = { castAt: now, biteAt: 0 };
+    this.reelAt = -Infinity;
+  }
+
+  /** FishEvent BITE: the rod tip tugs. */
+  bite(now: number) {
+    if (this.fishing) this.fishing.biteAt = now;
+  }
+
+  /** Caught or got away: flick the rod up, then put it away. */
+  reelIn(now: number) {
+    if (this.fishing || this.state === FISHING) this.reelAt = now;
+    this.fishing = null;
   }
 
   setMotion(m: Motion, now: number) {
@@ -218,6 +254,7 @@ export class Avatar {
     this.sprite.position.set(Math.round(feetX), Math.round(feetY + bob));
     this.sprite.scale.x = this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
+    this.drawRod(feetX, feetY + bob, walking, wallNow);
 
     // DOM label above the head.
     const s = this.scene.tileToScreen(x + 0.5, y + 1 - 4 / TILE - 34 / TILE);
@@ -237,6 +274,37 @@ export class Avatar {
     }
   }
 
+  /** The rod in the front hand while fishing: cast swing, gentle sway, bite tug, reel flick. */
+  private drawRod(feetX: number, feetY: number, walking: boolean, now: number) {
+    const g = this.rod.clear();
+    this.rodTip = null;
+    const reeling = now - this.reelAt < REEL_FLICK_MS;
+    if (!reeling && (this.state !== FISHING || walking)) return;
+    // Angle above the horizontal, pointing the way we face.
+    let a: number;
+    const f = this.fishing;
+    const swing = f ? Math.min(1, (now - f.castAt) / CAST_SWING_MS) : 1;
+    if (reeling) a = 35 + 60 * Math.sin(((now - this.reelAt) / REEL_FLICK_MS) * (Math.PI / 2));
+    else if (swing < 1) a = 120 - 85 * (1 - (1 - swing) ** 3); // from over the shoulder to out front
+    else if (f && f.biteAt && now - f.biteAt < BITE_TUG_MS) a = 22 + Math.sin(now / 45) * 6;
+    else a = 35 + Math.sin(now / 800) * 2;
+
+    const s = this.facing;
+    const cos = Math.cos(a * DEG) * s;
+    const sin = Math.sin(a * DEG);
+    const hx = feetX + 7 * s; // the front hand on the 24×34 avatar
+    const hy = feetY - 12;
+    const tx = hx + cos * ROD_LEN;
+    const ty = hy - sin * ROD_LEN;
+    const bx = hx - cos * 3; // butt of the handle, behind the hand
+    const by = hy + sin * 3;
+    g.moveTo(bx, by).lineTo(tx, ty).stroke({ width: 1.5, color: 0x7a5230 });
+    g.moveTo(bx, by).lineTo(hx + cos * 3, hy - sin * 3).stroke({ width: 2.5, color: 0x3b2a1e });
+    g.rect(Math.round(hx) - 1, Math.round(hy), 2, 2).fill(0x9aa0a6); // the reel
+    this.rod.zIndex = this.sprite.zIndex + 0.1;
+    if (!reeling && swing >= 1) this.rodTip = { x: tx, y: ty, z: this.rod.zIndex };
+  }
+
   /** Screen box of the name tag (measured once), for decluttering overlapping names. */
   nameBox(): { x0: number; x1: number; y: number } {
     if (!this.nameW && !this.nameEl.hidden) this.nameW = this.nameEl.offsetWidth;
@@ -247,6 +315,7 @@ export class Avatar {
 
   destroy() {
     this.sprite.destroy();
+    this.rod.destroy();
     this.label.remove();
   }
 }
