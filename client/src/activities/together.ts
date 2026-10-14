@@ -15,6 +15,10 @@ export const TOGETHER: Record<number, { icon: string; offer: string; verb: strin
   3: { icon: "💃", offer: "Dance together", verb: "a dance", done: "dance together" },
 };
 
+/** `together::FOLLOW` / `STOP_FOLLOW`: walking after someone. */
+export const FOLLOW = 4;
+export const STOP_FOLLOW = 5;
+
 export const moodIcon = (m: number) => (m > 0 ? (MOODS.find((x) => x.id === m)?.icon ?? "") : "");
 
 /** A small card for an offer: "Ana offers a hug 🤗 [Hug back] [Not now]". */
@@ -31,14 +35,14 @@ export class OfferCard {
 
   show(name: string, kind: number, accept: () => void) {
     const t = TOGETHER[kind];
-    if (!t) return;
+    if (!t && kind !== FOLLOW) return;
     this.el.replaceChildren();
     const text = document.createElement("span");
-    text.textContent = `${t.icon} ${name} offers you ${t.verb}`;
+    text.textContent = kind === FOLLOW ? `👣 ${name} would like to follow you around` : `${t.icon} ${name} offers you ${t.verb}`;
     const yes = document.createElement("button");
     yes.type = "button";
     yes.className = "primary-sm";
-    yes.textContent = kind === 1 ? "Hug back" : kind === 2 ? "Slap it ✋" : "Dance!";
+    yes.textContent = kind === FOLLOW ? "Sure, come along" : kind === 1 ? "Hug back" : kind === 2 ? "Slap it ✋" : "Dance!";
     yes.onclick = () => {
       accept();
       this.hide();

@@ -18,6 +18,8 @@ use commons_sim::map::MapFile;
 pub(super) const OFFER_MS: u32 = 20_000;
 /// How close (tiles, Chebyshev) two people must be to do something together.
 const TOGETHER_RANGE: i32 = 2;
+/// Following works across a little more distance: anyone in sight.
+const FOLLOW_RANGE: i32 = 16;
 /// One sky lantern per person this often.
 pub(super) const LANTERN_EVERY_MS: u32 = 30_000;
 
@@ -70,11 +72,16 @@ impl Instance {
         self.broadcast(cell, &ServerMsg::MoodShown { id, mood: m }, None);
     }
 
-    fn close_enough(&self, a: u32, b: u32) -> bool {
+    fn close_enough(&self, a: u32, b: u32, kind: u8) -> bool {
+        let range = if kind >= together::FOLLOW {
+            FOLLOW_RANGE
+        } else {
+            TOGETHER_RANGE
+        };
         match (self.avatars.get(&a), self.avatars.get(&b)) {
             (Some(x), Some(y)) => {
-                (x.tile.0 as i32 - y.tile.0 as i32).abs() <= TOGETHER_RANGE
-                    && (x.tile.1 as i32 - y.tile.1 as i32).abs() <= TOGETHER_RANGE
+                (x.tile.0 as i32 - y.tile.0 as i32).abs() <= range
+                    && (x.tile.1 as i32 - y.tile.1 as i32).abs() <= range
             }
             _ => false,
         }
@@ -93,8 +100,12 @@ impl Instance {
         {
             return;
         }
-        if !self.close_enough(id, to) {
+        if !self.close_enough(id, to, kind) {
             return self.error(id, error_code::TOO_FAR, "walk a little closer");
+        }
+        if kind == together::STOP_FOLLOW {
+            // Nothing to accept: just let the other side know.
+            return self.send_to(to, &ServerMsg::Offered { from: id, kind });
         }
         self.offers.retain(|_, &mut (_, until)| until > now);
         self.offers.insert((id, to), (kind, now + OFFER_MS));
@@ -105,13 +116,14 @@ impl Instance {
         let Some((k, until)) = self.offers.remove(&(from, id)) else {
             return;
         };
-        if k != kind || until <= now || !self.close_enough(id, from) {
+        if k != kind || until <= now || !self.close_enough(id, from, kind) {
             return;
         }
         for who in [id, from] {
             if let Some(a) = self.avatars.get_mut(&who) {
                 a.interactions = (a.interactions + 1).min(super::MAX_INTERACTIONS_PER_REPORT);
-                a.sat_together = true;
+                // A hug or a dance is time together; agreeing to be followed isn't yet.
+                a.sat_together |= kind < together::FOLLOW;
             }
         }
         let cell = self.avatars[&id].cell;
@@ -316,6 +328,69 @@ mod tests {
             inst.avatars[&1].look, 0x8100_00ff,
             "nobody dresses as the Caretaker"
         );
+    }
+
+    #[test]
+    fn following_needs_a_yes_and_works_from_further_away() {
+        let mut inst = nook_instance();
+        let mut a = connect(&mut inst, 1, "a", (20, 12));
+        let mut b = connect(&mut inst, 2, "b", (20, 12));
+        place(&mut inst, 1, (2, 2));
+        place(&mut inst, 2, (12, 8)); // ten tiles away: too far for a hug
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::Offer {
+                to: 2,
+                kind: together::FOLLOW,
+            },
+        });
+        inst.flush();
+        b.pump();
+        assert!(b.log.iter().any(|m| matches!(
+            m,
+            ServerMsg::Offered {
+                from: 1,
+                kind: together::FOLLOW
+            }
+        )));
+        inst.handle(Cmd::Msg {
+            conn: 2,
+            msg: ClientMsg::Accept {
+                from: 1,
+                kind: together::FOLLOW,
+            },
+        });
+        inst.flush();
+        a.pump();
+        assert!(a.log.iter().any(|m| matches!(
+            m,
+            ServerMsg::Together {
+                a: 1,
+                b: 2,
+                kind: together::FOLLOW
+            }
+        )));
+        assert!(
+            !inst.avatars[&1].sat_together,
+            "being followed isn't sitting together"
+        );
+        // Either side can stop it; the other is told.
+        inst.handle(Cmd::Msg {
+            conn: 2,
+            msg: ClientMsg::Offer {
+                to: 1,
+                kind: together::STOP_FOLLOW,
+            },
+        });
+        inst.flush();
+        a.pump();
+        assert!(a.log.iter().any(|m| matches!(
+            m,
+            ServerMsg::Offered {
+                from: 2,
+                kind: together::STOP_FOLLOW
+            }
+        )));
     }
 
     #[test]

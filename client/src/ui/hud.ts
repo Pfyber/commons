@@ -33,6 +33,7 @@ export class Hud {
   private badgeEl!: HTMLSpanElement;
   private toastTimer = 0;
   private tasksEl: HTMLButtonElement;
+  private followEl: HTMLDivElement;
   private moodBtn!: HTMLButtonElement;
   private chatPlaceholder = "";
 
@@ -51,6 +52,7 @@ export class Hud {
         </div>
       </div>
       <button type="button" class="pill btn tasks-chip" hidden></button>
+      <div class="pill follow-chip" hidden><span></span><button type="button">Stop</button></div>
       <div class="toast" role="status" hidden></div>
       <div class="bottom">
         <div class="log" aria-live="polite"></div>
@@ -67,6 +69,7 @@ export class Hud {
     if (matchMedia("(pointer: coarse)").matches) this.input.placeholder = "Tap to chat";
     this.coinsEl = root.querySelector(".coins")!;
     this.tasksEl = root.querySelector(".tasks-chip")!;
+    this.followEl = root.querySelector(".follow-chip")!;
     this.tasksEl.onclick = () => h.onTasks();
     root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
     root.querySelector<HTMLButtonElement>(".album-btn")!.onclick = () => h.onAlbum();
@@ -156,6 +159,16 @@ export class Hud {
     if (!this.chatPlaceholder) this.chatPlaceholder = this.input.placeholder;
     this.input.placeholder = text ?? this.chatPlaceholder;
     this.input.classList.toggle("whisper", text !== null);
+  }
+
+  /** "Following Ana · Stop" (or who follows you); null hides it. */
+  setFollow(text: string | null, buttonLabel = "Stop", onButton?: () => void) {
+    this.followEl.hidden = text === null;
+    if (text === null) return;
+    this.followEl.querySelector("span")!.textContent = text;
+    const b = this.followEl.querySelector("button")!;
+    b.textContent = buttonLabel;
+    b.onclick = () => onButton?.();
   }
 
   /** The Caretaker's tasks chip under the place name; null hides it. */

@@ -2458,3 +2458,26 @@ img.px-icon,
     height: 136px;
   }
 }
+
+/* "Following Ana · Stop" under the tasks chip. */
+.follow-chip {
+  position: fixed;
+  top: max(104px, calc(env(safe-area-inset-top) + 96px));
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 4px 12px;
+  background: #efe6fb;
+}
+
+.follow-chip button {
+  border: 0;
+  padding: 4px 10px;
+  font-weight: 600;
+  font-size: 13px;
+  background: var(--paper-3);
+  box-shadow: var(--frame-thin), inset 0 calc(var(--px2) * -1) 0 0 rgba(110, 75, 48, 0.3);
+  margin: var(--px2);
+  cursor: pointer;
+}

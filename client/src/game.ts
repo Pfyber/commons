@@ -10,7 +10,7 @@ import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
 import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
-import { type MoodPicker, type OfferCard, TOGETHER } from "./activities/together";
+import { FOLLOW, type MoodPicker, type OfferCard, STOP_FOLLOW, TOGETHER } from "./activities/together";
 import type { BottlesPanel, WishPanel } from "./ui/dream";
 import type { WardrobePanel } from "./ui/wardrobe";
 import { Critters } from "./ambient/critters";
@@ -209,6 +209,11 @@ export class Game {
   private nookOf: Uint8Array;
   private nookNames: string[] = [];
   private inNook = 0;
+  /** Whom we walk after, and who walks after us. */
+  private following: number | null = null;
+  private followers = new Set<number>();
+  private followGoal = "";
+  private followCheckAt = 0;
   /** The mood we show others, kept across zones and visits. */
   private mood = loadMood();
   private ringCheckAt = 0;
@@ -379,6 +384,116 @@ export class Game {
     window.setTimeout(() => void w.load().catch(() => {}), delay);
   }
 
+  // ---- following -------------------------------------------------------------
+
+  /** Friends: start right away (their client accepts). Others: they're asked. */
+  private askToFollow(id: number, name: string, friend: boolean) {
+    this.socket?.send({ t: "Offer", to: id, kind: FOLLOW });
+    this.hud.toast(friend ? `👣 Following ${name}…` : `👣 You asked ${name} if you can follow them.`, 3000);
+  }
+
+  private followStarted(a: number, b: number) {
+    const name = (id: number) => this.avatars.get(id)?.info.name ?? "someone";
+    if (a === this.selfId) {
+      this.following = b;
+      this.followGoal = "";
+      this.hud.setFollow(`👣 Following ${name(b)}`, "Stop", () => this.stopFollowing(true));
+      this.hud.toast(`👣 You're following ${name(b)}. Walk anywhere yourself to stop.`, 4000);
+    } else if (b === this.selfId) {
+      this.followers.add(a);
+      this.showFollowers();
+      this.hud.toast(`👣 ${name(a)} is following you`, 3500);
+    }
+  }
+
+  /** The other side stopped (they let go, or stopped following us). */
+  private followEnded(from: number, name: string) {
+    if (this.following === from) {
+      this.following = null;
+      this.hud.setFollow(null);
+      this.showFollowers();
+      this.hud.toast(`👣 ${name} let you go off on your own.`, 3000);
+    }
+    if (this.followers.delete(from)) {
+      this.showFollowers();
+      this.hud.toast(`👣 ${name} stopped following you.`, 3000);
+    }
+  }
+
+  /** Stops following; `tell` lets the other person know. */
+  private stopFollowing(tell: boolean) {
+    const id = this.following;
+    if (id === null) return;
+    this.following = null;
+    this.hud.setFollow(null);
+    this.showFollowers();
+    if (tell) this.socket?.send({ t: "Offer", to: id, kind: STOP_FOLLOW });
+  }
+
+  /** "Ana follows you · Let go", when nobody's being followed by us. */
+  private showFollowers() {
+    if (this.following !== null) return;
+    const names = [...this.followers].map((id) => this.avatars.get(id)?.info.name).filter(Boolean);
+    if (!names.length) return this.hud.setFollow(null);
+    const who = names.length === 1 ? `${names[0]} is` : `${names.length} people are`;
+    this.hud.setFollow(`👣 ${who} following you`, "Let go", () => {
+      for (const id of this.followers) this.socket?.send({ t: "Offer", to: id, kind: STOP_FOLLOW });
+      this.followers.clear();
+      this.hud.setFollow(null);
+    });
+  }
+
+  /** Walks after the person we follow; sits beside them when they sit. */
+  private followStep() {
+    const self = this.self;
+    const them = this.following === null ? undefined : this.avatars.get(this.following);
+    if (!self || !them) {
+      const name = them?.info.name;
+      this.stopFollowing(false);
+      this.hud.toast(name ? `👣 You lost sight of ${name}.` : "👣 You lost sight of them.", 3000);
+      return;
+    }
+    const goal = them.destination;
+    if (them.state === SITTING && !them.moving) {
+      // Already sitting beside them: stay put.
+      if (self.state === SITTING && cheb(self.destination, goal) <= 1) return;
+      // Sit next to them if there's a free seat beside theirs.
+      const taken = new Set([...this.avatars.values()].filter((a) => a.state === SITTING).map((a) => `${a.destination.x},${a.destination.y}`));
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const seat = this.furniture.seats.get(this.furniture.idAt({ x: goal.x + dx, y: goal.y + dy }));
+        if (!seat || taken.has(`${seat.tile.x},${seat.tile.y}`) || self.state === SITTING) continue;
+        const key = `sit:${seat.id}`;
+        if (this.followGoal !== key) {
+          this.followGoal = key;
+          this.sitAt(seat.id);
+        }
+        return;
+      }
+    }
+    // Otherwise stand right beside where they're going, on the side nearest us.
+    if (cheb(self.destination, goal) <= 1 && this.followGoal !== "") return;
+    let best: TileXY | null = null;
+    let bestD = Infinity;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const t = { x: goal.x + dx, y: goal.y + dy };
+        if (!walkable(this.scene.map, t.x, t.y)) continue;
+        const d = Math.hypot(t.x - self.pos.x, t.y - self.pos.y);
+        if (d < bestD) {
+          bestD = d;
+          best = t;
+        }
+      }
+    }
+    if (!best) return;
+    const key = `${best.x},${best.y}`;
+    if (key === this.followGoal && self.moving) return;
+    if (best.x === self.destination.x && best.y === self.destination.y) return;
+    this.followGoal = key;
+    this.moveTo(best, false);
+  }
+
   // ---- being together -------------------------------------------------------
 
   /** Shows others how you'd like company (`mood::*`); remembered. */
@@ -413,6 +528,7 @@ export class Game {
   }
 
   private together(a: number, b: number, kind: number) {
+    if (kind === FOLLOW) return this.followStarted(a, b);
     const t = TOGETHER[kind];
     if (!t) return;
     const pa = this.avatars.get(a);
@@ -469,6 +585,7 @@ export class Game {
 
   private remove(id: number) {
     if (id === this.selfId) return;
+    if (this.followers.delete(id)) this.showFollowers();
     this.avatars.get(id)?.destroy();
     this.avatars.delete(id);
   }
@@ -588,6 +705,15 @@ export class Game {
       case "Offered": {
         const from = this.avatars.get(m.from);
         if (!from || this.ui.social.isBlockedName(from.info.name)) break;
+        if (m.kind === STOP_FOLLOW) {
+          this.followEnded(m.from, from.info.name);
+          break;
+        }
+        // Friends may follow you without asking.
+        if (m.kind === FOLLOW && this.ui.social.friendByName(from.info.name)) {
+          this.socket?.send({ t: "Accept", from: m.from, kind: m.kind });
+          break;
+        }
         this.ui.offer.show(from.info.name, m.kind, () => this.socket?.send({ t: "Accept", from: m.from, kind: m.kind }));
         break;
       }
@@ -739,6 +865,8 @@ export class Game {
       if (this.tapCat(e.global.x, e.global.y)) return;
       if (this.tapCaretaker(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
+      // Taking your own steps ends following someone.
+      if (this.following !== null) this.stopFollowing(true);
       if (this.tapGift(t)) return;
       if (this.tapCollect(t)) return;
       const id = this.furniture.idAt(t);
@@ -807,6 +935,9 @@ export class Game {
       const actions: [string, () => void][] = friend
         ? [["Message", () => this.ui.friends.chatWith(friend)]]
         : [["Add friend", () => void say(social.request(name))]];
+      const them = a.info.id;
+      if (this.following === them) actions.unshift(["👣 Stop following", () => this.stopFollowing(true)]);
+      else actions.unshift([friend ? "👣 Follow" : "👣 Ask to follow", () => this.askToFollow(them, name, !!friend)]);
       for (const [kind, t] of Object.entries(TOGETHER)) {
         actions.push([`${t.icon} ${t.offer}`, () => this.offer(a.info.id, Number(kind), name)]);
       }
@@ -1097,6 +1228,7 @@ export class Game {
   /** Keyboard walking: short segments ahead, re-sent while keys are held. */
   private keyboardMove(wallNow: number) {
     const self = this.self;
+    if (this.keys.size > 0 && this.following !== null) this.stopFollowing(true);
     if (!self || this.keys.size === 0) {
       // Keys released: stop at the tile we're walking into instead of
       // finishing the look-ahead segment.
@@ -1175,6 +1307,10 @@ export class Game {
       this.caretakerChat(wallNow);
     }
     this.sky.update(wallNow, this.daynight.dark > 0.5);
+    if (this.following !== null && wallNow > this.followCheckAt) {
+      this.followCheckAt = wallNow + 350;
+      this.followStep();
+    }
     if (this.campfire) {
       const at = this.campfire.at;
       this.campfire.update(wallNow, !!self && self.state === SITTING && Math.hypot(self.pos.x - at.x, self.pos.y - at.y) <= 3);
@@ -1218,6 +1354,7 @@ export class Game {
     this.campfire?.destroy();
     this.sky.destroy();
     this.ui.offer.hide();
+    this.hud.setFollow(null);
     document.body.classList.remove("in-nook");
     this.hud.setChatHint(null);
     for (const p of [this.ui.bottles, this.ui.wish]) p.hide();

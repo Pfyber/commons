@@ -192,7 +192,11 @@ pub mod together {
     pub const HUG: u8 = 1;
     pub const HIGH_FIVE: u8 = 2;
     pub const DANCE: u8 = 3;
-    pub const MAX: u8 = DANCE;
+    /// Walk after someone wherever they go (friends accept on their own).
+    pub const FOLLOW: u8 = 4;
+    /// Either side ends a follow; just a notice, nothing to accept.
+    pub const STOP_FOLLOW: u8 = 5;
+    pub const MAX: u8 = STOP_FOLLOW;
 }
 
 /// Codes for `Error`.
