@@ -498,6 +498,24 @@ talk, and moments everyone shares.
 
 See docs/adr/0009-a-dreamier-park.md.
 
+## City C0 · Foundations: done (2026-10-15)
+
+The world becomes a 7 × 7 city of 48-tile blocks (ADR 0010). C0 lays the
+ground without changing the game:
+
+- `assets/city/city.json`: geometry (48-tile blocks, 4-tile streets,
+  13-tile cells; 368 × 368 tiles) and the block grid (Market at the centre,
+  Park north, Pond south, Casino east, 24 home blocks around the edge).
+- `assets/city/block_types.json`: the catalog, with the future block types
+  listed but disabled.
+- `sim::city` and `client/src/world/city.ts`: global ↔ block-local tiles,
+  streets, which zone owns each tile (streets split down the middle), the
+  zones near a point; tests on both sides check they agree and that every
+  tile has exactly one owner.
+
+Next: C1, the whole city as one zone with the client streaming nearby
+blocks.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

@@ -1,0 +1,24 @@
+{
+  "name": "Commons",
+  "block_tiles": 48,
+  "street_tiles": 4,
+  "cell_tiles": 13,
+  "spawn_block": [3, 3],
+  "blocks": [
+    ["home", "home",      "home",      "home",       "home",     "home",     "home"],
+    ["home", "orchard",   "club_hall", "theater",    "club_lot", "woods",    "home"],
+    ["home", "club_lot",  "museum",    "park",       "cafe",     "club_lot", "home"],
+    ["home", "gallery",   "library",   "market",     "cinema",   "casino",   "home"],
+    ["home", "club_lot",  "town_hall", "pond",       "arcade",   "club_lot", "home"],
+    ["home", "meadow",    "club_lot",  "fairground", "club_lot", "lake",     "home"],
+    ["home", "home",      "home",      "home",       "home",     "home",     "home"]
+  ],
+  "tram": {
+    "ring": 2,
+    "stops": ["nw", "n", "ne", "e", "se", "s", "sw", "w"]
+  },
+  "metro": [
+    { "name": "North–South line", "axis": "ns" },
+    { "name": "East–West line", "axis": "ew" }
+  ]
+}

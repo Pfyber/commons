@@ -1,0 +1,44 @@
+{
+  "_comment": "The catalog of block types. A block in city.json names one of these. `enabled: false` types are the future catalog: players may vote one in to replace an existing block later. `rentable` lists the plot kinds a block of this type offers; `instanced` blocks get parallel instances when crowded.",
+  "types": [
+    { "key": "market", "name": "Market", "category": "market", "enabled": true, "swappable": false, "rentable": ["stall", "apartment"], "instanced": true },
+
+    { "key": "park", "name": "Park", "category": "nature", "enabled": true, "swappable": false, "rentable": [], "instanced": false },
+    { "key": "pond", "name": "Pond", "category": "nature", "enabled": true, "swappable": false, "rentable": [], "instanced": false },
+    { "key": "museum", "name": "Museum", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "cafe", "name": "Café", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "library", "name": "Library", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "cinema", "name": "Cinema", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "town_hall", "name": "Town Hall", "category": "landmark", "enabled": true, "swappable": false, "rentable": [], "instanced": false },
+    { "key": "arcade", "name": "Arcade", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+
+    { "key": "orchard", "name": "Orchard & Greenhouse", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "woods", "name": "Woods", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "meadow", "name": "Meadow", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "lake", "name": "Lake", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "theater", "name": "Theater", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": true },
+    { "key": "fairground", "name": "Fairground", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": true },
+    { "key": "gallery", "name": "Gallery", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "casino", "name": "Casino", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "club_hall", "name": "Club Hall", "category": "club", "enabled": true, "swappable": false, "rentable": ["club_room"], "instanced": false },
+    { "key": "club_lot", "name": "Club lot", "category": "club", "enabled": true, "swappable": false, "rentable": ["club_lot"], "instanced": false },
+
+    { "key": "home", "name": "Homes", "category": "home", "enabled": true, "swappable": false, "rentable": ["home"], "instanced": false },
+
+    { "key": "karaoke_bar", "name": "Karaoke bar", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "dance_club", "name": "Dance club", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": true },
+    { "key": "bowling_alley", "name": "Bowling alley", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "sports_field", "name": "Sports field", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "mini_golf", "name": "Mini golf", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "disc_golf", "name": "Disc golf course", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "beach_pool", "name": "Beach & pool", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "hot_spring", "name": "Hot spring", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "ice_rink", "name": "Ice rink (seasonal)", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "haunted_house", "name": "Haunted house (seasonal)", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "cooking_school", "name": "Cooking school", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "photo_booth", "name": "Photo booth", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "observatory", "name": "Observatory", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "pet_shelter", "name": "Pet shelter", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "escape_room", "name": "Player-designed escape room", "category": "future", "enabled": false, "swappable": true, "rentable": [], "instanced": false }
+  ]
+}
