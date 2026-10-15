@@ -84,8 +84,8 @@ export interface Gathering {
   key: string;
   title: string;
   where: string;
-  /** Map tile to gather at. */
-  at: { x: number; y: number };
+  /** The map spot to gather at. */
+  spot: string;
   /** UTC day of the week (0 = Sunday), or null for every day. */
   weekday: number | null;
   /** Start, UTC. */
@@ -95,10 +95,10 @@ export interface Gathering {
 }
 
 export const GATHERINGS: Gathering[] = [
-  { key: "evening", title: "Evening at the fountain", where: "the fountain", at: { x: 48, y: 51 }, weekday: null, hour: 18, minute: 0, minutes: 60 },
-  { key: "chess", title: "Chess night", where: "the chess tables", at: { x: 60, y: 44 }, weekday: 4, hour: 18, minute: 30, minutes: 90 },
-  { key: "campfire", title: "Campfire stories", where: "the campfire on the west field", at: { x: 7, y: 43 }, weekday: null, hour: 20, minute: 0, minutes: 60 },
-  { key: "stars", title: "Stargazing", where: "the picnic lawn", at: { x: 46, y: 88 }, weekday: 6, hour: 20, minute: 30, minutes: 90 },
+  { key: "evening", title: "Evening at the fountain", where: "the fountain in the Market", spot: "fountain", weekday: null, hour: 18, minute: 0, minutes: 60 },
+  { key: "chess", title: "Chess night", where: "the chess tables in the Park", spot: "chess", weekday: 4, hour: 18, minute: 30, minutes: 90 },
+  { key: "campfire", title: "Campfire stories", where: "the campfire by the Lake", spot: "campfire", weekday: null, hour: 20, minute: 0, minutes: 60 },
+  { key: "stars", title: "Stargazing", where: "the picnic lawn in the Meadow", spot: "picnic", weekday: 6, hour: 20, minute: 30, minutes: 90 },
 ];
 
 const DAY = 86_400_000;

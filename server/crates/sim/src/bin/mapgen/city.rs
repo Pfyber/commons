@@ -1,10 +1,14 @@
-//! The city map (ADR 0010, step C1): the whole grid from `assets/city/` as
-//! one zone. Streets run between and around the blocks; every block gets a
-//! simple layout for its type and a sign. Today's content still lives in
-//! Founders' Park, reached through the gate in the Park block, until C2
-//! moves it into its blocks.
+//! The city map (ADR 0010): the whole grid from `assets/city/` as one zone.
+//! Streets run between and around the blocks; every block gets a layout for
+//! its type and a sign. Since C2 the founding park's content lives in its
+//! blocks: the fountain in the Market, the grove and chess in the Park, the
+//! pier at the Pond, the island and campfire at the Lake, and so on.
+//!
+//! Invisible `spot` objects name places the client walks people to (the
+//! Caretaker's rounds, "Show me", gatherings), so no coordinates live in
+//! client code.
 
-use super::{Brush, Builder, g, hash, noise};
+use super::{Brush, Builder, g, hash, maze, noise, nook};
 use commons_sim::city::{BlockId, City};
 use commons_sim::map::{MapFile, StreetGrid};
 use std::collections::VecDeque;
@@ -37,6 +41,24 @@ impl Blk<'_> {
         let label = (!label.is_empty()).then_some(label);
         self.b
             .object(kind, self.ox + x, self.oy + y, w, h, label, true);
+    }
+    /// An object nothing collides with (spots, nooks, grove slots).
+    fn marker(&mut self, kind: &str, x: u16, y: u16, w: u16, h: u16, label: Option<&str>) {
+        self.b
+            .object(kind, self.ox + x, self.oy + y, w, h, label, false);
+    }
+    /// A named place the client can walk people to.
+    fn spot(&mut self, key: &str, x: u16, y: u16) {
+        self.marker("spot", x, y, 1, 1, Some(key));
+    }
+    /// Clears decor from a rectangle and lays `ground` on it.
+    fn clear(&mut self, x: u16, y: u16, w: u16, h: u16, ground: &str) {
+        for yy in y..y + h {
+            for xx in x..x + w {
+                self.decor(xx, yy, "none");
+            }
+        }
+        self.rect(x, y, w, h, ground);
     }
     fn free(&self, x: u16, y: u16) -> bool {
         self.b.free(self.ox + x, self.oy + y)
@@ -143,6 +165,7 @@ pub fn city() -> MapFile {
             "meadow" => meadow(&mut k),
             "club_lot" => club_lot(&mut k),
             "home" => homes(&mut k),
+            "fairground" => fairground(&mut k),
             _ => landmark(&mut k, &t.key, &t.name),
         }
         // Every block names itself on its south sidewalk.
@@ -150,7 +173,7 @@ pub fn city() -> MapFile {
     }
 
     let spawn = geo.block_origin(city.spawn_block);
-    let spawn = (spawn.x + 24, spawn.y + 26);
+    let spawn = (spawn.x + 24, spawn.y + 28);
     let map = b.finish(&city.name, spawn);
     check_reachable(&map, &city);
     map
@@ -173,27 +196,44 @@ fn sidewalk(k: &mut Blk) {
     }
 }
 
-/// The Market, where everyone arrives: stalls, the tailor, benches.
+/// The Market, where everyone arrives: the town square with the fountain
+/// (the town's goal), the boards, stalls, the tailor and benches.
 fn market(k: &mut Blk) {
     k.rect(2, 2, N - 4, N - 4, "plaza");
     for (x, y) in [(4, 4), (38, 4), (4, 38), (38, 38)] {
         k.rect(x, y, 6, 6, "flowers");
         k.decor(x + 2, y + 2, "tree");
     }
+    // The fountain in a ring of flowerbeds.
+    for y in 17..32u16 {
+        for x in 17..32u16 {
+            let (dx, dy) = (x as i32 - 24, y as i32 - 24);
+            let r2 = dx * dx + dy * dy;
+            if (30..=42).contains(&r2) && dx.abs() > 1 && dy.abs() > 1 {
+                k.ground(x, y, "flowers");
+            }
+        }
+    }
+    k.object("fountain", 23, 23, 3, 3, "");
+    for (x, y) in [(19, 20), (28, 20), (19, 28), (28, 28)] {
+        k.bench(x, y, 2);
+    }
+    k.object("story_board", 19, 32, 2, 1, "Story of the Town");
+    k.object("notice_board", 27, 32, 2, 1, "Notice Board");
+    k.spot("fountain", 24, 27);
     for (x, y) in [(12, 13), (34, 13), (12, 34), (34, 34)] {
         k.object("market_cart", x, y, 2, 1, "Market");
     }
-    k.object("tailor", 35, 22, 3, 2, "Tailor");
+    k.object("tailor", 37, 22, 3, 2, "Tailor");
+    k.object("homes_gate", 3, 21, 2, 5, "Homes");
     k.object(
         "signpost",
         23,
-        22,
+        35,
         1,
         1,
-        "Welcome to Commons! North: the Park and the gate to Founders' Park · South: the Pond · West: the Library · East: the Cinema and the Casino",
+        "Welcome to Commons! North: the Park with the Founders' Grove and chess · South: the Pond and its pier · West: the Library and the Town Hall · East: the Cinema and the Casino",
     );
-    k.bench(14, 29, 3);
-    k.bench(31, 29, 3);
     k.bench(14, 18, 3);
     for (x, y) in [(10, 10), (37, 10), (10, 37), (37, 37)] {
         k.decor(x, y, "lamp");
@@ -214,7 +254,8 @@ fn market(k: &mut Blk) {
     }
 }
 
-/// The Park: crossing paths, trees, and the gate to Founders' Park.
+/// The Park: chess tables, the Founders' Grove with its stone, the Old Oak
+/// with a swing and the wishing well, on crossing paths.
 fn park(k: &mut Blk) {
     k.lawn();
     k.rect(22, 2, 4, N - 4, "path");
@@ -227,20 +268,58 @@ fn park(k: &mut Blk) {
             }
         }
     }
-    k.object("park_gate", 23, 20, 3, 1, "Founders' Park");
-    k.object(
-        "signpost",
-        27,
-        21,
-        1,
-        1,
-        "Through the gate: Founders' Park, with the pond, the garden, the Town Hall, the grove and its secret corners",
+    // Chess under the trees (north-west), benches either side of each table.
+    k.rect(5, 5, 14, 14, "plaza");
+    for (tx, ty) in [(8u16, 8u16), (14, 8), (8, 14), (14, 14)] {
+        k.decor(tx, ty, "chess_table");
+        k.decor(tx - 1, ty, "bench");
+        k.decor(tx + 1, ty, "bench");
+    }
+    k.rect(11, 19, 2, 3, "path");
+    k.spot("chess", 11, 17);
+    // The Old Oak and its swing, and the wishing well (south-west).
+    k.object("old_oak", 8, 30, 3, 3, "The Old Oak");
+    k.decor(10, 34, "swing");
+    k.spot("oak", 12, 33);
+    k.object("well", 15, 38, 2, 2, "Wishing Well");
+    k.spot("well", 16, 41);
+    k.bench(4, 38, 2);
+    // The Founders' Grove (spec §11): a stone with every founder's name,
+    // seedlings filling out from it across the north-east and south-east.
+    let stone = (35u16, 19u16);
+    k.object("founders_stone", stone.0, stone.1, 2, 1, "Founders' Stone");
+    k.spot("grove", 36, 21);
+    let mut slots = vec![];
+    for (x0, y0, x1, y1) in [(27u16, 3u16, 45u16, 17u16), (27, 27, 45, 44)] {
+        for (r, y) in (y0 + 1..=y1).step_by(2).enumerate() {
+            for x in (x0 + 1 + (r % 2) as u16..=x1).step_by(2) {
+                if k.free(x, y) {
+                    slots.push((x, y));
+                }
+            }
+        }
+    }
+    let d2 = |&(x, y): &(u16, u16)| {
+        let (dx, dy) = (
+            x as i32 * 2 - (stone.0 as i32 * 2 + 1),
+            y as i32 - stone.1 as i32,
+        );
+        (dx * dx + dy * dy * 4, y, x)
+    };
+    slots.sort_by_key(d2);
+    assert!(
+        slots.len() >= commons_sim::GROVE_SLOTS,
+        "only {} grove slots",
+        slots.len()
     );
-    for x in [7, 35] {
-        k.bench(x, 21, 3);
+    for &(x, y) in &slots[..commons_sim::GROVE_SLOTS] {
+        k.marker("grove_slot", x, y, 1, 1, None);
+    }
+    for x in [5, 37] {
         k.bench(x, 26, 3);
     }
-    k.scatter(3, 3, N - 3, N - 3, 9, &["tree", "tree", "bush", "pine"]);
+    k.scatter(3, 27, 21, N - 3, 7, &["tree", "tree", "bush", "pine"]);
+    k.scatter(19, 3, 21, 21, 5, &["tree", "bush"]);
 }
 
 /// Water inside an ellipse, with a sandy shore.
@@ -258,10 +337,28 @@ fn water(k: &mut Blk, cx: f32, cy: f32, rx: f32, ry: f32) {
     }
 }
 
+/// Reeds on the shore and lily pads out on the water.
+fn reeds(k: &mut Blk) {
+    for y in 3..N - 3 {
+        for x in 3..N - 3 {
+            if k.ground_at(x, y) == g("water") && k.hash(x, y, 3).is_multiple_of(11) {
+                let edge = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                    .iter()
+                    .any(|&(a, c)| k.ground_at(a, c) != g("water"));
+                if edge {
+                    k.decor(x, y, "reeds");
+                } else if k.hash(x, y, 4).is_multiple_of(3) {
+                    k.decor(x, y, "lilypad");
+                }
+            }
+        }
+    }
+}
+
+/// The Pond: a path all the way round, the fishing pier and the bottles.
 fn pond(k: &mut Blk) {
     k.lawn();
     water(k, 24.0, 23.0, 13.0, 10.0);
-    // A path all the way round.
     for y in 2..N - 2 {
         for x in 2..N - 2 {
             let (dx, dy) = (
@@ -275,44 +372,73 @@ fn pond(k: &mut Blk) {
         }
     }
     k.rect(22, 38, 4, 8, "path");
-    for y in 2..N - 2 {
-        for x in 2..N - 2 {
-            if k.ground_at(x, y) == g("water") && k.hash(x, y, 3).is_multiple_of(11) {
-                let edge = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-                    .iter()
-                    .any(|&(a, c)| k.ground_at(a, c) != g("water"));
-                if edge {
-                    k.decor(x, y, "reeds");
-                } else if k.hash(x, y, 4).is_multiple_of(3) {
-                    k.decor(x, y, "lilypad");
-                }
-            }
-        }
-    }
+    reeds(k);
+    // The pier reaches into the pond from the south path.
+    k.clear(23, 27, 2, 9, "bridge");
+    k.spot("pier", 24, 30);
+    k.object("bottles", 27, 37, 1, 1, "Messages in bottles");
     k.bench(5, 22, 3);
     k.bench(40, 22, 3);
     k.scatter(3, 3, N - 3, N - 3, 13, &["tree", "bush", "willow"]);
 }
 
+/// The Lake: the Little Island across stepping stones from the pier, and
+/// the campfire circle on the south-west shore.
 fn lake(k: &mut Blk) {
     k.lawn();
     water(k, 24.0, 22.0, 19.0, 16.0);
-    // A little island and a pier out from the south shore.
-    for y in 14..21u16 {
-        for x in 28..35u16 {
-            let (dx, dy) = (x as i32 - 31, y as i32 - 17);
-            if dx * dx + dy * dy <= 6 {
-                k.ground(x, y, "grass");
+    reeds(k);
+    k.scatter(3, 3, N - 3, N - 3, 11, &["pine", "tree", "bush"]);
+    // The Little Island: chat there stays there.
+    let mut inside = vec![];
+    for y in 10..21u16 {
+        for x in 25..38u16 {
+            let (dx, dy) = ((x as f32 + 0.5 - 31.5) / 4.0, (y as f32 + 0.5 - 15.5) / 2.8);
+            let e = dx * dx + dy * dy;
+            if e <= 1.0 {
+                k.ground(x, y, if e < 0.55 { "grass" } else { "sand" });
+                k.decor(x, y, "none");
+                inside.push((k.ox + x, k.oy + y));
             }
         }
     }
-    k.decor(31, 17, "willow");
-    k.rect(23, 30, 2, 14, "bridge");
+    k.bench(30, 14, 2);
+    k.decor(34, 15, "lantern");
+    k.decor(32, 17, "willow");
+    nook(k.b, &inside, "The Little Island");
+    k.spot("island", 30, 16);
+    // The pier, and stepping stones on from its end to the island.
+    k.clear(23, 30, 2, 14, "bridge");
     k.rect(22, 44, 4, 2, "path");
-    k.scatter(3, 3, N - 3, N - 3, 11, &["pine", "tree", "bush"]);
+    let mut y = 29;
+    while k.ground_at(24, y) == g("water") && y > 15 {
+        k.clear(24, y, 1, 1, "stones");
+        y -= 1;
+    }
+    let mut x = 24;
+    while k.ground_at(x, 15) != g("grass") && k.ground_at(x, 15) != g("sand") && x < 30 {
+        k.clear(x, 15, 1, 1, "stones");
+        x += 1;
+    }
+    // The campfire: logs to sit on, and a question to talk about.
+    let (fx, fy) = (9u16, 41u16);
+    k.clear(fx - 2, fy - 2, 5, 5, "sand");
+    k.object("campfire", fx, fy, 1, 1, "Campfire");
+    for (x, y) in [
+        (fx - 2, fy - 1),
+        (fx - 2, fy + 1),
+        (fx + 2, fy - 1),
+        (fx + 2, fy + 1),
+        (fx, fy - 2),
+        (fx, fy + 2),
+    ] {
+        k.decor(x, y, "log_seat");
+    }
+    k.clear(fx + 3, fy, 9, 1, "path");
+    k.spot("campfire", fx + 3, fy + 1);
 }
 
-/// Orchard rows and the greenhouse.
+/// The Orchard & Greenhouse, with the Community Garden's soil rows.
 fn orchard(k: &mut Blk) {
     k.lawn();
     k.rect(22, 2, 4, N - 4, "path");
@@ -333,11 +459,23 @@ fn orchard(k: &mut Blk) {
             }
         }
     }
+    k.rect(26, 22, 3, 2, "path");
+    k.object("garden_sign", 29, 21, 1, 1, "Community Garden");
+    k.spot("garden", 30, 23);
     k.bench(32, 20, 3);
 }
 
+/// The Woods: winding paths through pines, the Moss Grotto behind a pine
+/// that isn't one, a fairy ring, a tiny door and the hedge maze.
 fn woods(k: &mut Blk) {
     k.lawn();
+    // A brook from a spring in the east, out under the south pavement.
+    let (ox, oy) = (k.ox as f32, k.oy as f32);
+    let brook: Vec<(f32, f32)> = [(44.0, 30.0), (39.0, 35.0), (35.0, 41.0), (32.0, 46.0)]
+        .iter()
+        .map(|&(x, y)| (ox + x, oy + y))
+        .collect();
+    k.b.stroke(&brook, 0.9, Brush::Water);
     k.path(
         &[(2.0, 24.0), (14.0, 16.0), (28.0, 30.0), (46.0, 22.0)],
         1.2,
@@ -354,8 +492,83 @@ fn woods(k: &mut Blk) {
             }
         }
     }
+    // The hedge maze (north-east), with a nook at its heart.
+    let (mx, my) = (k.ox + 29, k.oy + 4);
+    let (mw, mh) = maze(k.b, mx, my, 7, 5, 4242);
+    let (hx, hy) = (mx + mw / 2, my + mh / 2);
+    k.b.object(
+        "maze_heart",
+        hx,
+        hy,
+        1,
+        1,
+        Some("The heart of the maze"),
+        true,
+    );
+    k.b.object(
+        "nook",
+        hx - 1,
+        hy - 1,
+        3,
+        3,
+        Some("The Heart of the Maze"),
+        false,
+    );
+    k.path(&[(36.5, 15.5), (37.0, 20.0), (37.5, 25.5)], 0.8);
+    // The Moss Grotto (west): a ring of pines; the middle one on its west
+    // side lets you through.
+    let mut inside = vec![];
+    for y in 29..=37u16 {
+        for x in 6..=12u16 {
+            if (7..=11).contains(&x) && (30..=36).contains(&y) {
+                k.ground(x, y, "grass_dark");
+                k.decor(x, y, "none");
+                inside.push((k.ox + x, k.oy + y));
+            } else {
+                k.decor(x, y, "pine");
+            }
+        }
+    }
+    k.decor(6, 33, "pine_secret");
+    k.clear(4, 33, 2, 1, "grass_dark");
+    k.path(&[(4.5, 33.5), (3.5, 29.0), (3.5, 25.0)], 0.6);
+    k.decor(9, 31, "log_seat");
+    k.decor(10, 31, "log_seat");
+    k.decor(8, 31, "lantern");
+    for (x, y) in [(8u16, 34u16), (10, 35), (8, 35), (11, 33)] {
+        k.decor(x, y, "mushrooms");
+    }
+    nook(k.b, &inside, "The Moss Grotto");
+    // A fairy ring in a little clearing (south), found by walking into it.
+    let (rx, ry) = (15u16, 41u16);
+    k.clear(rx - 3, ry - 3, 7, 7, "grass");
+    for (dx, dy) in [
+        (-2i32, 0i32),
+        (2, 0),
+        (0, -2),
+        (0, 2),
+        (-1, -2),
+        (1, -2),
+        (-2, 1),
+        (2, 1),
+        (-1, 2),
+        (1, 2),
+    ] {
+        k.decor(
+            (rx as i32 + dx) as u16,
+            (ry as i32 + dy) as u16,
+            "mushrooms",
+        );
+    }
+    k.path(&[(18.5, 41.5), (24.5, 41.5)], 0.6);
+    k.spot("fairy_ring", rx, ry);
+    // A tiny door in an old tree by the path.
+    k.clear(8, 17, 1, 2, "grass_dark");
+    k.object("tiny_door", 8, 17, 1, 1, "A tiny door");
 }
 
+/// The Meadow: wildflowers, the Willow Hideaway, and the picnic lawn where
+/// wish lanterns go up.
 fn meadow(k: &mut Blk) {
     k.lawn();
     for y in 2..N - 2 {
@@ -370,11 +583,7 @@ fn meadow(k: &mut Blk) {
         &[(2.0, 30.0), (18.0, 22.0), (32.0, 26.0), (46.0, 16.0)],
         1.0,
     );
-    for (x, y) in [(12, 12), (34, 34), (30, 10)] {
-        for i in 0..2 {
-            k.decor(x + i, y, "blanket");
-        }
-    }
+    k.path(&[(34.0, 26.0), (34.5, 36.0), (34.0, 46.0)], 1.0);
     for y in 3..N - 3 {
         for x in 3..N - 3 {
             if k.free(x, y) && k.hash(x, y, 5).is_multiple_of(7) {
@@ -383,6 +592,63 @@ fn meadow(k: &mut Blk) {
         }
     }
     k.scatter(3, 3, N - 3, N - 3, 41, &["tree"]);
+    // The Willow Hideaway: a ring of weeping willows; one curtain of
+    // branches on the east side parts as you walk through.
+    let (hx, hy, hrx, hry) = (11.0f32, 12.0f32, 4.6f32, 3.4f32);
+    let mut inside = vec![];
+    for y in 6..19u16 {
+        for x in 3..21u16 {
+            let (dx, dy) = ((x as f32 - hx) / hrx, (y as f32 - hy) / hry);
+            let e = dx * dx + dy * dy;
+            if e < 1.0 {
+                k.ground(x, y, "flowers");
+                k.decor(x, y, "none");
+                inside.push((k.ox + x, k.oy + y));
+            } else if e < 1.9 {
+                k.ground(x, y, "grass_dark");
+                k.decor(x, y, "willow");
+            }
+        }
+    }
+    let gap = (hx + hrx).ceil() as u16;
+    k.clear(gap, hy as u16, 2, 1, "flowers");
+    k.decor(gap, hy as u16, "willow_curtain");
+    k.decor(gap + 1, hy as u16, "willow_curtain");
+    k.clear(gap + 2, hy as u16, 3, 1, "grass");
+    k.decor(10, 10, "bench");
+    k.decor(11, 10, "bench");
+    k.decor(13, 10, "lantern");
+    nook(k.b, &inside, "The Willow Hideaway");
+    // The picnic lawn and the wish lanterns.
+    k.clear(26, 29, 16, 10, "grass");
+    for (x, y) in [(27u16, 31u16), (31, 34), (38, 31), (37, 36)] {
+        k.decor(x, y, "blanket");
+        k.decor(x + 1, y, "blanket");
+    }
+    k.rect(34, 29, 1, 10, "path");
+    k.object("lantern_stand", 35, 30, 1, 1, "Wish lanterns");
+    k.spot("picnic", 33, 33);
+}
+
+/// The Fairground: the bandstand stage for jams, and the sports pitch.
+fn fairground(k: &mut Blk) {
+    k.lawn();
+    k.rect(8, 5, 32, 13, "pitch");
+    k.object("goal", 8, 10, 1, 3, "");
+    k.object("goal", 39, 10, 1, 3, "");
+    k.spot("pitch", 24, 19);
+    k.rect(22, 18, 4, 6, "path");
+    k.rect(12, 24, 24, 12, "plaza");
+    k.object("bandstand", 21, 25, 5, 3, "");
+    k.bench(15, 31, 4);
+    k.bench(29, 31, 4);
+    k.spot("stage", 23, 30);
+    k.rect(22, 36, 4, 10, "path");
+    for (x, y) in [(12, 24), (35, 24), (12, 35), (35, 35)] {
+        k.decor(x, y, "lamp");
+    }
+    k.scatter(3, 20, 11, N - 3, 6, &["tree", "bush"]);
+    k.scatter(37, 20, N - 3, N - 3, 6, &["tree", "bush"]);
 }
 
 /// A fenced lot waiting for a club.
@@ -465,6 +731,8 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
     }
     let sign = match key {
         "town_hall" => "Town Hall: the town's votes and proposals".to_string(),
+        "gallery" => "Gallery: paint on the easels outside; the gallery opens soon".to_string(),
+        "cinema" => "Cinema: the big screen plays outside; the cinema opens soon".to_string(),
         "arcade" => "Arcade: word games inside, more soon".to_string(),
         "casino" => "Casino: opening soon. Play money only, never real money".to_string(),
         "club_hall" => "Club Hall: rooms for clubs, opening soon".to_string(),
@@ -474,12 +742,26 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
     if key == "arcade" {
         k.object("arcade", 27, 19, 3, 1, "");
     }
+    if key == "gallery" {
+        k.object("easels", 26, 21, 3, 1, "");
+        k.spot("easels", 27, 23);
+    }
     k.bench(13, 26, 3);
     k.bench(32, 26, 3);
     for (x, y) in [(10, 18), (37, 18), (10, 29), (37, 29)] {
         k.decor(x, y, "lamp");
     }
     k.scatter(3, 3, N - 3, N - 3, 10, &["tree", "bush", "tree"]);
+    if key == "cinema" {
+        // The outdoor big screen, with a lawn and blankets in front of it.
+        k.clear(14, 36, 20, 10, "grass");
+        k.object("big_screen", 17, 37, 13, 3, "Big Screen");
+        for (x, y) in [(18u16, 42u16), (23, 43), (28, 42)] {
+            k.decor(x, y, "blanket");
+            k.decor(x + 1, y, "blanket");
+        }
+        k.spot("screen", 24, 41);
+    }
 }
 
 /// Nearly every walkable tile can be reached from the spawn, and each
@@ -513,5 +795,22 @@ fn check_reachable(map: &MapFile, city: &City) {
             .filter(|&(x, y)| seen[y as usize * w + x as usize])
             .count();
         assert!(inside > 200, "block ({bx},{by}) is closed off");
+    }
+    let near = |x: u16, y: u16, r: u16| {
+        (y.saturating_sub(r)..=y + r)
+            .any(|yy| (x.saturating_sub(r)..=x + r).any(|xx| seen[yy as usize * w + xx as usize]))
+    };
+    for o in &map.objects {
+        let ok = match o.kind.as_str() {
+            "spot" | "grove_slot" => near(o.x, o.y, if o.kind == "spot" { 0 } else { 1 }),
+            "nook" => (o.y..o.y + o.h)
+                .any(|y| (o.x..o.x + o.w).any(|x| seen[y as usize * w + x as usize])),
+            _ => continue,
+        };
+        assert!(
+            ok,
+            "{} {:?} at ({}, {}) can't be reached",
+            o.kind, o.label, o.x, o.y
+        );
     }
 }

@@ -1,10 +1,10 @@
-// What reached town goals change in the founders' park: lanterns around the
-// fountain, wildflowers along the paths, fireworks over the pond at night.
+// What reached town goals change in the city: lanterns around the Market's
+// fountain, wildflowers along the Meadow's paths, fireworks over the Pond.
 // Purely visual and the same for everyone (the goals are town-wide).
 
 import { type Container, Graphics, Sprite } from "pixi.js";
 import { TILE, decorTexture, hash } from "./art";
-import { type ZoneMap, groundAt } from "./map";
+import { type ZoneMap, groundAt, spot } from "./map";
 import type { Scene } from "./scene";
 
 const BURST_EVERY_MS = 2600;
@@ -36,20 +36,8 @@ export class Milestones {
     // Fireworks draw above the night shade (they're lights), following the
     // world's camera transform.
     overlay.addChild(this.sky);
-    // The pond: the middle of the biggest patch of water west of the plaza.
-    let sx = 0;
-    let sy = 0;
-    let n = 0;
-    for (let y = 0; y < map.height; y++) {
-      for (let x = 0; x < Math.min(map.width, 44); x++) {
-        if (groundAt(map, x, y) === "water") {
-          sx += x;
-          sy += y;
-          n++;
-        }
-      }
-    }
-    if (n) this.pond = { x: sx / n, y: sy / n };
+    // Fireworks go up over the Pond, where the pier is.
+    this.pond = spot(map, "pier");
   }
 
   /** Shows everything for the goals reached so far (idempotent). */
@@ -87,10 +75,13 @@ export class Milestones {
     }
   }
 
+  /** Wildflowers along the paths of the Meadow, around the picnic lawn. */
   private meadow() {
     const m = this.map;
-    for (let y = 1; y < m.height - 1; y++) {
-      for (let x = 1; x < m.width - 1; x++) {
+    const c = spot(m, "picnic");
+    if (!c) return;
+    for (let y = Math.max(1, c.y - 30); y < Math.min(m.height - 1, c.y + 14); y++) {
+      for (let x = Math.max(1, c.x - 32); x < Math.min(m.width - 1, c.x + 14); x++) {
         const g = groundAt(m, x, y);
         if (g !== "grass" && g !== "grass_dark") continue;
         if (m.decor_legend[m.decor[y * m.width + x]] !== "none") continue;

@@ -7,26 +7,16 @@
 
 import { Container, Graphics } from "pixi.js";
 import { TILE, hash } from "../world/art";
-import { type ZoneMap, walkable } from "../world/map";
+import { type ZoneMap, spot, walkable } from "../world/map";
 import { type Motion, type TileXY, headingAt, posAt } from "../world/motion";
-import { compress, findPath } from "../world/path";
+import { compress, route } from "../world/path";
 
 const LEG_MS = 80_000;
 /** Cats amble: 1.6 tiles per second. */
 const SPEED_X10 = 16;
 
 /** Biscuit's favourite places (adjusted to the nearest walkable tile). */
-const FAVOURITES: TileXY[] = [
-  { x: 45, y: 53 }, // by the plaza benches
-  { x: 13, y: 65 }, // under the Old Oak
-  { x: 40, y: 56 }, // by the wishing well
-  { x: 27, y: 22 }, // the garden gate
-  { x: 55, y: 66 }, // the bandstand steps
-  { x: 46, y: 88 }, // the picnic lawn
-  { x: 68, y: 67 }, // the town hall steps
-  { x: 37, y: 65 }, // the pier
-  { x: 52, y: 44 }, // the sunny side of the plaza
-];
+const FAVOURITES = ["fountain", "oak", "well", "chess", "pier", "grove"];
 
 export class Cat {
   readonly sprite = new Container();
@@ -42,7 +32,9 @@ export class Cat {
   hearts = 0;
 
   constructor(private map: ZoneMap) {
-    this.spots = FAVOURITES.map((s) => nearest(map, s)).filter((s): s is TileXY => s !== null);
+    this.spots = FAVOURITES.map((k) => spot(map, k))
+      .map((s) => s && nearest(map, s))
+      .filter((s): s is TileXY => !!s);
     this.sprite.addChild(this.body, this.zzz);
   }
 
@@ -63,7 +55,7 @@ export class Cat {
       let from = this.spotFor(leg - 1);
       let to = this.spotFor(leg);
       if (from.x === to.x && from.y === to.y) to = this.spots[(this.spots.indexOf(to) + 1) % this.spots.length];
-      const path = findPath(this.map, from, to, 20000);
+      const path = route(this.map, from, to, 20000);
       this.motion = path && path.length > 1 ? { path: compress(path), t0: this.legStart, speedX10: SPEED_X10 } : null;
       if (!this.motion) this.pos = from = to;
     }

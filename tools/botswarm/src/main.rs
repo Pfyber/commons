@@ -48,13 +48,13 @@ struct Args {
     /// Seconds over which bots connect.
     #[arg(long, default_value_t = 10)]
     ramp: u64,
-    #[arg(long, default_value = "founders_park")]
+    #[arg(long, default_value = "city")]
     zone: String,
     #[arg(long, default_value_t = 1)]
     instance: u16,
     #[arg(long, value_enum, default_value_t = Behaviour::Mix)]
     behaviour: Behaviour,
-    #[arg(long, default_value = "assets/maps/founders_park.json")]
+    #[arg(long, default_value = "assets/maps/city.json")]
     map: String,
     /// Viewport in tiles reported by each bot (a 1080p screen at 2× scale ≈ 30×17).
     #[arg(long, default_value_t = 30)]

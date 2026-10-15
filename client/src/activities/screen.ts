@@ -110,7 +110,7 @@ const stars: Scene = (ctx, t) => {
 };
 
 const NOTICES = [
-  "Welcome to Founders' Park!",
+  "Welcome to Commons!",
   "Chess tables by the fountain: sit down to play",
   "Coming soon: the first town vote, what's beyond the bridge?",
   "Evening at the fountain, every day at 19:00",

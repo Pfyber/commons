@@ -557,7 +557,48 @@ Rendering coordinates stay plain world pixels: at 368 tiles (11,776 px)
 float precision is no concern, so camera-relative drawing waits for bigger
 cities.
 
-Next: C2, today's content moves into its blocks and the corner boards go.
+## City C2 · Everything moves into the city: done (2026-10-15)
+
+Founders' Park is retired as a zone; its content lives in the city blocks:
+
+| Block | What's there now |
+|---|---|
+| Market (spawn) | the fountain (town goal) in a ring of flowerbeds, Story of the Town and Notice Board, stalls, the tailor, the homes gate |
+| Park | chess tables (with the Park Elder), the Founders' Grove and Stone (80 seedling spots), the Old Oak and swing, the wishing well |
+| Pond | the fishing pier, messages in bottles |
+| Lake | the Little Island nook across stepping stones, the campfire circle |
+| Meadow | the Willow Hideaway nook, the picnic lawn, wish lanterns |
+| Woods | the Moss Grotto nook behind a pine that isn't one, the fairy ring, the tiny door, the hedge maze and its Heart, a brook |
+| Orchard | the Community Garden (soil rows are garden plots, space `city`) |
+| Fairground | the bandstand stage (jams) and the sports pitch |
+| Gallery / Cinema | the easels / the outdoor big screen |
+
+- The topic-corner boards are gone (clubs replace them in C9); the
+  quarters API stays until then.
+- **Named spots:** invisible `spot` objects (`pier`, `garden`, `chess`,
+  `grove`, `campfire`, `picnic`…) are where the Caretaker's "Show me", the
+  gathering hours, the Caretaker's rounds and Biscuit's naps go. No map
+  coordinates live in client code any more. Mapgen checks that every spot,
+  nook and grove slot can be walked to.
+- Everyone starts at the Market, newcomers too. The Caretaker walks
+  between the Market and the Park.
+- **Minimap:** the whole city in the corner (under the top bar on phones),
+  a pulsing dot for you, your block outlined, a dotted line to where you're
+  walking, and the name of the place you're in. Tap it (or press C) for the
+  **city map**: the drawn city with every place named; tap anywhere to walk
+  there.
+- Removed: `assets/maps/founders_park.json`, the park generator, the
+  `founders_park` zone (`COMMONS_ZONES` is now `city,home`). Plots planted
+  in the old park's space stay in the database but no longer show.
+
+Checked: 500 bots pass the perf gate in the city (tick p99 3.2 ms mixed,
+3.7 ms wandering). In the browser: arrive at the Market, "Show me" to the
+pier, the map's tap-to-walk, the grove, the island nook (private chat),
+the fairy ring discovery, the campfire, the stage and the screen; the
+welcome flow end to end (fish, plant, sit at chess, plant the seedling,
+the Founders' Stone) and following.
+
+Next: C3, home blocks with doors into instanced interiors.
 
 ## Next: M5 · Crowds
 

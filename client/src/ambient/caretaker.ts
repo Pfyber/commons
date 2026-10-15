@@ -6,9 +6,9 @@
 import type { EntityInfo } from "../net/protocol.gen";
 import { CARETAKER_LOOK } from "../world/art";
 import { Avatar } from "../world/avatars";
-import { type ZoneMap, walkable } from "../world/map";
+import { type ZoneMap, spot, walkable } from "../world/map";
 import { type TileXY, posAt } from "../world/motion";
-import { compress, findPath } from "../world/path";
+import { compress, route } from "../world/path";
 import type { Scene } from "../world/scene";
 import { happeningNow } from "../welcome";
 
@@ -16,15 +16,8 @@ export const CARETAKER_ID = 0xfffffff1;
 const LEG_MS = 70_000;
 const SPEED_X10 = 12;
 
-/** Rounds: the garden, the plaza, the grove, the story board, the well. */
-const ROUNDS: TileXY[] = [
-  { x: 28, y: 23 }, // the garden gate
-  { x: 46, y: 53 }, // by the fountain
-  { x: 71, y: 41 }, // the Founders' Stone
-  { x: 45, y: 57 }, // the Story of the Town
-  { x: 40, y: 56 }, // the wishing well
-  { x: 51, y: 45 }, // the plaza's north side
-];
+/** Rounds, between the Market and the Park (map spots). */
+const ROUNDS = ["fountain", "grove", "chess", "oak", "well"];
 
 export class Caretaker {
   readonly avatar: Avatar;
@@ -36,7 +29,9 @@ export class Caretaker {
     scene: Scene,
     labels: HTMLElement,
   ) {
-    this.spots = ROUNDS.map((s) => nearest(map, s)).filter((s): s is TileXY => s !== null);
+    this.spots = ROUNDS.map((k) => spot(map, k))
+      .map((s) => s && nearest(map, s))
+      .filter((s): s is TileXY => !!s);
     const at = this.spots[0] ?? { x: 0, y: 0 };
     const info: EntityInfo = { id: CARETAKER_ID, name: "Caretaker 🌿", look: CARETAKER_LOOK, x: at.x, y: at.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0 };
     this.avatar = new Avatar(info, scene, labels, false, Date.now());
@@ -67,8 +62,9 @@ export class Caretaker {
       this.legKey = key;
       const d = this.avatar.destination;
       const from = first ? this.spotFor(leg - 1) : { x: Math.round(d.x), y: Math.round(d.y) };
-      const to = gathering ? (nearest(this.map, gathering.at) ?? this.spotFor(leg)) : this.spotFor(leg);
-      const path = findPath(this.map, from, to, 20000);
+      const at = gathering && spot(this.map, gathering.spot);
+      const to = (at && nearest(this.map, at)) ?? this.spotFor(leg);
+      const path = route(this.map, from, to, 20000);
       if (path && path.length > 1) {
         // Rounds keep the clock's schedule, so everyone agrees; trips to and
         // from a gathering start when they're noticed.

@@ -34,6 +34,12 @@ export interface ZoneMap {
   streets?: StreetGrid;
 }
 
+/** A named place on the map (an invisible `spot` object), e.g. "pier". */
+export function spot(m: ZoneMap, key: string): TileXY | null {
+  const o = m.objects.find((o) => o.kind === "spot" && o.label === key);
+  return o ? { x: o.x, y: o.y } : null;
+}
+
 export function walkable(m: ZoneMap, x: number, y: number): boolean {
   return x >= 0 && y >= 0 && x < m.width && y < m.height && m.collision[y * m.width + x] === 0;
 }

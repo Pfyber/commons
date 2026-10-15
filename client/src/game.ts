@@ -32,10 +32,11 @@ import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
+import type { Minimap } from "./ui/minimap";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar } from "./world/avatars";
 import { Furniture } from "./world/furniture";
-import { type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
+import { type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
 import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
 import { compress, route } from "./world/path";
 import { Props } from "./world/props";
@@ -58,6 +59,7 @@ const REEL_WINDOW_MS = 2300;
 /** UI shared across zones (created once in main). */
 export interface Ui {
   hud: Hud;
+  minimap: Minimap;
   eco: Economy;
   bag: BagPanel;
   album: AlbumPanel;
@@ -92,7 +94,7 @@ export interface Ui {
 /** What the Caretaker lets slip about the park's secret places. */
 const SECRET_HINTS = [
   "They say the willows in the meadow keep a secret. Try walking right through them.",
-  "Ever counted the pines east of the fairy ring? One of them isn't quite a pine.",
+  "Ever counted the pines in the Woods? One of them isn't quite a pine.",
   "Those stepping stones by the pier lead somewhere quiet.",
   "Whatever's said at the heart of the maze stays there.",
   "Lie on a picnic blanket after dark and watch for shooting stars.",
@@ -177,6 +179,8 @@ const KEY_DIRS: Record<string, TileXY> = {
 
 export class Game {
   readonly scene: Scene;
+  /** The fairy ring's clearing, found by walking into it. */
+  private fairyRing: TileXY | null;
   private socket: ZoneSocket | null = null;
   private avatars = new Map<number, Avatar>();
   private selfId = 0;
@@ -229,6 +233,8 @@ export class Game {
   ) {
     this.hud = ui.hud;
     this.scene = new Scene(app, map);
+    ui.minimap.setMap(map);
+    this.fairyRing = spot(map, "fairy_ring");
     this.props = new Props(this.scene, map, ui.eco);
     ui.bag.placeable = zoneId === "home" && place.owner === ui.social.selfId;
     this.furniture = new Furniture(map);
@@ -240,7 +246,7 @@ export class Game {
     this.ambient = new Ambient(this.scene, map);
     this.daynight = new DayNight(app, this.scene, map);
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
-    if (zoneId === "founders_park") {
+    if (zoneId === "city") {
       ui.town
         .loadGoal()
         .then((g) => this.milestones.apply(g.reached))
@@ -249,7 +255,7 @@ export class Game {
     this.setupCorners(map);
     this.weather = new Weather(app, this.scene, map);
     this.critters = new Critters(app, this.scene, map);
-    if (zoneId === "founders_park") {
+    if (zoneId === "city") {
       this.cat = new Cat(map);
       if (this.cat.active) this.scene.sorted.addChild(this.cat.sprite);
       const grove = new Grove(map, this.scene.sorted);
@@ -340,6 +346,14 @@ export class Game {
     const a = p.anchor;
     const here = { x: Math.round(self.pos.x), y: Math.round(self.pos.y) };
     if (cheb(self.destination, a) > a.range && cheb(here, a) > a.range) p.hide();
+  }
+
+  /** Walks to a named place on this map ("pier", "grove"…); false if it isn't here. */
+  walkToSpot(key: string): boolean {
+    const t = spot(this.scene.map, key);
+    if (!t) return false;
+    this.walkTo(t);
+    return true;
   }
 
   /** Walks to (near) `t`, e.g. where the Caretaker's tasks point. */
@@ -1096,10 +1110,6 @@ export class Game {
       this.events.onTravel("home");
       return true;
     }
-    if (obj?.kind === "park_gate") {
-      this.events.onTravel("founders_park");
-      return true;
-    }
     if (obj?.kind === "city_gate") {
       this.events.onTravel("city");
       return true;
@@ -1287,6 +1297,7 @@ export class Game {
     if (self) {
       self.update(serverNow, wallNow);
       this.scene.follow(self.pos);
+      this.ui.minimap.update(self.pos, self.moving ? self.destination : null, wallNow);
     }
     for (const a of this.avatars.values()) a.update(serverNow, wallNow);
 
@@ -1328,7 +1339,7 @@ export class Game {
     if (wallNow > this.ringCheckAt) {
       this.ringCheckAt = wallNow + 400;
       // The fairy ring is found by walking into the hidden clearing.
-      if (self && this.zoneId === "founders_park" && Math.hypot(self.pos.x - 9, self.pos.y - 14) < 1.6 && !found().has("fairy_ring")) {
+      if (self && this.fairyRing && Math.hypot(self.pos.x - this.fairyRing.x, self.pos.y - this.fairyRing.y) < 1.6 && !found().has("fairy_ring")) {
         this.discover("fairy_ring", DISCOVERIES.fairy_ring);
       }
       if (self) this.checkNook(self.pos);
@@ -1372,6 +1383,7 @@ export class Game {
     for (const p of [this.ui.plot, this.ui.menu, this.ui.market, this.ui.easel, this.ui.word, this.ui.townhall, this.ui.story]) p.hide();
     this.ui.reel.stop();
     this.ui.place.hide();
+    this.ui.minimap.setMap(null);
     this.app.stage.removeChild(this.scene.world);
     this.scene.destroy();
   }

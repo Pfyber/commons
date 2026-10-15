@@ -2482,61 +2482,78 @@ img.px-icon,
   cursor: pointer;
 }
 
-/* City map: the grid of blocks, coloured by kind. */
-.panel.citymap .city-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: var(--px2);
-  margin: 8px 0;
-}
-
-.panel.citymap .city-cell {
-  position: relative;
-  min-height: 46px;
-  padding: 2px;
-  border: 0;
-  font-size: 10px;
-  line-height: 1.1;
-  color: var(--ink);
-  background: var(--paper-3);
-  box-shadow: var(--frame-thin);
-  cursor: pointer;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
-
-.panel.citymap .city-cell:hover {
-  filter: brightness(1.08);
-}
-
-.panel.citymap .cat-market { background: #f3d98a; }
-.panel.citymap .cat-nature { background: #bfdc9f; }
-.panel.citymap .cat-landmark { background: #c7dbe8; }
-.panel.citymap .cat-club { background: #dccbe8; }
-.panel.citymap .cat-home { background: #ead7bd; }
-
-.panel.citymap .city-cell.here {
-  box-shadow: var(--frame-thin), 0 0 0 calc(var(--px2) * 2) var(--gold);
-  z-index: 1;
-}
-
-.panel.citymap .city-cell .you {
+/* Minimap: the whole city in the corner, you as a pulsing dot. */
+#hud .minimap {
   position: absolute;
-  bottom: 1px;
-  left: 0;
-  right: 0;
-  font-size: 9px;
-  color: #8f3a2b;
-}
-
-.panel.citymap .city-legend {
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 11px;
+  flex-direction: column;
+  gap: 4px;
+  width: 172px;
+  padding: 6px 6px 4px;
+  border: 0;
+  background: var(--paper-3);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
-.panel.citymap .city-legend span {
-  padding: 1px 6px;
+#hud .minimap[hidden] {
+  display: none;
+}
+
+#hud .minimap canvas {
+  display: block;
+  width: 160px;
+  height: 160px;
+  image-rendering: pixelated;
   box-shadow: var(--frame-thin);
+}
+
+#hud .minimap span {
+  overflow: hidden;
+  font-size: 12px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Toasts are short-lived and matter more: they go over the minimap. */
+#hud .toast {
+  z-index: 3;
+}
+
+/* Phones: smaller, under the top bar, clear of the chat and emotes. */
+@media (max-width: 700px) {
+  #hud .minimap {
+    top: 72px;
+    bottom: auto;
+    width: 104px;
+  }
+  #hud .minimap canvas {
+    width: 92px;
+    height: 92px;
+  }
+  #hud .minimap span {
+    font-size: 10px;
+  }
+}
+
+/* The city map panel: the drawn city, tap to walk. */
+.panel.citymap .city-canvas {
+  display: block;
+  width: min(400px, calc(100vw - 72px));
+  aspect-ratio: 1;
+  margin: 6px auto;
+  image-rendering: pixelated;
+  box-shadow: var(--frame-thin);
+  cursor: crosshair;
+}
+
+.panel.citymap .city-here {
+  margin: 0;
+  font-weight: 600;
 }

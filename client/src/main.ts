@@ -1,7 +1,7 @@
 import { Application } from "pixi.js";
 import { CityMapPanel } from "./ui/citymap";
+import { Minimap } from "./ui/minimap";
 import cityUrl from "../../assets/maps/city.json?url";
-import parkUrl from "../../assets/maps/founders_park.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
@@ -31,7 +31,7 @@ import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
 import "./styles.css";
 
-const MAP_URLS: Record<string, string> = { city: cityUrl, founders_park: parkUrl, home: homeUrl };
+const MAP_URLS: Record<string, string> = { city: cityUrl, home: homeUrl };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
 
@@ -102,9 +102,14 @@ async function main() {
   const welcome = new Welcome(auth);
   const welcomePanel = new WelcomePanel(
     welcome,
-    (t) => game?.walkTo(t),
-    (no) => hud.toast(`🌱 Founder #${no}! Your seedling is in the Founders' Grove, east of the chess tables.`, 7000),
+    (spot) => walkToSpot(spot),
+    (no) => hud.toast(`🌱 Founder #${no}! Your seedling is in the Founders' Grove, in the Park just north of the Market.`, 7000),
   );
+  /** Walks to a named place in the city (going back to the city first if away). */
+  const walkToSpot = (spot: string) => {
+    if ((game as Game | null)?.walkToSpot(spot)) return;
+    void travel({ zone: "city" }).then(() => window.setTimeout(() => (game as Game | null)?.walkToSpot(spot), 1500));
+  };
   const place = new PlaceBanner(() => place.hide());
   const friendActions = {
     join: (f: { id: string }) => void travel({ friend: f.id }),
@@ -129,13 +134,15 @@ async function main() {
     },
   });
   const cityMap = new CityMapPanel({
-    here: () => {
+    where: () => {
       const g = game as Game | null;
-      return g?.scene.map.streets ? g.position : null;
+      const here = g?.position;
+      return g?.scene.map.streets && here ? { map: g.scene.map, here } : null;
     },
     walk: (t) => (game as Game | null)?.walkTo(t),
     toCity: () => void travel({ zone: "city" }),
   });
+  const minimap = new Minimap(document.getElementById("hud")!, () => cityMap.toggle());
   const showMood = (m: number) => hud.setMood(m ? (MOODS.find((x) => x.id === m)?.icon ?? "💬") : "💬", m > 0);
   const moodPicker = new MoodPicker((m) => {
     game?.setMood(m);
@@ -146,6 +153,7 @@ async function main() {
   const ui: Ui = {
     eco,
     hud,
+    minimap,
     bag: new BagPanel(eco, (item) => {
       ui.bag.hide();
       place.show(item);
@@ -266,10 +274,7 @@ async function main() {
     }
   };
 
-  // Until the Caretaker moves into the city (ADR 0010, step C2), newcomers
-  // still on their welcome tasks start in Founders' Park, where those are.
   const status = await welcome.load().catch(() => null);
-  if (status && !status.founder && status.season.open) dest = { zone: "founders_park" };
   await enter();
   showMood((game as Game | null)?.currentMood ?? 0);
   // First visit: the Caretaker says hello. Afterwards, keep the tasks fresh

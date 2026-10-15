@@ -65,8 +65,8 @@ export class Ambient {
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         const g = groundAt(map, x, y);
-        // The pond is the water west of the river.
-        if (g === "water" && x < 80 && this.isWater(x - 1, y) && this.isWater(x + 1, y)) this.pond.push({ x, y });
+        // Open water, away from the shore.
+        if (g === "water" && this.isWater(x - 1, y) && this.isWater(x + 1, y)) this.pond.push({ x, y });
         if (g === "flowers") flowers.push({ x, y });
         const d = map.decor_legend[map.decor[y * map.width + x]];
         if (d === "tree") this.trees.push({ x, y });

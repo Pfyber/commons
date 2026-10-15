@@ -2,24 +2,23 @@
 // seedling, gathering hours) and the Founders' Stone.
 
 import { ApiError } from "../net/api";
-import type { TileXY } from "../world/motion";
 import { GATHERINGS, type Welcome, nextOccurrence, whenText } from "../welcome";
 import { Panel, button, el } from "./panels";
 
 export const STAGES = ["seedling", "sapling", "young tree", "tree"];
 
-/** Places the tasks send you to. */
-export const TASK_SPOTS: Record<"fish" | "plant" | "sit" | "grove", TileXY> = {
-  fish: { x: 36, y: 65 }, // the pier
-  plant: { x: 27, y: 27 }, // the community garden
-  sit: { x: 57, y: 41 }, // the chess tables
-  grove: { x: 70, y: 41 }, // the Founders' Stone
+/** Places the tasks send you to (map spots). */
+export const TASK_SPOTS: Record<"fish" | "plant" | "sit" | "grove", string> = {
+  fish: "pier",
+  plant: "garden",
+  sit: "chess",
+  grove: "grove",
 };
 
 const TASKS: { key: "fish" | "plant" | "sit"; title: string; hint: string }[] = [
-  { key: "fish", title: "Catch a fish", hint: "Tap the pond from the pier, then reel in when it bites." },
-  { key: "plant", title: "Plant a seed", hint: "Tap a soil patch in the Community Garden. There are seeds in your bag." },
-  { key: "sit", title: "Sit with someone", hint: "Share a bench with a neighbour, or play chess. The Park Elder always has time for a game." },
+  { key: "fish", title: "Catch a fish", hint: "Tap the water from the pier at the Pond, just south of the Market, then reel in when it bites." },
+  { key: "plant", title: "Plant a seed", hint: "Tap a soil patch in the Community Garden, in the Orchard. There are seeds in your bag." },
+  { key: "sit", title: "Sit with someone", hint: "Share a bench with a neighbour, or play chess in the Park. The Park Elder always has time for a game." },
 ];
 
 function errText(e: unknown): string {
@@ -36,7 +35,7 @@ export class WelcomePanel extends Panel {
 
   constructor(
     private welcome: Welcome,
-    private go: (t: TileXY) => void,
+    private go: (spot: string) => void,
     private onFounder: (no: number) => void,
   ) {
     super("The Caretaker", "welcome");
@@ -114,15 +113,15 @@ export class WelcomePanel extends Panel {
       const row = el("div", "row");
       const on = o.start <= now;
       row.append(el("span", "name", g.title), el("span", "price", on ? "On now!" : whenText(o.start, now)));
-      if (on) row.append(button("Go", () => this.walk(g.at), "small primary-sm"));
+      if (on) row.append(button("Go", () => this.walk(g.spot), "small primary-sm"));
       this.body.append(row);
     }
-    this.body.append(el("p", "hint", "Come along: that's when the park is liveliest."), this.msg);
+    this.body.append(el("p", "hint", "Come along: that's when the town is liveliest."), this.msg);
   }
 
-  private walk(t: TileXY) {
+  private walk(spot: string) {
     this.hide();
-    this.go(t);
+    this.go(spot);
   }
 
   private visit() {
