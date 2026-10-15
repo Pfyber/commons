@@ -5,7 +5,7 @@ import vectors from "./pinball.vectors.json";
 const REST = [2.094, -2.094, 1.047, -1.047];
 
 function ball(x: number, y: number, vx: number, vy: number): PinState {
-  return { x, y, vx, vy, score: [0, 0], serving: false, ang: REST.slice(), hits: Array(9).fill(0), keys: [0, 0], botHold: [0, 0], botRest: 0 };
+  return { x, y, vx, vy, score: [0, 0], serving: false, ang: REST.slice(), hits: Array(9).fill(0), keys: [0, 0], botHold: [0, 0], botRest: 0, still: 0, bumps: 0 };
 }
 
 describe("pinball, carried on between states", () => {

@@ -1,6 +1,8 @@
 //! Fishing (spec §7): cast, wait, a local timing mini-game, then a
-//! server-decided outcome. The server picks when the fish bites and what is
-//! caught; the client only reports how well the reel was timed.
+//! server-decided outcome. The server picks when the fish bites and, as it
+//! bites, which fish it is (by its rarity's odds); the bite tells the
+//! angler, whose reel game is the harder the rarer the fish. The client only
+//! reports how well the reel was timed: good enough, and that fish is landed.
 
 use super::{Instance, Pending};
 use crate::econ::{CallError, FishInfo};
@@ -18,6 +20,11 @@ const GRACE_MS: u32 = 400;
 const CAST_RANGE: i32 = 2;
 /// Reels scoring below this lose the fish.
 const MIN_QUALITY: u16 = 250;
+/// The fisherman's upgraded rod (an item): fish bite a quarter sooner, and
+/// the reel game gives one more swing of the needle, so the hook holds longer.
+pub(crate) const ROD_ITEM: u32 = 112;
+const ROD_BITE: f64 = 0.75;
+const ROD_EXTRA_MS: u32 = 3_200;
 
 #[derive(Debug, Clone)]
 pub(super) struct FishSession {
@@ -25,6 +32,11 @@ pub(super) struct FishSession {
     bite_at: u32,
     window_end: u32,
     biting: bool,
+    /// The fish on the hook, once it bites.
+    fish: Option<u32>,
+    /// When the line went in, and whether it's the upgraded rod.
+    cast_at: u32,
+    rod: bool,
 }
 
 fn chebyshev(a: TilePos, b: TilePos) -> i32 {
@@ -33,21 +45,10 @@ fn chebyshev(a: TilePos, b: TilePos) -> i32 {
         .max((a.1 as i32 - b.1 as i32).abs())
 }
 
-/// Picks a catch. Better timing (`quality` 0–1000) makes rare fish likelier
-/// and junk less likely; night-only fish appear only at night.
-pub(crate) fn roll_fish(fish: &[FishInfo], quality: u16, night: bool, roll: f64) -> Option<u32> {
-    let q = quality.min(1000) as f64 / 1000.0;
-    let weight = |f: &FishInfo| -> f64 {
-        if f.night && !night {
-            return 0.0;
-        }
-        let base = f.weight as f64;
-        match f.rarity {
-            0 if f.id == 107 => base * (1.0 - 0.8 * q), // junk: the old boot
-            r if r >= 2 => base * (1.0 + 2.0 * q),
-            _ => base,
-        }
-    };
+/// Picks what bites, by each fish's odds (`weight`: common ones often,
+/// mythical ones seldom); night-only fish appear only at night.
+pub(crate) fn roll_fish(fish: &[FishInfo], night: bool, roll: f64) -> Option<u32> {
+    let weight = |f: &FishInfo| -> f64 { if f.night && !night { 0.0 } else { f.weight as f64 } };
     let total: f64 = fish.iter().map(weight).sum();
     if total <= 0.0 {
         return None;
@@ -114,8 +115,26 @@ impl Instance {
             bite_at,
             window_end: bite_at + WINDOW_MS,
             biting: false,
+            fish: None,
+            cast_at: now,
+            rod: false,
         });
-        let (tile, cell) = (a.tile, a.cell);
+        let (tile, cell, player) = (a.tile, a.cell, a.player_id.clone());
+        // The upgraded rod? (Asked of the economy; the answer's back long before a bite.)
+        if let Some(econ) = self.economy.clone() {
+            self.spawn_call(async move { econ.has(&player, ROD_ITEM).await }, move |inst, has| {
+                if !matches!(has, Ok(q) if q > 0) {
+                    return;
+                }
+                let Some(s) = inst.avatars.get_mut(&id).and_then(|a| a.fish.as_mut()) else { return };
+                if s.cast_at != now || s.biting {
+                    return;
+                }
+                s.rod = true;
+                s.bite_at = now + ((s.bite_at - now) as f64 * ROD_BITE) as u32;
+                s.window_end = s.bite_at + WINDOW_MS + ROD_EXTRA_MS;
+            });
+        }
         self.broadcast(
             cell,
             &ServerMsg::StateChange {
@@ -180,10 +199,7 @@ impl Instance {
         let Some(econ) = self.economy.clone() else {
             return self.stop_fishing(id, true);
         };
-        let Some(catalog) = econ.catalog() else {
-            return self.stop_fishing(id, true);
-        };
-        let Some(item) = roll_fish(&catalog.fish, quality, is_night(), rand::rng().random()) else {
+        let Some(item) = session.fish else {
             return self.stop_fishing(id, true);
         };
         // The fish is landed now; the economy records it in the background.
@@ -238,13 +254,16 @@ impl Instance {
             let s = a.fish.as_mut().unwrap();
             if !s.biting && now >= s.bite_at {
                 s.biting = true;
-                let (target, cell) = (s.target, a.cell);
+                // What's on the hook: the angler sees how rare (and so how hard) it is.
+                let catalog = self.economy.as_ref().and_then(|e| e.catalog());
+                s.fish = catalog.and_then(|c| roll_fish(&c.fish, is_night(), rand::rng().random()));
+                let (target, cell, item) = (s.target, a.cell, s.fish.unwrap_or(0));
                 let bite = ServerMsg::FishEvent {
                     id,
                     kind: fish_event::BITE,
                     x: target.0,
                     y: target.1,
-                    item: 0,
+                    item,
                 };
                 self.broadcast(cell, &bite, None);
             } else if s.biting && now > s.window_end + GRACE_MS {
@@ -263,22 +282,15 @@ mod tests {
     use commons_protocol::{ClientMsg, ServerMsg};
 
     #[test]
-    fn roll_respects_night_and_quality() {
+    fn roll_respects_night_and_rarity() {
         let fish = ZoneCatalog::for_tests().fish;
         // Moonfish (106) is night-only.
         for i in 0..100 {
-            assert_ne!(roll_fish(&fish, 500, false, i as f64 / 100.0), Some(106));
+            assert_ne!(roll_fish(&fish, false, i as f64 / 100.0), Some(106));
         }
-        let count = |q: u16, id: u32| {
-            (0..1000)
-                .filter(|i| roll_fish(&fish, q, true, *i as f64 / 1000.0) == Some(id))
-                .count()
-        };
-        assert!(
-            count(1000, 105) > count(0, 105),
-            "perfect timing finds more koi"
-        );
-        assert!(count(1000, 107) < count(0, 107), "and fewer boots");
+        let count = |id: u32| (0..1000).filter(|i| roll_fish(&fish, true, *i as f64 / 1000.0) == Some(id)).count();
+        assert!(count(100) > count(107) && count(107) > count(105), "common minnows, fewer boots, a rare koi");
+        assert!(count(105) > 0, "but koi do bite");
     }
 
     #[test]

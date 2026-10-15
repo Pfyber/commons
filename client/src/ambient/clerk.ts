@@ -14,6 +14,7 @@ import type { Scene } from "../world/scene";
 export const CLERK_ID = 0xfffffff2;
 export const BARTENDER_ID = 0xfffffff4;
 export const ATTENDANT_ID = 0xfffffff6;
+export const FISHERMAN_ID = 0xfffffff7;
 const LEG_MS = 9000;
 const SPEED_X10 = 10;
 /** A waistcoat, glasses and a ponytail. */
@@ -63,6 +64,21 @@ export const ATTENDANT: Keeper = {
     "Trade tickets here for clothes. Wear them at any changing room.",
     "The Connect Four bot thinks a few moves ahead. Just saying.",
     "Pong: hit the ball off the edge of your paddle to angle it.",
+  ],
+};
+
+/** An oilskin coat, a bucket hat and a grey beard-ish cut: the pier's fisherman. */
+export const FISHERMAN: Keeper = {
+  id: FISHERMAN_ID,
+  name: "Fisherman 🎣",
+  look: encodeLook({ hue: 48, skin: 1, hair: 3, hat: 2, hatHue: 45, style: 0, accessory: 0, outfit: 5 }),
+  hellos: ["Ahoy! Caught anything? I'll buy it.", "Fish are biting today, I can feel it.", "Bring me something rare and I'll make it worth your while."],
+  tips: [
+    "Minnows are a coin. A dragonfish? Ten, if you ever land one.",
+    "The rarer the fish, the harder it fights. Watch that needle!",
+    "Catfish and moonfish only come out after dark.",
+    "Legendary ones thrash about. Wait for the needle to swing back through.",
+    "I've seen a mythical dragonfish once. Pink as a sunset.",
   ],
 };
 

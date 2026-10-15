@@ -21,16 +21,16 @@ const FLIP_UP = 15;
 const FLIP_DOWN = 9;
 /** Pivot x, y, resting angle, raised angle: a's top and bottom, then b's. */
 export const FLIPPERS: [number, number, number, number][] = [
-  [30, 52, 2.094, 1.047],
-  [30, 104, -2.094, -1.047],
-  [230, 52, 1.047, 2.094],
-  [230, 104, -1.047, -2.094],
+  [30, 50, 2.094, 1.047],
+  [30, 106, -2.094, -1.047],
+  [230, 50, 1.047, 2.094],
+  [230, 106, -1.047, -2.094],
 ];
 export const RAILS: [number, number, number, number][] = [
-  [12, 0, 30, 52],
-  [12, 156, 30, 104],
-  [248, 0, 230, 52],
-  [248, 156, 230, 104],
+  [12, 0, 30, 50],
+  [12, 156, 30, 106],
+  [248, 0, 230, 50],
+  [248, 156, 230, 106],
 ];
 export const RAIL_R = 1.6;
 /** Centre, radius, kick speed (0: a plain post). */
@@ -49,7 +49,8 @@ const TILT = 34;
 const FRICTION = 10;
 const MAX_SPEED = 300;
 const STUCK_SPEED = 4;
-const NUDGE = 400;
+const STUCK_MS = 1000;
+const BUMP = 70;
 const STEP_MS = 2;
 const BOT_HOLD_MS = 170;
 const BOT_SKILL = 78;
@@ -69,6 +70,9 @@ export interface PinState {
   /** The bot's timers, ms after the state's time: holding each flipper, resting. */
   botHold: [number, number];
   botRest: number;
+  /** How long the ball's been all but still (ms), and the table bumps so far. */
+  still: number;
+  bumps: number;
 }
 
 export function unpack(d: number[]): PinState {
@@ -84,6 +88,8 @@ export function unpack(d: number[]): PinState {
     keys: [d[20] & 3, (d[20] >> 2) & 3],
     botHold: [d[21] ?? 0, d[22] ?? 0],
     botRest: d[23] ?? 0,
+    still: d[24] ?? 0,
+    bumps: d[25] ?? 0,
   };
 }
 
@@ -144,6 +150,8 @@ export function carry(s: PinState, t0: number, now: number, mine: number, presse
   const keys: [number, number] = [s.keys[0], s.keys[1]];
   const hold = [t0 + s.botHold[0], t0 + s.botHold[1]];
   let rest = t0 + s.botRest;
+  let still = s.still;
+  let bumps = s.bumps;
   const hits: [number, number][] = [];
   if (s.serving) return { x: PW / 2, y: PH / 2, vx: 0, vy: 0, ang, hits, gone: false };
   let t = t0;
@@ -269,8 +277,21 @@ export function carry(s: PinState, t0: number, now: number, mine: number, presse
     if (sp > MAX_SPEED) {
       vx *= MAX_SPEED / sp;
       vy *= MAX_SPEED / sp;
-    } else if (sp < STUCK_SPEED) {
-      vy += (y < PH / 2 ? NUDGE : -NUDGE) * dt;
+    }
+    if (sp < STUCK_SPEED) {
+      still += ms;
+      if (still >= STUCK_MS) {
+        // Balanced on something: the table gets a bump, across the slope (as the server).
+        const [gx2, gy2] = tilt(x, y);
+        const side = bumps % 2 === 0 ? 1 : -1;
+        const [px, py] = gx2 === 0 && gy2 === 0 ? [0, 1] : [-gy2, gx2];
+        vx += px * BUMP * side;
+        vy += py * BUMP * side;
+        bumps = (bumps + 1) & 0xffff;
+        still = 0;
+      }
+    } else {
+      still = 0;
     }
     if (x < -BALL_R || x > PW + BALL_R) return { x, y, vx, vy, ang, hits, gone: true };
   }

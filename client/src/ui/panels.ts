@@ -5,6 +5,7 @@ import { COIN, type Economy, type Item } from "../economy";
 import { ApiError } from "../net/api";
 import { itemIconUrl } from "../world/items";
 import { pxIcon } from "./icons";
+import { TIERS, type Tier, tier } from "./rarity";
 
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -17,6 +18,11 @@ export function icon(item: Item | undefined): HTMLImageElement {
   const img = el("img", "icon");
   img.alt = "";
   if (item) img.src = itemIconUrl(item.key, item.kind);
+  // Fish wear their rarity: a coloured frame, common grey to mythical pink.
+  if (item && (item.kind === "fish" || item.kind === "junk")) {
+    img.classList.add("rarity", `rarity-${Math.max(0, Math.min(5, item.rarity))}`);
+    img.title = `${item.name} · ${tier(item.rarity).name}`;
+  }
   return img;
 }
 
@@ -237,6 +243,7 @@ const KIND_ORDER: [string, string][] = [
   ["seed", "Seeds"],
   ["furniture", "Furniture"],
   ["ticket", "Arcade tickets"],
+  ["tool", "Gear"],
 ];
 
 export class BagPanel extends Panel {
@@ -365,6 +372,119 @@ export class MarketPanel extends Panel {
   }
 }
 
+/**
+ * The fisherman on the pier: he buys your catch, a coin for a minnow up to
+ * ten for a dragonfish. His board lists every fish, rarest (and dearest)
+ * first, each in its rarity's colour; ones you've never landed are a mystery.
+ */
+export class FishermanPanel extends Panel {
+  private err = el("p", "error");
+  private busy = false;
+
+  constructor(
+    private eco: Economy,
+    private onSold: (coins: number, best: Item) => void,
+    private onRod: () => void,
+  ) {
+    super("🎣 The Fisherman", "fisherman");
+    eco.onChange(() => this.open && !this.busy && this.render());
+  }
+
+  private fish(): Item[] {
+    return [...this.eco.items.values()]
+      .filter((i) => (i.kind === "fish" || i.kind === "junk") && i.meta.sell)
+      .sort((a, b) => (b.meta.sell ?? 0) - (a.meta.sell ?? 0) || b.rarity - a.rarity);
+  }
+
+  private async sell(list: [Item, number][]) {
+    if (this.busy || !list.length) return;
+    this.busy = true;
+    this.err.textContent = "";
+    let coins = 0;
+    try {
+      for (const [it, n] of list) {
+        await this.eco.sell(it.id, n);
+        coins += (it.meta.sell ?? 0) * n;
+      }
+    } catch (e) {
+      this.err.textContent = e instanceof ApiError ? e.message : "He shook his head. Try again?";
+    }
+    this.busy = false;
+    if (coins) this.onSold(coins, list[0][0]);
+    this.render();
+  }
+
+  private async buyRod() {
+    if (this.busy) return;
+    this.busy = true;
+    this.err.textContent = "";
+    try {
+      await this.eco.buy(ROD_ITEM, 1);
+      this.onRod();
+    } catch (e) {
+      this.err.textContent = e instanceof ApiError ? e.message : "He shook his head. Try again?";
+    }
+    this.busy = false;
+    this.render();
+  }
+
+  render() {
+    this.body.replaceChildren();
+    const all = this.fish();
+    const mine = all.filter((i) => this.eco.qty(i.id) > 0).map((i) => [i, Math.min(99, this.eco.qty(i.id))] as [Item, number]);
+    const total = mine.reduce((sum, [i, n]) => sum + (i.meta.sell ?? 0) * n, 0);
+    const head = el("div", "fisher-head");
+    const coins = el("div", "coins");
+    coins.append(icon(this.eco.items.get(COIN)), `${this.eco.coins} coins`);
+    const all_btn = button(total ? `Sell the lot · +${total}c` : "Nothing to sell yet", () => this.sell(mine), "primary");
+    all_btn.disabled = !total || this.busy;
+    head.append(coins, all_btn);
+    this.body.append(el("p", "hint", "\"I'll buy whatever you pull out of that pond. The rarer it is, the more it's worth.\""), head, this.err);
+    // His one thing for sale: a better rod.
+    const rod = this.eco.items.get(ROD_ITEM);
+    if (rod) {
+      const owned = this.eco.qty(ROD_ITEM) > 0;
+      const price = rod.meta.buy ?? 0;
+      const card = el("div", `fisher-rod${owned ? " owned" : ""}`);
+      const text = el("div", "fisher-rod-text");
+      text.append(el("b", "", `🎣 ${rod.name}`), el("small", "", "Fish bite 25% sooner · a slower needle · one more swing to catch it"));
+      card.append(icon(rod), text);
+      if (owned) card.append(el("span", "fisher-rod-owned", "✓ Yours"));
+      else {
+        const buy = button(`Buy · ${price}c`, () => this.buyRod(), "primary");
+        buy.disabled = this.busy || this.eco.coins < price;
+        card.append(buy);
+      }
+      this.body.append(card);
+    }
+    // The tiers, as a key.
+    const key = el("div", "fisher-key");
+    for (const t of TIERS) {
+      const chip = el("span", "chip", t.name);
+      chip.style.setProperty("--tier", t.color);
+      key.append(chip);
+    }
+    this.body.append(key);
+    const list = el("div", "rows fisher-rows");
+    for (const it of all) {
+      const t: Tier = tier(it.rarity);
+      const n = this.eco.qty(it.id);
+      const known = n > 0 || this.eco.album.has(it.id);
+      const row = el("div", `row fisher-row tier-${Math.max(0, Math.min(5, it.rarity))}${known ? "" : " unknown"}`);
+      row.style.setProperty("--tier", t.color);
+      const name = el("span", "name");
+      name.append(el("b", "", known ? it.name : "???"), el("small", "tier-name", t.name + (it.meta.night ? " · night" : "")));
+      row.append(icon(it), name, el("span", "qty", n ? `×${n}` : ""), el("span", "price", `${it.meta.sell}c`));
+      const one = button("Sell 1", () => this.sell([[it, 1]]), "small");
+      one.disabled = !n || this.busy;
+      row.append(one);
+      if (n > 1) row.append(button(`All ${n}`, () => this.sell([[it, Math.min(n, 99)]]), "small"));
+      list.append(row);
+    }
+    this.body.append(list);
+  }
+}
+
 export interface PlotInfo {
   plant: number;
   stage: number;
@@ -434,10 +554,21 @@ export class PlotMenu extends Panel {
  * The reel mini-game: a needle sweeps across a bar; stop it in the green.
  * Calls back with a quality score 0–1000, or never if the window passes.
  */
+/** The upgraded rod (item): the needle's pace, and the most it adds to the reel window (the server allows a little more). */
+export const ROD_ITEM = 112;
+const ROD_PACE = 0.85;
+const ROD_EXTRA_MAX_MS = 3000;
+
 export class ReelGame {
   private el = el("div", "reel");
   private needle = el("div", "needle");
+  private sweet = el("div", "sweet");
+  private title = el("div", "title");
   private start = 0;
+  /** This bite's difficulty (rarity tier), and the needle's pace (slower with the upgraded rod). */
+  private tier: Tier = TIERS[0];
+  private pace = TIERS[0].pace;
+  private wild = false;
   private raf = 0;
   private done: ((q: number) => void) | null = null;
   private key = (e: KeyboardEvent) => {
@@ -450,22 +581,43 @@ export class ReelGame {
 
   constructor() {
     const bar = el("div", "bar");
-    bar.append(el("div", "sweet"), this.needle);
+    bar.append(this.sweet, this.needle);
     const btn = button("Reel in!", () => this.hit(), "primary");
-    this.el.append(el("div", "title", "A bite! Stop the needle in the green"), bar, btn);
+    this.el.append(this.title, bar, btn);
     this.el.hidden = true;
     document.body.appendChild(this.el);
   }
 
   private pos(t: number) {
-    // Back and forth at a steady, gentle pace: it crosses the green three
-    // times (0 s, ~1.05 s, ~2.1 s) inside the reel window.
+    // Back and forth from one end, quicker the rarer the fish; legendary and
+    // mythical fish thrash, so the needle surges and stalls as well.
     const s = (t - this.start) / 1000;
-    return 0.5 + 0.5 * Math.sin(s * 3);
+    const p = this.pace;
+    const surge = this.wild ? 0.7 * Math.sin(s * p * 1.7) : 0;
+    return 0.5 + 0.5 * Math.sin(s * p + surge - Math.PI / 2);
   }
 
-  play(windowMs: number, done: (quality: number) => void) {
+  /**
+   * A bite: reel in within `windowMs`; `rarity` (0–5) sets how hard it is.
+   * With the upgraded `rod` the needle moves a little slower and swings
+   * through once more before the fish gets away.
+   */
+  play(windowMs: number, done: (quality: number) => void, rarity = 0, rod = false) {
     this.done = done;
+    this.tier = tier(rarity);
+    this.pace = this.tier.pace * (rod ? ROD_PACE : 1);
+    if (rod) windowMs += Math.min(ROD_EXTRA_MAX_MS, ((2 * Math.PI) / this.pace) * 1000);
+    this.wild = rarity >= 4;
+    const w = this.tier.sweet;
+    this.sweet.style.left = `${(0.5 - w) * 100}%`;
+    this.sweet.style.width = `${w * 200}%`;
+    this.sweet.style.background = this.tier.color;
+    this.el.style.setProperty("--tier", this.tier.color);
+    this.el.className = `reel tier-${Math.max(0, Math.min(5, rarity))}`;
+    this.title.replaceChildren();
+    const name = el("b", "", this.tier.name.toUpperCase());
+    name.style.color = this.tier.color;
+    this.title.append(rarity >= 3 ? "‼️ " : "", name, " bite! Stop the needle in the coloured zone", rod ? " (🎣 Angler's Rod: an extra swing)" : "");
     this.start = performance.now();
     this.el.hidden = false;
     window.addEventListener("keydown", this.key, true);
@@ -479,8 +631,10 @@ export class ReelGame {
 
   private hit() {
     if (!this.done) return;
+    // In the zone (a hair of slack at its edges): the closer to its middle the better.
     const d = Math.abs(this.pos(performance.now()) - 0.5);
-    const quality = Math.max(0, Math.round(1000 - d * 2400));
+    const w = this.tier.sweet + 0.008;
+    const quality = d <= w ? Math.round(1000 - (d / w) * 600) : 0;
     const f = this.done;
     this.stop();
     f(quality);

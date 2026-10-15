@@ -175,7 +175,7 @@ export function nibble(vol = 1) {
 }
 
 /** A fish pulled out of the water, and a happy little chime. */
-export function landed(vol = 1) {
+export function landed(vol = 1, rarity = 0) {
   if (muted) return;
   const t = at(0);
   burst(t, 0.28, 0.18 * vol, "highpass", 1200, 2600);
@@ -183,6 +183,99 @@ export function landed(vol = 1) {
   [784, 988, 1175, 1568].forEach((hz, i) => {
     tone(t + 0.12 + i * 0.08, 0.35, 0.09 * vol, "triangle", hz);
   });
+  // Rarer catches get a bigger celebration on top, after the chime.
+  if (rarity >= 2) celebrate(t + 0.45, vol, rarity);
+}
+
+/** A bright brassy note: a sawtooth, its brightness swelling then mellowing. */
+function brass(t: number, hz: number, len: number, level: number) {
+  const o = bus();
+  if (!o || level < 0.002) return;
+  const a = audio();
+  for (const detune of [-6, 6]) {
+    const osc = a.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.value = hz;
+    osc.detune.value = detune;
+    const f = a.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.setValueAtTime(hz * 1.5, t);
+    f.frequency.linearRampToValueAtTime(hz * 6, t + 0.06);
+    f.frequency.exponentialRampToValueAtTime(hz * 2.5, t + len);
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(level, t + 0.03);
+    g.gain.setValueAtTime(level, t + len * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    osc.connect(f).connect(g).connect(o);
+    osc.start(t);
+    osc.stop(t + len + 0.02);
+  }
+}
+
+/** A bell: a pure note with a high partial, ringing out. */
+function bell(t: number, hz: number, level: number, len = 1.2) {
+  tone(t, len, level, "sine", hz);
+  tone(t, len * 0.5, level * 0.4, "sine", hz * 2.76);
+  tone(t, len * 0.25, level * 0.25, "sine", hz * 5.4);
+}
+
+/**
+ * The fanfare for a rare catch, growing with rarity: rare gets a sparkly
+ * run of bells; epic a brassy "ta-da!"; legendary a full fanfare with a
+ * cymbal; mythical a drumroll first, then a triumphant chord climb, a
+ * cascade of bells and a shimmer that hangs in the air.
+ */
+function celebrate(t: number, vol: number, rarity: number) {
+  const v = vol;
+  // A shimmer of high notes (pentatonic, so it always sounds happy).
+  const shimmer = (at: number, n: number, gap: number, level: number) => {
+    const scale = [1568, 1760, 2093, 2349, 2637, 3136, 3520];
+    for (let i = 0; i < n; i++) tone(at + i * gap, 0.25, level * v, "triangle", scale[(i * 3 + rarity) % scale.length]);
+  };
+  if (rarity === 2) {
+    [1047, 1319, 1568, 2093].forEach((hz, i) => bell(t + i * 0.07, hz, 0.06 * v, 0.8));
+    shimmer(t + 0.3, 6, 0.045, 0.035);
+    return;
+  }
+  let at = t;
+  if (rarity >= 5) {
+    // A drumroll, speeding up and swelling…
+    let k = 0;
+    for (let d = 0; d < 0.9; k++) {
+      burst(at + d, 0.08, (0.05 + d * 0.18) * v, "bandpass", 1800, 1200, 1.5);
+      d += Math.max(0.03, 0.09 - k * 0.004);
+    }
+    tone(at, 0.9, 0.08 * v, "sine", 110, 220);
+    at += 0.95;
+    // …a crash.
+    burst(at, 1.6, 0.22 * v, "highpass", 3000, 6000);
+  }
+  // "Ta-da-daaa!": up an arpeggio to a held major chord.
+  const root = rarity >= 4 ? 523.25 : 392;
+  const third = root * 1.26;
+  const fifth = root * 1.5;
+  brass(at, root, 0.14, 0.05 * v);
+  brass(at + 0.13, third, 0.14, 0.05 * v);
+  brass(at + 0.26, fifth, 0.14, 0.055 * v);
+  for (const hz of [root * 2, third * 2, fifth, root]) brass(at + 0.4, hz, rarity >= 4 ? 1.1 : 0.7, 0.045 * v);
+  bell(at + 0.4, root * 4, 0.05 * v, 1.4);
+  shimmer(at + 0.45, 8 + rarity * 2, 0.04, 0.03);
+  if (rarity >= 4) {
+    // A cymbal swell under the chord, then a second, higher "hooray".
+    burst(at + 0.38, 1.2, 0.12 * v, "highpass", 4000, 8000);
+    const up = at + 1.15;
+    for (const hz of [root * 1.335 * 2, root * 1.68 * 2, root * 2 * 2]) brass(up, hz, 0.9, 0.04 * v);
+    [2093, 2637, 3136, 4186].forEach((hz, i) => bell(up + 0.05 + i * 0.09, hz, 0.04 * v, 1.2));
+  }
+  if (rarity >= 5) {
+    // The mythical: a key change up for the big finish, a falling cascade of bells, and a long shimmer.
+    const fin = at + 2.0;
+    for (const hz of [587.33, 739.99, 880, 1174.66]) brass(fin, hz, 1.6, 0.045 * v);
+    burst(fin, 2.0, 0.14 * v, "highpass", 5000, 9000);
+    [4186, 3520, 3136, 2637, 2349, 2093, 1760, 1568].forEach((hz, i) => bell(fin + 0.1 + i * 0.08, hz, 0.035 * v, 1.6));
+    shimmer(fin + 0.7, 24, 0.05, 0.022);
+  }
 }
 
 /** The fish slipping off: a sad two-note drop. */

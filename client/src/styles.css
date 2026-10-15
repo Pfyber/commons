@@ -2954,3 +2954,137 @@ body.woozy #stage canvas {
 .panel.arcade .hint {
   color: var(--muted);
 }
+
+/* ---- fish rarity (ui/rarity.ts) ---- */
+
+.icon.rarity {
+  box-shadow: 0 0 0 2px var(--r, transparent);
+  background: color-mix(in srgb, var(--r, transparent) 18%, transparent);
+}
+.icon.rarity-0 { --r: #c8c4b8; }
+.icon.rarity-1 { --r: #5fd07a; }
+.icon.rarity-2 { --r: #4fa8ff; }
+.icon.rarity-3 { --r: #b07bff; box-shadow: 0 0 0 2px var(--r), 0 0 6px var(--r); }
+.icon.rarity-4 { --r: #ffb84f; box-shadow: 0 0 0 2px var(--r), 0 0 8px var(--r); }
+.icon.rarity-5 {
+  --r: #ff4fa3;
+  animation: mythical 1.6s linear infinite;
+}
+
+@keyframes mythical {
+  0% { box-shadow: 0 0 0 2px #ff4fa3, 0 0 10px #ff4fa3; }
+  33% { box-shadow: 0 0 0 2px #ffb84f, 0 0 10px #ffb84f; }
+  66% { box-shadow: 0 0 0 2px #b07bff, 0 0 10px #b07bff; }
+  100% { box-shadow: 0 0 0 2px #ff4fa3, 0 0 10px #ff4fa3; }
+}
+
+/* The reel game, framed in the bite's rarity colour. */
+.reel {
+  box-shadow: var(--frame), var(--drop), var(--bevel), 0 0 0 3px var(--tier, transparent);
+}
+.reel.tier-4,
+.reel.tier-5 {
+  animation: reel-glow 0.8s ease-in-out infinite alternate;
+}
+@keyframes reel-glow {
+  to { box-shadow: var(--frame), var(--drop), var(--bevel), 0 0 0 3px var(--tier), 0 0 22px 6px var(--tier); }
+}
+.reel .sweet {
+  opacity: 0.75;
+}
+
+/* ---- the fisherman's board ---- */
+
+.panel.fisherman {
+  width: min(460px, calc(100vw - 24px));
+}
+.fisher-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fisher-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fisher-key .chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  color: #1a1a1a;
+  background: var(--tier);
+}
+.fisher-rows .fisher-row {
+  border-left: 4px solid var(--tier);
+  padding-left: 6px;
+}
+.fisher-row .name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.fisher-row .tier-name {
+  color: var(--tier);
+  font-weight: 700;
+  font-size: 11px;
+  filter: brightness(0.8);
+}
+.fisher-row .qty {
+  min-width: 28px;
+  text-align: right;
+}
+.fisher-row.unknown .icon {
+  filter: brightness(0) opacity(0.5);
+}
+.fisher-row.tier-5 {
+  background: linear-gradient(90deg, rgba(255, 79, 163, 0.12), transparent);
+}
+
+/* A legendary or mythical catch: the screen glows in its colour, then fades. */
+.catch-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--tier) 55%, transparent) 0%, color-mix(in srgb, var(--tier) 18%, transparent) 40%, transparent 75%);
+  animation: catch-flash 2.6s ease-out forwards;
+}
+.catch-flash.tier-5 {
+  background: radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 79, 163, 0.35) 25%, rgba(176, 123, 255, 0.25) 45%, rgba(79, 168, 255, 0.12) 65%, transparent 80%);
+  animation: catch-flash 2.6s ease-out forwards, catch-hue 1.2s linear infinite;
+}
+@keyframes catch-flash {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes catch-hue {
+  to { filter: hue-rotate(360deg); }
+}
+
+/* The fisherman's rod for sale. */
+.fisher-rod {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 2px solid #b07bff;
+  background: rgba(176, 123, 255, 0.12);
+}
+.fisher-rod-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.fisher-rod-text small {
+  opacity: 0.8;
+}
+.fisher-rod.owned {
+  border-color: #5fd07a;
+  background: rgba(95, 208, 122, 0.12);
+}
+.fisher-rod-owned {
+  font-weight: 700;
+  color: #3a9a52;
+}

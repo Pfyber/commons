@@ -1330,6 +1330,21 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, "#3d1656", bx0 + 1, top + h - 24, 22, 4);
       break;
     }
+    case "fisherman": {
+      // His things on the boards beside him: a bucket of fish and a tackle box.
+      [c, ctx] = makeCanvas(w, h);
+      px(ctx, "rgba(0,0,0,0.2)", 1, 26, 12, 3);
+      px(ctx, P.outline, 2, 16, 10, 11);
+      px(ctx, "#5d7a8a", 3, 17, 8, 9);
+      px(ctx, "#7a9aaa", 3, 17, 8, 2);
+      px(ctx, "#9fb7c4", 4, 15, 3, 3);
+      px(ctx, "#f6c343", 7, 14, 3, 3);
+      px(ctx, P.outline, 4, 13, 6, 1);
+      px(ctx, P.outline, w - 12, 21, 11, 7);
+      px(ctx, "#2f6b3f", w - 11, 22, 9, 5);
+      px(ctx, "#c8553d", w - 8, 22, 3, 1);
+      break;
+    }
     case "fireplace": {
       // A stone fireplace with a crackling fire and candles on the mantel.
       [c, ctx] = makeCanvas(w, h + 40);

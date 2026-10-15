@@ -4,6 +4,7 @@
 
 import { Texture } from "pixi.js";
 import { PALETTE, toTexture } from "./art";
+import { drawFish } from "./fish";
 import { disc, oval } from "./pixeldraw";
 
 type Draw = (ctx: CanvasRenderingContext2D) => void;
@@ -24,16 +25,6 @@ function px(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, 
 }
 
 const O = PALETTE.outline;
-
-const FISH_COLORS: Record<string, [string, string]> = {
-  minnow: ["#9fb7c4", "#7f97a4"],
-  perch: ["#c9b44a", "#5d7a3a"],
-  carp: ["#b8864a", "#8a5d36"],
-  bluegill: ["#5d8fc4", "#f2a541"],
-  catfish: ["#6b6658", "#4a463c"],
-  golden_koi: ["#f6c343", "#f28c28"],
-  moonfish: ["#d9d4f2", "#8f86c4"],
-};
 
 const FLOWER_COLORS: Record<string, string> = {
   tulip: "#e8566b",
@@ -65,15 +56,14 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     px(ctx, "#c99a2a", 7, 6, 2, 5);
     return;
   }
-  if (kind === "fish") {
-    const [body, fin] = FISH_COLORS[key] ?? ["#9fb7c4", "#7f97a4"];
-    px(ctx, O, 2, 5, 10, 7);
-    px(ctx, body, 3, 6, 8, 5);
-    px(ctx, fin, 5, 4, 4, 2);
-    px(ctx, O, 12, 6, 3, 5);
-    px(ctx, fin, 12, 7, 2, 3);
-    px(ctx, "#1b1b1b", 4, 7, 1, 1);
-    if (key === "golden_koi") px(ctx, "#fff", 7, 7, 2, 1);
+  if (key === "pro_rod") {
+    // A golden rod, bent, with its reel and a line to a red bobber.
+    for (let i = 0; i < 11; i++) px(ctx, i < 3 ? "#5a3a1a" : "#f6c343", 2 + i, 13 - i, 2, 2);
+    px(ctx, O, 3, 9, 4, 4);
+    px(ctx, "#c8c8dc", 4, 10, 2, 2);
+    px(ctx, "#e8e8f0", 14, 3, 1, 8);
+    px(ctx, O, 13, 11, 3, 3);
+    px(ctx, "#e8566b", 14, 12, 1, 1);
     return;
   }
   if (key === "old_boot") {
@@ -201,7 +191,7 @@ const iconCache = new Map<string, string>();
 export function itemIconUrl(key: string, kind: string): string {
   let url = iconCache.get(key);
   if (!url) {
-    url = canvas(16, 16, (ctx) => drawIcon(ctx, key, kind)).toDataURL();
+    url = iconCanvas(key, kind).toDataURL();
     iconCache.set(key, url);
   }
   return url;
@@ -216,6 +206,17 @@ function cachedTex(key: string, draw: () => HTMLCanvasElement): Texture {
     texCache.set(key, t);
   }
   return t;
+}
+
+/** An item's icon canvas: fish at 32×32 (they have the detail), the rest 16×16. */
+function iconCanvas(key: string, kind: string): HTMLCanvasElement {
+  if (kind === "fish") return canvas(32, 32, (ctx) => drawFish(ctx, key));
+  return canvas(16, 16, (ctx) => drawIcon(ctx, key, kind));
+}
+
+/** An item's icon as a texture (the fish you just caught, held up). */
+export function itemTexture(key: string, kind: string): Texture {
+  return cachedTex(`icon:${key}`, () => iconCanvas(key, kind));
 }
 
 export function furnitureTexture(key: string): Texture {

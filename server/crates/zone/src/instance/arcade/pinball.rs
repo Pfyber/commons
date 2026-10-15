@@ -33,14 +33,14 @@ const FLIP_DOWN: f64 = 9.0;
 /// in toward the middle and back toward the hole, like a real machine's
 /// turned on its side; raised, in and up the table.
 const FLIPPERS: [(f64, f64, f64, f64); 4] = [
-    (30.0, 52.0, 2.094, 1.047),
-    (30.0, 104.0, -2.094, -1.047),
-    (230.0, 52.0, 1.047, 2.094),
-    (230.0, 104.0, -1.047, -2.094),
+    (30.0, 50.0, 2.094, 1.047),
+    (30.0, 106.0, -2.094, -1.047),
+    (230.0, 50.0, 1.047, 2.094),
+    (230.0, 106.0, -1.047, -2.094),
 ];
 /// Guide rails from the long walls down to the flipper pivots (as a real
 /// machine's inlanes), so the ball can only reach a hole between the flippers.
-const RAILS: [(f64, f64, f64, f64); 4] = [(12.0, 0.0, 30.0, 52.0), (12.0, 156.0, 30.0, 104.0), (248.0, 0.0, 230.0, 52.0), (248.0, 156.0, 230.0, 104.0)];
+const RAILS: [(f64, f64, f64, f64); 4] = [(12.0, 0.0, 30.0, 50.0), (12.0, 156.0, 30.0, 106.0), (248.0, 0.0, 230.0, 50.0), (248.0, 156.0, 230.0, 106.0)];
 const RAIL_R: f64 = 1.6;
 /// Bumpers and posts: centre, radius, and the speed they kick the ball off
 /// at (0: a plain post, which just bounces it).
@@ -64,9 +64,12 @@ const TILT: f64 = 34.0;
 const FRICTION: f64 = 10.0;
 const MAX_SPEED: f64 = 300.0;
 const SERVE_SPEED: f64 = 120.0;
-/// A ball slower than this is balanced on something; it's nudged off (units/s²).
+/// A ball slower than this for `STUCK_MS` is balanced on something (a post's
+/// top, a flipper's pivot): the table gets a bump, `BUMP` units/s across
+/// the slope, one way then the other each time, so nothing balances for ever.
 const STUCK_SPEED: f64 = 4.0;
-const NUDGE: f64 = 400.0;
+const STUCK_MS: u32 = 1_000;
+const BUMP: f64 = 70.0;
 /// Physics step, ms.
 const STEP_MS: u32 = 2;
 /// The bot keeps a flipper up this long, and saves this many in a hundred.
@@ -94,6 +97,9 @@ pub(super) struct Pinball {
     /// The bot: holding each flipper until then; leaving this approach alone until then.
     bot_hold: [u32; 2],
     bot_rest: u32,
+    /// How long the ball's been all but still, and how many bumps so far.
+    still: u32,
+    bumps: u16,
 }
 
 /// The closest point to (x, y) on the segment a–b, and how far along it is (0–1).
@@ -140,6 +146,8 @@ impl Pinball {
             t: now,
             bot_hold: [0; 2],
             bot_rest: 0,
+            still: 0,
+            bumps: 0,
         }
     }
 
@@ -314,10 +322,21 @@ impl Pinball {
             if s > MAX_SPEED {
                 self.vx *= MAX_SPEED / s;
                 self.vy *= MAX_SPEED / s;
-            } else if s < STUCK_SPEED {
-                // Balanced on the round end of a post or a flipper: the
-                // table's shake tips it off, toward the middle line.
-                self.vy += if self.y < H / 2.0 { NUDGE } else { -NUDGE } * dt;
+            }
+            if s < STUCK_SPEED {
+                self.still += ms;
+                if self.still >= STUCK_MS {
+                    // Balanced: bump the table, across the slope.
+                    let (gx, gy) = tilt(self.x, self.y);
+                    let side = if self.bumps % 2 == 0 { 1.0 } else { -1.0 };
+                    let (px, py) = if gx == 0.0 && gy == 0.0 { (0.0, 1.0) } else { (-gy, gx) };
+                    self.vx += px * BUMP * side;
+                    self.vy += py * BUMP * side;
+                    self.bumps = self.bumps.wrapping_add(1);
+                    self.still = 0;
+                }
+            } else {
+                self.still = 0;
             }
             // Through a hole: a point to the other end.
             if self.x < -BALL_R || self.x > W + BALL_R {
@@ -358,7 +377,7 @@ impl Pinball {
         d.extend(self.hits);
         d.push(self.keys[0] | self.keys[1] << 2);
         let rel = |at: u32| at.saturating_sub(self.t).min(60_000) as u16;
-        d.extend([rel(self.bot_hold[0]), rel(self.bot_hold[1]), rel(self.bot_rest)]);
+        d.extend([rel(self.bot_hold[0]), rel(self.bot_hold[1]), rel(self.bot_rest), self.still.min(60_000) as u16, self.bumps]);
         d
     }
 }
@@ -469,5 +488,32 @@ mod tests {
 ", "
 ");
         assert_eq!(have, json, "pinball vectors are stale: run with UPDATE_PINBALL_VECTORS=1");
+    }
+}
+#[cfg(test)]
+/// Many bot games: the ball never comes to rest balanced on something.
+mod stress {
+    use super::*;
+    #[test]
+    fn stress_no_stall() {
+        let mut stalls = 0;
+        for game in 0..60 {
+            let mut g = Pinball::new(0);
+            let mut now = 0;
+            let mut still_for = 0;
+            let mut over = None;
+            while over.is_none() && now < 60 * 60_000 {
+                now += 100;
+                over = g.tick(now, Some(0)).over;
+                let slow = g.serve_at.is_none() && (g.vx * g.vx + g.vy * g.vy).sqrt() < 15.0 && (g.x - g.x.round()).abs() < 10.0;
+                still_for = if slow { still_for + 100 } else { 0 };
+                if still_for > 8_000 {
+                    eprintln!("game {game}: stall at x={:.2} y={:.2} vx={:.3} vy={:.3} serve={:?} score={:?}", g.x, g.y, g.vx, g.vy, g.serve_at, g.score);
+                    stalls += 1;
+                    break;
+                }
+            }
+        }
+        assert_eq!(stalls, 0);
     }
 }

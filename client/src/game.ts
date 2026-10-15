@@ -8,7 +8,7 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
-import { ATTENDANT, BARTENDER, Clerk } from "./ambient/clerk";
+import { ATTENDANT, BARTENDER, Clerk, FISHERMAN } from "./ambient/clerk";
 import { ArcadePanel, BEAT_MS, BOT as ARCADE_BOT, PLAYING as ARCADE_PLAYING } from "./activities/arcade";
 import { PrizePanel } from "./ui/prizes";
 import { PoolPanel } from "./activities/pool";
@@ -36,9 +36,11 @@ import type { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { type FoundersPanel, STAGES, type WelcomePanel } from "./ui/welcome";
 import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
+import { tier } from "./ui/rarity";
+import { CatchShows } from "./world/catchfx";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
-import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
+import { type ActionMenu, type AlbumPanel, type BagPanel, FishermanPanel, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
@@ -229,6 +231,10 @@ export class Game {
   private pool: PoolPanel | null = null;
   /** The arcade's cabinets and its prize counter, where the map has them. */
   private arcade: ArcadePanel | null = null;
+  /** Fish just landed, held up above their anglers. */
+  private catches: CatchShows;
+  /** The fisherman on the pier, who buys your catch. */
+  private fisherman: FishermanPanel | null = null;
   private prizes: PrizePanel | null = null;
   /** The Dance Off machine: its number, the light-up floor and the scoreboard over it. */
   private dance: { cab: number; floor: MapObject; lights: Graphics; board: Text } | null = null;
@@ -289,6 +295,7 @@ export class Game {
     }
     this.setupCorners(map);
     this.weather = new Weather(app, this.scene, map, indoors);
+    this.catches = new CatchShows(this.scene);
     this.critters = new Critters(app, this.scene, map);
     if (zoneId === "founders_park") {
       this.cat = new Cat(map);
@@ -299,6 +306,18 @@ export class Game {
     }
     const counter = map.objects.find((o) => o.kind === "shop_counter");
     if (counter) this.clerk = new Clerk(map, counter, this.scene, labels);
+    // The fisherman stands still on his spot (a one-tile "counter" just below it).
+    const fisher = map.objects.find((o) => o.kind === "fisherman");
+    if (fisher) {
+      this.clerk = new Clerk(map, { ...fisher, x: fisher.x - 1, y: fisher.y + 1, w: 3, h: 1 }, this.scene, labels, FISHERMAN);
+      this.fisherman = new FishermanPanel(ui.eco, (coins, best) => {
+        this.clerk?.say(coins >= 8 ? `Now that's a catch! ${coins} coins for you.` : `${coins} coin${coins === 1 ? "" : "s"}, as promised. Thanks!`);
+        this.hud.toast(`🎣 Sold to the fisherman: +${coins} coins (best: ${best.name})`, 3500);
+      }, () => {
+        this.clerk?.say("She's a beauty. Fish'll practically jump onto that hook!");
+        this.hud.toast("🎣 You bought the Angler's Rod! Fish bite sooner and you get an extra swing.", 4500);
+      });
+    }
     const bar = map.objects.find((o) => o.kind === "bar_counter");
     if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
     const prizeCounter = map.objects.find((o) => o.kind === "prize_counter");
@@ -456,7 +475,21 @@ export class Game {
     if (bar) this.openBar(bar);
     const prizes = map.objects.find((o) => o.kind === "prize_counter");
     if (prizes && this.prizes) this.near(this.prizes, { x: prizes.x + Math.floor(prizes.w / 2), y: prizes.y + prizes.h }, 6).show();
+    const fisher = map.objects.find((o) => o.kind === "fisherman");
+    if (fisher && this.fisherman) this.openFisherman(fisher);
     return true;
+  }
+
+  /** Walk up to the fisherman and see what he'll give for your catch. */
+  private openFisherman(spot: MapObject) {
+    const self = this.self;
+    const at = { x: spot.x, y: spot.y };
+    if (self && cheb(self.destination, at) > 2) {
+      const near = nearestWalkable(this.scene.map, at.x + 1, at.y, 2);
+      if (near) this.moveTo(near, true);
+    }
+    void this.ui.eco.loadAlbum().catch(() => {});
+    this.near(this.fisherman!, at, 5).show();
   }
 
   /** The bartender's menu: a beer, or a glass of water to sober up. */
@@ -1580,18 +1613,45 @@ export class Game {
         this.avatars.get(m.id)?.bite(performance.now());
         if (isSelf) {
           sfx.nibble();
-          this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }));
+          // How hard the fight is depends on what's on the hook.
+          const rarity = this.ui.eco.items.get(m.item)?.rarity ?? 0;
+          const rod = this.ui.eco.qty(ROD_ITEM) > 0;
+          this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }), rarity, rod);
         }
         break;
       case FISH.CAUGHT: {
         this.props.reelIn(m.id);
         this.avatars.get(m.id)?.reelIn(performance.now());
-        sfx.landed(vol);
+        const caught = this.ui.eco.items.get(m.item);
+        const rarity = caught?.rarity ?? 0;
+        const t = tier(rarity);
+        sfx.landed(vol, rarity);
+        // Out of the water and up above the angler's head, for all to see.
+        const angler = m.id;
+        this.catches.start(
+          { x: m.x, y: m.y },
+          () => {
+            const a = this.avatars.get(angler);
+            return a ? { x: a.pos.x * TILE + TILE / 2, y: a.pos.y * TILE + TILE - 4 - 34 } : null;
+          },
+          caught?.key ?? "minnow",
+          caught?.name ?? "A fish",
+          rarity,
+        );
+        if (isSelf && rarity >= 4) {
+          // A legendary or mythical catch lights up the whole screen.
+          const flash = document.createElement("div");
+          flash.className = `catch-flash tier-${rarity}`;
+          flash.style.setProperty("--tier", t.color);
+          document.body.appendChild(flash);
+          window.setTimeout(() => flash.remove(), 2600);
+        }
+        const sparkle = (caught?.rarity ?? 0) >= 3 ? "✨" : "🎣";
         if (isSelf) {
           this.ui.reel.stop();
           this.taskMaybeDone();
+          this.hud.toast(`${sparkle} ${t.name} catch: ${this.ui.eco.name(m.item)}! (worth ${caught?.meta.sell ?? 0}c to the fisherman)`, (caught?.rarity ?? 0) >= 3 ? 5000 : 3000);
         }
-        this.avatars.get(m.id)?.say(`🎣 ${this.ui.eco.name(m.item)}!`);
         break;
       }
       case FISH.ESCAPED:
@@ -1796,6 +1856,7 @@ export class Game {
       this.closeIfWalkedAway();
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
+    this.catches.update(wallNow);
     sfx.skate.update(!!self?.riding, wallNow);
     // The jam pads go away when you walk off from the bandstand.
     if (this.jam?.open && self) {
@@ -1827,6 +1888,8 @@ export class Game {
     this.rpsPicker.destroy();
     this.pool?.destroy();
     this.arcade?.destroy();
+    this.fisherman?.destroy();
+    this.catches.destroy();
     this.danceBot?.destroy();
     this.prizes?.destroy();
     document.body.classList.remove("woozy");

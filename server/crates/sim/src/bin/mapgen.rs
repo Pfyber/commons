@@ -764,6 +764,9 @@ fn park() -> MapFile {
         b.decor(x, by + bh + 2, "tree");
     }
 
+    // The fisherman, out on the pier: he buys your catch.
+    b.object("fisherman", 35, 63, 1, 1, Some("Fisherman"), false);
+
     // Messages in bottles, at the land end of the pier.
     b.object("bottles", 38, 64, 1, 1, Some("Messages in bottles"), true);
 

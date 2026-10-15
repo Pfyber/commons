@@ -1458,6 +1458,12 @@ mod founding {
         )
         .await;
         assert_eq!(st, StatusCode::OK, "{r}");
+        // The zone can ask what a player holds (the fisherman's rod, say).
+        let (st, r) = call(&app, &svc, "GET", &format!("/internal/has?player={p}&item=1"), json!({})).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert!(r["qty"].as_i64().unwrap() > 0, "coins: {r}");
+        let (_, r) = call(&app, &svc, "GET", &format!("/internal/has?player={p}&item=112"), json!({})).await;
+        assert_eq!(r["qty"], 0, "no rod yet");
         let (st, _) = call(
             &app,
             &svc,
