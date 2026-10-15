@@ -1,6 +1,7 @@
-//! Generates `assets/maps/founders_park.json`, the ≈96×96 founding map (spec §11):
+//! Generates the zone maps: `city.json` (see `city.rs`, ADR 0010), `home.json`
+//! and `founders_park.json`, the ≈96×96 founding map (spec §11):
 //! central plaza with fountain, pond, chess tables, benches, garden plots,
-//! big screen, town hall, homes gate, one fogged bridge to the east, a
+//! big screen, town hall, homes gate, a bridge east to the city, a
 //! notice board and four topic corners (sports, art, music, games), set in an
 //! organic landscape: winding paths, a brook with footbridges, groves and the
 //! Whispering Wood, a wildflower meadow, an orchard, a hedge maze, the Old Oak
@@ -9,7 +10,9 @@
 //! Deterministic: rerunning produces the same file. Hand-authored maps will
 //! replace this once `tools/mapedit` exists.
 
-use commons_sim::map::{MapFile, MapObject, Spawn};
+mod city;
+
+use commons_sim::map::{MapFile, MapObject, Spawn, StreetGrid};
 use std::path::PathBuf;
 
 const W: u16 = 96;
@@ -29,6 +32,8 @@ const GROUND: &[&str] = &[
     "floor",
     "pitch",
     "stones",
+    "road",
+    "curb",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -84,6 +89,7 @@ struct Builder {
     decor: Vec<u8>,
     solid: Vec<bool>,
     objects: Vec<MapObject>,
+    streets: Option<StreetGrid>,
 }
 
 impl Builder {
@@ -156,6 +162,7 @@ impl Builder {
             decor: vec![0; n],
             solid: vec![false; n],
             objects: vec![],
+            streets: None,
         }
     }
 
@@ -194,6 +201,7 @@ impl Builder {
             decor: self.decor,
             collision,
             objects: self.objects,
+            streets: self.streets,
         }
     }
 }
@@ -219,6 +227,7 @@ fn park() -> MapFile {
         decor: vec![0; n],
         solid: vec![false; n],
         objects: vec![],
+        streets: None,
     };
     let (cx, cy) = (48i32, 48i32);
 
@@ -350,17 +359,9 @@ fn park() -> MapFile {
     b.object("arcade", 24, 41, 3, 1, None, true);
     b.object("board_games", 28, 41, 2, 1, Some("Games Corner"), true);
 
-    // The fogged bridge across the river: built but closed until the first vote.
+    // The bridge across the river leads out to the city (ADR 0010).
     b.rect(84, 47, 4, 3, "bridge");
-    b.object(
-        "fog_gate",
-        87,
-        46,
-        1,
-        5,
-        Some("Beyond the bridge: decided by vote"),
-        true,
-    );
+    b.object("city_gate", 87, 46, 1, 5, Some("To the city"), true);
 
     // ---- landmarks ----------------------------------------------------------
 
@@ -1050,7 +1051,7 @@ fn home() -> MapFile {
     b.decor(16, 12, "bush");
     b.decor(1, 0, "pine");
     b.decor(18, 0, "pine");
-    b.object("park_gate", 9, h - 1, 2, 1, Some("To the park"), true);
+    b.object("city_gate", 9, h - 1, 2, 1, Some("To the city"), true);
     // A wardrobe against the back wall: change clothes at home.
     b.object("wardrobe", 15, 2, 2, 1, Some("Wardrobe"), true);
     b.finish("Home", (10, 11))
@@ -1069,6 +1070,7 @@ fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
+    write("city", &city::city())?;
     write("founders_park", &park())?;
     write("home", &home())
 }

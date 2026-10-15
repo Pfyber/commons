@@ -20,6 +20,7 @@ export interface HudHandlers {
   onSound(): boolean;
   onTasks(): void;
   onMood(): void;
+  onMap(): void;
 }
 
 export class Hud {
@@ -43,6 +44,7 @@ export class Hud {
         <div class="pill place"></div>
         <div class="top-right">
           <div class="pill coins" title="Coins"></div>
+          <button type="button" class="pill btn map-btn" title="City map (C)" aria-label="City map"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("map")}" /></button>
           <button type="button" class="pill btn bag-btn" title="Bag (B)" aria-label="Bag"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bag")}" /></button>
           <button type="button" class="pill btn album-btn" title="Album (L)" aria-label="Album"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("book")}" /></button>
           <button type="button" class="pill btn friends-btn" title="Friends (F)" aria-label="Friends"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("friends")}" /></button>
@@ -71,6 +73,7 @@ export class Hud {
     this.tasksEl = root.querySelector(".tasks-chip")!;
     this.followEl = root.querySelector(".follow-chip")!;
     this.tasksEl.onclick = () => h.onTasks();
+    root.querySelector<HTMLButtonElement>(".map-btn")!.onclick = () => h.onMap();
     root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
     root.querySelector<HTMLButtonElement>(".album-btn")!.onclick = () => h.onAlbum();
     root.querySelector<HTMLButtonElement>(".friends-btn")!.onclick = () => h.onFriends();
@@ -81,6 +84,7 @@ export class Hud {
     soundBtn.onclick = sound;
     window.addEventListener("keydown", (e) => {
       if (isTyping(e)) return;
+      if (e.key === "c" || e.key === "C") h.onMap();
       if (e.key === "b" || e.key === "B") h.onBag();
       if (e.key === "l" || e.key === "L") h.onAlbum();
       if (e.key === "f" || e.key === "F") h.onFriends();

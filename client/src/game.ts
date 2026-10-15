@@ -37,7 +37,7 @@ import { Avatar } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
 import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
-import { compress, findPath } from "./world/path";
+import { compress, route } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
 import { TILE } from "./world/art";
@@ -290,6 +290,12 @@ export class Game {
       this.socket = null;
       this.events.onDisconnect(r);
     });
+  }
+
+  /** The player's tile, rounded (null before the welcome). */
+  get position(): TileXY | null {
+    const a = this.self;
+    return a ? { x: Math.round(a.pos.x), y: Math.round(a.pos.y) } : null;
   }
 
   private get self(): Avatar | undefined {
@@ -844,7 +850,7 @@ export class Game {
     } else {
       start = cur && now <= cur.t0 ? cur.path[0] : self.destination;
     }
-    const full = findPath(this.scene.map, start, t);
+    const full = route(this.scene.map, start, t);
     if (!full) {
       this.hud.toast("Can't get there from here.");
       return;
@@ -1092,6 +1098,10 @@ export class Game {
     }
     if (obj?.kind === "park_gate") {
       this.events.onTravel("founders_park");
+      return true;
+    }
+    if (obj?.kind === "city_gate") {
+      this.events.onTravel("city");
       return true;
     }
     const ground = groundAt(map, t.x, t.y);
@@ -1363,7 +1373,7 @@ export class Game {
     this.ui.reel.stop();
     this.ui.place.hide();
     this.app.stage.removeChild(this.scene.world);
-    this.scene.world.destroy({ children: true });
+    this.scene.destroy();
   }
 }
 

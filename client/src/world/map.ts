@@ -11,6 +11,14 @@ export interface MapObject {
   label?: string;
 }
 
+/** The street grid of a city map (mirror of sim::map::StreetGrid). */
+export interface StreetGrid {
+  block_tiles: number;
+  street_tiles: number;
+  /** Blocks per side. */
+  blocks: number;
+}
+
 export interface ZoneMap {
   name: string;
   width: number;
@@ -22,6 +30,8 @@ export interface ZoneMap {
   decor: number[];
   collision: number[];
   objects: MapObject[];
+  /** Present on city maps. */
+  streets?: StreetGrid;
 }
 
 export function walkable(m: ZoneMap, x: number, y: number): boolean {

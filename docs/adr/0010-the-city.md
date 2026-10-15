@@ -34,8 +34,9 @@ identically (tests on both sides).
 path grid across blocks, the same compact messages as today. A 20 × 20
 city is 1,044 tiles across, and `u16` would allow more than 1,000 blocks
 across. Storage and zone addressing use **block ID + local tile**
-(`b3_3`, x, y). The client renders relative to the camera's block, so
-float precision never matters even far from the origin.
+(`b3_3`, x, y). At these sizes plain world pixels are precise enough
+(1,044 tiles is about 33,000 px); the client can draw relative to the
+camera's block if cities ever grow far past that.
 
 **Zone ownership.** Each block's zone owns the block and the near half of
 the streets around it (all of the outer street at the city's edge).
@@ -93,7 +94,7 @@ come from a layout file for its type, not from code.
 | Step | What | Playable because |
 |---|---|---|
 | **C0** | Geometry, city and block-type data, this ADR. | No visible change. |
-| **C1** | The whole city as **one zone** (368 × 368), spawn at the Market; client streams nearby blocks and draws relative to the camera; long walks route along streets. Placeholder layouts with signs. | Same server model as today. |
+| **C1** ✓ | The whole city as **one zone** (368 × 368), spawn at the Market; client streams nearby blocks; long walks route along streets; a city map. Placeholder layouts with signs. Founders' Park stays a separate zone behind the Park block's gate, and newcomers on the Caretaker's tasks start there. | Same server model as today. |
 | **C2** | Today's content moves into its blocks (pond, orchard plots, town hall, arcade, woods grotto, meadow nooks, lake island, fairground stage, Founders' Grove). Corner boards removed. | Every feature keeps working in its new place. |
 | **C3** | Home blocks per the layout, doors into instanced interiors, yards, courtyards, the post office. | Lots assigned free for now. |
 | **C4** | Renting: tiers, leases, recurring rent, grace, release to storage, upgrade/downgrade; market stalls and apartments. | Nothing is lost on release. |

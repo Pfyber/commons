@@ -2481,3 +2481,62 @@ img.px-icon,
   margin: var(--px2);
   cursor: pointer;
 }
+
+/* City map: the grid of blocks, coloured by kind. */
+.panel.citymap .city-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--px2);
+  margin: 8px 0;
+}
+
+.panel.citymap .city-cell {
+  position: relative;
+  min-height: 46px;
+  padding: 2px;
+  border: 0;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--ink);
+  background: var(--paper-3);
+  box-shadow: var(--frame-thin);
+  cursor: pointer;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.panel.citymap .city-cell:hover {
+  filter: brightness(1.08);
+}
+
+.panel.citymap .cat-market { background: #f3d98a; }
+.panel.citymap .cat-nature { background: #bfdc9f; }
+.panel.citymap .cat-landmark { background: #c7dbe8; }
+.panel.citymap .cat-club { background: #dccbe8; }
+.panel.citymap .cat-home { background: #ead7bd; }
+
+.panel.citymap .city-cell.here {
+  box-shadow: var(--frame-thin), 0 0 0 calc(var(--px2) * 2) var(--gold);
+  z-index: 1;
+}
+
+.panel.citymap .city-cell .you {
+  position: absolute;
+  bottom: 1px;
+  left: 0;
+  right: 0;
+  font-size: 9px;
+  color: #8f3a2b;
+}
+
+.panel.citymap .city-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.panel.citymap .city-legend span {
+  padding: 1px 6px;
+  box-shadow: var(--frame-thin);
+}

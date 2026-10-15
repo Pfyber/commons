@@ -9,9 +9,9 @@ pub mod map;
 pub mod motion;
 pub mod path;
 
-pub use map::{Grid, MapFile};
+pub use map::{Grid, MapFile, StreetGrid};
 pub use motion::{Motion, WALK_SPEED_X10};
-pub use path::{compress, find_path};
+pub use path::{compress, find_path, route};
 
 pub type TilePos = (u16, u16);
 

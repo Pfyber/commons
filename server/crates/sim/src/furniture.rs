@@ -118,6 +118,7 @@ mod tests {
             decor,
             collision: vec![0; n],
             objects: vec![],
+            streets: None,
         };
         let f = Furniture::from_map(&map);
         assert_eq!(f.seats.len(), 3);

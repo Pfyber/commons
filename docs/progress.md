@@ -513,8 +513,51 @@ ground without changing the game:
   zones near a point; tests on both sides check they agree and that every
   tile has exactly one owner.
 
-Next: C1, the whole city as one zone with the client streaming nearby
-blocks.
+## City C1 · The city as one zone: done (2026-10-15)
+
+The whole city runs as one zone, `city` (368 × 368), and is the default
+place to join:
+
+- **Map:** `mapgen` builds `assets/maps/city.json` from `assets/city/`:
+  cobbled streets, pavements with street lamps, and a placeholder layout
+  per block type with a sign on its south pavement. The Market (spawn) has
+  stalls, the tailor and benches. The Park has the **gate to Founders'
+  Park**. The Pond and Lake have water you can fish in. The Orchard has a
+  greenhouse; Woods and Meadow are wild. Club lots are fenced. Home blocks
+  have the C3 layout of seven houses around a hedged courtyard (no doors
+  yet). Landmarks have a building and a forecourt; the Town Hall block has
+  the real Town Hall and the Arcade block has the word game. Mapgen checks
+  that nearly every walkable tile is reachable from the spawn and that no
+  block is closed off.
+- **Founders' Park** stays as its own zone until C2 moves its content into
+  the blocks. Its fogged east bridge is now the **city gate**, and the home's
+  gate leads to the city. Newcomers still doing the Caretaker's tasks start
+  in the park, where those tasks are; everyone else starts at the Market.
+- **Routing (`sim::path::route`, mirrored in `world/path.ts`):** on maps
+  bigger than 128 × 128, A* searches only a window around the walk (24
+  tiles of margin), so a short walk never allocates the whole city. Walks
+  longer than 40 tiles head to a street crossing near the start, follow
+  street centre lines, and walk in from a crossing near the goal. The map
+  file carries `streets` so both sides know the grid. A shared test city
+  checks that client and server produce the same route.
+- **Streaming (`world/scene.ts`):** ground chunks, decor and objects exist
+  only around the camera. Chunks are baked nearest first, a few per frame,
+  and dropped with one ring of slack, so a walk across the whole city stays
+  near 28 chunks and 300 sprites. The scene frees its textures on leaving a
+  zone.
+- **City map (C, or the map button):** the 7 × 7 grid by kind, with "you"
+  on your block; tap a block to walk to its sign by the streets.
+- New art: road cobbles, pavement with kerbs, landmark buildings (roof,
+  windows, name board), houses and the city gate.
+
+Checked: 500 bots in the city pass the perf gate (tick p99 2.3 ms with
+cross-city walks to seats). In the browser: newcomer → park → city gate →
+Market → map → Lake (50 s walk) → Park gate → Founders' Park → back.
+Rendering coordinates stay plain world pixels: at 368 tiles (11,776 px)
+float precision is no concern, so camera-relative drawing waits for bigger
+cities.
+
+Next: C2, today's content moves into its blocks and the corner boards go.
 
 ## Next: M5 · Crowds
 

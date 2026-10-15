@@ -20,6 +20,32 @@ pub struct Spawn {
     pub y: u16,
 }
 
+/// The street grid of a city map (ADR 0010): blocks of `block_tiles` with
+/// `street_tiles`-wide streets between them and around the edge. Long walks
+/// follow the street centre lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreetGrid {
+    pub block_tiles: u16,
+    pub street_tiles: u16,
+    /// Blocks per side.
+    pub blocks: u16,
+}
+
+impl StreetGrid {
+    pub fn pitch(&self) -> u16 {
+        self.block_tiles + self.street_tiles
+    }
+    /// Coordinate of the centre line of street `k` (0..=blocks), on either axis.
+    pub fn lane(&self, k: u16) -> u16 {
+        k * self.pitch() + self.street_tiles / 2
+    }
+    /// The two street centre lines on either side of `v` (equal at the edge).
+    pub fn lanes_around(&self, v: u16) -> [u16; 2] {
+        let k = (v.saturating_sub(self.street_tiles / 2) / self.pitch()).min(self.blocks);
+        [k, (k + 1).min(self.blocks)]
+    }
+}
+
 /// On-disk map format. Layers are row-major `width * height` arrays; ground and
 /// decor values index into their legends, collision is 0 (walkable) / 1 (blocked).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +60,9 @@ pub struct MapFile {
     pub decor: Vec<u8>,
     pub collision: Vec<u8>,
     pub objects: Vec<MapObject>,
+    /// Present on city maps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streets: Option<StreetGrid>,
 }
 
 impl MapFile {
@@ -61,6 +90,7 @@ impl MapFile {
             w: self.width,
             h: self.height,
             blocked: self.collision.iter().map(|&c| c != 0).collect(),
+            streets: self.streets,
         }
     }
 }
@@ -70,6 +100,7 @@ pub struct Grid {
     pub w: u16,
     pub h: u16,
     pub blocked: Vec<bool>,
+    pub streets: Option<StreetGrid>,
 }
 
 impl Grid {
@@ -78,6 +109,7 @@ impl Grid {
             w,
             h,
             blocked: vec![false; w as usize * h as usize],
+            streets: None,
         }
     }
 

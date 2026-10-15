@@ -22,6 +22,20 @@ const PAL: Record<string, string> = {
 };
 
 export const ICONS: Record<string, string[]> = {
+  map: [
+    "............",
+    ".ooo.ooo.oo.",
+    "okkkokkkokko",
+    "okggokkkokko",
+    "okggokbbokko",
+    "okkkokbbokgo",
+    "okkkokkkokgo",
+    "okyyokkkokko",
+    "okyyokggokko",
+    "okkkokggokko",
+    "okkkokkkokko",
+    ".ooo.ooo.oo.",
+  ],
   bag: [
     "....oooo....",
     "...on..no...",

@@ -2,7 +2,7 @@
 // used to predict the local player's walk before the server confirms it.
 // Same costs, neighbour order and tie-breaking as the Rust version.
 
-import { type ZoneMap, walkable } from "./map";
+import { type StreetGrid, type ZoneMap, walkable } from "./map";
 import type { TileXY } from "./motion";
 
 const STRAIGHT = 10;
@@ -61,18 +61,34 @@ class Heap {
   }
 }
 
+/** Maps up to this many tiles are searched whole; bigger ones within a window (as sim::path). */
+const WHOLE_MAP_TILES = 128 * 128;
+const WINDOW_MARGIN = 24;
+/** On a city map, walks longer than this (Chebyshev, in tiles) follow the streets. */
+export const LONG_WALK = 40;
+
 export function findPath(map: ZoneMap, from: TileXY, to: TileXY, maxExpansions = 12000): TileXY[] | null {
   if (!walkable(map, from.x, from.y) || !walkable(map, to.x, to.y)) return null;
   if (from.x === to.x && from.y === to.y) return [{ ...from }];
-  const w = map.width;
-  const n = w * map.height;
+  let wx = 0;
+  let wy = 0;
+  let w = map.width;
+  let wh = map.height;
+  if (map.width * map.height > WHOLE_MAP_TILES) {
+    wx = Math.max(0, Math.min(from.x, to.x) - WINDOW_MARGIN);
+    wy = Math.max(0, Math.min(from.y, to.y) - WINDOW_MARGIN);
+    w = Math.min(map.width - 1, Math.max(from.x, to.x) + WINDOW_MARGIN) - wx + 1;
+    wh = Math.min(map.height - 1, Math.max(from.y, to.y) + WINDOW_MARGIN) - wy + 1;
+  }
+  const openAt = (x: number, y: number) => x >= wx && y >= wy && x < wx + w && y < wy + wh && walkable(map, x, y);
+  const n = w * wh;
   const g = new Uint32Array(n).fill(0xffffffff);
   const parent = new Int32Array(n).fill(-1);
   const closed = new Uint8Array(n);
   const open = new Heap();
   let seq = 0;
-  const start = from.y * w + from.x;
-  const goal = to.y * w + to.x;
+  const start = (from.y - wy) * w + (from.x - wx);
+  const goal = (to.y - wy) * w + (to.x - wx);
   g[start] = 0;
   const h0 = octile(from.x, from.y, to.x, to.y);
   open.push([h0, h0, seq, start]);
@@ -83,20 +99,20 @@ export function findPath(map: ZoneMap, from: TileXY, to: TileXY, maxExpansions =
     if (closed[cur]) continue;
     if (cur === goal) {
       const out: TileXY[] = [];
-      for (let i = cur; i !== -1; i = parent[i]) out.push({ x: i % w, y: Math.floor(i / w) });
+      for (let i = cur; i !== -1; i = parent[i]) out.push({ x: wx + (i % w), y: wy + Math.floor(i / w) });
       return out.reverse();
     }
     closed[cur] = 1;
     if (++expansions > maxExpansions) return null;
-    const cx = cur % w;
-    const cy = Math.floor(cur / w);
+    const cx = wx + (cur % w);
+    const cy = wy + Math.floor(cur / w);
     for (const [dx, dy] of DIRS) {
       const nx = cx + dx;
       const ny = cy + dy;
-      if (!walkable(map, nx, ny)) continue;
+      if (!openAt(nx, ny)) continue;
       const diagonal = dx !== 0 && dy !== 0;
-      if (diagonal && (!walkable(map, cx + dx, cy) || !walkable(map, cx, cy + dy))) continue;
-      const ni = ny * w + nx;
+      if (diagonal && (!openAt(cx + dx, cy) || !openAt(cx, cy + dy))) continue;
+      const ni = (ny - wy) * w + (nx - wx);
       if (closed[ni]) continue;
       const ng = g[cur] + (diagonal ? DIAGONAL : STRAIGHT);
       if (ng < g[ni]) {
@@ -108,6 +124,62 @@ export function findPath(map: ZoneMap, from: TileXY, to: TileXY, maxExpansions =
     }
   }
   return null;
+}
+
+/**
+ * The path a walk takes (mirror of sim::path::route): on a city map a long
+ * walk goes via street crossings and centre lines; otherwise plain A*.
+ */
+export function route(map: ZoneMap, from: TileXY, to: TileXY, maxExpansions = 12000): TileXY[] | null {
+  const cheb = Math.max(Math.abs(from.x - to.x), Math.abs(from.y - to.y));
+  if (map.streets && cheb > LONG_WALK) {
+    const p = streetRoute(map, map.streets, from, to, maxExpansions);
+    if (p) return p;
+  }
+  return findPath(map, from, to, maxExpansions);
+}
+
+const pitchOf = (s: StreetGrid) => s.block_tiles + s.street_tiles;
+const lane = (s: StreetGrid, k: number) => k * pitchOf(s) + Math.floor(s.street_tiles / 2);
+function lanesAround(s: StreetGrid, v: number): [number, number] {
+  const k = Math.min(s.blocks, Math.floor(Math.max(0, v - Math.floor(s.street_tiles / 2)) / pitchOf(s)));
+  return [k, Math.min(k + 1, s.blocks)];
+}
+
+function crossings(s: StreetGrid, p: TileXY): TileXY[] {
+  const out: TileXY[] = [];
+  for (const ky of lanesAround(s, p.y)) {
+    for (const kx of lanesAround(s, p.x)) {
+      const c = { x: lane(s, kx), y: lane(s, ky) };
+      if (!out.some((o) => o.x === c.x && o.y === c.y)) out.push(c);
+    }
+  }
+  return out;
+}
+
+function streetRoute(map: ZoneMap, s: StreetGrid, from: TileXY, to: TileXY, maxExpansions: number): TileXY[] | null {
+  const manhattan = (a: TileXY, b: TileXY) => STRAIGHT * (Math.abs(a.x - b.x) + Math.abs(a.y - b.y));
+  let best: [number, TileXY, TileXY] | null = null;
+  for (const e of crossings(s, from)) {
+    for (const x of crossings(s, to)) {
+      const cost = octile(from.x, from.y, e.x, e.y) + manhattan(e, x) + octile(x.x, x.y, to.x, to.y);
+      if (!best || cost < best[0]) best = [cost, e, x];
+    }
+  }
+  if (!best) return null;
+  const [, e, x] = best;
+  const out = findPath(map, from, e, maxExpansions);
+  if (!out) return null;
+  const cur = { ...e };
+  while (cur.x !== x.x || cur.y !== x.y) {
+    if (cur.x !== x.x) cur.x += Math.sign(x.x - cur.x);
+    else cur.y += Math.sign(x.y - cur.y);
+    if (!walkable(map, cur.x, cur.y)) return null;
+    out.push({ ...cur });
+  }
+  const tail = findPath(map, x, to, maxExpansions);
+  if (!tail) return null;
+  return out.concat(tail.slice(1));
 }
 
 /** Keeps endpoints and direction changes only (mirror of sim::compress). */

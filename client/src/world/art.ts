@@ -107,6 +107,8 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     fog: P.fog,
     floor: P.floor,
     pitch: P.pitch,
+    road: "#8f8a80",
+    curb: "#cfc6b2",
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
   const differs = (dx: number, dy: number) => {
@@ -179,6 +181,30 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
       break;
     case "floor":
       for (let r = 0; r < TILE; r += 8) px(ctx, P.woodDark, ox, oy + r, TILE, 1);
+      break;
+    case "road":
+      // Cobbles in staggered rows, each a little different.
+      for (let r = 0; r < 4; r++) {
+        const shift = r % 2 ? 4 : 0;
+        for (let c = -1; c < 4; c++) {
+          const s = hash(tx * 4 + c, ty * 4 + r, 60);
+          const x = ox + c * 8 + shift;
+          const tone = ["#9a958a", "#948f84", "#a19c90", "#8b867b"][s % 4];
+          const x0 = Math.max(ox, x + 1);
+          const x1 = Math.min(ox + TILE, x + 8);
+          if (x1 > x0) px(ctx, tone, x0, oy + r * 8 + 1, x1 - x0, 6);
+        }
+      }
+      break;
+    case "curb":
+      // Paving slabs, with a darker kerb stone where they meet the road.
+      px(ctx, "#bdb39e", ox + (tx % 2 ? 0 : 16), oy, 1, TILE);
+      px(ctx, "#bdb39e", ox, oy + (ty % 2 ? 0 : 16), TILE, 1);
+      if ((h & 15) === 0) px(ctx, "#c4bba7", ox + 4 + (h % 18), oy + 6 + ((h >>> 5) % 18), 5, 3);
+      if (at(tx, ty - 1) === "road") px(ctx, "#7d776c", ox, oy, TILE, 4);
+      if (at(tx, ty + 1) === "road") px(ctx, "#7d776c", ox, oy + TILE - 4, TILE, 4);
+      if (at(tx - 1, ty) === "road") px(ctx, "#7d776c", ox, oy, 4, TILE);
+      if (at(tx + 1, ty) === "road") px(ctx, "#7d776c", ox + TILE - 4, oy, 4, TILE);
       break;
     case "stones": {
       // Stepping stones: flat round stones over the water.
@@ -684,6 +710,108 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.outline, w / 2 - 70, top + 14, 140, 22);
       px(ctx, "#f6efe1", w / 2 - 68, top + 16, 136, 18);
       label(ctx, o.label ?? "Town Hall", w / 2, top + 25, "#5a3b2b", 14);
+      break;
+    }
+    case "building": {
+      // A landmark (a placeholder until its block is built), seen from above
+      // at an angle: a big roof over a front wall with windows, the door and
+      // a name board. Colours vary per building.
+      const look = hash(o.x, o.y, 71);
+      const walls = ["#efe3cf", "#e7d2c0", "#d9e2e6", "#e9dcb8", "#dcd3e8", "#e3ead6"][look % 6];
+      const roofs = ["#b5544a", "#4f6d8a", "#5d8a4e", "#8a5d8a", "#c27a3c", "#3f7a8a"][(look >>> 4) % 6];
+      const glass = o.label === "Greenhouse";
+      [c, ctx] = makeCanvas(w, h + 32);
+      overhang = 32;
+      const H = h + 32;
+      const eave = Math.round(H * 0.58);
+      px(ctx, "rgba(0,0,0,0.15)", 6, H - 8, w - 12, 8);
+      // Front wall.
+      px(ctx, P.outline, 6, eave - 4, w - 12, H - eave);
+      px(ctx, glass ? "#d6efe9" : walls, 8, eave - 2, w - 16, H - eave - 4);
+      // Roof: slopes up to a ridge, shingle rows, a dark eave line.
+      px(ctx, P.outline, 2, 2, w - 4, eave);
+      px(ctx, glass ? "#b9e0da" : roofs, 4, 4, w - 8, eave - 4);
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillRect(4, 4, w - 8, Math.round((eave - 4) * 0.45));
+      ctx.fillStyle = "rgba(0,0,0,0.10)";
+      for (let y = 12; y < eave - 6; y += 10) ctx.fillRect(4, y, w - 8, 2);
+      if (glass) for (let x = 16; x < w - 8; x += 20) px(ctx, "#eef8f6", x, 4, 2, eave - 4);
+      px(ctx, "rgba(0,0,0,0.25)", 4, Math.round((eave - 4) * 0.45) + 4, w - 8, 2);
+      px(ctx, "rgba(0,0,0,0.3)", 2, eave - 4, w - 4, 4);
+      // Windows along the wall, a gap in the middle for the door.
+      const wy = eave + 8;
+      const wh = Math.max(12, Math.min(22, H - eave - 30));
+      for (let x = 18; x + 14 < w - 14; x += 26) {
+        if (Math.abs(x + 7 - w / 2) < 26) continue;
+        px(ctx, P.outline, x, wy, 14, wh);
+        px(ctx, glass ? "#eef8f6" : "#9fc3d6", x + 1, wy + 1, 12, wh - 2);
+        px(ctx, "#d6ecf5", x + 2, wy + 2, 4, 5);
+      }
+      px(ctx, P.outline, w / 2 - 12, H - 40, 24, 38);
+      px(ctx, P.woodDark, w / 2 - 10, H - 38, 20, 36);
+      px(ctx, "#f6c343", w / 2 + 5, H - 20, 2, 2);
+      // Name board over the door, on the eave.
+      const name = o.label ?? "";
+      const bw = Math.min(w - 24, Math.max(64, name.length * 9 + 18));
+      px(ctx, P.outline, w / 2 - bw / 2, eave - 12, bw, 20);
+      px(ctx, P.wood, w / 2 - bw / 2 + 1, eave - 11, bw - 2, 18);
+      label(ctx, name, w / 2, eave - 2, "#fff9ec", 11);
+      break;
+    }
+    case "house": {
+      // A small house from above: a hipped roof with a chimney over the
+      // front wall, two windows and a door (homes open in a later step).
+      const look = hash(o.x, o.y, 73);
+      const walls = ["#f1e4cc", "#e8d6c4", "#dfe6e8", "#efe2b8", "#e2dbec"][look % 5];
+      const roofs = ["#b5544a", "#4f6d8a", "#5d8a4e", "#8a5d8a", "#c27a3c", "#7a6a5a"][(look >>> 4) % 6];
+      [c, ctx] = makeCanvas(w, h + 32);
+      overhang = 32;
+      const H = h + 32;
+      const eave = Math.round(H * 0.55);
+      px(ctx, "rgba(0,0,0,0.15)", 4, H - 6, w - 12, 6);
+      px(ctx, P.outline, 8, eave - 4, w - 16, H - eave);
+      px(ctx, walls, 10, eave - 2, w - 20, H - eave - 4);
+      polygon(ctx, P.outline, [[2, eave], [18, 4], [w - 18, 4], [w - 2, eave]]);
+      polygon(ctx, roofs, [[5, eave - 2], [20, 7], [w - 20, 7], [w - 5, eave - 2]]);
+      ctx.fillStyle = "rgba(0,0,0,0.10)";
+      for (let y = 16; y < eave - 6; y += 9) ctx.fillRect(10, y, w - 20, 2);
+      px(ctx, "rgba(0,0,0,0.3)", 2, eave - 3, w - 4, 3);
+      px(ctx, P.outline, w - 52, 0, 14, 22);
+      px(ctx, "#a0675a", w - 50, 2, 10, 18);
+      const wy = eave + 8;
+      for (const x of [22, w - 42]) {
+        px(ctx, P.outline, x, wy, 20, 18);
+        px(ctx, "#9fc3d6", x + 2, wy + 2, 16, 14);
+        px(ctx, P.outline, x + 9, wy + 2, 2, 14);
+      }
+      px(ctx, P.outline, w / 2 - 10, H - 40, 20, 36);
+      px(ctx, roofs, w / 2 - 8, H - 38, 16, 34);
+      px(ctx, "#f6c343", w / 2 + 3, H - 22, 2, 2);
+      break;
+    }
+    case "city_gate": {
+      // Stone pillars with lanterns: the way out into the city.
+      const tall = o.h > o.w;
+      [c, ctx] = makeCanvas(w + (tall ? 16 : 0), h + 40);
+      overhang = 40;
+      const pillar = (x: number, y: number) => {
+        px(ctx, "rgba(0,0,0,0.15)", x - 2, y + 36, 16, 5);
+        px(ctx, P.outline, x, y, 12, 40);
+        px(ctx, "#c9c2b0", x + 1, y + 1, 10, 38);
+        px(ctx, "#b2aa96", x + 1, y + 12, 10, 2);
+        px(ctx, P.outline, x + 2, y - 8, 8, 9);
+        px(ctx, "#f6c343", x + 3, y - 7, 6, 7);
+      };
+      if (tall) {
+        pillar(2, 8);
+        pillar(2, h + 40 - 44);
+        label(ctx, "City", 10, h / 2 + 24, "#5a3b2b", 10);
+      } else {
+        pillar(0, 0);
+        pillar(w - 12, 0);
+        px(ctx, P.outline, 0, 6, w, 6);
+        px(ctx, "#c9c2b0", 1, 7, w - 2, 4);
+      }
       break;
     }
     case "homes_gate": {

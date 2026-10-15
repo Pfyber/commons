@@ -1,9 +1,9 @@
-// The rendered world: baked ground chunks, y-sorted props and avatars, and a
-// camera that follows the player.
+// The rendered world: ground chunks baked as they come into view, y-sorted
+// props and avatars, and a camera that follows the player.
 
 import { type Application, Container, Graphics, Sprite } from "pixi.js";
 import { TILE, bakeChunk, decorTexture, hash, objectTexture } from "./art";
-import { type ZoneMap, groundAt } from "./map";
+import { type MapObject, type ZoneMap, groundAt } from "./map";
 import type { TileXY } from "./motion";
 
 const CHUNK = 16;
@@ -20,15 +20,52 @@ function benchPiece(map: ZoneMap, x: number, y: number): string {
   return l && r ? "bench_mid" : l ? "bench_right" : r ? "bench_left" : "bench";
 }
 
+/** Chunks kept loaded around the view, and how many to bake per frame. */
+const MARGIN = 1;
+const BAKE_PER_FRAME = 4;
+
+interface Chunk {
+  ground: Sprite;
+  props: Sprite[];
+  sway: { s: Sprite; x: number; y: number; phase: number }[];
+}
+
+interface Placed {
+  o: MapObject;
+  /** Tile bounds including the art above the footprint. */
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  sprite: Sprite | null;
+}
+
+/** Inclusive chunk rectangle. */
+interface Range {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export class Scene {
   readonly world = new Container();
   /** Props and avatars, sorted by their foot position. */
   readonly sorted = new Container();
+  private ground = new Container();
   private marker = new Graphics();
   private markerUntil = 0;
   scale = 2;
   private cam: TileXY = { x: 0, y: 0 };
-  private swaying: { s: Sprite; x: number; y: number; phase: number }[] = [];
+  /**
+   * The map streams in by chunks around the camera (ADR 0010): ground, decor
+   * and objects exist only near the view, so a city costs what a park does.
+   */
+  private chunks = new Map<number, Chunk>();
+  private placed: Placed[];
+  private cols: number;
+  private rows: number;
+  private loaded: Range | null = null;
   /** 0 calm … 1 blustery; set by the weather. */
   wind = 0.3;
 
@@ -37,21 +74,83 @@ export class Scene {
     readonly map: ZoneMap,
   ) {
     this.sorted.sortableChildren = true;
-    const ground = new Container();
-    this.world.addChild(ground, this.marker, this.sorted);
+    this.world.addChild(this.ground, this.marker, this.sorted);
     app.stage.addChild(this.world);
+    this.cols = Math.ceil(map.width / CHUNK);
+    this.rows = Math.ceil(map.height / CHUNK);
+    this.placed = map.objects
+      // Drawn elsewhere, or invisible.
+      .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook")
+      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null }));
+    this.resize();
+  }
 
-    const at = (x: number, y: number) => groundAt(map, x, y);
-    for (let cy = 0; cy < map.height; cy += CHUNK) {
-      for (let cx = 0; cx < map.width; cx += CHUNK) {
-        const s = new Sprite(bakeChunk(cx, cy, Math.min(CHUNK, map.width - cx), Math.min(CHUNK, map.height - cy), at));
-        s.position.set(cx * TILE, cy * TILE);
-        ground.addChild(s);
+  /** Bakes chunks that came into range (a few per frame) and drops far ones. */
+  private stream() {
+    const v = this.viewRect();
+    const clampX = (c: number) => Math.max(0, Math.min(this.cols - 1, c));
+    const clampY = (c: number) => Math.max(0, Math.min(this.rows - 1, c));
+    const want: Range = {
+      x0: clampX(Math.floor(v.x0 / CHUNK) - MARGIN),
+      y0: clampY(Math.floor(v.y0 / CHUNK) - MARGIN),
+      x1: clampX(Math.floor(v.x1 / CHUNK) + MARGIN),
+      y1: clampY(Math.floor(v.y1 / CHUNK) + MARGIN),
+    };
+    const l = this.loaded;
+    if (l && l.x0 === want.x0 && l.y0 === want.y0 && l.x1 === want.x1 && l.y1 === want.y1) return;
+    // Keep one extra ring before dropping, so walking along an edge doesn't churn.
+    for (const [key, c] of this.chunks) {
+      const cx = key % this.cols;
+      const cy = Math.floor(key / this.cols);
+      if (cx < want.x0 - 1 || cx > want.x1 + 1 || cy < want.y0 - 1 || cy > want.y1 + 1) this.unload(key, c);
+    }
+    // Nearest first; everything at once only for the very first view.
+    const missing: [number, number, number][] = [];
+    const mx = (v.x0 + v.x1) / 2 / CHUNK;
+    const my = (v.y0 + v.y1) / 2 / CHUNK;
+    for (let cy = want.y0; cy <= want.y1; cy++) {
+      for (let cx = want.x0; cx <= want.x1; cx++) {
+        if (!this.chunks.has(cy * this.cols + cx)) missing.push([Math.hypot(cx + 0.5 - mx, cy + 0.5 - my), cx, cy]);
       }
     }
+    missing.sort((a, b) => a[0] - b[0]);
+    const budget = this.chunks.size === 0 ? missing.length : BAKE_PER_FRAME;
+    for (const [, cx, cy] of missing.slice(0, budget)) this.load(cx, cy);
+    if (missing.length <= budget) this.loaded = want;
 
-    for (let y = 0; y < map.height; y++) {
-      for (let x = 0; x < map.width; x++) {
+    // Objects: shown while they overlap the kept area.
+    const tx0 = (want.x0 - 1) * CHUNK;
+    const ty0 = (want.y0 - 1) * CHUNK;
+    const tx1 = (want.x1 + 2) * CHUNK;
+    const ty1 = (want.y1 + 2) * CHUNK;
+    for (const p of this.placed) {
+      const near = p.x1 >= tx0 && p.x0 < tx1 && p.y1 >= ty0 && p.y0 < ty1;
+      if (near && !p.sprite) {
+        const { texture, overhang } = objectTexture(p.o);
+        const s = new Sprite(texture);
+        s.position.set(p.o.x * TILE, p.o.y * TILE - overhang);
+        s.zIndex = (p.o.y + p.o.h) * TILE - 1;
+        this.sorted.addChild(s);
+        p.sprite = s;
+      } else if (!near && p.sprite) {
+        p.sprite.destroy({ texture: true, textureSource: true });
+        p.sprite = null;
+      }
+    }
+  }
+
+  private load(cx: number, cy: number) {
+    const map = this.map;
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    const w = Math.min(CHUNK, map.width - x0);
+    const h = Math.min(CHUNK, map.height - y0);
+    const ground = new Sprite(bakeChunk(x0, y0, w, h, (x, y) => groundAt(map, x, y)));
+    ground.position.set(x0 * TILE, y0 * TILE);
+    this.ground.addChild(ground);
+    const chunk: Chunk = { ground, props: [], sway: [] };
+    for (let y = y0; y < y0 + h; y++) {
+      for (let x = x0; x < x0 + w; x++) {
         const kind = map.decor_legend[map.decor[y * map.width + x]];
         if (kind === "none") continue;
         const tex = decorTexture(kind === "bench" ? benchPiece(map, x, y) : kind, hash(x, y, 5));
@@ -62,20 +161,30 @@ export class Scene {
         // Flat things lie under whoever stands on them.
         s.zIndex = FLAT.has(kind) ? y * TILE + 1 : y * TILE + TILE - 2;
         this.sorted.addChild(s);
-        if (SWAY.has(kind)) this.swaying.push({ s, x, y, phase: hash(x, y, 13) % 628 });
+        chunk.props.push(s);
+        if (SWAY.has(kind)) chunk.sway.push({ s, x, y, phase: hash(x, y, 13) % 628 });
       }
     }
+    this.chunks.set(cy * this.cols + cx, chunk);
+  }
 
-    for (const o of map.objects) {
-      if (o.kind === "grove_slot" || o.kind === "nook") continue; // drawn elsewhere, or invisible
-      const { texture, overhang } = objectTexture(o);
-      const s = new Sprite(texture);
-      s.position.set(o.x * TILE, o.y * TILE - overhang);
-      s.zIndex = (o.y + o.h) * TILE - 1;
-      this.sorted.addChild(s);
-    }
+  private unload(key: number, c: Chunk) {
+    // Ground textures are baked per chunk; decor textures are shared and cached.
+    c.ground.destroy({ texture: true, textureSource: true });
+    for (const s of c.props) s.destroy();
+    this.chunks.delete(key);
+  }
 
-    this.resize();
+  /** Frees the baked chunk and object textures, then everything else. */
+  destroy() {
+    for (const [key, c] of this.chunks) this.unload(key, c);
+    for (const p of this.placed) p.sprite?.destroy({ texture: true, textureSource: true });
+    this.world.destroy({ children: true });
+  }
+
+  /** Chunks currently baked (for tests and the debug overlay). */
+  get chunkCount(): number {
+    return this.chunks.size;
   }
 
   /**
@@ -153,14 +262,17 @@ export class Scene {
     const now = performance.now();
     const left = this.markerUntil - now;
     this.marker.alpha = left > 0 ? Math.min(1, left / 300) : 0;
+    this.stream();
     // Wind: plants on screen lean gently, each a little out of step.
     const v = this.viewRect();
     const t = now / 1000;
     const amp = 0.015 + this.wind * 0.05;
-    for (const p of this.swaying) {
-      if (p.x < v.x0 - 2 || p.x > v.x1 + 2 || p.y < v.y0 - 2 || p.y > v.y1 + 3) continue;
-      const gust = Math.sin(t * 0.7 + p.x * 0.15) * 0.5 + 0.5;
-      p.s.skew.x = Math.sin(t * 1.6 + p.phase / 100) * amp * (0.4 + gust);
+    for (const c of this.chunks.values()) {
+      for (const p of c.sway) {
+        if (p.x < v.x0 - 2 || p.x > v.x1 + 2 || p.y < v.y0 - 2 || p.y > v.y1 + 3) continue;
+        const gust = Math.sin(t * 0.7 + p.x * 0.15) * 0.5 + 0.5;
+        p.s.skew.x = Math.sin(t * 1.6 + p.phase / 100) * amp * (0.4 + gust);
+      }
     }
   }
 }

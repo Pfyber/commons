@@ -30,7 +30,7 @@ use commons_common::token::JoinClaims;
 use commons_protocol::{
     CELL_TILES, ClientMsg, EntityInfo, ServerMsg, Tile, emote, error_code, push_framed, state,
 };
-use commons_sim::{Grid, Motion, TilePos, WALK_SPEED_X10, compress, find_path};
+use commons_sim::{Grid, Motion, TilePos, WALK_SPEED_X10, compress, route};
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -725,7 +725,7 @@ impl Instance {
                 (None, from, now + MOVE_LEAD_MS)
             }
         };
-        let Some(mut full) = find_path(grid, start, target, MAX_PATH_EXPANSIONS) else {
+        let Some(mut full) = route(grid, start, target, MAX_PATH_EXPANSIONS) else {
             self.error(id, error_code::NO_PATH, "can't get there");
             return;
         };
@@ -1002,6 +1002,7 @@ pub(crate) mod tests {
             decor: vec![0; n],
             collision: vec![0; n],
             objects: vec![],
+            streets: None,
         }
     }
 
@@ -1098,6 +1099,7 @@ pub(crate) mod tests {
             decor: vec![0; n],
             collision: vec![0; n],
             objects: vec![],
+            streets: None,
         };
         Arc::new(ZoneDef::new("test".into(), map, None))
     }
