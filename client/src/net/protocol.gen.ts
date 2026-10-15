@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 12;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -85,6 +85,26 @@ export function decTile(r: Reader): Tile {
   };
 }
 
+export interface PoolBall {
+  n: number;
+  x: number;
+  y: number;
+}
+
+export function encPoolBall(w: Writer, v: PoolBall) {
+  w.u8(v.n);
+  w.u16(v.x);
+  w.u16(v.y);
+}
+
+export function decPoolBall(r: Reader): PoolBall {
+  return {
+    n: r.u8(),
+    x: r.u16(),
+    y: r.u16(),
+  };
+}
+
 export interface EntityInfo {
   id: number;
   name: string;
@@ -149,6 +169,14 @@ export type ClientMsg =
   | { t: "SetLook"; look: number }
   | { t: "Skate"; on: boolean }
   | { t: "RpsPick"; pick: number }
+  | { t: "Drink"; kind: number }
+  | { t: "PoolJoin"; vsBot: boolean }
+  | { t: "PoolLeave" }
+  | { t: "PoolShoot"; angle: number; power: number }
+  | { t: "ArcadeJoin"; cab: number; vsBot: boolean }
+  | { t: "ArcadeLeave"; cab: number }
+  | { t: "ArcadeInput"; cab: number; value: number }
+  | { t: "PoolAim"; angle: number; pull: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -259,6 +287,41 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(22);
       w.u8(m.pick);
       break;
+    case "Drink":
+      w.u8(23);
+      w.u8(m.kind);
+      break;
+    case "PoolJoin":
+      w.u8(24);
+      w.bool(m.vsBot);
+      break;
+    case "PoolLeave":
+      w.u8(25);
+      break;
+    case "PoolShoot":
+      w.u8(26);
+      w.u16(m.angle);
+      w.u16(m.power);
+      break;
+    case "ArcadeJoin":
+      w.u8(27);
+      w.u8(m.cab);
+      w.bool(m.vsBot);
+      break;
+    case "ArcadeLeave":
+      w.u8(28);
+      w.u8(m.cab);
+      break;
+    case "ArcadeInput":
+      w.u8(29);
+      w.u8(m.cab);
+      w.u16(m.value);
+      break;
+    case "PoolAim":
+      w.u8(30);
+      w.u16(m.angle);
+      w.u16(m.pull);
+      break;
   }
   return w.finish();
 }
@@ -334,6 +397,30 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 22:
       m = { t: "RpsPick", pick: r.u8() };
       break;
+    case 23:
+      m = { t: "Drink", kind: r.u8() };
+      break;
+    case 24:
+      m = { t: "PoolJoin", vsBot: r.bool() };
+      break;
+    case 25:
+      m = { t: "PoolLeave" };
+      break;
+    case 26:
+      m = { t: "PoolShoot", angle: r.u16(), power: r.u16() };
+      break;
+    case 27:
+      m = { t: "ArcadeJoin", cab: r.u8(), vsBot: r.bool() };
+      break;
+    case 28:
+      m = { t: "ArcadeLeave", cab: r.u8() };
+      break;
+    case 29:
+      m = { t: "ArcadeInput", cab: r.u8(), value: r.u16() };
+      break;
+    case 30:
+      m = { t: "PoolAim", angle: r.u16(), pull: r.u16() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -369,6 +456,11 @@ export type ServerMsg =
   | { t: "LanternRise"; id: number; x: number; y: number; text: string }
   | { t: "LookChanged"; id: number; look: number }
   | { t: "Rps"; a: number; b: number; phase: number; aPick: number; bPick: number; endsT: number }
+  | { t: "Woozy"; id: number; ms: number }
+  | { t: "PoolState"; a: number; b: number; turn: number; groups: number; status: number; shot: number; hole: number; balls: PoolBall[] }
+  | { t: "PoolShot"; by: number; vx: number; vy: number; shot: number }
+  | { t: "ArcadeState"; cab: number; kind: number; a: number; b: number; status: number; turn: number; t0: number; data: number[] }
+  | { t: "PoolAim"; by: number; angle: number; pull: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -549,6 +641,46 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(m.bPick);
       w.u32(m.endsT);
       break;
+    case "Woozy":
+      w.u8(28);
+      w.u32(m.id);
+      w.u32(m.ms);
+      break;
+    case "PoolState":
+      w.u8(29);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.turn);
+      w.u8(m.groups);
+      w.u8(m.status);
+      w.u32(m.shot);
+      w.u8(m.hole);
+      w.vec(m.balls, (x) => encPoolBall(w, x));
+      break;
+    case "PoolShot":
+      w.u8(30);
+      w.u32(m.by);
+      w.u16(m.vx);
+      w.u16(m.vy);
+      w.u32(m.shot);
+      break;
+    case "ArcadeState":
+      w.u8(31);
+      w.u8(m.cab);
+      w.u8(m.kind);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.status);
+      w.u8(m.turn);
+      w.u32(m.t0);
+      w.vec(m.data, (x) => w.u16(x));
+      break;
+    case "PoolAim":
+      w.u8(32);
+      w.u32(m.by);
+      w.u16(m.angle);
+      w.u16(m.pull);
+      break;
   }
   return w.finish();
 }
@@ -638,6 +770,21 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 27:
       m = { t: "Rps", a: r.u32(), b: r.u32(), phase: r.u8(), aPick: r.u8(), bPick: r.u8(), endsT: r.u32() };
+      break;
+    case 28:
+      m = { t: "Woozy", id: r.u32(), ms: r.u32() };
+      break;
+    case 29:
+      m = { t: "PoolState", a: r.u32(), b: r.u32(), turn: r.u8(), groups: r.u8(), status: r.u8(), shot: r.u32(), hole: r.u8(), balls: r.vec(() => decPoolBall(r)) };
+      break;
+    case 30:
+      m = { t: "PoolShot", by: r.u32(), vx: r.u16(), vy: r.u16(), shot: r.u32() };
+      break;
+    case 31:
+      m = { t: "ArcadeState", cab: r.u8(), kind: r.u8(), a: r.u32(), b: r.u32(), status: r.u8(), turn: r.u8(), t0: r.u32(), data: r.vec(() => r.u16()) };
+      break;
+    case 32:
+      m = { t: "PoolAim", by: r.u32(), angle: r.u16(), pull: r.u16() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

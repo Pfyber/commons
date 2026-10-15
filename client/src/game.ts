@@ -1,6 +1,6 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
-import { type Application, type FederatedPointerEvent, Sprite } from "pixi.js";
+import { type Application, type FederatedPointerEvent, Graphics, Sprite, Text } from "pixi.js";
 import { Ball } from "./activities/ball";
 import { ChessPanel, type GameStateMsg } from "./activities/chess";
 import { EaselDisplays, type EaselPanel } from "./activities/easel";
@@ -8,7 +8,10 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
-import { Clerk } from "./ambient/clerk";
+import { ATTENDANT, BARTENDER, Clerk } from "./ambient/clerk";
+import { ArcadePanel, BEAT_MS, BOT as ARCADE_BOT, PLAYING as ARCADE_PLAYING } from "./activities/arcade";
+import { PrizePanel } from "./ui/prizes";
+import { PoolPanel } from "./activities/pool";
 import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
 import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
@@ -17,6 +20,7 @@ import type { BottlesPanel, WishPanel } from "./ui/dream";
 import type { Tab, WardrobePanel } from "./ui/wardrobe";
 import { Critters } from "./ambient/critters";
 import type { Soundscape } from "./ambient/sound";
+import * as sfx from "./ambient/sfx";
 import { Weather } from "./ambient/weather";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
@@ -35,7 +39,7 @@ import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
-import { Avatar, PUMP_MS } from "./world/avatars";
+import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
 import { SKATE_SPEED_X10, type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
@@ -43,6 +47,7 @@ import { compress, findPath } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
 import { TILE } from "./world/art";
+import { encodeLook } from "./world/look";
 import { Milestones } from "./world/milestones";
 import { Scene } from "./world/scene";
 
@@ -51,6 +56,13 @@ const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION
 /** Errors worth showing to the player as-is. */
 const TOAST_CODES = new Set([ERR.RATE_LIMITED, 9, 10, 11, 12, 13]);
 const FISHING = 2;
+/** The Dance Off's AI bot dancer (not a server avatar): an id clear of real ones, and a party look. */
+const DANCE_BOT_ID = 0xfffffff7;
+const DANCE_BOT_LOOK = encodeLook({ hue: 200, skin: 0, hair: 4, hat: 0, hatHue: 0, style: 5, accessory: 2, outfit: 6 });
+
+/** Protocol `drink::*`. */
+const BEER = 1;
+const WATER = 2;
 /** Protocol `state::SKATING`. */
 const SKATING = 3;
 const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3 };
@@ -169,7 +181,10 @@ const SEAT_GROUND = 0xffffffff;
 const WATCH_RANGE = 12;
 /** Names are drawn for the nearest few avatars only, to keep crowds readable. */
 const MAX_NAMES = 25;
-const KEY_STEPS = 3;
+/** How far ahead a held arrow key plans the walk (twice that on a board). */
+const KEY_STEPS = 6;
+/** Map objects that are game machines (the server numbers them in map order, as here). */
+const CABINET_KINDS = ["arcade_cabinet", "dance_machine", "pinball"];
 const KEY_RESEND_MS = 180;
 
 const KEY_DIRS: Record<string, TileXY> = {
@@ -187,6 +202,8 @@ export class Game {
   private keys = new Set<string>();
   private lastKeyDir = "";
   private lastKeySend = 0;
+  /** Walks we've predicted and sent, oldest first, awaiting the server's echo. */
+  private sentMoves: { x: number; y: number; at: number }[] = [];
   private disposers: (() => void)[] = [];
   private furniture: Furniture;
   private games = new Map<number, GameStateMsg>();
@@ -208,10 +225,21 @@ export class Game {
   private clerk: Clerk | null = null;
   /** Your three hands while a rock paper scissors match waits on your pick. */
   private rpsPicker = new RpsPicker((pick) => this.socket?.send({ t: "RpsPick", pick }));
+  /** The bar's pool table, where the map has one. */
+  private pool: PoolPanel | null = null;
+  /** The arcade's cabinets and its prize counter, where the map has them. */
+  private arcade: ArcadePanel | null = null;
+  private prizes: PrizePanel | null = null;
+  /** The Dance Off machine: its number, the light-up floor and the scoreboard over it. */
+  private dance: { cab: number; floor: MapObject; lights: Graphics; board: Text } | null = null;
+  /** Dancing next to you when you take on the AI bot at the Dance Off. */
+  private danceBot: Avatar | null = null;
   /** A building we're walking to the door of, to go in once we get there. */
   private entering: { door: TileXY; zone: string } | null = null;
   /** Inside a building: no weather, no night, no skateboards. */
   private indoors = false;
+  /** When your own wooziness wears off. */
+  private soberTimer = 0;
   private grove: Grove | null = null;
   private caretakerTalkAt = 0;
   private sky: Sky;
@@ -249,9 +277,9 @@ export class Game {
       this.scene.sorted.addChild(this.screen.sprite);
     }
     this.ambient = new Ambient(this.scene, map);
-    const indoors = (this.indoors = zoneId === "shop");
+    const indoors = (this.indoors = zoneId === "shop" || zoneId === "bar" || zoneId === "arcade");
     ui.hud.setSkateAllowed(!indoors);
-    this.daynight = new DayNight(app, this.scene, map, indoors);
+    this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade");
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     if (zoneId === "founders_park") {
       ui.town
@@ -271,6 +299,48 @@ export class Game {
     }
     const counter = map.objects.find((o) => o.kind === "shop_counter");
     if (counter) this.clerk = new Clerk(map, counter, this.scene, labels);
+    const bar = map.objects.find((o) => o.kind === "bar_counter");
+    if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
+    const prizeCounter = map.objects.find((o) => o.kind === "prize_counter");
+    if (prizeCounter) {
+      this.clerk = new Clerk(map, prizeCounter, this.scene, labels, ATTENDANT);
+      this.prizes = new PrizePanel(ui.eco, (name) => {
+        this.clerk?.say(`One ${name}, all yours! Looks great.`);
+        this.hud.toast(`🎟️ You got the ${name}! Wear it at a changing room.`, 4000);
+      });
+    }
+    const cabinets = map.objects.filter((o) => CABINET_KINDS.includes(o.kind));
+    if (cabinets.length) {
+      this.arcade = new ArcadePanel(
+        cabinets.map((o) => o.label ?? "Arcade"),
+        () => this.selfId,
+        (id) => this.avatars.get(id)?.info.name ?? "someone",
+        (m) => this.socket?.send(m),
+        () => this.socket?.clock.now() ?? 0,
+        () => ui.sound.muted,
+      );
+      const machine = map.objects.find((o) => o.kind === "dance_machine");
+      const floor = map.objects.find((o) => o.kind === "dance_floor");
+      if (machine && floor) {
+        const lights = new Graphics();
+        lights.zIndex = floor.y * TILE + 2;
+        this.scene.sorted.addChild(lights);
+        const board = new Text({ text: "", style: { fontFamily: "ui-monospace, monospace", fontSize: 9, fontWeight: "bold", fill: 0xfff1b0, stroke: { color: 0x05030c, width: 3 }, align: "center" } });
+        board.anchor.set(0.5, 1);
+        board.resolution = 4;
+        board.position.set((machine.x + machine.w / 2) * TILE, machine.y * TILE - 50);
+        board.zIndex = 1e6;
+        this.scene.sorted.addChild(board);
+        this.dance = { cab: cabinets.indexOf(machine), floor, lights, board };
+      }
+    }
+    if (map.objects.some((o) => o.kind === "pool_table")) {
+      this.pool = new PoolPanel(
+        () => this.selfId,
+        (id) => this.avatars.get(id)?.info.name ?? "someone",
+        (m) => this.socket?.send(m),
+      );
+    }
     this.sky = new Sky(app, this.scene, () => this.onShootingStar());
     const fire = map.objects.find((o) => o.kind === "campfire");
     if (fire) {
@@ -379,9 +449,48 @@ export class Game {
     const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
     if (!this.clerk.hit(x, y)) return false;
     this.clerk.chat();
-    const counter = this.scene.map.objects.find((o) => o.kind === "shop_counter");
+    const map = this.scene.map;
+    const counter = map.objects.find((o) => o.kind === "shop_counter");
     if (counter) this.openShop(counter);
+    const bar = map.objects.find((o) => o.kind === "bar_counter");
+    if (bar) this.openBar(bar);
+    const prizes = map.objects.find((o) => o.kind === "prize_counter");
+    if (prizes && this.prizes) this.near(this.prizes, { x: prizes.x + Math.floor(prizes.w / 2), y: prizes.y + prizes.h }, 6).show();
     return true;
+  }
+
+  /** The bartender's menu: a beer, or a glass of water to sober up. */
+  private openBar(counter: MapObject) {
+    const self = this.self;
+    const front = { x: counter.x + Math.floor(counter.w / 2), y: counter.y + counter.h };
+    if (self && cheb(self.destination, front) > 3) {
+      const spot = nearestWalkable(this.scene.map, front.x, front.y, 2);
+      if (spot) this.moveTo(spot, true);
+    }
+    const order = (kind: number, line: string) => {
+      this.socket?.send({ t: "Drink", kind });
+      this.clerk?.say(line);
+    };
+    this.near(this.ui.menu, front, 6).showWith("Bartender 🍺", "The Mossy Mug", [
+      ["🍺 A beer · 5 coins", () => order(BEER, "One cold one, coming up!")],
+      ["💧 A glass of water · free", () => order(WATER, "Here you go. Sip slowly.")],
+    ]);
+  }
+
+  /** A drink took effect: `ms` of wooziness (0: sober again). */
+  private onWoozy(id: number, ms: number) {
+    const a = this.avatars.get(id);
+    a?.setWoozy(ms);
+    a?.flash(ms ? "🍺" : "💧");
+    if (id !== this.selfId) return;
+    window.clearTimeout(this.soberTimer);
+    document.body.classList.toggle("woozy", ms > 0);
+    if (ms) {
+      this.hud.toast("🍺 Cheers! The room's gone a little wobbly…", 4000);
+      this.soberTimer = window.setTimeout(() => document.body.classList.remove("woozy"), ms);
+    } else {
+      this.hud.toast("💧 Ahh. Much better.", 2500);
+    }
   }
 
   /** The clothes shop's try-on panel, tied to the rack or counter `at`. */
@@ -660,6 +769,65 @@ export class Game {
     }, PUMP_MS + 900);
   }
 
+  /**
+   * The Dance Off, as seen from the room: while a dance is on, the floor in
+   * front of the machine lights up on the beat (brighter under whoever just
+   * scored), the dancers dance, and a scoreboard over the machine shows who's
+   * ahead; after, who won.
+   */
+  private danceFloor(serverNow: number) {
+    const d = this.dance;
+    if (!d || !this.arcade) return;
+    const st = this.arcade.stateOf(d.cab);
+    const g = d.lights.clear();
+    const name = (id: number) => (id === ARCADE_BOT ? "AI bot" : (this.avatars.get(id)?.info.name ?? "someone"));
+    // The AI bot dances on the floor beside you while you take it on.
+    const botDancing = st?.status === ARCADE_PLAYING && st.b === ARCADE_BOT;
+    if (botDancing && !this.danceBot && st) {
+      // On the second pad, beside yours (the server puts you on the first).
+      const you = this.avatars.get(st.a);
+      const x = d.floor.x + 2;
+      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0 };
+      this.danceBot = new Avatar(info, this.scene, this.labels, false, serverNow);
+      this.danceBot.markNpc();
+      if (you) this.danceBot.faceToward(you.pos.x);
+    } else if (!botDancing && this.danceBot) {
+      this.danceBot.destroy();
+      this.danceBot = null;
+    }
+    if (this.danceBot) {
+      this.danceBot.keepDancing(300);
+      this.danceBot.update(serverNow, performance.now());
+    }
+    if (!st || st.status === 0 || st.status === 4) {
+      d.board.text = "";
+      return;
+    }
+    const data = st.data;
+    const [sa, sb] = [data[5], data[6]];
+    if (st.status !== ARCADE_PLAYING) {
+      const winner = st.status === 2 ? st.a : st.status === 3 ? st.b : 0;
+      d.board.text = winner ? `🏆 ${name(winner)} won the Dance Off!\n${sa} – ${sb}` : `A draw! ${sa} – ${sb}`;
+      return;
+    }
+    const start = data[1] * 65536 + data[2];
+    const beat = (serverNow - start) / BEAT_MS;
+    const crown = (mine: number, theirs: number) => (mine > theirs ? "👑 " : "");
+    d.board.text = beat < 0 ? `💃 Dance Off starting… ${Math.ceil(-beat * BEAT_MS / 1000)}` : `${crown(sa, sb)}${name(st.a)} ${sa}  –  ${sb} ${name(st.b)}${sb > sa ? " 👑" : ""}`;
+    if (beat < 0) return;
+    // The floor: each tile its own colour, changing on every beat, pulsing.
+    const pulse = Math.max(0, 1 - (beat - Math.floor(beat)) * 2);
+    const colors = [0xff4fa3, 0x3fe0ff, 0xffe14f, 0x5fe08a, 0xb07bff];
+    for (let i = 0; i < d.floor.w; i++) {
+      const c = colors[(i + Math.floor(beat)) % colors.length];
+      const x = (d.floor.x + i) * TILE;
+      const y = d.floor.y * TILE;
+      g.rect(x + 2, y + 2, TILE - 4, TILE - 4).fill({ color: c, alpha: 0.25 + pulse * 0.45 });
+      g.rect(x + 8, y + 8, TILE - 16, TILE - 16).fill({ color: 0xffffff, alpha: pulse * 0.25 });
+    }
+    for (const id of [st.a, st.b]) this.avatars.get(id)?.keepDancing(300);
+  }
+
   /** Trying clothes on: your avatar wears `look`, but only on your screen. */
   previewLook(look: number) {
     const self = this.self;
@@ -742,8 +910,16 @@ export class Game {
         const a = this.avatars.get(m.id);
         if (!a) break;
         if (m.id === this.selfId) {
-          // The server confirming our predicted walk: keep the local timing.
+          // The server confirming a walk we predicted: keep the local timing.
+          // Held arrow keys send a new stretch before the last one's echo is
+          // back, so match any walk still in flight, not just the latest one
+          // (taking an older echo as a correction snapped us back and forth).
           const end = m.path[m.path.length - 1];
+          const i = this.sentMoves.findIndex((s) => s.x === end.x && s.y === end.y);
+          if (i >= 0) {
+            this.sentMoves.splice(0, i + 1);
+            break;
+          }
           const dest = a.destination;
           if (end.x === dest.x && end.y === dest.y) break;
         }
@@ -850,6 +1026,21 @@ export class Game {
         break;
       case "Rps":
         this.onRps(m);
+        break;
+      case "Woozy":
+        this.onWoozy(m.id, m.ms);
+        break;
+      case "PoolState":
+        this.pool?.onState(m);
+        break;
+      case "PoolShot":
+        this.pool?.onShot(m.by, m.vx, m.vy, m.shot);
+        break;
+      case "PoolAim":
+        this.pool?.onAim(m.by, m.angle, m.pull);
+        break;
+      case "ArcadeState":
+        this.arcade?.onState(m);
         break;
       case "LanternRise": {
         const who = this.avatars.get(m.id);
@@ -959,6 +1150,11 @@ export class Game {
   private moveTo(t: TileXY, marker: boolean) {
     const self = this.self;
     if (!this.socket || !self) return;
+    // A little woozy: now and then you end up a step off where you meant.
+    if (self.woozy && Math.random() < 0.5) {
+      const off = { x: t.x + Math.round(Math.random() * 2 - 1), y: t.y + Math.round(Math.random() * 2 - 1) };
+      if (walkable(this.scene.map, off.x, off.y)) t = off;
+    }
     const now = this.socket.clock.now();
     // Walking off stands us up; the server does the same on MoveTo.
     if (self.state === SITTING) {
@@ -983,6 +1179,9 @@ export class Game {
     if (sp) full.unshift(sp.prev);
     const speedX10 = self.state === SKATING ? SKATE_SPEED_X10 : WALK_SPEED_X10;
     if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10 }, now);
+    const wall = performance.now();
+    this.sentMoves = this.sentMoves.filter((s) => wall - s.at < 3000);
+    this.sentMoves.push({ x: t.x, y: t.y, at: wall });
     this.socket.send({ t: "MoveTo", x: t.x, y: t.y });
     if (marker) this.scene.showTarget(t);
   }
@@ -1025,7 +1224,7 @@ export class Game {
         this.hud.focusChat();
         return;
       }
-      if (/^[1-7]$/.test(e.key)) {
+      if (/^[1-8]$/.test(e.key)) {
         this.emote(Number(e.key));
         return;
       }
@@ -1196,6 +1395,74 @@ export class Game {
       this.openShop(obj);
       return true;
     }
+    // The bar: in through the door; inside, the counter, the pool table, the fire.
+    if (obj?.kind === "bar") {
+      this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "bar");
+      return true;
+    }
+    if (obj?.kind === "bar_exit") {
+      this.events.onTravel("founders_park", "bar");
+      return true;
+    }
+    if (obj && (obj.kind === "bar_counter" || obj.kind === "bottle_shelf")) {
+      this.clerk?.chat();
+      const counter = map.objects.find((o) => o.kind === "bar_counter");
+      if (counter) this.openBar(counter);
+      return true;
+    }
+    if (obj?.kind === "pool_table" && this.pool) {
+      const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 3) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(this.pool, front, 7).show();
+      return true;
+    }
+    // The arcade: in through the doors; inside, the cabinets and the prizes.
+    if (obj?.kind === "arcade_hall") {
+      this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "arcade");
+      return true;
+    }
+    if (obj?.kind === "arcade_exit") {
+      this.events.onTravel("founders_park", "arcade_hall");
+      return true;
+    }
+    if (obj?.kind === "dance_floor" && this.arcade && this.dance) {
+      this.moveTo({ x: t.x, y: t.y }, true);
+      this.near(this.arcade, t, 5).openCab(this.dance.cab);
+      return true;
+    }
+    if (obj && CABINET_KINDS.includes(obj.kind) && this.arcade) {
+      const cab = map.objects.filter((o) => CABINET_KINDS.includes(o.kind)).indexOf(obj);
+      // Cabinets are played from the front; the pinball machine from its left end.
+      const front = obj.kind === "pinball" ? { x: obj.x - 1, y: obj.y + Math.floor(obj.h / 2) } : { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 1) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(this.arcade, front, 5).openCab(cab);
+      return true;
+    }
+    if (obj?.kind === "prize_counter" && this.prizes) {
+      this.clerk?.chat();
+      const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 3) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(this.prizes, front, 6).show();
+      return true;
+    }
+    if (obj?.kind === "claw_machine") {
+      const lines = ["🧸 The claw grabs a plushie… and drops it. So close!", "🧸 The claw wobbles over the duck… nope.", "🧸 Almost had the frog that time."];
+      this.hud.toast(lines[Math.floor(Math.random() * lines.length)], 3000);
+      return true;
+    }
+    if (obj?.kind === "fireplace") {
+      this.hud.toast("🔥 The fire crackles. It's warm and smells of pine.", 3500);
+      return true;
+    }
     if (obj?.kind === "fitting_room") {
       const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
       if (cheb(self.destination, front) > 2) {
@@ -1301,19 +1568,25 @@ export class Game {
 
   private onFish(m: Extract<ServerMsg, { t: "FishEvent" }>) {
     const isSelf = m.id === this.selfId;
+    const vol = this.nearbyVolume(m.id);
     switch (m.kind) {
       case FISH.CAST:
         this.props.cast(m.id, { x: m.x, y: m.y });
         this.avatars.get(m.id)?.castLine({ x: m.x, y: m.y }, performance.now());
+        sfx.splash(vol, CAST_SWING_MS);
         break;
       case FISH.BITE:
         this.props.bite(m.id);
         this.avatars.get(m.id)?.bite(performance.now());
-        if (isSelf) this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }));
+        if (isSelf) {
+          sfx.nibble();
+          this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }));
+        }
         break;
       case FISH.CAUGHT: {
         this.props.reelIn(m.id);
         this.avatars.get(m.id)?.reelIn(performance.now());
+        sfx.landed(vol);
         if (isSelf) {
           this.ui.reel.stop();
           this.taskMaybeDone();
@@ -1325,11 +1598,22 @@ export class Game {
         this.props.reelIn(m.id);
         this.avatars.get(m.id)?.reelIn(performance.now());
         if (isSelf) {
+          sfx.gotAway();
           this.ui.reel.stop();
           this.hud.toast("It got away…");
         }
         break;
     }
+  }
+
+  /** How loud someone's sounds are to you: full for your own, fading out over a dozen tiles. */
+  private nearbyVolume(id: number): number {
+    if (id === this.selfId) return 1;
+    const a = this.avatars.get(id);
+    const self = this.self;
+    if (!a || !self) return 0;
+    const d = Math.hypot(a.pos.x - self.pos.x, a.pos.y - self.pos.y);
+    return Math.max(0, 1 - d / 12) * 0.6;
   }
 
   /** Garden action from the plot menu: walk next to the plot, then act. */
@@ -1433,8 +1717,11 @@ export class Game {
     // On a board we cover ground faster, so plan further ahead.
     const skating = self.state === SKATING;
     const steps = skating ? KEY_STEPS * 2 : KEY_STEPS;
-    const due = dirKey !== this.lastKeyDir || remaining < (skating ? 3 : 1.5);
-    if (!due || wallNow - this.lastKeySend < KEY_RESEND_MS) return;
+    // Turning answers at once; going straight, the next stretch is planned
+    // well before this one runs out, so the walk never eases off.
+    const turned = dirKey !== this.lastKeyDir;
+    const due = turned || remaining < steps / 2;
+    if (!due || (!turned && wallNow - this.lastKeySend < KEY_RESEND_MS)) return;
     // Plan from the tile we're heading into, so segments chain smoothly.
     const from = { x: Math.round(self.pos.x + dx * 0.49), y: Math.round(self.pos.y + dy * 0.49) };
     const target =
@@ -1488,6 +1775,7 @@ export class Game {
       this.caretakerChat(wallNow);
     }
     this.clerk?.update(Date.now(), wallNow);
+    this.danceFloor(serverNow);
     this.checkEntering();
     this.sky.update(wallNow, this.daynight.dark > 0.5);
     if (this.following !== null && wallNow > this.followCheckAt) {
@@ -1508,6 +1796,7 @@ export class Game {
       this.closeIfWalkedAway();
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
+    sfx.skate.update(!!self?.riding, wallNow);
     // The jam pads go away when you walk off from the bandstand.
     if (this.jam?.open && self) {
       const b = this.scene.map.objects.find((o) => o.kind === "bandstand");
@@ -1536,6 +1825,12 @@ export class Game {
     this.caretaker?.destroy();
     this.clerk?.destroy();
     this.rpsPicker.destroy();
+    this.pool?.destroy();
+    this.arcade?.destroy();
+    this.danceBot?.destroy();
+    this.prizes?.destroy();
+    document.body.classList.remove("woozy");
+    window.clearTimeout(this.soberTimer);
     this.campfire?.destroy();
     this.sky.destroy();
     this.ui.offer.hide();

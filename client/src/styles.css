@@ -2601,3 +2601,356 @@ img.px-icon,
   margin: var(--px2);
   cursor: pointer;
 }
+
+/* ---- the bar ---- */
+
+/* A beer: the whole world sways and softens for a minute. */
+body.woozy #stage canvas {
+  animation: woozy 5s ease-in-out infinite;
+  filter: blur(0.6px) saturate(1.25) sepia(0.12);
+}
+
+@keyframes woozy {
+  0%,
+  100% {
+    transform: rotate(-0.8deg) scale(1.03) translateX(-4px);
+  }
+  50% {
+    transform: rotate(0.8deg) scale(1.04) translateX(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.woozy #stage canvas {
+    animation: none;
+  }
+}
+
+.panel.pool {
+  width: min(600px, calc(100vw - 24px));
+}
+
+.pool-canvas {
+  display: block;
+  width: 100%;
+  image-rendering: pixelated;
+  touch-action: none;
+  cursor: crosshair;
+  margin: 6px 0;
+}
+
+.pool-players {
+  font-weight: 700;
+}
+
+.pool-status {
+  margin: 0;
+  min-height: 1.3em;
+}
+
+.pool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pool-table {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.pool-table .pool-canvas {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The power meter: green (soft) at the bottom to red (full) at the top,
+   with an arrow sliding up and down it. */
+.pool-meter {
+  position: relative;
+  flex: none;
+  width: 18px;
+  margin: 6px 6px 6px 0;
+  background: linear-gradient(to top, #5f9e4b 0%, #f6c343 55%, #c8553d 100%);
+  box-shadow: var(--frame-thin);
+  cursor: pointer;
+}
+
+.pool-meter-arrow {
+  position: absolute;
+  right: -10px;
+  width: 0;
+  height: 0;
+  transform: translateY(50%);
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-right: 9px solid var(--ink);
+}
+
+/* The power-shot zone at the top of the meter. */
+.pool-meter-power {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 4px;
+  background: repeating-linear-gradient(45deg, #fff2a8 0 3px, #e8566b 3px 6px);
+  box-shadow: 0 0 6px 2px rgba(255, 220, 120, 0.8);
+  animation: power-glow 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes power-glow {
+  to {
+    box-shadow: 0 0 2px 1px rgba(255, 220, 120, 0.4);
+  }
+}
+
+/* ---- the arcade ---- */
+
+.panel.arcade {
+  width: min(560px, calc(100vw - 24px));
+}
+
+.arcade-canvas {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  image-rendering: pixelated;
+  touch-action: none;
+  background: #05030c;
+  box-shadow: 0 0 0 3px #1a1030, 0 0 18px rgba(176, 123, 255, 0.45);
+}
+
+.arcade-players {
+  font-weight: 700;
+}
+
+.arcade-status {
+  margin: 0;
+  min-height: 1.3em;
+}
+
+.arcade-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.arcade-tickets {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.arcade-pad {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.prize-icon {
+  width: 22px;
+  text-align: center;
+}
+
+/* ---- big game windows (the expand button on pool and the arcade) ---- */
+
+/* Fills the screen; the game's canvas is sized to fit (Panel.enlargeable),
+   so the whole table and every button show without scrolling. */
+.panel.big {
+  inset: 8px;
+  width: auto;
+  max-width: none;
+  z-index: 8;
+}
+
+.panel.big .panel-body {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.panel.big .pool-table {
+  justify-content: center;
+}
+
+.panel.big .pool-table .pool-canvas {
+  flex: none;
+}
+
+.panel.big .arcade-canvas {
+  margin: 6px auto;
+}
+
+/* ---- choosing how to play (ChoiceModal) ---- */
+
+.choice-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: radial-gradient(ellipse at center, rgba(20, 16, 34, 0.55), rgba(4, 4, 6, 0.8));
+  backdrop-filter: blur(7px) saturate(0.8);
+  -webkit-backdrop-filter: blur(7px) saturate(0.8);
+}
+
+.choice-modal[hidden] {
+  display: none;
+}
+
+.choice-card {
+  position: relative;
+  width: min(480px, 100%);
+  padding: 22px 22px 16px;
+  text-align: center;
+  color: #f1ece0;
+  background: linear-gradient(180deg, #17171b 0%, #0e0e11 100%);
+  /* A neon pixel frame: cyan one side, pink the other, as on the cabinets. */
+  box-shadow:
+    0 0 0 2px #0a0a0c,
+    0 0 0 4px #3fe0ff,
+    0 0 0 6px #0a0a0c,
+    0 0 26px 4px rgba(63, 224, 255, 0.25),
+    0 0 60px 10px rgba(255, 79, 163, 0.18),
+    0 18px 40px rgba(0, 0, 0, 0.6);
+  animation: choice-in 0.22s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes choice-in {
+  from {
+    transform: scale(0.85) translateY(10px);
+    opacity: 0;
+  }
+}
+
+.choice-kicker {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #ff8fc8;
+  text-shadow: 0 0 8px rgba(255, 79, 163, 0.7);
+}
+
+.choice-title {
+  margin: 0 0 8px;
+  font-size: 26px;
+  color: #ffe14f;
+  text-shadow: 2px 2px 0 #7a3b00, 0 0 14px rgba(255, 225, 79, 0.45);
+}
+
+.choice-text {
+  margin: 0 auto 16px;
+  max-width: 400px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #c9c3b6;
+}
+
+.choice-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.choice-modal .choice-card button.choice-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 14px 10px 12px;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  font: inherit;
+  color: #f1ece0;
+  background: #1f1f25;
+  box-shadow: 0 0 0 2px #3a3a46, inset 0 -3px 0 rgba(0, 0, 0, 0.35);
+  transition: transform 0.1s, box-shadow 0.15s, background 0.15s;
+}
+
+.choice-modal .choice-card button.choice-opt:hover,
+.choice-modal .choice-card button.choice-opt:focus-visible {
+  background: #26262e;
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 2px #ff4fa3, 0 0 16px rgba(255, 79, 163, 0.45), inset 0 -3px 0 rgba(0, 0, 0, 0.35);
+  outline: none;
+}
+
+.choice-modal .choice-card button.choice-opt.main {
+  color: #06140c;
+  background: linear-gradient(180deg, #6ff0a8 0%, #2fc27a 100%);
+  box-shadow: 0 0 0 2px #0a0a0c, 0 0 0 4px #6ff0a8, 0 0 18px rgba(111, 240, 168, 0.45), inset 0 -3px 0 rgba(0, 0, 0, 0.2);
+}
+
+.choice-modal .choice-card button.choice-opt.main:hover,
+.choice-modal .choice-card button.choice-opt.main:focus-visible {
+  background: linear-gradient(180deg, #8bffbe 0%, #3ad68a 100%);
+  box-shadow: 0 0 0 2px #0a0a0c, 0 0 0 4px #8bffbe, 0 0 26px rgba(111, 240, 168, 0.7), inset 0 -3px 0 rgba(0, 0, 0, 0.2);
+}
+
+.choice-icon {
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.choice-label {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.choice-sub {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.choice-modal .choice-card button.choice-back {
+  margin: 14px auto 0;
+  padding: 6px 14px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: #9d988c;
+}
+
+.choice-modal .choice-card button.choice-back:hover {
+  color: #f1ece0;
+  text-decoration: underline;
+}
+
+/* ---- dark game windows: pool and the arcade ---- */
+
+/* A really dark grey around the games, for atmosphere (the wooden title
+   bar stays). The paper colours are swapped for near-black greys, and the
+   text and the non-main buttons made light to read on them. */
+.panel.pool,
+.panel.arcade {
+  --paper: #0f0f11;
+  --paper-2: #18181b;
+  --paper-3: #222226;
+  --muted: #a9a59b;
+  background: var(--paper);
+  color: #ece6d8;
+}
+
+.panel.pool button:not(.primary):not(.x),
+.panel.arcade button:not(.primary):not(.x) {
+  color: #ece6d8;
+  background: var(--paper-3);
+}
+
+.panel.pool .hint,
+.panel.arcade .hint {
+  color: var(--muted);
+}

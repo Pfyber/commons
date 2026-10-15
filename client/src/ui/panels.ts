@@ -94,6 +94,137 @@ export class Panel {
 
   render() {}
 
+  /**
+   * Adds a button beside the close one that blows the panel up to fill the
+   * screen (and back); remembered per panel. For the game tables: while big,
+   * `canvas` is sized to the room left over by everything else in the panel
+   * (less `besideW` px of things next to it), so nothing needs scrolling.
+   */
+  protected enlargeable(canvas: HTMLCanvasElement, besideW = 0) {
+    const key = `commons.big.${this.el.className.split(" ")[1]}`;
+    const fit = () => {
+      if (!this.el.classList.contains("big") || this.el.hidden) {
+        canvas.style.width = "";
+        return;
+      }
+      const body = this.body;
+      const gap = parseFloat(getComputedStyle(body).rowGap) || 0;
+      let used = 0;
+      let rows = 0;
+      for (const child of Array.from(body.children) as HTMLElement[]) {
+        rows++;
+        if (child.contains(canvas)) {
+          // what the canvas's own row adds around it (margins and the like)
+          const cs = getComputedStyle(canvas);
+          used += parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+          continue;
+        }
+        used += child.offsetHeight;
+      }
+      used += gap * Math.max(0, rows - 1);
+      const h = body.clientHeight - used - 4;
+      const w = body.clientWidth - besideW - 8;
+      const width = Math.max(120, Math.min(w, (h * canvas.width) / canvas.height));
+      canvas.style.width = `${Math.floor(width)}px`;
+    };
+    new ResizeObserver(fit).observe(this.body);
+    new MutationObserver(() => requestAnimationFrame(fit)).observe(this.body, { childList: true, subtree: true });
+    const btn = button("", () => set(!this.el.classList.contains("big")), "x");
+    const set = (big: boolean) => {
+      this.el.classList.toggle("big", big);
+      requestAnimationFrame(fit);
+      btn.replaceChildren(pxIcon(big ? "shrink" : "expand", 2));
+      btn.title = big ? "Smaller" : "Bigger";
+      btn.setAttribute("aria-label", btn.title);
+      try {
+        localStorage.setItem(key, big ? "1" : "0");
+      } catch {
+        // storage unavailable
+      }
+    };
+    let big = false;
+    try {
+      big = localStorage.getItem(key) === "1";
+    } catch {
+      // storage unavailable
+    }
+    set(big);
+    this.titleEl.after(btn);
+    this.titleEl.style.marginRight = "auto";
+  }
+
+  destroy() {
+    this.el.remove();
+  }
+}
+
+/**
+ * A choice in the middle of the screen over a blurred world, for the moment
+ * you step up to a game: play the AI bot, or wait for someone. Each way to
+ * play is a big card (icon, what it is, what's in it for you). It stays
+ * until you pick (or back out).
+ */
+export class ChoiceModal {
+  private el = el("div", "choice-modal");
+  private card = el("div", "choice-card");
+  /** What's on show, so re-renders don't rebuild it under your pointer. */
+  private key = "";
+
+  constructor() {
+    this.el.hidden = true;
+    this.el.append(this.card);
+    document.body.appendChild(this.el);
+  }
+
+  get open() {
+    return !this.el.hidden;
+  }
+
+  /**
+   * Shows `title` (with `kicker` above it, `text` below) and a card per
+   * choice; `back` is the way out ("Not now").
+   */
+  show(
+    title: string,
+    text: string,
+    choices: { icon: string; label: string; sub?: string; primary?: boolean; pick: () => void }[],
+    back: () => void,
+    kicker = "",
+  ) {
+    const key = [kicker, title, text, ...choices.map((c) => c.label + c.sub)].join("|");
+    this.el.hidden = false;
+    if (key === this.key) return;
+    this.key = key;
+    this.card.replaceChildren();
+    if (kicker) this.card.append(el("p", "choice-kicker", kicker));
+    this.card.append(el("h3", "choice-title", title));
+    if (text) this.card.append(el("p", "choice-text", text));
+    const row = el("div", "choice-options");
+    for (const c of choices) {
+      const b = el("button", c.primary ? "choice-opt main" : "choice-opt");
+      b.type = "button";
+      b.append(el("span", "choice-icon", c.icon), el("span", "choice-label", c.label));
+      if (c.sub) b.append(el("span", "choice-sub", c.sub));
+      b.onclick = () => {
+        this.hide();
+        c.pick();
+      };
+      row.append(b);
+    }
+    const no = el("button", "choice-back", "Not now");
+    no.type = "button";
+    no.onclick = () => {
+      this.hide();
+      back();
+    };
+    this.card.append(row, no);
+  }
+
+  hide() {
+    this.el.hidden = true;
+    this.key = "";
+  }
+
   destroy() {
     this.el.remove();
   }
@@ -105,6 +236,7 @@ const KIND_ORDER: [string, string][] = [
   ["plant", "Harvest"],
   ["seed", "Seeds"],
   ["furniture", "Furniture"],
+  ["ticket", "Arcade tickets"],
 ];
 
 export class BagPanel extends Panel {

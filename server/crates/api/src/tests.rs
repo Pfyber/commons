@@ -1715,6 +1715,28 @@ mod changing_room {
     }
 
     #[tokio::test]
+    async fn tickets_buy_prizes_once() {
+        let Some((s, app, p, auth)) = setup().await else { return };
+        let redeem = |item: i32| json!({ "item": item, "key": Uuid::new_v4().to_string() });
+        // The Flower hat costs 10 coins, so 30 tickets.
+        let (st, r) = call(&app, &auth, "/api/arcade/redeem", redeem(513)).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(r["error"], "not_enough_tickets");
+        crate::economy::apply_tx(&s.db, &s.catalog, p, &[Op { item: 600, delta: 40 }], "test", &Uuid::new_v4().to_string())
+            .await
+            .unwrap();
+        let (st, r) = call(&app, &auth, "/api/arcade/redeem", redeem(513)).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(qty(&s, p, 600).await, 10);
+        assert_eq!(qty(&s, p, 513).await, 1);
+        let (st, r) = call(&app, &auth, "/api/arcade/redeem", redeem(513)).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(r["error"], "owned");
+        let (st, _) = call(&app, &auth, "/api/arcade/redeem", redeem(1)).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "coins aren't a prize");
+    }
+
+    #[tokio::test]
     async fn what_you_wore_before_the_shop_is_yours_to_keep() {
         let Some((s, app, p, auth)) = setup().await else { return };
         sqlx::query("UPDATE players SET avatar = jsonb_build_object('look', $2::bigint) WHERE id = $1")

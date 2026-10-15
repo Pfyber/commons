@@ -13,13 +13,17 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 12;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
 
 records! {
     Tile { x: u16, y: u16 }
+
+    /// A pool ball still on the table (`n`: 0 cue, 1–7 solids, 8, 9–15
+    /// stripes) at whole table units.
+    PoolBall { n: u8, x: u16, y: u16 }
 
     /// Everything a client needs to render another avatar, including any
     /// walk in progress so it can be simulated locally, and what it signals
@@ -85,6 +89,28 @@ message_enum! {
         21 Skate { on: bool }
         /// Your pick in a rock paper scissors match (`rps::ROCK`…).
         22 RpsPick { pick: u8 }
+        /// Order at the bar (`drink::*`): a beer (coins) or a glass of water.
+        23 Drink { kind: u8 }
+        /// Take a cue at the pool table: against the bar's bot, or wait for
+        /// someone to play you.
+        24 PoolJoin { vs_bot: bool }
+        /// Put the cue down (forfeits a game in progress).
+        25 PoolLeave {}
+        /// Your shot: direction as a fraction of a full turn (0–65535) and
+        /// power 0–1000.
+        26 PoolShoot { angle: u16, power: u16 }
+        /// Play the arcade cabinet `cab` (its index among the map's
+        /// cabinets): against its bot, or wait for someone to join.
+        27 ArcadeJoin { cab: u8, vs_bot: bool }
+        /// Step away from cabinet `cab` (forfeits a game in progress).
+        28 ArcadeLeave { cab: u8 }
+        /// A move or control at cabinet `cab` (`arcade::*` says what
+        /// `value` means for each game).
+        29 ArcadeInput { cab: u8, value: u16 }
+        /// Where you are aiming while it is your shot at the pool table
+        /// (`angle` as `PoolShoot`) and how far the cue is drawn back
+        /// (`pull` 0–1000), so the people watching see you line it up.
+        30 PoolAim { angle: u16, pull: u16 }
     }
 }
 
@@ -165,6 +191,28 @@ message_enum! {
         /// While choosing, picks are hidden (0) and `ends_t` is the deadline;
         /// at the reveal they show what each chose (0: didn't choose in time).
         27 Rps { a: u32, b: u32, phase: u8, a_pick: u8, b_pick: u8, ends_t: u32 }
+        /// Avatar `id` is a little woozy for `ms` (0: sober again).
+        28 Woozy { id: u32, ms: u32 }
+        /// The pool table: players `a` and `b` (0: empty; `pool::BOT`: the
+        /// bar's bot), whose `turn` (0 a, 1 b), `groups` (0 open, or a's
+        /// group: `pool::SOLIDS`/`STRIPES`), `status` (`pool::*`) and the
+        /// balls. `shot` counts shots, so clients can match it to `PoolShot`.
+        /// `hole`: the pocket (0–5: top left, top middle, top right, then
+        /// the bottom row) whoever's shot it is must sink the 8 in, once
+        /// they've cleared their group (where their last ball went); 255 until then.
+        29 PoolState { a: u32, b: u32, turn: u8, groups: u8, status: u8, shot: u32, hole: u8, balls: Vec<PoolBall> }
+        /// `by` played shot number `shot`: the cue ball leaves at (`vx`,
+        /// `vy`) units/s, each offset by `pool::V_OFFSET`. Clients replay it from the last state with the
+        /// shared physics; the next `PoolState` is where everything stopped.
+        30 PoolShot { by: u32, vx: u16, vy: u16, shot: u32 }
+        /// Arcade cabinet `cab` running game `kind`: players `a` and `b`
+        /// (0: empty; `arcade::BOT`), `status` (`arcade::*`), whose `turn`
+        /// (0 a, 1 b) and the game's own `data` (see `arcade`). `t0` is the
+        /// server time `data` describes (Pong's ball).
+        31 ArcadeState { cab: u8, kind: u8, a: u32, b: u32, status: u8, turn: u8, t0: u32, data: Vec<u16> }
+        /// `by` (a player, or `pool::BOT`) lining up their shot: the cue at
+        /// `angle`, drawn back `pull` (as `PoolAim`).
+        32 PoolAim { by: u32, angle: u16, pull: u16 }
     }
 }
 
@@ -177,7 +225,9 @@ pub mod emote {
     pub const SLEEP: u8 = 5;
     pub const CHEER: u8 = 6;
     pub const HEART: u8 = 7;
-    pub const MAX: u8 = HEART;
+    /// The robot: a stiff, poppy dance.
+    pub const ROBOT: u8 = 8;
+    pub const MAX: u8 = ROBOT;
 }
 
 /// Looks reserved for non-player characters (the Caretaker).
@@ -207,6 +257,107 @@ pub mod together {
     /// A game of rock paper scissors (see `rps`); anyone may be asked.
     pub const RPS: u8 = 6;
     pub const MAX: u8 = RPS;
+}
+
+/// `Drink.kind`.
+pub mod drink {
+    pub const BEER: u8 = 1;
+    pub const WATER: u8 = 2;
+    /// What a beer costs, in coins.
+    pub const BEER_PRICE: i32 = 5;
+    /// How long a beer makes you woozy.
+    pub const WOOZY_MS: u32 = 60_000;
+}
+
+/// The bar's pool table (`PoolState`); the game itself is `commons_sim::pool`.
+pub mod pool {
+    /// `PoolState.status`: nobody at the table, one player waiting for an
+    /// opponent, a game on, or won.
+    pub const EMPTY: u8 = 0;
+    pub const WAITING: u8 = 4;
+    pub const PLAYING: u8 = 1;
+    pub const A_WON: u8 = 2;
+    pub const B_WON: u8 = 3;
+    pub const SOLIDS: u8 = 1;
+    pub const STRIPES: u8 = 2;
+    /// The bar's bot, as a player id.
+    pub const BOT: u32 = 0xffff_fff3;
+    /// Added to `PoolShot` velocities so they fit a u16.
+    pub const V_OFFSET: i32 = 32_768;
+}
+
+/// The arcade's cabinets (`ArcadeState`).
+pub mod arcade {
+    /// Games, by cabinet label.
+    pub const PONG: u8 = 1;
+    pub const CYCLES: u8 = 2;
+    pub const CONNECT4: u8 = 3;
+    pub const MEMORY: u8 = 5;
+    pub const CATCH: u8 = 7;
+    pub const RACER: u8 = 8;
+    pub const DANCE: u8 = 9;
+    pub const TANKS: u8 = 10;
+    /// Pinball 1v1 (the bar): flippers either end, first to `PINBALL_WIN`.
+    pub const PINBALL: u8 = 11;
+    pub const PINBALL_WIN: u16 = 10;
+    /// Pinball controls, as bits of `ArcadeInput.value`: your top and bottom flipper.
+    pub const FLIP_TOP: u16 = 1;
+    pub const FLIP_BOTTOM: u16 = 2;
+    /// Contests (catch, racer, dance) and tanks count down this long first.
+    pub const COUNTDOWN_MS: u32 = 3_000;
+    /// Basket catch lasts this long.
+    pub const CATCH_MS: u32 = 45_000;
+    /// The race is this many units long, run within `RACE_MS`.
+    pub const RACE_GOAL: u16 = 3_000;
+    pub const RACE_MS: u32 = 90_000;
+    /// The racer's top speed, units per second.
+    pub const RACE_TOP_SPEED: u32 = 120;
+    /// Dance off: a beat every `BEAT_MS`, for `DANCE_BEATS` beats (40 s). The
+    /// chart starts easy and gets busier (see `dance_notes`).
+    pub const BEAT_MS: u32 = 500;
+    pub const DANCE_BEATS: u32 = 80;
+    /// A tank duel lasts at most this long.
+    pub const TANK_MS: u32 = 90_000;
+    /// Contest reports at or above this are scores (less it); below, positions.
+    pub const SCORE_FLAG: u16 = 0x8000;
+    /// Tank controls, as bits of `ArcadeInput.value`.
+    pub const KEY_FORWARD: u16 = 1;
+    pub const KEY_BACK: u16 = 2;
+    pub const KEY_LEFT: u16 = 4;
+    pub const KEY_RIGHT: u16 = 8;
+    pub const KEY_FIRE: u16 = 16;
+    /// `status`: as at the pool table, plus a draw.
+    pub const EMPTY: u8 = 0;
+    pub const PLAYING: u8 = 1;
+    pub const A_WON: u8 = 2;
+    pub const B_WON: u8 = 3;
+    pub const WAITING: u8 = 4;
+    pub const DRAW: u8 = 5;
+    /// The arcade's bot, as a player id.
+    pub const BOT: u32 = 0xffff_fff5;
+    /// Tickets for winning a game, against a person or the bot (nothing for
+    /// a draw or a loss).
+    pub const TICKETS_WIN: i32 = 10;
+    pub const TICKETS_WIN_BOT: i32 = 5;
+
+    /// How many arrows the dance has on beat `b` (from its start), not
+    /// counting a possible extra half-beat arrow (`dance_half`): none in
+    /// the two-beat count-in, one every other beat for the first 12 s, then
+    /// one every beat. Clients build the chart from this, the bot dances to it.
+    pub fn dance_notes(b: u32) -> u32 {
+        match b {
+            0..=1 => 0,
+            2..=23 => (b % 2 == 0) as u32,
+            _ => (b < DANCE_BEATS - 1) as u32,
+        }
+    }
+
+    /// Whether beat `b` may also have an arrow half a beat after it (the last 14 s).
+    pub fn dance_half(b: u32) -> bool {
+        (52..DANCE_BEATS - 2).contains(&b)
+    }
+    /// The ticket's item id.
+    pub const TICKET: u32 = 600;
 }
 
 /// Rock paper scissors: picks for `RpsPick` / `Rps`, and `Rps.phase`.

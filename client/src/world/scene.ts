@@ -71,7 +71,8 @@ export class Scene {
       const { texture, overhang } = objectTexture(o);
       const s = new Sprite(texture);
       s.position.set(o.x * TILE, o.y * TILE - overhang);
-      s.zIndex = (o.y + o.h) * TILE - 1;
+      // The dance floor lies flat: people stand on it, not behind it.
+      s.zIndex = o.kind === "dance_floor" ? o.y * TILE + 1 : (o.y + o.h) * TILE - 1;
       this.sorted.addChild(s);
     }
 

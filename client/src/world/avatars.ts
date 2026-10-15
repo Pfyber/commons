@@ -17,7 +17,31 @@ export const EMOTES: Record<number, { icon: string; label: string }> = {
   5: { icon: "💤", label: "Sleep" },
   6: { icon: "🎉", label: "Cheer" },
   7: { icon: "❤️", label: "Heart" },
+  8: { icon: "🤖", label: "Robot" },
 };
+
+/** `emote::ROBOT`: a stiff, poppy dance that lasts a little longer than the others. */
+const ROBOT = 8;
+const ROBOT_MS = 4200;
+/**
+ * The robot, beat by beat: a pose (art ROBOT_ARMS) and whether the knees pop
+ * the body down a pixel. Every fourth beat it turns to face the other way.
+ */
+const ROBOT_BEATS: { frame: AvatarFrame; pop: boolean }[] = [
+  { frame: 7, pop: false },
+  { frame: 8, pop: true },
+  { frame: 9, pop: false },
+  { frame: 8, pop: true },
+  { frame: 10, pop: false },
+  { frame: 10, pop: true },
+  { frame: 11, pop: false },
+  { frame: 12, pop: true },
+  { frame: 11, pop: false },
+  { frame: 12, pop: true },
+  { frame: 8, pop: false },
+  { frame: 10, pop: true },
+];
+const ROBOT_BEAT_MS = 220;
 
 const BUBBLE_MS = 6000;
 const EMOTE_MS = 2200;
@@ -88,6 +112,8 @@ export class Avatar {
   private bubbleUntil = 0;
   private emoteEl: HTMLDivElement | null = null;
   private emoteUntil = 0;
+  /** When the current emote started (the robot keeps to its beat from here). */
+  private emoteAt = 0;
   private emoteId = 0;
   private motion: Motion | null = null;
   private tile: TileXY;
@@ -105,10 +131,16 @@ export class Avatar {
   /** Rock paper scissors: a fist pumping in front of you, from `pumpAt`. */
   private hand = new Graphics();
   private pumpAt = -Infinity;
+  /** A beer at the bar: wobbly until then (wall clock). */
+  private woozyUntil = 0;
   /** Skateboard: when this ride began, the wheels' turn, and where they were last frame. */
   private rolling = false;
   private rollStart = 0;
   private wheelSpin = 0;
+  /** Whether this avatar is rolling along on a board right now. */
+  get riding() {
+    return this.rolling;
+  }
   private wheelAt: { x: number; y: number } | null = null;
   private fishing: { castAt: number; biteAt: number } | null = null;
   private reelAt = -Infinity;
@@ -261,6 +293,16 @@ export class Avatar {
     if (!e) return;
     this.flash(e.icon);
     this.emoteId = id;
+    if (id === ROBOT) {
+      this.emoteAt = performance.now();
+      this.emoteUntil = this.emoteAt + ROBOT_MS;
+    }
+  }
+
+  /** Dances for `ms` more (the Dance Off machine keeps its dancers going). */
+  keepDancing(ms: number) {
+    this.emoteId = 4;
+    this.emoteUntil = Math.max(this.emoteUntil, performance.now() + ms);
   }
 
   /** Pops `icon` above the head for a moment (emotes, jam notes). */
@@ -300,12 +342,14 @@ export class Avatar {
     const sitting = this.state === 1 && !walking;
     const skating = this.state === SKATING;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;
+    const beat = this.emoteId === ROBOT && wallNow < this.emoteUntil && !walking && !sitting && !skating ? Math.floor((wallNow - this.emoteAt) / ROBOT_BEAT_MS) : -1;
+    const robot = beat >= 0 ? ROBOT_BEATS[beat % ROBOT_BEATS.length] : null;
     // On a board: push off with the back foot, then glide.
     if (skating && walking && !this.rolling) this.rollStart = wallNow;
     this.rolling = skating && walking;
     const push = this.rolling ? pushPose(wallNow - this.rollStart) : null;
     const stepping = (walking && !skating) || dancing;
-    const frame: AvatarFrame = sitting ? 2 : skating ? (push?.frame ?? 4) : stepping ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
+    const frame: AvatarFrame = sitting ? 2 : skating ? (push?.frame ?? 4) : robot ? robot.frame : stepping ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
     this.sprite.texture = avatarTexture(this.info.look, frame);
     const bob = skating
       ? -BOARD_RISE
@@ -313,12 +357,19 @@ export class Avatar {
         ? Math.abs(Math.sin(wallNow / 90)) * -1.5
         : dancing && !sitting
           ? Math.sin(wallNow / 70) * 2
-          : 0;
+          : robot?.pop
+            ? 1
+            : 0;
     const feetX = x * TILE + TILE / 2;
     // Seated avatars sit on the bench's slats, drawn just in front of it.
     const feetY = y * TILE + TILE - (sitting ? 6 : 4);
-    this.sprite.position.set(Math.round(feetX), Math.round(feetY + bob));
-    this.sprite.scale.x = this.facing;
+    // Woozy: a slow sway, a stagger from side to side while walking, a tilt.
+    const woozy = wallNow < this.woozyUntil && !sitting;
+    const sway = woozy ? Math.sin(wallNow / 420) * 2.5 + (walking ? Math.sin(wallNow / 140) * 3 : 0) : 0;
+    this.sprite.rotation = woozy ? Math.sin(wallNow / 560) * 0.1 : 0;
+    this.sprite.position.set(Math.round(feetX + sway), Math.round(feetY + bob));
+    // The robot turns on the beat: every four beats it faces the other way.
+    this.sprite.scale.x = robot && Math.floor(beat / 4) % 2 === 1 ? -this.facing : this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
     this.drawBoard(skating, feetX, feetY, push);
     this.drawRod(feetX, feetY + bob, walking, wallNow);
@@ -391,6 +442,15 @@ export class Avatar {
       }
     }
     this.board.zIndex = this.sprite.zIndex - 0.1;
+  }
+
+  /** A beer: woozy for `ms` (0: sober again). */
+  setWoozy(ms: number) {
+    this.woozyUntil = ms ? performance.now() + ms : 0;
+  }
+
+  get woozy(): boolean {
+    return performance.now() < this.woozyUntil;
   }
 
   /** Turns to face tile column `x` (standing still; walking turns you anyway). */

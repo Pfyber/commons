@@ -29,6 +29,10 @@ const GROUND: &[&str] = &[
     "floor",
     "pitch",
     "stones",
+    // The arcade's dark carpet, with neon squiggles.
+    "arcade_carpet",
+    // The bar's worn plank floor: grain, knots, staggered joints.
+    "tavern_floor",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -57,6 +61,13 @@ const DECOR: &[&str] = &[
     "pine_secret",
     "log_seat",
     "lantern",
+    // The bar: stools to sit on, little round tables, barrels, log walls.
+    "stool",
+    "bar_table",
+    "barrel",
+    "wood_wall",
+    // The arcade's walls, striped with neon.
+    "neon_wall",
 ];
 
 fn g(name: &str) -> u8 {
@@ -715,6 +726,44 @@ fn park() -> MapFile {
     b.object("clothes_shop", sx, sy, sw, sh, Some("Clothes Shop"), true);
     b.rect(sx + sw / 2, sy + sh, 1, 68 - (sy + sh), "path");
 
+    // The bar, in the little wood west of the wishing well: the trees there
+    // make way for a log cabin, its door facing south, with a path round to
+    // the one by the well.
+    let (bx, by, bw, bh) = (25u16, 50u16, 7u16, 4u16);
+    for y in by..by + bh {
+        for x in bx..bx + bw {
+            b.decor(x, y, "none");
+        }
+    }
+    b.object("bar", bx, by, bw, bh, Some("The Mossy Mug"), true);
+    let door = bx + bw / 2;
+    b.rect(door, by + bh, 35 - door, 1, "path");
+    for x in door..35 {
+        b.decor(x, by + bh, "none");
+    }
+    b.decor(door - 2, by + bh, "lantern");
+    // The arcade hall on the lawn east of the picnic path, south of Music Corner
+    // (far enough that its sign clears the corner's board):
+    // a neon-lit hall, its door facing south, a path across to the main one.
+    let (ax, ay, aw, ah) = (51u16, 78u16, 8u16, 5u16);
+    for y in ay..ay + ah {
+        for x in ax..ax + aw {
+            b.decor(x, y, "none");
+        }
+    }
+    b.object("arcade_hall", ax, ay, aw, ah, Some("Arcade"), true);
+    let adoor = ax + aw / 2;
+    b.rect(50, ay + ah, adoor - 50 + 1, 1, "path");
+    for x in 50..=adoor {
+        b.decor(x, ay + ah, "none");
+    }
+
+    // The grove south of the path keeps its trees, a row further back so
+    // their crowns don't hide the path (trees aren't planted by paths later on).
+    for x in [29u16, 30, 32, 33] {
+        b.decor(x, by + bh + 2, "tree");
+    }
+
     // Messages in bottles, at the land end of the pier.
     b.object("bottles", 38, 64, 1, 1, Some("Messages in bottles"), true);
 
@@ -1095,6 +1144,88 @@ fn shop() -> MapFile {
     b.finish("Clothes Shop", (9, 8))
 }
 
+/// Inside the bar (spec: a cosy room of wood): log walls, a counter with
+/// shelves of bottles behind it and stools in front, two little tables,
+/// barrels, the pool table, and a pinball machine in the corner, played from
+/// its left side. The door leads back to the park.
+fn bar() -> MapFile {
+    let (w, h) = (20u16, 13u16);
+    let mut b = Builder::new(w, h);
+    b.rect(0, 0, w, h, "tavern_floor");
+    for x in 0..w {
+        b.decor(x, 0, "wood_wall");
+        if !(9..=10).contains(&x) {
+            b.decor(x, h - 1, "wood_wall");
+        }
+    }
+    for y in 0..h {
+        b.decor(0, y, "wood_wall");
+        b.decor(w - 1, y, "wood_wall");
+    }
+    // The bar: shelves on the back wall, the bartender's aisle, the counter.
+    b.object("bottle_shelf", 2, 1, 8, 1, Some("Bottles"), true);
+    b.object("bar_counter", 2, 3, 8, 1, Some("Bar"), true);
+    for x in [3, 5, 7, 9] {
+        b.decor(x, 4, "stool");
+    }
+    // Two little tables, a stool either side.
+    for (tx, ty) in [(4u16, 8u16), (8, 9)] {
+        b.decor(tx, ty, "bar_table");
+        b.decor(tx - 1, ty, "stool");
+        b.decor(tx + 1, ty, "stool");
+    }
+    b.object("pool_table", 12, 4, 4, 2, Some("Pool table"), true);
+    b.object("pinball", 16, 9, 3, 2, Some("Pinball"), true);
+    for (x, y) in [(1u16, 1u16), (1, 11), (18, 1), (11, 1)] {
+        b.decor(x, y, "barrel");
+    }
+    b.decor(17, 6, "lantern");
+    b.decor(2, 6, "lantern");
+    b.object("bar_exit", 9, h - 1, 2, 1, Some("To the park"), true);
+    b.finish("The Mossy Mug", (9, 10))
+}
+
+/// Inside the arcade: a dim carpeted hall, seven cabinets along the back
+/// wall, the Dance Off machine with its light-up floor on the left, tables
+/// on the right, claw machines and the prize counter. The door leads back
+/// out to the park.
+fn arcade() -> MapFile {
+    let (w, h) = (26u16, 16u16);
+    let mut b = Builder::new(w, h);
+    b.rect(0, 0, w, h, "arcade_carpet");
+    for x in 0..w {
+        b.decor(x, 0, "neon_wall");
+        if !(12..=13).contains(&x) {
+            b.decor(x, h - 1, "neon_wall");
+        }
+    }
+    for y in 0..h {
+        b.decor(0, y, "neon_wall");
+        b.decor(w - 1, y, "neon_wall");
+    }
+    // The cabinets, in a row a step out from the back wall (so their tops
+    // aren't cut off at the map's edge), then the dance machine.
+    // Their order is their number in ArcadeJoin; the label is the game.
+    let games = ["Pong", "Light Cycles", "Connect Four", "Memory Match", "Basket Catch", "Turbo Racer", "Tank Duel"];
+    for (i, game) in games.iter().enumerate() {
+        b.object("arcade_cabinet", 2 + i as u16 * 3, 2, 2, 2, Some(game), true);
+    }
+    b.object("dance_machine", 2, 7, 4, 2, Some("Dance Off"), true);
+    // The dancers stand on the light-up floor in front of it.
+    b.object("dance_floor", 2, 9, 4, 1, None, false);
+    // Two tables with stools, in a tidy row on the right.
+    for ty in [7u16, 10] {
+        b.decor(22, ty, "bar_table");
+        b.decor(21, ty, "stool");
+        b.decor(23, ty, "stool");
+    }
+    b.object("claw_machine", 2, 12, 2, 2, Some("Claw machine"), true);
+    b.object("claw_machine", 5, 12, 2, 2, Some("Claw machine"), true);
+    b.object("prize_counter", 15, 13, 6, 1, Some("Prizes"), true);
+    b.object("arcade_exit", 12, h - 1, 2, 1, Some("To the park"), true);
+    b.finish("Arcade", (12, 13))
+}
+
 fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
     let json = serde_json::to_string(map).unwrap();
     // Validate before writing.
@@ -1110,5 +1241,7 @@ fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
 fn main() -> std::io::Result<()> {
     write("founders_park", &park())?;
     write("home", &home())?;
-    write("shop", &shop())
+    write("shop", &shop())?;
+    write("bar", &bar())?;
+    write("arcade", &arcade())
 }

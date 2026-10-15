@@ -37,6 +37,10 @@ export interface Applied {
 }
 
 export const COIN = 1;
+/** The arcade's tickets (protocol `arcade::TICKET`). */
+export const TICKET = 600;
+/** Prize counter prices: tickets per coin of the shop price. */
+export const TICKETS_PER_COIN = 3;
 
 export class Economy {
   readonly items = new Map<number, Item>();
@@ -113,6 +117,11 @@ export class Economy {
 
   async buy(item: number, qty: number) {
     this.applyResult(await this.auth.send<Applied>("/api/market/buy", { item, qty, key: crypto.randomUUID() }));
+  }
+
+  /** The arcade's prize counter: tickets for a piece of clothing. */
+  async redeem(item: number) {
+    this.applyResult(await this.auth.send<Pick<Applied, "totals">>("/api/arcade/redeem", { item, key: crypto.randomUUID() }));
   }
 
   /** Today's small gift, if not yet collected. */

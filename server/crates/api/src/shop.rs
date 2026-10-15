@@ -27,7 +27,13 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/me/look", post(set_look))
         .route("/shop/buy", post(buy))
+        .route("/arcade/redeem", post(redeem))
 }
+
+/// The arcade's tickets (item id, as in the zone's `arcade::TICKET`).
+pub const TICKET: i32 = 600;
+/// Prize counter prices: tickets per coin of the shop price.
+pub const TICKETS_PER_COIN: i64 = 3;
 
 /// The look's clothing fields, as (slot, index); see client/src/world/look.ts.
 pub fn pieces(look: u32) -> [(&'static str, u32); 3] {
@@ -199,6 +205,48 @@ async fn buy(State(state): S, headers: HeaderMap, Json(req): Json<BuyReq>) -> Ap
     }
     let totals = wear(&state, player, req.look, Some((&req.key, req.price))).await?;
     worn(&state, &who.sub, totals).await
+}
+
+#[derive(Deserialize)]
+struct RedeemReq {
+    item: i32,
+    /// Client-generated idempotency key (one per press).
+    key: String,
+}
+
+/// The arcade's prize counter: tickets for clothes you don't have yet.
+async fn redeem(State(state): S, headers: HeaderMap, Json(req): Json<RedeemReq>) -> ApiResult<Json<serde_json::Value>> {
+    let who = bearer(&state, &headers)?;
+    let player =
+        Uuid::parse_str(&who.sub).map_err(|_| ApiError::unauthorized("not a player account"))?;
+    if req.key.is_empty() || req.key.len() > 80 {
+        return Err(ApiError::bad_request("bad_request", "Invalid request."));
+    }
+    let item = state
+        .catalog
+        .get(req.item)
+        .filter(|i| i.kind == "clothing")
+        .ok_or_else(|| ApiError::bad_request("not_a_prize", "That's not on the prize shelf."))?;
+    let cost = price(item) * TICKETS_PER_COIN;
+    let mut tx = state.db.begin().await.map_err(db_err)?;
+    let have = totals(&mut tx, player, &[item.id]).await.map_err(db_err)?;
+    if have.first().is_some_and(|&(_, q)| q > 0) {
+        return Err(ApiError::new(StatusCode::CONFLICT, "owned", "You've got that one already."));
+    }
+    let ops = [
+        Op { item: TICKET, delta: -(cost as i32) },
+        Op { item: item.id, delta: 1 },
+    ];
+    let key = format!("prize:{player}:{}", req.key);
+    let applied = match apply(&mut tx, &state.catalog, player, &ops, "arcade_prize", &key).await {
+        Err(EconError::Insufficient(_)) => {
+            return Err(ApiError::new(StatusCode::CONFLICT, "not_enough_tickets", "Not enough tickets yet."));
+        }
+        Err(EconError::Race) => return Err(ApiError::new(StatusCode::CONFLICT, "retry", "Please try again.")),
+        r => r?,
+    };
+    tx.commit().await.map_err(db_err)?;
+    Ok(Json(serde_json::json!({ "totals": applied.totals })))
 }
 
 #[cfg(test)]

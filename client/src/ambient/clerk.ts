@@ -1,6 +1,7 @@
-// The clothes shop's clerk: potters about behind the counter, says hello as
-// you come in, and helps you try things on. Like the Caretaker, where they
-// stand comes from the wall clock alone, so everyone sees the same.
+// Shopkeepers behind a counter: the clothes shop's clerk and the bar's
+// bartender. They potter about behind it, say hello as you come in, and
+// chat when tapped. Like the Caretaker, where they stand comes from the wall
+// clock alone, so everyone sees the same.
 
 import type { EntityInfo } from "../net/protocol.gen";
 import { Avatar } from "../world/avatars";
@@ -11,6 +12,8 @@ import { compress, findPath } from "../world/path";
 import type { Scene } from "../world/scene";
 
 export const CLERK_ID = 0xfffffff2;
+export const BARTENDER_ID = 0xfffffff4;
+export const ATTENDANT_ID = 0xfffffff6;
 const LEG_MS = 9000;
 const SPEED_X10 = 10;
 /** A waistcoat, glasses and a ponytail. */
@@ -24,6 +27,45 @@ const TIPS = [
   "Outfits at the back, hats in the middle, accessories by the door.",
 ];
 
+/** Who stands behind a counter, and what they say. */
+export interface Keeper {
+  id: number;
+  name: string;
+  look: number;
+  hellos: string[];
+  tips: string[];
+}
+
+export const CLERK: Keeper = { id: CLERK_ID, name: "Clerk 🧵", look: CLERK_LOOK, hellos: HELLOS, tips: TIPS };
+
+/** A flannel shirt, a beard-ish short cut and a cap. */
+export const BARTENDER: Keeper = {
+  id: BARTENDER_ID,
+  name: "Bartender 🍺",
+  look: encodeLook({ hue: 10, skin: 1, hair: 3, hat: 2, hatHue: 30, style: 0, accessory: 0, outfit: 5 }),
+  hellos: ["Welcome to the Mossy Mug! Pull up a stool.", "Evening! Fire's warm, beer's cold.", "Come on in. The pool shark's been waiting for a challenger."],
+  tips: [
+    "A beer's 5 coins. Fair warning: it goes straight to your head.",
+    "Water's free, and it'll set you straight.",
+    "Fancy a game? The pool shark doesn't go easy.",
+    "Best seat's by the fire, if you ask me.",
+  ],
+};
+
+/** Neon hoodie, headphones and spiky hair. */
+export const ATTENDANT: Keeper = {
+  id: ATTENDANT_ID,
+  name: "Attendant 🎟️",
+  look: encodeLook({ hue: 208, skin: 3, hair: 6, hat: 0, hatHue: 220, style: 5, accessory: 6, outfit: 4 }),
+  hellos: ["Welcome to the arcade! Grab a cabinet.", "Insert coin! …just kidding, it's free.", "High scores get tickets. Tickets get prizes."],
+  tips: [
+    "Win against a person for 10 tickets, the bot for 5. Even a loss gets you 2.",
+    "Trade tickets here for clothes. Wear them at any changing room.",
+    "The Connect Four bot thinks a few moves ahead. Just saying.",
+    "Pong: hit the ball off the edge of your paddle to angle it.",
+  ],
+};
+
 export class Clerk {
   readonly avatar: Avatar;
   private spots: TileXY[];
@@ -35,6 +77,7 @@ export class Clerk {
     counter: MapObject,
     scene: Scene,
     labels: HTMLElement,
+    private who: Keeper = CLERK,
   ) {
     // The row behind the counter.
     this.spots = [];
@@ -42,7 +85,7 @@ export class Clerk {
       if (walkable(map, x, counter.y - 1)) this.spots.push({ x, y: counter.y - 1 });
     }
     const at = this.spots[0] ?? { x: counter.x, y: counter.y - 1 };
-    const info: EntityInfo = { id: CLERK_ID, name: "Clerk 🧵", look: CLERK_LOOK, x: at.x, y: at.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0 };
+    const info: EntityInfo = { id: who.id, name: who.name, look: who.look, x: at.x, y: at.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0 };
     this.avatar = new Avatar(info, scene, labels, false, Date.now());
     this.avatar.markNpc();
   }
@@ -68,12 +111,16 @@ export class Clerk {
   }
 
   hello() {
-    this.avatar.say(HELLOS[Math.floor(Math.random() * HELLOS.length)]);
+    this.avatar.say(this.who.hellos[Math.floor(Math.random() * this.who.hellos.length)]);
+  }
+
+  say(text: string) {
+    this.avatar.say(text);
   }
 
   /** Something helpful, a different one each time. */
   chat() {
-    this.avatar.say(TIPS[this.tip++ % TIPS.length]);
+    this.avatar.say(this.who.tips[this.tip++ % this.who.tips.length]);
   }
 
   destroy() {

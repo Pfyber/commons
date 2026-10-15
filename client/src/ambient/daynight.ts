@@ -50,9 +50,37 @@ function glowTexture(): Texture {
   return Texture.from(c);
 }
 
+/** A soft white glow, tinted per light (the arcade's neon). */
+function whiteGlow(): Texture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,255,255,0.85)");
+  g.addColorStop(0.35, "rgba(255,255,255,0.3)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  return Texture.from(c);
+}
+
+/** Each cabinet's screen colour (art: arcade_cabinet). */
+const CABINET_NEON: Record<string, number> = {
+  Pong: 0x3fe0ff,
+  "Light Cycles": 0xff4fa3,
+  "Connect Four": 0xffe14f,
+  "Memory Match": 0xb07bff,
+  "Basket Catch": 0x5fe08a,
+  "Turbo Racer": 0xff9a4f,
+  "Tank Duel": 0xc8d84f,
+  "Dance Off": 0xff4fa3,
+};
+
 export class DayNight {
   private shade = new Graphics();
   private lights = new Container();
+  /** The arcade: neon glows drawn over the dimmed room, pulsing gently. */
+  private neon: Container | null = null;
   private override: number | null;
   private glow: Texture;
   /** 0 in daylight … 1 at night. */
@@ -60,10 +88,12 @@ export class DayNight {
 
   constructor(
     private app: Application,
-    scene: Scene,
+    private scene: Scene,
     map: ZoneMap,
     /** Inside a building the lights are on: no night shade. */
     private indoors = false,
+    /** A dim room lit by neon (the arcade). */
+    neon = false,
   ) {
     const q = new URLSearchParams(location.search).get("hour");
     this.override = q !== null && !Number.isNaN(Number(q)) ? Number(q) : null;
@@ -72,6 +102,7 @@ export class DayNight {
     this.lights.blendMode = "add";
     scene.world.addChild(this.lights);
 
+    if (neon) this.addNeon(app, map);
     const tex = glowTexture();
     this.glow = tex;
     const lamps = new Set(["lamp", "lantern"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
@@ -84,13 +115,36 @@ export class DayNight {
       this.lights.addChild(s);
     });
     for (const o of map.objects) {
-      if (!["town_hall", "clothes_shop", "fountain", "campfire", "lantern_stand"].includes(o.kind)) continue;
+      if (!["town_hall", "clothes_shop", "bar", "arcade_hall", "fountain", "campfire", "lantern_stand"].includes(o.kind)) continue;
       const s = new Sprite(tex);
       s.anchor.set(0.5);
-      s.scale.set(o.kind === "town_hall" ? 4 : o.kind === "clothes_shop" ? 3 : o.kind === "campfire" ? 3.2 : 1.6);
+      s.scale.set(o.kind === "town_hall" ? 4 : o.kind === "clothes_shop" || o.kind === "bar" || o.kind === "arcade_hall" ? 3 : o.kind === "campfire" ? 3.2 : 1.6);
       s.alpha = 0.7;
       s.position.set((o.x + o.w / 2) * TILE, (o.y + o.h / 2) * TILE);
       this.lights.addChild(s);
+    }
+  }
+
+  /** Coloured glows over the walls' neon tubes and the machines. */
+  private addNeon(app: Application, map: ZoneMap) {
+    const neon = new Container();
+    neon.blendMode = "add";
+    app.stage.addChild(neon);
+    this.neon = neon;
+    const tex = whiteGlow();
+    const add = (x: number, y: number, color: number, scale: number) => {
+      const s = new Sprite(tex);
+      s.anchor.set(0.5);
+      s.tint = color;
+      s.scale.set(scale);
+      s.position.set(x, y);
+      neon.addChild(s);
+    };
+    // Only the screens glow: a soft pool of their colour.
+    for (const o of map.objects) {
+      const cx = (o.x + o.w / 2) * TILE;
+      if (o.kind === "arcade_cabinet") add(cx, o.y * TILE - 9, CABINET_NEON[o.label ?? ""] ?? 0x3fe0ff, 1.5);
+      if (o.kind === "dance_machine") add(cx, o.y * TILE - 12, CABINET_NEON["Dance Off"], 2.2);
     }
   }
 
@@ -104,6 +158,10 @@ export class DayNight {
   }
 
   destroy() {
+    if (this.neon) {
+      this.app.stage.removeChild(this.neon);
+      this.neon.destroy({ children: true });
+    }
     this.app.stage.removeChild(this.shade);
     this.shade.destroy();
   }
@@ -115,6 +173,19 @@ export class DayNight {
   }
 
   update() {
+    if (this.neon) {
+      // A dim violet room; the neon glows ride with the camera and breathe.
+      const { width, height } = this.app.screen;
+      this.shade.clear().rect(0, 0, width, height).fill(0xa49cc4);
+      this.dark = 0;
+      this.lights.visible = false;
+      this.neon.position.copyFrom(this.scene.world.position);
+      this.neon.scale.copyFrom(this.scene.world.scale);
+      const t = performance.now() / 1000;
+      // A slow, slight flicker, as screens do.
+      this.neon.children.forEach((c, i) => (c.alpha = 0.5 + Math.sin(t * 0.8 + i * 1.7) * 0.06));
+      return;
+    }
     if (this.indoors) {
       this.dark = 0;
       this.shade.clear();

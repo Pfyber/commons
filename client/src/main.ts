@@ -2,6 +2,8 @@ import { Application } from "pixi.js";
 import parkUrl from "../../assets/maps/founders_park.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
 import shopUrl from "../../assets/maps/shop.json?url";
+import barUrl from "../../assets/maps/bar.json?url";
+import arcadeUrl from "../../assets/maps/arcade.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { ApiError, Auth, type Destination } from "./net/api";
@@ -30,7 +32,7 @@ import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
 import "./styles.css";
 
-const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl, shop: shopUrl };
+const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl, shop: shopUrl, bar: barUrl, arcade: arcadeUrl };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
 

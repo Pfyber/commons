@@ -7,6 +7,7 @@ pub mod garden;
 pub mod map;
 pub mod motion;
 pub mod path;
+pub mod pool;
 
 pub use map::{Grid, MapFile};
 pub use motion::{Motion, SKATE_SPEED_X10, WALK_SPEED_X10};

@@ -9,10 +9,13 @@
 //! watched cells via CellEnter/CellLeave (subscription changes) and
 //! Spawn/Despawn (an avatar crossing into or out of the watched area).
 
+mod arcade;
+mod bar;
 mod fishing;
 mod garden;
 mod hangout;
 mod home;
+mod pool;
 mod rps;
 mod skate;
 mod together;
@@ -216,6 +219,10 @@ pub struct Instance {
     offers: HashMap<(u32, u32), (u8, u32)>,
     /// Rock paper scissors matches under way.
     rps: Vec<rps::RpsMatch>,
+    /// The bar's pool table, where the map has one.
+    pool: Option<pool::Table>,
+    /// The arcade's cabinets, in map order.
+    cabinets: Vec<arcade::Cabinet>,
     /// The pitch's ball, if the zone has a pitch.
     ball: Option<play::Ball>,
     /// Activity of players who left since the last report.
@@ -262,6 +269,26 @@ impl Instance {
             .map(|(i, _)| ((i % w) as u16, (i / w) as u16))
             .collect();
         let ball = zone.pitch.as_ref().map(play::Ball::new);
+        let pool = zone
+            .map
+            .objects
+            .iter()
+            .find(|o| o.kind == "pool_table")
+            .map(|o| pool::Table::new((o.x, o.y)));
+        let cabinets = zone
+            .map
+            .objects
+            .iter()
+            .filter(|o| o.kind == "arcade_cabinet" || o.kind == "dance_machine" || o.kind == "pinball")
+            .map(|o| {
+                let cab = arcade::Cabinet::new((o.x, o.y), arcade::kind_for(o.label.as_deref().unwrap_or("")));
+                // The dance machine's players stand on the middle two tiles of its floor.
+                match zone.map.objects.iter().find(|f| f.kind == "dance_floor" && o.kind == "dance_machine") {
+                    Some(f) => cab.with_pads([(f.x + 1, f.y), (f.x + 2, f.y)]),
+                    None => cab,
+                }
+            })
+            .collect();
         Instance {
             grid: zone.grid.clone(),
             zone,
@@ -279,6 +306,8 @@ impl Instance {
             elders: HashMap::new(),
             offers: HashMap::new(),
             rps: Vec::new(),
+            pool,
+            cabinets,
             ball,
             activity_left: Vec::new(),
             next_activity_report: ACTIVITY_EVERY_MS,
@@ -413,6 +442,8 @@ impl Instance {
             self.screen_tick(now);
             self.fish_tick(now);
             self.rps_tick(now);
+            self.pool_tick(now);
+            self.arcade_tick(now);
             self.garden_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
@@ -617,6 +648,8 @@ impl Instance {
         if let Some(msg) = self.screen_state(now) {
             self.send_to(id, &msg);
         }
+        self.pool_hello(id);
+        self.arcade_hello(id);
         self.stats
             .population
             .store(self.avatars.len() as u32, Ordering::Relaxed);
@@ -626,6 +659,8 @@ impl Instance {
         self.leave_seat(id);
         self.stop_fishing(id, false);
         self.rps_leave(id);
+        self.pool_leave(id);
+        self.arcade_leave(id, None);
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
@@ -708,6 +743,14 @@ impl Instance {
             ClientMsg::SetLook { look } => self.set_look(id, look, now),
             ClientMsg::Skate { on } => self.skate(id, on, now),
             ClientMsg::RpsPick { pick } => self.rps_pick(id, pick),
+            ClientMsg::Drink { kind } => self.drink(id, kind, now),
+            ClientMsg::PoolJoin { vs_bot } => self.pool_join(id, vs_bot, now),
+            ClientMsg::PoolLeave {} => self.pool_leave(id),
+            ClientMsg::PoolShoot { angle, power } => self.pool_shoot(id, angle, power, now),
+            ClientMsg::PoolAim { angle, pull } => self.pool_aim(id, angle, pull, now),
+            ClientMsg::ArcadeJoin { cab, vs_bot } => self.arcade_join(id, cab, vs_bot, now),
+            ClientMsg::ArcadeLeave { cab } => self.arcade_leave(id, Some(cab)),
+            ClientMsg::ArcadeInput { cab, value } => self.arcade_input(id, cab, value, now),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }

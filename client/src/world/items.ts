@@ -48,6 +48,16 @@ function plantOf(key: string) {
 
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
+  if (key === "arcade_ticket") {
+    // A pink ticket with a notch and a star.
+    px(ctx, O, 1, 4, 14, 9);
+    px(ctx, "#ff4fa3", 2, 5, 12, 7);
+    px(ctx, O, 1, 7, 2, 3);
+    px(ctx, O, 13, 7, 2, 3);
+    px(ctx, "#ffe14f", 7, 6, 2, 5);
+    px(ctx, "#ffe14f", 6, 8, 4, 1);
+    return;
+  }
   if (key === "coin") {
     disc(ctx, O, 8, 8, 7);
     disc(ctx, "#f6c343", 8, 8, 6);
