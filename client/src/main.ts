@@ -1,16 +1,18 @@
 import { Application } from "pixi.js";
-import { CityMapPanel } from "./ui/citymap";
-import { Minimap } from "./ui/minimap";
 import cityUrl from "../../assets/maps/city.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
+import { Homes } from "./homes";
 import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
 import { Social } from "./social";
 import { Town } from "./town";
 import { Gov } from "./gov";
+import { CityMapPanel } from "./ui/citymap";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
+import { PostOfficePanel } from "./ui/homes";
+import { Minimap } from "./ui/minimap";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
 import { WardrobePanel } from "./ui/wardrobe";
@@ -24,7 +26,7 @@ import { FriendsPanel, NotificationsPanel } from "./ui/social";
 import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { EaselPanel } from "./activities/easel";
 import { WordPanel } from "./activities/word";
-import type { ZoneMap } from "./world/map";
+import { type ZoneMap, spot } from "./world/map";
 import "@fontsource/pixelify-sans/400.css";
 import "@fontsource/pixelify-sans/500.css";
 import "@fontsource/pixelify-sans/600.css";
@@ -133,16 +135,25 @@ async function main() {
       moodPicker.toggle();
     },
   });
+  const homes = new Homes(auth);
   const cityMap = new CityMapPanel({
     where: () => {
       const g = game as Game | null;
       const here = g?.position;
-      return g?.scene.map.streets && here ? { map: g.scene.map, here } : null;
+      if (!g?.scene.map.streets || !here) return null;
+      const home = homes.mine ? spot(g.scene.map, `door:${homes.mine}`) : null;
+      return { map: g.scene.map, here, home };
     },
     walk: (t) => (game as Game | null)?.walkTo(t),
     toCity: () => void travel({ zone: "city" }),
   });
   const minimap = new Minimap(document.getElementById("hud")!, () => cityMap.toggle());
+  homes.onChange(() => minimap.setHome(homes.mine));
+  const postOffice = new PostOfficePanel(homes, {
+    walkToSpot: (s) => (game as Game | null)?.walkToSpot(s),
+    findHome: () => (game as Game | null)?.findHome() ?? false,
+    goInside: () => void travel({ zone: "home" }),
+  });
   const showMood = (m: number) => hud.setMood(m ? (MOODS.find((x) => x.id === m)?.icon ?? "💬") : "💬", m > 0);
   const moodPicker = new MoodPicker((m) => {
     game?.setMood(m);
@@ -154,6 +165,8 @@ async function main() {
     eco,
     hud,
     minimap,
+    homes,
+    postOffice,
     bag: new BagPanel(eco, (item) => {
       ui.bag.hide();
       place.show(item);
@@ -209,7 +222,7 @@ async function main() {
   eco.onChange(() => hud.setCoins(eco.coins));
   social.onChange(() => hud.setBadge(social.unreadCount));
   social.onToast = (t) => hud.toast(t, 4000);
-  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {})]);
+  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {})]);
 
   let dest: Destination = { zone: "city" };
   let retry = 0;
@@ -224,7 +237,13 @@ async function main() {
         game = new Game(app, map, ticket.zone_id, placeInfo, ui, document.getElementById("labels")!, {
           onWelcome: () => (retry = 0),
           onDisconnect,
-          onTravel: (z) => void travel({ zone: z }),
+          // Out of a home's door into the city: you come out of that house.
+          onTravel: (z) => {
+            const from = game as Game | null;
+            const arrive = z === "city" && from?.zoneId === "home" ? (from.place.owner ?? "home") : undefined;
+            void travel({ zone: z, arrive });
+          },
+          onVisit: (owner) => void travel({ zone: "home", owner }),
         });
         if (import.meta.env.DEV) (window as unknown as { __commons: Game }).__commons = game;
       }

@@ -243,11 +243,139 @@ async fn gifts_move_items_and_earn_close_friendship() {
     );
 }
 
+/// A lot nobody lives on, from the front or the back of the list (tests
+/// running at the same time take from different ends).
+async fn free_lot(s: &State, from_back: bool) -> String {
+    let taken: Vec<String> = sqlx::query_scalar("SELECT lot FROM home_lots")
+        .fetch_all(&s.db)
+        .await
+        .unwrap();
+    let mut lots = commons_sim::city::city_home_lots();
+    if from_back {
+        lots.reverse();
+    }
+    lots.into_iter()
+        .find(|l| !taken.contains(l))
+        .expect("a free lot for the test")
+}
+
+/// Gives `p` a home straight in the table (homes are scarce, so tests give
+/// them back with `move_out`).
+async fn give_home(s: &State, p: &P) -> String {
+    loop {
+        let lot = free_lot(s, true).await;
+        let done = sqlx::query(
+            "INSERT INTO home_lots (lot, player_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(&lot)
+        .bind(p.id)
+        .execute(&s.db)
+        .await
+        .unwrap()
+        .rows_affected();
+        if done == 1 {
+            return lot;
+        }
+    }
+}
+
+async fn move_out(s: &State, ps: &[&P]) {
+    for p in ps {
+        sqlx::query("DELETE FROM home_lots WHERE player_id = $1")
+            .bind(p.id)
+            .execute(&s.db)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn homes_are_claimed_once_and_lead_home() {
+    let Some(s) = state().await else { return };
+    let (a, b) = (player(&s).await, player(&s).await);
+    let svc = service(&s);
+    let home_of = |p: &P| format!("/internal/home?player={}", p.id);
+    assert_eq!(
+        call(&s, "GET", &home_of(&a), &svc, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    // A real lot, free: a moves in.
+    let lot = free_lot(&s, false).await;
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/homes/claim",
+        &a.token,
+        Some(json!({ "lot": lot })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, body) = call(&s, "GET", &home_of(&a), &svc, None).await;
+    assert_eq!(
+        (st, body["lot"].as_str()),
+        (StatusCode::OK, Some(lot.as_str()))
+    );
+    // Taken, and nobody gets two; made-up lots don't exist.
+    let (st, body) = call(
+        &s,
+        "POST",
+        "/api/social/homes/claim",
+        &b.token,
+        Some(json!({ "lot": lot })),
+    )
+    .await;
+    assert_eq!(
+        (st, body["error"].as_str()),
+        (StatusCode::CONFLICT, Some("taken"))
+    );
+    let (st, body) = call(
+        &s,
+        "POST",
+        "/api/social/homes/claim",
+        &a.token,
+        Some(json!({ "lot": "b0_0:1" })),
+    )
+    .await;
+    assert_eq!(
+        (st, body["error"].as_str()),
+        (StatusCode::CONFLICT, Some("has_home"))
+    );
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/homes/claim",
+        &b.token,
+        Some(json!({ "lot": "b3_3:0" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    // The list shows who lives where, and which one is yours.
+    let (_, body) = call(&s, "GET", "/api/social/homes", &a.token, None).await;
+    assert_eq!(body["mine"].as_str(), Some(lot.as_str()));
+    assert_eq!(body["total"], 168);
+    assert!(
+        body["lots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["lot"] == lot.as_str() && l["name"] == a.name.as_str())
+    );
+    // Visiting someone needs them to have a home at all.
+    let to_b = format!("/internal/can_visit?guest={}&owner={}", a.id, b.id);
+    let (st, body) = call(&s, "GET", &to_b, &svc, None).await;
+    assert_eq!(
+        (st, body["error"].as_str()),
+        (StatusCode::NOT_FOUND, Some("no_home"))
+    );
+    move_out(&s, &[&a, &b]).await;
+}
+
 #[tokio::test]
 async fn visiting_and_joining_friends() {
     let Some(s) = state().await else { return };
     let (a, b, stranger) = (player(&s).await, player(&s).await, player(&s).await);
     befriend(&s, &a, &b).await;
+    give_home(&s, &a).await;
     let svc = service(&s);
     let can_visit =
         |guest: &P, owner: &P| format!("/internal/can_visit?guest={}&owner={}", guest.id, owner.id);
@@ -300,6 +428,7 @@ async fn visiting_and_joining_friends() {
         call(&s, "GET", &strangers, &svc, None).await.0,
         StatusCode::FORBIDDEN
     );
+    move_out(&s, &[&a]).await;
 }
 
 #[tokio::test]

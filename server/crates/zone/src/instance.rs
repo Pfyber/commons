@@ -547,9 +547,18 @@ impl Instance {
             (spawn.x as i32 + rng.random_range(-3..=3)).clamp(0, self.grid.w as i32 - 1) as u16,
             (spawn.y as i32 + rng.random_range(-2..=2)).clamp(0, self.grid.h as i32 - 1) as u16,
         );
-        let tile = self
-            .grid
-            .nearest_walkable(jitter, 8)
+        // Leaving your home, you step out of your own front door.
+        let door = claims.arrive.as_ref().and_then(|lot| {
+            let key = format!("door:{lot}");
+            self.zone
+                .map
+                .objects
+                .iter()
+                .find(|o| o.kind == "spot" && o.label.as_deref() == Some(key.as_str()))
+                .and_then(|o| self.grid.nearest_walkable((o.x, o.y), 2))
+        });
+        let tile = door
+            .or_else(|| self.grid.nearest_walkable(jitter, 8))
             .unwrap_or((spawn.x, spawn.y));
         let cell = self.cell_of(tile);
         let now = self.clock.now_ms();
@@ -1119,6 +1128,7 @@ pub(crate) mod tests {
             instance: 1,
             owner: None,
             muted_until: 0,
+            arrive: None,
         }
     }
 

@@ -122,6 +122,10 @@ pub struct JoinClaims {
     /// Unix time a moderation mute ends (0: not muted).
     #[serde(default)]
     pub muted_until: u64,
+    /// Arrive at this home lot's front door (leaving your home) instead of
+    /// the zone's spawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrive: Option<String>,
 }
 
 impl Claims for JoinClaims {

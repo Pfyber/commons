@@ -322,6 +322,34 @@ impl City {
         let c = (self.geometry.blocks / 2) as i32;
         (b.bx as i32 - c).abs().max((b.by as i32 - c).abs()) as u8
     }
+
+    /// Every home lot in the city, block by block (ADR 0010, C3).
+    pub fn home_lots(&self) -> Vec<String> {
+        self.blocks()
+            .filter(|(_, t)| t.key == "home")
+            .flat_map(|(b, _)| (0..HOME_LOTS).map(move |i| lot_key(b, i)))
+            .collect()
+    }
+}
+
+/// Houses on a home block: three along the north edge, three along the
+/// south, one on the west.
+pub const HOME_LOTS: u8 = 7;
+
+/// A home lot's id, e.g. `b0_3:5` (block, then the house on it).
+pub fn lot_key(b: BlockId, i: u8) -> String {
+    format!("{}:{i}", b.key())
+}
+
+/// The lot ids of the real city (`assets/city/`), for services that check
+/// lots without loading the map.
+pub fn city_home_lots() -> Vec<String> {
+    City::from_json(
+        include_str!("../../../../assets/city/city.json"),
+        include_str!("../../../../assets/city/block_types.json"),
+    )
+    .expect("assets/city is valid")
+    .home_lots()
 }
 
 #[cfg(test)]
@@ -500,5 +528,14 @@ mod tests {
         assert_eq!(b.key(), "b3_5");
         assert_eq!(BlockId::parse("b3_5"), Some(b));
         assert_eq!(BlockId::parse("x3_5"), None);
+    }
+
+    #[test]
+    fn home_lots_number_seven_per_home_block() {
+        let lots = city_home_lots();
+        assert_eq!(lots.len(), 24 * HOME_LOTS as usize);
+        assert_eq!(lots[0], "b0_0:0");
+        assert!(lots.contains(&"b6_6:6".to_string()));
+        assert!(!lots.iter().any(|l| l.starts_with("b3_3")));
     }
 }

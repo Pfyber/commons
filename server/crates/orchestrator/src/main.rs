@@ -35,6 +35,10 @@ struct JoinReq {
     /// For `zone_id: "home"`: whose home (default: your own).
     #[serde(default)]
     owner: Option<String>,
+    /// Leaving a home: its owner's id (or `"home"` for your own), to come
+    /// out of its front door.
+    #[serde(default)]
+    arrive: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -62,6 +66,11 @@ struct Located {
     zone: String,
     instance: u16,
     owner: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Lot {
+    lot: String,
 }
 
 #[derive(Deserialize)]
@@ -145,7 +154,11 @@ async fn join(
         if zone == "home" {
             let owner = req.owner.clone().unwrap_or_else(|| who.sub.clone());
             let mut label = "Your home".to_string();
-            if owner != who.sub {
+            if owner == who.sub {
+                // Homes are houses in the city now: no house, no home (ADR 0010).
+                let _: Lot =
+                    ask_social(&state, &format!("/internal/home?player={}", who.sub)).await?;
+            } else {
                 #[derive(Deserialize)]
                 struct Visit {
                     owner_name: String,
@@ -162,6 +175,18 @@ async fn join(
             (zone, 1, None, String::new())
         }
     };
+    // Leaving a home: step out of its front door (best effort). `arrive` is
+    // the home's owner, or "home" for your own.
+    let arrive = match req.arrive.as_deref() {
+        Some(a) if zone == "city" => {
+            let owner = if a == "home" { who.sub.as_str() } else { a };
+            ask_social::<Lot>(&state, &format!("/internal/home?player={owner}"))
+                .await
+                .ok()
+                .map(|l| l.lot)
+        }
+        _ => None,
+    };
     if !state.zones.contains(&zone) {
         return Err(err(StatusCode::NOT_FOUND, "unknown_zone", "no such zone"));
     }
@@ -175,6 +200,7 @@ async fn join(
         instance,
         owner: owner.clone(),
         muted_until: who.muted_until,
+        arrive,
     };
     Ok(Json(JoinResp {
         server_url: state.zone_server_url.clone(),

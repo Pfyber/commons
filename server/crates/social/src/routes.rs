@@ -46,28 +46,31 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/gifts/{id}/open", post(open_gift))
         .route("/invite", post(invite))
         .route("/notifications", get(notifications))
-        .route("/notifications/read", post(read_notifications));
+        .route("/notifications/read", post(read_notifications))
+        .route("/homes", get(crate::homes::list))
+        .route("/homes/claim", post(crate::homes::claim));
     let internal = Router::new()
         .route("/presence", post(presence))
         .route("/locate", get(locate))
-        .route("/can_visit", get(can_visit));
+        .route("/can_visit", get(can_visit))
+        .route("/home", get(crate::homes::internal_home));
     Router::new()
         .nest("/api/social", player)
         .nest("/internal", internal)
 }
 
-fn db_err(e: sqlx::Error) -> ApiError {
+pub(crate) fn db_err(e: sqlx::Error) -> ApiError {
     commons_api::store::db_err(e)
 }
 
-fn me(state: &SocialState, headers: &HeaderMap) -> ApiResult<(Uuid, AccessClaims)> {
+pub(crate) fn me(state: &SocialState, headers: &HeaderMap) -> ApiResult<(Uuid, AccessClaims)> {
     let claims = commons_api::auth::bearer_with(&state.secret, headers)?;
     let id =
         Uuid::parse_str(&claims.sub).map_err(|_| ApiError::unauthorized("not a player account"))?;
     Ok((id, claims))
 }
 
-fn service(state: &SocialState, headers: &HeaderMap) -> ApiResult<()> {
+pub(crate) fn service(state: &SocialState, headers: &HeaderMap) -> ApiResult<()> {
     let raw = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -78,7 +81,7 @@ fn service(state: &SocialState, headers: &HeaderMap) -> ApiResult<()> {
     Ok(())
 }
 
-fn uuid(s: &str) -> ApiResult<Uuid> {
+pub(crate) fn uuid(s: &str) -> ApiResult<Uuid> {
     Uuid::parse_str(s).map_err(|_| ApiError::bad_request("bad_id", "unknown player"))
 }
 
@@ -619,6 +622,7 @@ async fn can_visit(
 ) -> ApiResult<Json<serde_json::Value>> {
     service(&state, &headers)?;
     let (guest, owner) = (uuid(&q.guest)?, uuid(&q.owner)?);
+    crate::homes::require_home(&state.db, owner).await?;
     if !visit_allowed(&state, guest, owner).await? {
         return Err(forbidden("not_invited", "You need an invitation to visit."));
     }

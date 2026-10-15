@@ -31,6 +31,8 @@ import { type FoundersPanel, STAGES, type WelcomePanel } from "./ui/welcome";
 import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
+import type { Homes } from "./homes";
+import type { PostOfficePanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { Minimap } from "./ui/minimap";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
@@ -60,6 +62,8 @@ const REEL_WINDOW_MS = 2300;
 export interface Ui {
   hud: Hud;
   minimap: Minimap;
+  homes: Homes;
+  postOffice: PostOfficePanel;
   eco: Economy;
   bag: BagPanel;
   album: AlbumPanel;
@@ -229,7 +233,13 @@ export class Game {
     readonly place: Place,
     private ui: Ui,
     private labels: HTMLElement,
-    private events: { onWelcome(): void; onDisconnect(reason: CloseReason): void; onTravel(zone: string): void },
+    private events: {
+      onWelcome(): void;
+      onDisconnect(reason: CloseReason): void;
+      onTravel(zone: string): void;
+      /** Knock on someone's home: visit them if they've invited you. */
+      onVisit(owner: string): void;
+    },
   ) {
     this.hud = ui.hud;
     this.scene = new Scene(app, map);
@@ -348,6 +358,49 @@ export class Game {
     if (cheb(self.destination, a) > a.range && cheb(here, a) > a.range) p.hide();
   }
 
+  /** A house's door: yours (go in), someone's (knock), or free (move in). */
+  private tapHouse(lot: string) {
+    const self = this.self;
+    const door = spot(this.scene.map, `door:${lot}`);
+    if (!self || !door) return;
+    if (cheb(self.destination, door) > 3) this.moveTo(door, true);
+    const homes = this.ui.homes;
+    const r = homes.resident(lot);
+    const menu = this.near(this.ui.menu, door, 6);
+    if (homes.mine === lot) {
+      menu.showWith("Your home", "", [["Go inside", () => this.events.onTravel("home")]]);
+    } else if (r) {
+      menu.showWith(`${r.name}'s home`, "Friends can come in when they're invited.", [["Knock", () => this.events.onVisit(r.owner)]]);
+    } else if (homes.mine) {
+      menu.showWith("A free house", "Someone new could make it their home.", []);
+    } else {
+      menu.showWith("A free house", "A garden, a postbox and a front door of your own. Homes are free while the town is young.", [
+        [
+          "Move in 🏡",
+          () =>
+            void homes
+              .claim(lot)
+              .then(() => this.hud.toast("🏡 Welcome home! Tap your door to go inside. It's on your map now.", 6000))
+              .catch((e) => this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 4000)),
+        ],
+      ]);
+    }
+  }
+
+  /** Walks to the nearest free house's door; false if none is free. */
+  findHome(): boolean {
+    const self = this.self;
+    if (!self) return false;
+    let best: { lot: string; d: number } | null = null;
+    for (const o of this.scene.map.objects) {
+      if (o.kind !== "house" || !o.label || this.ui.homes.resident(o.label)) continue;
+      const d = Math.hypot(o.x - self.pos.x, o.y - self.pos.y);
+      if (!best || d < best.d) best = { lot: o.label, d };
+    }
+    if (!best) return false;
+    return this.walkToSpot(`door:${best.lot}`);
+  }
+
   /** Walks to a named place on this map ("pier", "grove"…); false if it isn't here. */
   walkToSpot(key: string): boolean {
     const t = spot(this.scene.map, key);
@@ -370,7 +423,9 @@ export class Game {
     if (!this.caretaker.hit(x, y)) return false;
     const self = this.self;
     if (self && cheb(self.destination, this.caretaker.pos) > 3) this.walkTo(this.caretaker.avatar.destination);
-    this.near(this.ui.welcomePanel, this.caretaker.avatar.destination, 6).show();
+    // Anchored where they stand now: their walks can be long.
+    const at = this.caretaker.pos;
+    this.near(this.ui.welcomePanel, { x: Math.round(at.x), y: Math.round(at.y) }, 6).show();
     return true;
   }
 
@@ -1104,6 +1159,16 @@ export class Game {
       if (obj.kind === "notice_board") this.near(ui.requests, obj).show();
       else if (obj.kind === "fountain") this.near(ui.goal, obj, 7).show();
       else void this.near(ui.quarter, obj).openFor(obj.kind.slice("board_".length));
+      return true;
+    }
+    if (obj && (obj.kind === "house" || obj.kind === "postbox") && obj.label) {
+      this.tapHouse(obj.label);
+      return true;
+    }
+    if (obj?.kind === "post_office") {
+      const door = spot(map, "post_office");
+      if (door && cheb(self.destination, door) > 3) this.moveTo(door, true);
+      this.near(ui.postOffice, door ?? { x: obj.x, y: obj.y }, 8).show();
       return true;
     }
     if (obj?.kind === "homes_gate") {

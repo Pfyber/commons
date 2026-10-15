@@ -9,7 +9,7 @@
 //! client code.
 
 use super::{Brush, Builder, g, hash, maze, noise, nook};
-use commons_sim::city::{BlockId, City};
+use commons_sim::city::{BlockId, City, lot_key};
 use commons_sim::map::{MapFile, StreetGrid};
 use std::collections::VecDeque;
 
@@ -164,7 +164,7 @@ pub fn city() -> MapFile {
             "woods" => woods(&mut k),
             "meadow" => meadow(&mut k),
             "club_lot" => club_lot(&mut k),
-            "home" => homes(&mut k),
+            "home" => homes(&mut k, id),
             "fairground" => fairground(&mut k),
             _ => landmark(&mut k, &t.key, &t.name),
         }
@@ -225,7 +225,9 @@ fn market(k: &mut Blk) {
         k.object("market_cart", x, y, 2, 1, "Market");
     }
     k.object("tailor", 37, 22, 3, 2, "Tailor");
-    k.object("homes_gate", 3, 21, 2, 5, "Homes");
+    // The post office: where your home is, and finding one if you have none.
+    k.object("post_office", 2, 20, 7, 6, "Post Office");
+    k.spot("post_office", 5, 26);
     k.object(
         "signpost",
         23,
@@ -677,17 +679,26 @@ fn club_lot(k: &mut Blk) {
 
 /// Seven homes around a shared courtyard (the C3 layout, without doors yet):
 /// three along the north edge, three along the south, one on the west.
-fn homes(k: &mut Blk) {
+fn homes(k: &mut Blk, block: BlockId) {
     k.lawn();
+    // Each house is labelled with its lot id; a `door:<lot>` spot in front
+    // of its door is where its owner steps out, and its postbox stands by.
+    let house = |k: &mut Blk, i: u8, (x, y, w, h): (u16, u16, u16, u16)| {
+        let lot = lot_key(block, i);
+        k.object("house", x, y, w, h, &lot);
+        let door = (x + w / 2, y + h);
+        k.spot(&format!("door:{lot}"), door.0, door.1);
+        k.object("postbox", door.0 + 3, door.1, 1, 1, &lot);
+    };
     for i in 0..3u16 {
         let x0 = 3 + i * 15;
-        k.object("house", x0 + 1, 3, 10, 6, "Home");
         k.rect(x0 + 1, 9, 10, 3, "flowers");
-        k.object("house", x0 + 1, 39, 10, 6, "Home");
         k.rect(x0 + 1, 35, 10, 3, "flowers");
+        house(k, i as u8, (x0 + 1, 3, 10, 6));
+        house(k, 3 + i as u8, (x0 + 1, 39, 10, 6));
     }
-    k.object("house", 3, 18, 8, 10, "Home");
     k.rect(11, 18, 2, 10, "flowers");
+    house(k, 6, (3, 18, 8, 10));
     // The courtyard, hedged, with its gate to the east street.
     for x in 16..44u16 {
         k.decor(x, 15, "hedge");
@@ -800,9 +811,14 @@ fn check_reachable(map: &MapFile, city: &City) {
         (y.saturating_sub(r)..=y + r)
             .any(|yy| (x.saturating_sub(r)..=x + r).any(|xx| seen[yy as usize * w + xx as usize]))
     };
+    let mut lots = 0;
     for o in &map.objects {
         let ok = match o.kind.as_str() {
             "spot" | "grove_slot" => near(o.x, o.y, if o.kind == "spot" { 0 } else { 1 }),
+            "house" => {
+                lots += 1;
+                continue;
+            }
             "nook" => (o.y..o.y + o.h)
                 .any(|y| (o.x..o.x + o.w).any(|x| seen[y as usize * w + x as usize])),
             _ => continue,
@@ -811,6 +827,16 @@ fn check_reachable(map: &MapFile, city: &City) {
             ok,
             "{} {:?} at ({}, {}) can't be reached",
             o.kind, o.label, o.x, o.y
+        );
+    }
+    assert_eq!(lots, city.home_lots().len(), "a house for every home lot");
+    for lot in city.home_lots() {
+        let door = format!("door:{lot}");
+        assert!(
+            map.objects
+                .iter()
+                .any(|o| o.kind == "spot" && o.label.as_deref() == Some(door.as_str())),
+            "no door for lot {lot}"
         );
     }
 }

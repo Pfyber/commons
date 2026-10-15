@@ -3,9 +3,9 @@
 // the big city map.
 
 import { blockOrigin, ownerAt } from "../world/city";
-import type { ZoneMap } from "../world/map";
+import { type ZoneMap, spot } from "../world/map";
 import type { TileXY } from "../world/motion";
-import { cityImage, drawYou, geometry, placeName } from "./citymap";
+import { cityImage, drawHome, drawYou, geometry, placeName } from "./citymap";
 
 export class Minimap {
   readonly el = document.createElement("button");
@@ -13,6 +13,8 @@ export class Minimap {
   private name = document.createElement("span");
   private map: ZoneMap | null = null;
   private lastName = "";
+  private homeLot: string | null = null;
+  private home: TileXY | null = null;
 
   constructor(root: HTMLElement, onTap: () => void) {
     this.el.type = "button";
@@ -30,6 +32,13 @@ export class Minimap {
     this.map = map?.streets ? map : null;
     this.el.hidden = !this.map;
     this.lastName = "";
+    this.setHome(this.homeLot);
+  }
+
+  /** Marks your home's door (null: no home). */
+  setHome(lot: string | null) {
+    this.homeLot = lot;
+    this.home = lot && this.map ? spot(this.map, `door:${lot}`) : null;
   }
 
   /** Call every frame with where the player is and is heading. */
@@ -65,6 +74,7 @@ export class Minimap {
     ctx.strokeStyle = "#f6c343";
     ctx.lineWidth = 2 * dpr;
     ctx.strokeRect(o.x * k, o.y * k, geometry.blockTiles * k, geometry.blockTiles * k);
+    if (this.home) drawHome(ctx, (this.home.x + 0.5) * k, (this.home.y + 0.5) * k, 4 * dpr);
     drawYou(ctx, (pos.x + 0.5) * k, (pos.y + 0.5) * k, 4 * dpr, now);
     const name = placeName(Math.round(pos.x), Math.round(pos.y));
     if (name !== this.lastName) {

@@ -598,7 +598,44 @@ the fairy ring discovery, the campfire, the stage and the screen; the
 welcome flow end to end (fish, plant, sit at chess, plant the seedling,
 the Founders' Stone) and following.
 
-Next: C3, home blocks with doors into instanced interiors.
+## City C3 · Homes in the city: done (2026-10-15)
+
+Every home is now a house in one of the 24 home blocks, seven per block
+(168 in all): three along the north edge, three along the south and one on
+the west, each with a flower garden and a postbox, around a hedged shared
+courtyard (its soil beds are shared garden plots) with a gate to the east.
+
+- **Lots:** each house is a lot (`b0_3:5`: block, then house), shared by
+  mapgen, the social service and the zone through `sim::city`. Table
+  `home_lots` (migration 0009): one house per player, free for now (C4
+  adds rent). `GET /api/social/homes` (who lives where, which is yours),
+  `POST /api/social/homes/claim`, and `/internal/home` for the orchestrator.
+- **Doors:** tap a house or its postbox. Yours: *Go inside*. Someone's:
+  their name and *Knock* (visiting still needs an invitation). Free (and
+  you have none): *Move in*. Mapgen puts a `door:<lot>` spot in front of
+  every door and checks each can be reached.
+- **No house, no home:** the orchestrator only lets you into your own home
+  if you have a house, and visits need the owner to have one. Leaving a
+  home (yours or a friend's) you step out of that house's front door: the
+  join carries `arrive`, the orchestrator looks up the lot, the zone spawns
+  you at its door.
+- **Post Office** in the Market (where the homes gate was): with a home,
+  *Walk home* / *Go straight inside*; without, how many houses are free and
+  *Show me a free house* (walks to the nearest).
+- Your door is a little gold house on the minimap and the city map.
+- Fixed: tapping the Caretaker opened their panel and closed it at once
+  when their walk was long (the panel was anchored to where they were
+  going, not where they stood).
+
+Checked: social tests for claiming (taken, one each, unknown lots) and the
+visit rule; in the browser: Post Office → free house → move in → go inside
+→ out of the same front door; another player sees "Ada's home" and is told
+to get an invitation; going home with no house explains why. The welcome
+flow, following and C2's tour pass again; 500 bots pass the perf gate.
+
+Not yet: garage-sale tables (with market stalls in C4), names on houses.
+
+Next: C4, renting.
 
 ## Next: M5 · Crowds
 

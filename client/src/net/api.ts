@@ -38,6 +38,8 @@ export interface Destination {
   zone?: string;
   friend?: string;
   owner?: string;
+  /** Leaving a home: its owner's id, or "home" (yours), to come out of its door. */
+  arrive?: string;
 }
 
 export class ApiError extends Error {
@@ -160,6 +162,6 @@ export class Auth {
   }
 
   async join(dest: Destination): Promise<JoinTicket> {
-    return post<JoinTicket>("/api/join", { zone_id: dest.zone, friend: dest.friend, owner: dest.owner }, await this.accessToken());
+    return post<JoinTicket>("/api/join", { zone_id: dest.zone, friend: dest.friend, owner: dest.owner, arrive: dest.arrive }, await this.accessToken());
   }
 }

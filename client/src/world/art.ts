@@ -712,6 +712,20 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       label(ctx, o.label ?? "Town Hall", w / 2, top + 25, "#5a3b2b", 14);
       break;
     }
+    case "postbox": {
+      // A red postbox on a post, by a home's door.
+      [c, ctx] = makeCanvas(w, h + 22);
+      overhang = 22;
+      px(ctx, "rgba(0,0,0,0.15)", 8, h + 16, 16, 5);
+      px(ctx, P.outline, 14, 14, 4, h + 6);
+      px(ctx, P.outline, 7, 2, 18, 16);
+      px(ctx, "#c8553d", 8, 3, 16, 14);
+      px(ctx, "#e07a5f", 8, 3, 16, 3);
+      px(ctx, P.outline, 11, 8, 10, 2);
+      px(ctx, "#f6c343", 24, 6, 3, 6);
+      break;
+    }
+    case "post_office":
     case "building": {
       // A landmark (a placeholder until its block is built), seen from above
       // at an angle: a big roof over a front wall with windows, the door and

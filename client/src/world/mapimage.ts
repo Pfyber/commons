@@ -42,11 +42,11 @@ const OBJECTS: Record<string, string> = {
   big_screen: "#3d4a57",
   bandstand: "#c27a3c",
   tailor: "#c8553d",
-  homes_gate: "#a0703f",
+  post_office: "#c8553d",
 };
 
 /** Kinds that aren't drawn at all: markers and tiny props. */
-const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost"]);
+const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox"]);
 
 export function mapImage(map: ZoneMap): HTMLCanvasElement {
   const c = document.createElement("canvas");

@@ -96,7 +96,7 @@ come from a layout file for its type, not from code.
 | **C0** | Geometry, city and block-type data, this ADR. | No visible change. |
 | **C1** ✓ | The whole city as **one zone** (368 × 368), spawn at the Market; client streams nearby blocks; long walks route along streets; a city map. Placeholder layouts with signs. Founders' Park stayed a separate zone behind the Park block's gate until C2. | Same server model as today. |
 | **C2** ✓ | Today's content moves into its blocks (pond, orchard plots, town hall, arcade, woods grotto, meadow nooks, lake island, fairground stage, Founders' Grove). Corner boards removed. | Every feature keeps working in its new place. |
-| **C3** | Home blocks per the layout, doors into instanced interiors, yards, courtyards, the post office. | Lots assigned free for now. |
+| **C3** ✓ | Home blocks per the layout, doors into instanced interiors, yards, courtyards, the post office. | Lots assigned free for now. |
 | **C4** | Renting: tiers, leases, recurring rent, grace, release to storage, upgrade/downgrade; market stalls and apartments. | Nothing is lost on release. |
 | **C5** | Tram and two metro lines: a 3–5 s ride or a tap on the station map; "Go home" at every station. | Same connection; the ride hides loading. |
 | **C6** | **One zone actor per block** in one process: neighbour subscriptions, seamless handoff, sleeping zones, protocol v7 (city clock, process-unique entity ids). | The single-zone build stays as fallback until this passes the bot tests. |

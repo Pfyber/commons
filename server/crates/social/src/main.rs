@@ -3,6 +3,7 @@
 //! client, independent of the zone they're in.
 
 mod db;
+mod homes;
 mod hub;
 mod routes;
 #[cfg(test)]

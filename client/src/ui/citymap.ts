@@ -61,9 +61,27 @@ export function drawYou(ctx: CanvasRenderingContext2D, x: number, y: number, r: 
   ctx.fill();
 }
 
+/** Your home's door on a map: a little gold house. */
+export function drawHome(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  ctx.fillStyle = "#3b3a2e";
+  ctx.beginPath();
+  ctx.moveTo(x - s - 1, y);
+  ctx.lineTo(x, y - s - 1.5);
+  ctx.lineTo(x + s + 1, y);
+  ctx.fill();
+  ctx.fillRect(x - s * 0.75 - 1, y - 1, s * 1.5 + 2, s + 2);
+  ctx.fillStyle = "#f6c343";
+  ctx.beginPath();
+  ctx.moveTo(x - s + 0.5, y - 0.5);
+  ctx.lineTo(x, y - s);
+  ctx.lineTo(x + s - 0.5, y - 0.5);
+  ctx.fill();
+  ctx.fillRect(x - s * 0.75, y - 0.5, s * 1.5, s);
+}
+
 export interface CityMapHost {
-  /** The city map and the player's tile, or null when not in the city. */
-  where(): { map: ZoneMap; here: TileXY } | null;
+  /** The city map, the player's tile and their home's door, or null when not in the city. */
+  where(): { map: ZoneMap; here: TileXY; home: TileXY | null } | null;
   walk(t: TileXY): void;
   toCity(): void;
 }
@@ -134,6 +152,7 @@ export class CityMapPanel extends Panel {
         ctx.fillText(name, cx, cy + 0.5 * dpr);
       }),
     );
+    if (w.home) drawHome(ctx, (w.home.x + 0.5) * k, (w.home.y + 0.5) * k, 6 * dpr);
     drawYou(ctx, (here.x + 0.5) * k, (here.y + 0.5) * k, 4 * dpr, performance.now());
     this.label.textContent = `You're at: ${placeName(here.x, here.y)}`;
   }
