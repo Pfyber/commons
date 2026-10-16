@@ -97,7 +97,7 @@ come from a layout file for its type, not from code.
 | **C1** ✓ | The whole city as **one zone** (368 × 368), spawn at the Market; client streams nearby blocks; long walks route along streets; a city map. Placeholder layouts with signs. Founders' Park stayed a separate zone behind the Park block's gate until C2. | Same server model as today. |
 | **C2** ✓ | Today's content moves into its blocks (pond, orchard plots, town hall, arcade, woods grotto, meadow nooks, lake island, fairground stage, Founders' Grove). Corner boards removed. | Every feature keeps working in its new place. |
 | **C3** ✓ | Home blocks per the layout, doors into instanced interiors, yards, courtyards, the post office. | Lots assigned free for now. |
-| **C4** | Renting: tiers, leases, recurring rent, grace, release to storage, upgrade/downgrade; market stalls and apartments. | Nothing is lost on release. |
+| **C4** ✓ | Renting: tiers, leases, recurring rent, grace, release to storage, upgrade/downgrade; market stalls and apartments. | Nothing is lost on release. |
 | **C5** | Tram and two metro lines: a 3–5 s ride or a tap on the station map; "Go home" at every station. | Same connection; the ride hides loading. |
 | **C6** | **One zone actor per block** in one process: neighbour subscriptions, seamless handoff, sleeping zones, protocol v7 (city clock, process-unique entity ids). | The single-zone build stays as fallback until this passes the bot tests. |
 | **C7** | Sharding: NATS (one subject per zone), the orchestrator's block→process map, a gateway holding each player's socket. | |
@@ -111,11 +111,11 @@ Later: 20 × 20 and beyond with district hubs and more metro lines.
 
 - `city_blocks(id, bx, by, block_type, layout, rotation, ring, since)`:
   the live grid, so a vote can swap a block.
-- `rent_plots(id, block_id, kind, lot_index, footprint, door_tile)`,
-  `rent_tiers(kind, tier, name, rent_coins, interior_template, facade)`,
-  `leases(id, plot_id, tenant_kind, tenant_id, tier, paid_until,
-  grace_until, state)`, `rent_charges(lease_id, period, amount, status,
-  ledger_key)`.
+- Built in C4: plots are named in the map (`b0_3:5`, `apt:2`, `stall:4`)
+  and tiers live in `assets/city/rent.json`; `leases(id, kind, slot, plot,
+  player_id, tier, periods_paid, paid_until, grace_until, state)`,
+  `rent_charges(lease_id, period, amount)`, `stall_listings`. Clubs will
+  lease as tenants too (C9).
 - `personal_storage(player_id, item_id, qty)`, `post_office(...)`,
   `interiors` and `interior_objects` (replace `home_objects`),
   `yard_items`, `sale_listings`.

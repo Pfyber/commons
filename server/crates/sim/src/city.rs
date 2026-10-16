@@ -341,6 +341,70 @@ pub fn lot_key(b: BlockId, i: u8) -> String {
     format!("{}:{i}", b.key())
 }
 
+/// Apartments above the Market's shops (`apt:1`…) and market stalls
+/// (`stall:1`…), C4.
+pub const APARTMENTS: u8 = 8;
+pub const STALLS: u8 = 6;
+
+/// What kind of rentable plot `plot` is in the real city, if it is one.
+pub fn plot_kind(plot: &str) -> Option<&'static str> {
+    let numbered = |prefix: &str, n: u8| {
+        plot.strip_prefix(prefix)
+            .and_then(|i| i.parse::<u8>().ok())
+            .is_some_and(|i| (1..=n).contains(&i))
+    };
+    if numbered("apt:", APARTMENTS) {
+        Some("apartment")
+    } else if numbered("stall:", STALLS) {
+        Some("stall")
+    } else if city_home_lots().iter().any(|l| l == plot) {
+        Some("home")
+    } else {
+        None
+    }
+}
+
+/// One tier of something rentable (`assets/city/rent.json`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RentTier {
+    pub tier: i16,
+    pub name: String,
+    /// Coins per period.
+    pub rent: i32,
+    /// Homes: furniture pieces that can be placed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub furniture: Option<i64>,
+    /// Stalls: goods that can be on show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listings: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RentKind {
+    pub name: String,
+    pub tiers: Vec<RentTier>,
+}
+
+/// Rent for every kind of plot, by tier.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RentCatalog {
+    pub period_secs: i64,
+    pub grace_secs: i64,
+    pub kinds: std::collections::BTreeMap<String, RentKind>,
+}
+
+impl RentCatalog {
+    pub fn tier(&self, kind: &str, tier: i16) -> Option<&RentTier> {
+        self.kinds.get(kind)?.tiers.iter().find(|t| t.tier == tier)
+    }
+}
+
+/// The real rent catalog.
+pub fn rent_catalog() -> RentCatalog {
+    serde_json::from_str(include_str!("../../../../assets/city/rent.json"))
+        .expect("assets/city/rent.json is valid")
+}
+
 /// The lot ids of the real city (`assets/city/`), for services that check
 /// lots without loading the map.
 pub fn city_home_lots() -> Vec<String> {
@@ -537,5 +601,26 @@ mod tests {
         assert_eq!(lots[0], "b0_0:0");
         assert!(lots.contains(&"b6_6:6".to_string()));
         assert!(!lots.iter().any(|l| l.starts_with("b3_3")));
+    }
+
+    #[test]
+    fn plots_and_rent() {
+        assert_eq!(plot_kind("b0_0:6"), Some("home"));
+        assert_eq!(plot_kind("b0_0:7"), None);
+        assert_eq!(plot_kind("apt:8"), Some("apartment"));
+        assert_eq!(plot_kind("apt:9"), None);
+        assert_eq!(plot_kind("stall:1"), Some("stall"));
+        assert_eq!(plot_kind("stall:0"), None);
+        let r = rent_catalog();
+        for kind in ["home", "apartment", "stall"] {
+            let tiers = &r.kinds[kind].tiers;
+            assert!(
+                tiers.windows(2).all(|w| w[0].rent < w[1].rent),
+                "{kind} tiers rise"
+            );
+            assert_eq!(tiers[0].tier, 1);
+        }
+        assert_eq!(r.tier("home", 1).unwrap().furniture, Some(12));
+        assert!(r.tier("stall", 9).is_none());
     }
 }

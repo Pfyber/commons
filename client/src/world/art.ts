@@ -725,6 +725,24 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, "#f6c343", 24, 6, 3, 6);
       break;
     }
+    case "stall": {
+      // A market stall: a striped awning in its own colour over a counter.
+      const n = Number((o.label ?? "stall:1").split(":")[1]) || 1;
+      const colour = ["#c8553d", "#3f7a8a", "#5d8a4e", "#c27a3c", "#8a5d8a", "#4f6d8a"][(n - 1) % 6];
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      px(ctx, "rgba(0,0,0,0.15)", 4, h + 34, w - 8, 6);
+      px(ctx, P.outline, 4, 8, 3, h + 30);
+      px(ctx, P.outline, w - 7, 8, 3, h + 30);
+      for (let i = 0; i < 6; i++) px(ctx, i % 2 ? "#f4f1d8" : colour, i * (w / 6), 0, w / 6, 14);
+      px(ctx, P.outline, 0, 14, w, 2);
+      px(ctx, P.outline, 2, 30, w - 4, h + 8);
+      px(ctx, P.wood, 3, 31, w - 6, h + 6);
+      px(ctx, P.woodDark, 3, 31, w - 6, 3);
+      label(ctx, String(n), w / 2, 44, "#fff9ec", 12);
+      break;
+    }
+    case "apartments":
     case "post_office":
     case "building": {
       // A landmark (a placeholder until its block is built), seen from above

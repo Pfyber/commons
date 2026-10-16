@@ -4,6 +4,7 @@ import homeUrl from "../../assets/maps/home.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { Homes } from "./homes";
+import { Rent } from "./rent";
 import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
 import { Social } from "./social";
@@ -11,7 +12,7 @@ import { Town } from "./town";
 import { Gov } from "./gov";
 import { CityMapPanel } from "./ui/citymap";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
-import { PostOfficePanel } from "./ui/homes";
+import { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import { Minimap } from "./ui/minimap";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
@@ -136,6 +137,12 @@ async function main() {
     },
   });
   const homes = new Homes(auth);
+  const rent = new Rent(auth);
+  rent.onChange(() => {
+    homes.cottage = rent.tiers("home")[0] ?? null;
+    // Rent, stall sales and moving out all change coins or the bag.
+    void eco.load().catch(() => {});
+  });
   const cityMap = new CityMapPanel({
     where: () => {
       const g = game as Game | null;
@@ -149,11 +156,15 @@ async function main() {
   });
   const minimap = new Minimap(document.getElementById("hud")!, () => cityMap.toggle());
   homes.onChange(() => minimap.setHome(homes.mine));
-  const postOffice = new PostOfficePanel(homes, {
-    walkToSpot: (s) => (game as Game | null)?.walkToSpot(s),
+  const rentHost = {
+    walkToSpot: (s: string) => void (game as Game | null)?.walkToSpot(s),
     findHome: () => (game as Game | null)?.findHome() ?? false,
     goInside: () => void travel({ zone: "home" }),
-  });
+    toast: (t: string) => hud.toast(t, 4500),
+  };
+  const postOffice = new PostOfficePanel(homes, rent, rentHost);
+  const apartments = new ApartmentsPanel(homes, rent, rentHost);
+  const stall = new StallPanel(rent, eco, rentHost);
   const showMood = (m: number) => hud.setMood(m ? (MOODS.find((x) => x.id === m)?.icon ?? "💬") : "💬", m > 0);
   const moodPicker = new MoodPicker((m) => {
     game?.setMood(m);
@@ -166,7 +177,10 @@ async function main() {
     hud,
     minimap,
     homes,
+    rent,
     postOffice,
+    apartments,
+    stall,
     bag: new BagPanel(eco, (item) => {
       ui.bag.hide();
       place.show(item);
@@ -222,7 +236,7 @@ async function main() {
   eco.onChange(() => hud.setCoins(eco.coins));
   social.onChange(() => hud.setBadge(social.unreadCount));
   social.onToast = (t) => hud.toast(t, 4000);
-  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {})]);
+  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {})]);
 
   let dest: Destination = { zone: "city" };
   let retry = 0;

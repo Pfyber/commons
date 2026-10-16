@@ -2557,3 +2557,36 @@ img.px-icon,
   margin: 0;
   font-weight: 600;
 }
+
+/* Renting: tier choices, unpaid rent, a second-chance button, the stall form. */
+.panel .tier-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 10px;
+}
+
+.panel .hint.warn {
+  color: #8f3a2b;
+  font-weight: 600;
+}
+
+.panel button.danger {
+  background: #f0c4b8;
+}
+
+.panel .stall-form {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 8px;
+  align-items: center;
+  margin: 6px 0 10px;
+}
+
+.panel .stall-form select {
+  grid-column: 1 / -1;
+}
+
+.panel .stall-form input {
+  width: 100%;
+}

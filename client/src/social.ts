@@ -253,6 +253,18 @@ export function describe(n: Notification): string {
       return `You and ${who} are now close friends 💛`;
     case "bottle_thanks":
       return "Someone found your message in a bottle and sent a thank-you 💛";
+    case "rent_due": {
+      const b = n.body as { what?: string; rent?: number };
+      return `Rent for ${b.what ?? "your place"} is due: ${b.rent ?? "some"} coins. Pay at the Post Office; nothing is lost if you can't 🏡`;
+    }
+    case "lease_ended": {
+      const b = n.body as { what?: string; returned?: number };
+      return `The lease on ${b.what ?? "your place"} has ended. ${b.returned ? `${b.returned} things went back to your bag.` : ""} The Post Office can find you a new one 📦`;
+    }
+    case "stall_sale": {
+      const b = n.body as { buyer?: string; what?: string; qty?: number; coins?: number };
+      return `${b.buyer ?? "Someone"} bought ${b.qty ?? 1}× ${b.what ?? "something"} from your stall for ${b.coins ?? "?"} coins 🧺`;
+    }
     default:
       return "Something happened";
   }

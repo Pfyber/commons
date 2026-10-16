@@ -118,4 +118,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `SMTP_URL` / `MAIL_FROM` | (none) | api: sign-in emails (required unless `COMMONS_DEV`) |
 | `COMMONS_FOUNDING_SEASON_END` | (none) | api: date the founding season closes (else when the grove is full) |
 | `COMMONS_GROVE_DAY_SECS` | `86400` | api: length of a day for founders' trees growing |
+| `COMMONS_RENT_PERIOD_SECS` | from `assets/city/rent.json` (a week) | social: how often rent is due |
+| `COMMONS_RENT_GRACE_SECS` | from `assets/city/rent.json` (three days) | social: time to pay overdue rent before a lease ends |
+| `COMMONS_RENT_SWEEP_SECS` | `60` | social: how often leases are checked |
 | `COMMONS_GROWTH_STAGE_SECS` | `21600` (6 h; dev script: 60) | api, zone |

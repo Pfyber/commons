@@ -633,9 +633,55 @@ visit rule; in the browser: Post Office → free house → move in → go inside
 to get an invitation; going home with no house explains why. The welcome
 flow, following and C2's tour pass again; 500 bots pass the perf gate.
 
-Not yet: garage-sale tables (with market stalls in C4), names on houses.
+Not yet: names on houses.
 
-Next: C4, renting.
+## City C4 · Renting: done (2026-10-16)
+
+Everything players hold in the city is rented by the week in coins, never
+bought, and nothing is ever lost when a lease ends.
+
+| What | Tiers (coins a week) | Holds |
+|---|---|---|
+| House (168, home blocks) | Cottage 15 · House 40 · Big house 90 | 12 / 24 / 48 pieces of furniture |
+| Apartment (8, above the Market) | Studio 10 · Flat 30 | 8 / 16 |
+| Market stall (6, south side of the Market) | Small stall 10 · Big stall 30 | 4 / 10 goods on show |
+
+- **Data:** `assets/city/rent.json` (tiers, period, grace), read through
+  `sim::city::rent_catalog`. Migration 0010: `leases` (one home, house or
+  apartment, and one stall per player; one tenant per plot),
+  `rent_charges`, `stall_listings`; C3's free houses became Cottage leases
+  with the first week free.
+- **Leases** (`social/src/rent.rs`): moving in pays the first week. A
+  sweeper (every minute) renews leases as they fall due; one that can't be
+  paid gets three days' grace and a notice, then ends. Ending a lease moves
+  furniture (or stall goods) back to the bag. Moving up pays the
+  difference for the current week; moving down is free if everything still
+  fits. You can pay overdue rent at once, or move out. Period, grace and
+  sweep are configurable (`COMMONS_RENT_PERIOD_SECS`, `_GRACE_SECS`,
+  `_SWEEP_SECS`).
+- **Furniture limit:** the API won't place more than the home's tier holds.
+- **Stalls** (`social/src/stalls.rs`): put things from your bag on show at
+  your price; anyone can buy (coins to the seller, goods to the buyer, in
+  one transaction; idempotent). The seller is told. Take things back any
+  time.
+- **In town:** the Post Office is now also the rent office (your home and
+  stall: tier, rent, paid until, pay now, move up or down, move out or
+  give up, with a second click to confirm). The Market Apartments list the
+  eight flats; each stall shows its owner's goods. Notices for rent due,
+  a lease ending and a stall sale.
+
+Economy check: a fish sells for 5–20 coins, so a Cottage is two or three
+catches a week, and a newcomer's 100 coins cover six weeks; a stall pays
+for itself with one or two sales.
+
+Checked: social tests for renewal, grace, release returning furniture, tier
+rules and stall sales (including a repeated buy that doesn't charge twice);
+the API test for the furniture cap. In the browser, with a 90-second
+period: rent a flat and a stall, put seeds on show, a second player buys
+one and the seller is told, move up to a Flat, out of the apartments' door,
+the period renews both leases, move out. Earlier flows and 500 bots pass.
+
+Next: C5, transit (tram ring and two metro lines).
 
 ## Next: M5 · Crowds
 

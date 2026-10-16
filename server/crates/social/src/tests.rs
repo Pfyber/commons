@@ -243,29 +243,29 @@ async fn gifts_move_items_and_earn_close_friendship() {
     );
 }
 
-/// A lot nobody lives on, from the front or the back of the list (tests
-/// running at the same time take from different ends).
-async fn free_lot(s: &State, from_back: bool) -> String {
-    let taken: Vec<String> = sqlx::query_scalar("SELECT lot FROM home_lots")
+/// A lot nobody lives on, picked at random so tests running at the same
+/// time don't reach for the same one.
+async fn free_lot(s: &State) -> String {
+    let taken: Vec<String> = sqlx::query_scalar("SELECT plot FROM leases WHERE state <> 'ended'")
         .fetch_all(&s.db)
         .await
         .unwrap();
-    let mut lots = commons_sim::city::city_home_lots();
-    if from_back {
-        lots.reverse();
-    }
-    lots.into_iter()
-        .find(|l| !taken.contains(l))
-        .expect("a free lot for the test")
+    let free: Vec<String> = commons_sim::city::city_home_lots()
+        .into_iter()
+        .filter(|l| !taken.contains(l))
+        .collect();
+    assert!(!free.is_empty(), "a free lot for the test");
+    free[(Uuid::new_v4().as_u128() % free.len() as u128) as usize].clone()
 }
 
 /// Gives `p` a home straight in the table (homes are scarce, so tests give
 /// them back with `move_out`).
 async fn give_home(s: &State, p: &P) -> String {
     loop {
-        let lot = free_lot(s, true).await;
+        let lot = free_lot(s).await;
         let done = sqlx::query(
-            "INSERT INTO home_lots (lot, player_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            "INSERT INTO leases (kind, plot, player_id, tier, paid_until)
+             VALUES ('home', $1, $2, 1, now() + interval '7 days') ON CONFLICT DO NOTHING",
         )
         .bind(&lot)
         .bind(p.id)
@@ -281,7 +281,7 @@ async fn give_home(s: &State, p: &P) -> String {
 
 async fn move_out(s: &State, ps: &[&P]) {
     for p in ps {
-        sqlx::query("DELETE FROM home_lots WHERE player_id = $1")
+        sqlx::query("DELETE FROM leases WHERE player_id = $1")
             .bind(p.id)
             .execute(&s.db)
             .await
@@ -300,7 +300,7 @@ async fn homes_are_claimed_once_and_lead_home() {
         StatusCode::NOT_FOUND
     );
     // A real lot, free: a moves in.
-    let lot = free_lot(&s, false).await;
+    let lot = free_lot(&s).await;
     let (st, _) = call(
         &s,
         "POST",
@@ -484,4 +484,237 @@ async fn blocking_ends_friendship_and_contact() {
     )
     .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
+}
+
+async fn coins(s: &State, p: &P) -> i32 {
+    sqlx::query_scalar(
+        "SELECT coalesce((SELECT qty FROM inventory WHERE player_id = $1 AND item_id = 1), 0)",
+    )
+    .bind(p.id)
+    .fetch_one(&s.db)
+    .await
+    .unwrap()
+}
+
+async fn lease_state(s: &State, p: &P, slot: &str) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT state FROM leases WHERE player_id = $1 AND slot = $2 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(p.id)
+    .bind(slot)
+    .fetch_optional(&s.db)
+    .await
+    .unwrap()
+}
+
+async fn make_due(s: &State, p: &P) {
+    sqlx::query(
+        "UPDATE leases SET paid_until = now() - interval '1 second' WHERE player_id = $1 AND state <> 'ended'",
+    )
+    .bind(p.id)
+    .execute(&s.db)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn rent_renews_then_grace_then_release_returns_everything() {
+    let Some(s) = state().await else { return };
+    let a = player(&s).await;
+    let lot = free_lot(&s).await;
+    // Moving in pays the first week of a Cottage (15 of the welcome 100).
+    let (st, body) = call(
+        &s,
+        "POST",
+        "/api/social/homes/claim",
+        &a.token,
+        Some(json!({ "lot": lot })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert_eq!(coins(&s, &a).await, 85);
+    // Upgrading to a House pays the difference for this week.
+    let (st, body) = call(
+        &s,
+        "POST",
+        "/api/social/rent/tier",
+        &a.token,
+        Some(json!({ "slot": "home", "tier": 2 })),
+    )
+    .await;
+    assert_eq!(
+        (st, body["tier_name"].as_str()),
+        (StatusCode::OK, Some("House"))
+    );
+    assert_eq!(coins(&s, &a).await, 60);
+    // A week on: the sweep renews at the House rate.
+    make_due(&s, &a).await;
+    crate::rent::sweep(&s).await.unwrap();
+    assert_eq!(coins(&s, &a).await, 20);
+    assert_eq!(lease_state(&s, &a, "home").await.as_deref(), Some("active"));
+    // Furniture inside, and not enough coins next week: grace, with a notice.
+    sqlx::query(
+        "INSERT INTO home_objects (owner_id, x, y, item_id) VALUES ($1, 3, 3, (SELECT min(id) FROM items WHERE kind = 'furniture'))",
+    )
+    .bind(a.id)
+    .execute(&s.db)
+    .await
+    .unwrap();
+    make_due(&s, &a).await;
+    crate::rent::sweep(&s).await.unwrap();
+    assert_eq!(lease_state(&s, &a, "home").await.as_deref(), Some("grace"));
+    assert_eq!(coins(&s, &a).await, 20, "nothing taken when it can't pay");
+    let (_, notes) = call(&s, "GET", "/api/social/notifications", &a.token, None).await;
+    assert!(notes.to_string().contains("rent_due"), "{notes}");
+    // Paying now can't work either, and no tier changes while unpaid.
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/rent/pay",
+        &a.token,
+        Some(json!({ "slot": "home" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    let (st, body) = call(
+        &s,
+        "POST",
+        "/api/social/rent/tier",
+        &a.token,
+        Some(json!({ "slot": "home", "tier": 1 })),
+    )
+    .await;
+    assert_eq!(
+        (st, body["error"].as_str()),
+        (StatusCode::CONFLICT, Some("unpaid"))
+    );
+    // Grace runs out: the lease ends, the furniture comes back to the bag.
+    sqlx::query(
+        "UPDATE leases SET grace_until = now() - interval '1 second' WHERE player_id = $1 AND state = 'grace'",
+    )
+    .bind(a.id)
+    .execute(&s.db)
+    .await
+    .unwrap();
+    crate::rent::sweep(&s).await.unwrap();
+    assert_eq!(lease_state(&s, &a, "home").await.as_deref(), Some("ended"));
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM home_objects WHERE owner_id = $1")
+        .bind(a.id)
+        .fetch_one(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    let furniture: i64 = sqlx::query_scalar(
+        "SELECT coalesce(sum(i.qty), 0)::bigint FROM inventory i JOIN items t ON t.id = i.item_id
+         WHERE i.player_id = $1 AND t.kind = 'furniture'",
+    )
+    .bind(a.id)
+    .fetch_one(&s.db)
+    .await
+    .unwrap();
+    assert_eq!(furniture, 1, "the furniture is back in the bag");
+    let svc = service(&s);
+    let (st, _) = call(
+        &s,
+        "GET",
+        &format!("/internal/home?player={}", a.id),
+        &svc,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "no lease, no home");
+    move_out(&s, &[&a]).await;
+}
+
+#[tokio::test]
+async fn stalls_sell_from_one_bag_to_another() {
+    let Some(s) = state().await else { return };
+    let (a, b) = (player(&s).await, player(&s).await);
+    // A free stall (there are only six).
+    let taken: Vec<String> =
+        sqlx::query_scalar("SELECT plot FROM leases WHERE state <> 'ended' AND kind = 'stall'")
+            .fetch_all(&s.db)
+            .await
+            .unwrap();
+    let Some(stall) = (1..=6)
+        .map(|i| format!("stall:{i}"))
+        .find(|p| !taken.contains(p))
+    else {
+        return;
+    };
+    let (st, body) = call(
+        &s,
+        "POST",
+        "/api/social/stalls/claim",
+        &a.token,
+        Some(json!({ "stall": stall })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert_eq!(coins(&s, &a).await, 90);
+    // Two of the welcome seeds (item 200) at 7 coins each.
+    let (st, body) = call(
+        &s,
+        "POST",
+        "/api/social/stalls/put",
+        &a.token,
+        Some(json!({ "item": 200, "qty": 2, "price": 7, "key": "k1" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    let (_, list) = call(&s, "GET", "/api/social/stalls", &b.token, None).await;
+    let mine = list["stalls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["stall"] == stall.as_str())
+        .unwrap()
+        .clone();
+    let id = mine["goods"][0]["id"].as_i64().unwrap();
+    assert_eq!(mine["goods"][0]["qty"], 2);
+    // Not your own; B buys one; the same key twice doesn't buy twice.
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/stalls/buy",
+        &a.token,
+        Some(json!({ "id": id, "qty": 1, "key": "x" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    for _ in 0..2 {
+        let (st, body) = call(
+            &s,
+            "POST",
+            "/api/social/stalls/buy",
+            &b.token,
+            Some(json!({ "id": id, "qty": 1, "key": "buy1" })),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+    }
+    assert_eq!(coins(&s, &b).await, 93);
+    assert_eq!(coins(&s, &a).await, 97);
+    let seeds = |p: &P| {
+        sqlx::query_scalar::<_, i32>(
+            "SELECT coalesce((SELECT qty FROM inventory WHERE player_id = $1 AND item_id = 200), 0)",
+        )
+        .bind(p.id)
+    };
+    assert_eq!(seeds(&b).fetch_one(&s.db).await.unwrap(), 4);
+    assert_eq!(seeds(&a).fetch_one(&s.db).await.unwrap(), 1);
+    // A takes the last one back off the stall.
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/stalls/take",
+        &a.token,
+        Some(json!({ "id": id })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(seeds(&a).fetch_one(&s.db).await.unwrap(), 2);
+    let (_, notes) = call(&s, "GET", "/api/social/notifications", &a.token, None).await;
+    assert!(notes.to_string().contains("stall_sale"), "{notes}");
+    move_out(&s, &[&a, &b]).await;
 }

@@ -315,7 +315,19 @@ async fn home_place_and_pickup() {
     let s = state(db.clone(), 1000).await;
     let p = player(&s).await;
     let owner = p.to_string();
-    let (st, _) = call(&s, "/home/place", serde_json::json!({ "owner": owner, "item": 400, "x": 3, "y": 3, "key": format!("{p}:p0") })).await;
+    let (st, r) = call(&s, "/home/place", serde_json::json!({ "owner": owner, "item": 400, "x": 3, "y": 3, "key": format!("{p}:p0") })).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("no_home"))
+    );
+    // A Cottage (on a made-up plot, so real houses aren't used up).
+    sqlx::query("INSERT INTO leases (kind, plot, player_id, tier, paid_until) VALUES ('home', $1, $2, 1, now() + interval '7 days')")
+        .bind(format!("test:{p}"))
+        .bind(p)
+        .execute(&s.db)
+        .await
+        .unwrap();
+    let (st, _) = call(&s, "/home/place", serde_json::json!({ "owner": owner, "item": 400, "x": 3, "y": 3, "key": format!("{p}:p0b") })).await;
     assert_eq!(st, StatusCode::CONFLICT, "no chair owned yet");
     apply_tx(
         &s.db,
@@ -341,6 +353,25 @@ async fn home_place_and_pickup() {
     .await;
     assert_eq!(st, StatusCode::OK, "{r}");
     assert_eq!(r["totals"][0], serde_json::json!([400, 1]));
+    // A Cottage holds twelve pieces.
+    for i in 0..12 {
+        sqlx::query("INSERT INTO home_objects (owner_id, x, y, item_id) VALUES ($1, $2, 9, 400)")
+            .bind(p)
+            .bind(i as i16)
+            .execute(&s.db)
+            .await
+            .unwrap();
+    }
+    let (st, r) = call(&s, "/home/place", serde_json::json!({ "owner": owner, "item": 400, "x": 3, "y": 3, "key": format!("{p}:p2") })).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("home_full"))
+    );
+    sqlx::query("DELETE FROM leases WHERE player_id = $1")
+        .bind(p)
+        .execute(&s.db)
+        .await
+        .unwrap();
 }
 
 // ---- town life ------------------------------------------------------------------

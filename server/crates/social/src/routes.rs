@@ -48,7 +48,16 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/notifications", get(notifications))
         .route("/notifications/read", post(read_notifications))
         .route("/homes", get(crate::homes::list))
-        .route("/homes/claim", post(crate::homes::claim));
+        .route("/homes/claim", post(crate::homes::claim))
+        .route("/rent", get(crate::rent::mine))
+        .route("/rent/tier", post(crate::rent::change_tier))
+        .route("/rent/pay", post(crate::rent::pay))
+        .route("/rent/end", post(crate::rent::end))
+        .route("/stalls", get(crate::stalls::list))
+        .route("/stalls/claim", post(crate::stalls::claim))
+        .route("/stalls/put", post(crate::stalls::put))
+        .route("/stalls/take", post(crate::stalls::take))
+        .route("/stalls/buy", post(crate::stalls::buy));
     let internal = Router::new()
         .route("/presence", post(presence))
         .route("/locate", get(locate))
@@ -105,7 +114,7 @@ async fn require_friend(state: &SocialState, a: Uuid, b: Uuid) -> ApiResult<i16>
 }
 
 /// Records a notification and pushes it live if they're online.
-async fn notify(state: &SocialState, to: Uuid, kind: &str, body: serde_json::Value) {
+pub(crate) async fn notify(state: &SocialState, to: Uuid, kind: &str, body: serde_json::Value) {
     match db::notify(&state.db, to, kind, body).await {
         Ok(n) => state.hub.send(to, &json!({ "t": "notify", "n": n })),
         Err(e) => tracing::error!(error = %e, "storing notification failed"),

@@ -9,7 +9,7 @@
 //! client code.
 
 use super::{Brush, Builder, g, hash, maze, noise, nook};
-use commons_sim::city::{BlockId, City, lot_key};
+use commons_sim::city::{APARTMENTS, BlockId, City, STALLS, lot_key};
 use commons_sim::map::{MapFile, StreetGrid};
 use std::collections::VecDeque;
 
@@ -241,18 +241,22 @@ fn market(k: &mut Blk) {
         k.decor(x, y, "lamp");
     }
     // Shade trees in planters around the square.
-    for (x, y) in [
-        (18, 6),
-        (29, 6),
-        (18, 41),
-        (29, 41),
-        (6, 18),
-        (6, 29),
-        (41, 18),
-        (41, 29),
-    ] {
+    for (x, y) in [(6, 18), (6, 29), (41, 18), (41, 29)] {
         k.ground(x, y, "flowers");
         k.decor(x, y, "tree");
+    }
+    // Apartments above the shops along the north side (C4): one door, a
+    // `door:apt:<n>` spot per flat so each tenant steps out of it.
+    k.object("apartments", 11, 2, 26, 7, "Market Apartments");
+    for n in 1..=APARTMENTS {
+        k.spot(&format!("door:apt:{n}"), 24, 9);
+    }
+    k.spot("apartments", 24, 10);
+    // Market stalls along the south side, to rent and sell from.
+    for n in 0..STALLS as u16 {
+        let x = 12 + n * 4;
+        k.object("stall", x, 39, 3, 2, &format!("stall:{}", n + 1));
+        k.spot(&format!("stall:{}", n + 1), x + 1, 38);
     }
 }
 

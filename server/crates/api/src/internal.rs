@@ -428,6 +428,36 @@ async fn place(
     }
     let mut tx = state.db.begin().await.map_err(db_err)?;
     if !key_used(&mut tx, &req.key).await.map_err(db_err)? {
+        // How much a home holds depends on its rent tier (ADR 0010, C4).
+        let lease: Option<(String, i16)> = sqlx::query_as(
+            "SELECT kind, tier FROM leases WHERE player_id = $1 AND slot = 'home' AND state <> 'ended'",
+        )
+        .bind(owner)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        let (kind, tier) =
+            lease.ok_or_else(|| conflict("no_home", "You need a home to put furniture in."))?;
+        let rent = commons_sim::city::rent_catalog();
+        let t = rent
+            .tier(&kind, tier)
+            .ok_or_else(|| conflict("no_home", "You need a home to put furniture in."))?;
+        let placed: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM home_objects WHERE owner_id = $1")
+                .bind(owner)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        if placed >= t.furniture.unwrap_or(0) {
+            return Err(conflict(
+                "home_full",
+                &format!(
+                    "Your {} has room for {} pieces. A bigger home holds more; ask at the Post Office.",
+                    t.name,
+                    t.furniture.unwrap_or(0)
+                ),
+            ));
+        }
         let r = sqlx::query(
             "INSERT INTO home_objects (owner_id, x, y, item_id) VALUES ($1, $2, $3, $4)",
         )

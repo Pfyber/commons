@@ -32,7 +32,8 @@ import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Homes } from "./homes";
-import type { PostOfficePanel } from "./ui/homes";
+import type { Rent } from "./rent";
+import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { Minimap } from "./ui/minimap";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
@@ -63,7 +64,10 @@ export interface Ui {
   hud: Hud;
   minimap: Minimap;
   homes: Homes;
+  rent: Rent;
   postOffice: PostOfficePanel;
+  apartments: ApartmentsPanel;
+  stall: StallPanel;
   eco: Economy;
   bag: BagPanel;
   album: AlbumPanel;
@@ -374,12 +378,15 @@ export class Game {
     } else if (homes.mine) {
       menu.showWith("A free house", "Someone new could make it their home.", []);
     } else {
-      menu.showWith("A free house", "A garden, a postbox and a front door of your own. Homes are free while the town is young.", [
+      const t = homes.cottage;
+      const price = t ? `A ${t.name}, ${t.rent} coins a week (you can move up to a bigger house later).` : "";
+      menu.showWith("A free house", `A garden, a postbox and a front door of your own. ${price}`, [
         [
           "Move in 🏡",
           () =>
             void homes
               .claim(lot)
+              .then(() => void this.ui.rent.load().catch(() => {}))
               .then(() => this.hud.toast("🏡 Welcome home! Tap your door to go inside. It's on your map now.", 6000))
               .catch((e) => this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 4000)),
         ],
@@ -1163,6 +1170,14 @@ export class Game {
     }
     if (obj && (obj.kind === "house" || obj.kind === "postbox") && obj.label) {
       this.tapHouse(obj.label);
+      return true;
+    }
+    if (obj && (obj.kind === "apartments" || obj.kind === "stall")) {
+      const front = spot(map, obj.kind === "stall" ? (obj.label ?? "") : "apartments");
+      if (front && cheb(self.destination, front) > 3) this.moveTo(front, true);
+      const at = front ?? { x: obj.x, y: obj.y };
+      if (obj.kind === "stall" && obj.label) this.near(ui.stall, at, 6).openFor(obj.label);
+      else this.near(ui.apartments, at, 8).show();
       return true;
     }
     if (obj?.kind === "post_office") {

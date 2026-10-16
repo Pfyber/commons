@@ -5,7 +5,9 @@
 mod db;
 mod homes;
 mod hub;
+mod rent;
 mod routes;
+mod stalls;
 #[cfg(test)]
 mod tests;
 
@@ -50,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     let db = commons_api::connect(&db_url, config::env_or("DATABASE_POOL", 10)).await?;
     let catalog = Arc::new(Catalog::load(&db).await?);
     let state = Arc::new(State::new(db, config::secret(), catalog));
+    rent::spawn_sweeper(state.clone());
     let app = routes::routes()
         .with_state(state)
         .merge(telemetry::routes(prom));

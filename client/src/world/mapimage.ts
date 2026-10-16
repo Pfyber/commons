@@ -43,6 +43,8 @@ const OBJECTS: Record<string, string> = {
   bandstand: "#c27a3c",
   tailor: "#c8553d",
   post_office: "#c8553d",
+  apartments: "#a8735a",
+  stall: "#c27a3c",
 };
 
 /** Kinds that aren't drawn at all: markers and tiny props. */
