@@ -5,13 +5,11 @@
 //! bottom has the directory map and the seasonal pop-up stand.
 
 use super::Builder;
+use commons_sim::mall::{Department, departments};
 use commons_sim::map::MapFile;
-use serde::Deserialize;
 use std::collections::VecDeque;
 
 type Tile = (u16, u16);
-
-const DEPARTMENTS: &str = include_str!("../../../../../../assets/mall/departments.json");
 
 const W: u16 = 96;
 const H: u16 = 80;
@@ -24,20 +22,6 @@ const ATRIUM: (u16, u16, u16, u16) = (28, 23, 67, 56);
 /// The entrance hall, open to the loop.
 const HALL: (u16, u16, u16, u16) = (36, 61, 59, 78);
 
-#[derive(Deserialize)]
-struct Departments {
-    departments: Vec<Department>,
-}
-
-#[derive(Deserialize)]
-struct Department {
-    key: String,
-    name: String,
-    unit: [u16; 4],
-    door: String,
-    open: bool,
-}
-
 fn rect(b: &mut Builder, (x0, y0, x1, y1): (u16, u16, u16, u16), ground: &str) {
     for y in y0..=y1 {
         for x in x0..=x1 {
@@ -48,7 +32,7 @@ fn rect(b: &mut Builder, (x0, y0, x1, y1): (u16, u16, u16, u16), ground: &str) {
 }
 
 pub fn mall() -> MapFile {
-    let deps: Departments = serde_json::from_str(DEPARTMENTS).expect("departments.json");
+    let deps = departments();
     let mut b = Builder::new(W, H);
     // Solid to start with; then the open spaces are carved out.
     for y in 0..H {
@@ -123,6 +107,9 @@ pub fn mall() -> MapFile {
             format!("{}: opening soon", d.name)
         };
         b.object("counter", cx - 1, cy, 3, 1, Some(&label), true);
+        if d.open {
+            displays(&mut b, d, cy);
+        }
     }
 
     // The food court: planters round the edge with gaps to walk through,
@@ -188,6 +175,54 @@ pub fn mall() -> MapFile {
     map
 }
 
+/// Where a shop's goods stand. Showrooms (furniture) are four carpeted
+/// model rooms with three pieces each; shelves stand in rows. Each display is
+/// labelled `<dept>:<slot>`; what's on it comes from the stock.
+fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
+    let [x0, y0, x1, y1] = d.unit;
+    let (ix0, iy0, ix1, iy1) = (x0 + 1, y0 + 1, x1 - 1, y1 - 1);
+    let mut spots: Vec<Tile> = vec![];
+    let kind = match d.kind.as_str() {
+        "showroom" => {
+            for (vx, vy) in [
+                (ix0 + 1, iy0 + 1),
+                (ix1 - 6, iy0 + 1),
+                (ix0 + 1, iy1 - 5),
+                (ix1 - 6, iy1 - 5),
+            ] {
+                for y in vy..vy + 5 {
+                    for x in vx..vx + 6 {
+                        b.ground(x, y, "carpet");
+                    }
+                }
+                spots.extend([(vx + 1, vy + 1), (vx + 4, vy + 1), (vx + 2, vy + 3)]);
+            }
+            "display"
+        }
+        _ => {
+            for y in [iy0 + 2, iy0 + 5, iy1 - 2] {
+                if y.abs_diff(counter_y) <= 1 {
+                    continue;
+                }
+                for x in (ix0 + 2..=ix1 - 2).step_by(2) {
+                    spots.push((x, y));
+                }
+            }
+            "shelf"
+        }
+    };
+    assert!(
+        spots.len() >= d.slots as usize,
+        "{}: room for {} displays, {} wanted",
+        d.key,
+        spots.len(),
+        d.slots
+    );
+    for (slot, &(x, y)) in spots.iter().take(d.slots as usize).enumerate() {
+        b.object(kind, x, y, 1, 1, Some(&format!("{}:{slot}", d.key)), true);
+    }
+}
+
 /// Every spot can be walked to from the entrance, and so can each shop.
 fn check(map: &MapFile) {
     let grid = map.grid();
@@ -210,6 +245,15 @@ fn check(map: &MapFile) {
             "spot" => seen[o.y as usize * w + o.x as usize],
             "dept" => (o.y..o.y + o.h)
                 .any(|y| (o.x..o.x + o.w).any(|x| seen[y as usize * w + x as usize])),
+            // Something on show has to be reachable to look at and buy.
+            "display" | "shelf" => {
+                [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)]
+                    .iter()
+                    .any(|(dx, dy)| {
+                        let (x, y) = (o.x as i32 + dx, o.y as i32 + dy);
+                        grid.walkable_i(x, y) && seen[y as usize * w + x as usize]
+                    })
+            }
             _ => continue,
         };
         assert!(ok, "mall: {} {:?} can't be reached", o.kind, o.label);

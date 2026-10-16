@@ -386,7 +386,7 @@ mod town_life {
         Router::new().nest("/api", town::routes()).with_state(s)
     }
 
-    fn bearer_for(s: &AppState, id: Uuid, name: &str) -> String {
+    pub(super) fn bearer_for(s: &AppState, id: Uuid, name: &str) -> String {
         let claims = token::AccessClaims {
             sub: id.to_string(),
             name: name.into(),
@@ -401,7 +401,7 @@ mod town_life {
         )
     }
 
-    async fn call(
+    pub(super) async fn call(
         app: &Router,
         auth: &str,
         method: &str,
@@ -1693,5 +1693,102 @@ mod changing_room {
             StatusCode::BAD_REQUEST,
             "nobody dresses as the Caretaker"
         );
+    }
+}
+
+// ---- the mall ---------------------------------------------------------------------
+
+mod mall_shop {
+    use super::town_life::{bearer_for, call};
+    use super::*;
+    use crate::economy::{self, COIN};
+    use crate::mall::{self, DEPARTMENTS, PLAYER_MADE};
+    use axum::Router;
+    use serde_json::json;
+
+    fn app(s: Arc<AppState>) -> Router {
+        Router::new().nest("/api", mall::routes()).with_state(s)
+    }
+
+    #[tokio::test]
+    async fn the_mall_sells_only_shop_goods() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        for d in &DEPARTMENTS.departments {
+            for c in &d.catalog {
+                let item = s
+                    .catalog
+                    .by_key(&c.item)
+                    .unwrap_or_else(|| panic!("{}: no item {}", d.key, c.item));
+                assert!(
+                    !PLAYER_MADE.contains(&item.kind.as_str()),
+                    "{} sells {}, which players make",
+                    d.key,
+                    c.item
+                );
+                assert!(!item.account_bound());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn buying_off_a_display_charges_its_price_once() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = app(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Shopper");
+        let (st, stock) = call(&app, &auth, "GET", "/api/mall/stock", json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        let seeds = stock["departments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["key"] == "seeds")
+            .unwrap()
+            .clone();
+        let shelf = &seeds["shelves"][0];
+        let (item, price) = (
+            shelf["item"].as_i64().unwrap() as i32,
+            shelf["price"].as_i64().unwrap() as i32,
+        );
+        let before = economy::totals(&mut s.db.acquire().await.unwrap(), p, &[COIN, item])
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            let (st, r) = call(
+                &app,
+                &auth,
+                "POST",
+                "/api/mall/buy",
+                json!({ "dept": "seeds", "slot": 0, "key": "k1" }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+        }
+        let after = economy::totals(&mut s.db.acquire().await.unwrap(), p, &[COIN, item])
+            .await
+            .unwrap();
+        assert_eq!(after[0].1, before[0].1 - price, "charged once");
+        assert_eq!(after[1].1, before[1].1 + 1);
+        // Closed shops and empty displays sell nothing.
+        let (st, _) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/mall/buy",
+            json!({ "dept": "pets", "slot": 0, "key": "k2" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/mall/buy",
+            json!({ "dept": "seeds", "slot": 99, "key": "k3" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
     }
 }

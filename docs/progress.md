@@ -710,8 +710,38 @@ Furniture, two players meet and sit at a café table, out onto the square
 at the door. 500 bots in the mall pass the perf gate (tick p99 4.7 ms);
 the city's gate, homes and the welcome flow pass again.
 
-Next: M2, the first shops (Furniture, Seeds & garden) with displays and
-buying.
+## Mall M2 · The first shops: done (2026-10-16)
+
+- **Departments from data:** `assets/mall/departments.json` gives each
+  shop its type, displays (`slots`) and catalog (item and price), read by
+  `sim::mall` for mapgen and the API alike.
+- **Furniture** (showroom): four carpeted model rooms, three pieces in each,
+  standing on the floor with a price tag: walk through and look. **Seeds &
+  Garden** (shelves): seeds and garden pieces on little stands.
+- **Eight new pieces** (migration 0011): armchair, sofa, side table, potted
+  palm, wall clock, flower box, garden gnome, birdbath, with their art.
+  Garden pieces are placed like furniture for now (yards come with Home
+  exterior).
+- **Buying:** tap a display to see the item up close (picture, price, what
+  it's for, how many you have) and buy it, or tap the counter for
+  everything the shop sells. `GET /api/mall/stock`, `POST /api/mall/buy`:
+  the server checks the item is on that display at that price; idempotent
+  like every purchase.
+- **Rules from the start:** the mall never sells what players make (an API
+  test checks every catalog item); `account_bound` items can't be sold to
+  the cart, given or put on a stall.
+- The market cart now only buys (your catch and harvest); buying moved to
+  the mall.
+- Fixed: tapping inside an invisible area (a shop, a nook, a named spot)
+  no longer hides the thing you actually tapped.
+
+Checked: API tests for the catalog rule and buying (charged once, closed
+shops and empty displays refused). In the browser: the cart points to the
+mall, all 19 displays dressed, inspect and buy a fern (100 → 50 coins, in
+the bag), the counter's 12 rows, seeds off a shelf, a closed shop says so.
+500 bots in the mall pass the perf gate.
+
+Next: M3, weekly rotation, limited stock and the seasonal pop-up.
 
 ## Next: M5 · Crowds
 

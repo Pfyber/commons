@@ -1,11 +1,14 @@
-// The Commons Mall (ADR 0011): the directory map at the entrance. The floor
-// drawn from the map, every shop named, "you are here", tap to walk there.
+// The Commons Mall (ADR 0011): the directory map at the entrance (the floor
+// drawn from the map, every shop named, "you are here", tap to walk there)
+// and the shop panel (one display up close, or a shop's counter).
 
 import departments from "../../../assets/mall/departments.json";
+import type { Economy } from "../economy";
+import type { Shelf, Shop } from "../shop";
 import { type ZoneMap, nearestWalkable, spot } from "../world/map";
 import type { TileXY } from "../world/motion";
 import { cityImage, drawYou } from "./citymap";
-import { Panel, el } from "./panels";
+import { Panel, button, el, icon } from "./panels";
 
 const NAMES = new Map(departments.departments.map((d) => [d.key, d.name]));
 
@@ -88,5 +91,91 @@ export class DirectoryPanel extends Panel {
     if (!t) return;
     this.hide();
     this.host.walk(t);
+  }
+}
+
+const ABOUT: Record<string, string> = {
+  furniture: "For your home: place it from your bag. How many pieces fit depends on your home.",
+  seed: "Plant it in a soil patch: the Community Garden, your courtyard beds, or at home.",
+};
+
+/** A shop's goods: one display up close, or everything at the counter. */
+export class ShopPanel extends Panel {
+  private dept = "";
+  private slot: number | null = null;
+  private msg = el("p", "error");
+
+  constructor(
+    private shop: Shop,
+    private eco: Economy,
+  ) {
+    super("Shop", "shop");
+    eco.onChange(() => this.open && this.render());
+  }
+
+  /** Whether a department is open (has stock). */
+  isOpen(dept: string): boolean {
+    return this.shop.depts.get(dept)?.open ?? false;
+  }
+
+  /** Inspecting the thing on one display. */
+  openItem(dept: string, slot: number) {
+    this.dept = dept;
+    this.slot = slot;
+    this.msg.textContent = "";
+    this.show();
+  }
+
+  /** Everything the shop has on show, at its counter. */
+  openDept(dept: string) {
+    this.dept = dept;
+    this.slot = null;
+    this.msg.textContent = "";
+    this.show();
+  }
+
+  private buyButton(s: Shelf, cls: string): HTMLButtonElement {
+    const b = button(`Buy for ${s.price}`, () => {
+      this.msg.textContent = "";
+      this.shop
+        .buy(this.dept, s.slot)
+        .then(() => (this.msg.textContent = `✓ ${this.eco.name(s.item)} is in your bag.`))
+        .catch((e) => (this.msg.textContent = e instanceof Error ? e.message : "That didn't work."));
+    }, cls);
+    b.disabled = this.eco.coins < s.price;
+    return b;
+  }
+
+  render() {
+    this.body.replaceChildren();
+    const d = this.shop.depts.get(this.dept);
+    this.titleEl.textContent = d?.name ?? "Shop";
+    if (!d?.open) {
+      this.body.append(el("p", "hint", "Opening soon."));
+      return;
+    }
+    const coins = el("p", "hint", `You have ${this.eco.coins} coins.`);
+    if (this.slot !== null) {
+      const s = d.shelves.find((x) => x.slot === this.slot);
+      if (!s) return void this.body.append(el("p", "hint", "Nothing here right now."));
+      const it = this.eco.items.get(s.item);
+      const card = el("div", "shop-card");
+      const pic = icon(it);
+      pic.classList.add("big");
+      card.append(pic, el("strong", "", it?.name ?? s.key), el("span", "price", `${s.price} coins`));
+      const owned = this.eco.qty(s.item);
+      this.body.append(card, el("p", "hint", ABOUT[it?.kind ?? ""] ?? ""), el("p", "hint", owned ? `You have ${owned}.` : ""), coins, this.buyButton(s, "primary"));
+    } else {
+      // Each item once, cheapest first.
+      const seen = new Set<number>();
+      const rows = [...d.shelves].sort((a, b) => a.price - b.price).filter((s) => !seen.has(s.item) && seen.add(s.item));
+      for (const s of rows) {
+        const row = el("div", "row");
+        row.append(icon(this.eco.items.get(s.item)), el("span", "name", this.eco.name(s.item)), el("span", "price", `${s.price}c`), this.buyButton(s, "small"));
+        this.body.append(row);
+      }
+      this.body.append(coins);
+    }
+    this.body.append(this.msg);
   }
 }

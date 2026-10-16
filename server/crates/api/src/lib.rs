@@ -10,6 +10,7 @@ pub mod error;
 pub mod gov;
 pub mod internal;
 pub mod mail;
+pub mod mall;
 pub mod play;
 pub mod store;
 #[cfg(test)]

@@ -108,6 +108,7 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     floor: P.floor,
     pitch: P.pitch,
     road: "#8f8a80",
+    carpet: "#c48d7a",
     curb: "#cfc6b2",
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
@@ -195,6 +196,17 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
           if (x1 > x0) px(ctx, tone, x0, oy + r * 8 + 1, x1 - x0, 6);
         }
       }
+      break;
+    case "carpet":
+      // A soft rug: a small diamond pattern, a darker border at its edge.
+      for (const [dx, dy] of [[8, 8], [24, 24]]) {
+        px(ctx, "#d6a593", ox + dx - 1, oy + dy - 3, 2, 6);
+        px(ctx, "#d6a593", ox + dx - 3, oy + dy - 1, 6, 2);
+      }
+      if (differs(0, -1)) px(ctx, "#8f5a4a", ox, oy, TILE, 3);
+      if (differs(0, 1)) px(ctx, "#8f5a4a", ox, oy + TILE - 3, TILE, 3);
+      if (differs(-1, 0)) px(ctx, "#8f5a4a", ox, oy, 3, TILE);
+      if (differs(1, 0)) px(ctx, "#8f5a4a", ox + TILE - 3, oy, 3, TILE);
       break;
     case "curb":
       // Paving slabs, with a darker kerb stone where they meet the road.
@@ -742,6 +754,26 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       label(ctx, name, sw / 2, 13, "#fff9ec", 10);
       // Wider than its tile: the art reaches `left` px left of it.
       left = x0;
+      break;
+    }
+    case "display": {
+      // Showroom: the piece stands on the carpet; just a price tag.
+      [c, ctx] = makeCanvas(w, h);
+      px(ctx, P.outline, w - 9, h - 12, 2, 10);
+      px(ctx, P.outline, w - 13, h - 18, 10, 8);
+      px(ctx, "#fff9ec", w - 12, h - 17, 8, 6);
+      px(ctx, "#e8566b", w - 10, h - 15, 4, 2);
+      break;
+    }
+    case "shelf": {
+      // A small wooden stand with the goods on top.
+      [c, ctx] = makeCanvas(w, h + 10);
+      overhang = 10;
+      px(ctx, "rgba(0,0,0,0.15)", 3, h + 6, w - 6, 4);
+      px(ctx, P.outline, 2, 10, w - 4, h - 2);
+      px(ctx, P.wood, 3, 11, w - 6, h - 4);
+      px(ctx, P.woodDark, 3, 11, w - 6, 3);
+      px(ctx, P.woodDark, 3, h + 2, w - 6, 2);
       break;
     }
     case "counter": {

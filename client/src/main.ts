@@ -8,13 +8,14 @@ import { Homes } from "./homes";
 import { Rent } from "./rent";
 import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
+import { Shop } from "./shop";
 import { Social } from "./social";
 import { Town } from "./town";
 import { Gov } from "./gov";
 import { CityMapPanel } from "./ui/citymap";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
 import { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
-import { DirectoryPanel } from "./ui/mall";
+import { DirectoryPanel, ShopPanel } from "./ui/mall";
 import { Minimap } from "./ui/minimap";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
@@ -167,6 +168,8 @@ async function main() {
   const postOffice = new PostOfficePanel(homes, rent, rentHost);
   const apartments = new ApartmentsPanel(homes, rent, rentHost);
   const stall = new StallPanel(rent, eco, rentHost);
+  const shop = new Shop(auth, eco);
+  const shopPanel = new ShopPanel(shop, eco);
   const directory = new DirectoryPanel({
     where: () => {
       const g = game as Game | null;
@@ -192,6 +195,7 @@ async function main() {
     apartments,
     stall,
     directory,
+    shop: shopPanel,
     bag: new BagPanel(eco, (item) => {
       ui.bag.hide();
       place.show(item);
@@ -256,6 +260,11 @@ async function main() {
     try {
       const ticket = await auth.join(dest);
       const map = await loadMap(ticket.zone_id);
+      // In the mall, put what's on show onto the displays before drawing.
+      if (ticket.zone_id === "mall") {
+        await shop.load().catch(() => {});
+        shop.dress(map);
+      }
       const placeInfo = { label: ticket.label, owner: ticket.owner };
       if (!game || game.zoneId !== ticket.zone_id || game.place.owner !== placeInfo.owner) {
         game?.destroy();

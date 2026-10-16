@@ -35,7 +35,7 @@ import type { Homes } from "./homes";
 import type { Rent } from "./rent";
 import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
-import type { DirectoryPanel } from "./ui/mall";
+import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar } from "./world/avatars";
@@ -70,6 +70,7 @@ export interface Ui {
   apartments: ApartmentsPanel;
   stall: StallPanel;
   directory: DirectoryPanel;
+  shop: ShopPanel;
   eco: Economy;
   bag: BagPanel;
   album: AlbumPanel;
@@ -169,6 +170,9 @@ const DOORSTEP: TileXY[] = [
   { x: 6, y: 10 },
   { x: 13, y: 10 },
 ];
+
+/** Invisible map objects (areas and named places): never what you tapped. */
+const MARKERS = new Set(["spot", "dept", "nook", "grove_slot"]);
 
 const cheb = (a: TileXY, b: TileXY) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const SITTING = 1;
@@ -1093,7 +1097,7 @@ export class Game {
       return true;
     }
     // Map objects: the drawn art reaches a couple of tiles above the footprint.
-    const obj = map.objects.find((o) => t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 2 && t.y < o.y + o.h);
+    const obj = map.objects.find((o) => !MARKERS.has(o.kind) && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 2 && t.y < o.y + o.h);
     if (obj?.kind === "market_cart") {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
@@ -1198,6 +1202,25 @@ export class Game {
         if (spot) this.moveTo(spot, true);
       }
       this.near(ui.directory, { x: obj.x, y: obj.y + 1 }, 8).show();
+      return true;
+    }
+    if (obj && (obj.kind === "display" || obj.kind === "shelf") && obj.label) {
+      // Walk up to it and look: what it is, what it costs, buy it.
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+        const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      const [dept, slot] = obj.label.split(":");
+      this.near(ui.shop, { x: obj.x, y: obj.y }, 5).openItem(dept, Number(slot));
+      return true;
+    }
+    const shopAt = obj?.kind === "counter" ? map.objects.find((d) => d.kind === "dept" && obj.x >= d.x && obj.x < d.x + d.w && obj.y >= d.y && obj.y < d.y + d.h) : undefined;
+    if (obj && shopAt?.label && ui.shop.isOpen(shopAt.label)) {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+        const spot = nearestWalkable(map, obj.x + 1, obj.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.shop, { x: obj.x + 1, y: obj.y }, 6).openDept(shopAt.label);
       return true;
     }
     if (obj && (obj.kind === "counter" || obj.kind === "popup" || obj.kind === "shopfront")) {

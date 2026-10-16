@@ -221,13 +221,7 @@ export class MarketPanel extends Panel {
         list.append(row);
       }
     } else {
-      for (const it of this.eco.ofKind("seed", "furniture").filter((i) => i.meta.buy)) {
-        const row = el("div", "row");
-        const b = button("Buy", () => this.act(() => this.eco.buy(it.id, 1)), "small");
-        b.disabled = this.eco.coins < (it.meta.buy ?? 0);
-        row.append(icon(it), el("span", "name", it.name), el("span", "price", `${it.meta.buy}c`), b);
-        list.append(row);
-      }
+      list.append(el("p", "empty", "Seeds, furniture and garden things are sold at the Commons Mall now: the big doors on the north side of the Market."));
     }
     this.body.append(list);
   }

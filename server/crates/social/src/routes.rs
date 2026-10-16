@@ -440,6 +440,16 @@ async fn gift(
     if !(1..=99).contains(&req.qty) || req.key.is_empty() || req.key.len() > 80 {
         return Err(ApiError::bad_request("bad_request", "Invalid gift."));
     }
+    if state
+        .catalog
+        .get(req.item)
+        .is_some_and(|i| i.account_bound())
+    {
+        return Err(ApiError::bad_request(
+            "account_bound",
+            "That's yours to keep: it can't be given.",
+        ));
+    }
     let note = clean_chat(&req.note).unwrap_or_default();
     let key = format!("gift:{me}:{}", req.key);
     let applied = db::send_gift(

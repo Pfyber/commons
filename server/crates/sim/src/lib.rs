@@ -5,6 +5,7 @@
 pub mod city;
 pub mod furniture;
 pub mod garden;
+pub mod mall;
 pub mod map;
 pub mod motion;
 pub mod path;

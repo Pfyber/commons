@@ -3,6 +3,7 @@
 
 import { type Application, Container, Graphics, Sprite } from "pixi.js";
 import { TILE, bakeChunk, decorTexture, hash, objectTexture } from "./art";
+import { itemTexture } from "./items";
 import { type MapObject, type ZoneMap, groundAt } from "./map";
 import type { TileXY } from "./motion";
 
@@ -38,6 +39,8 @@ interface Placed {
   x1: number;
   y1: number;
   sprite: Sprite | null;
+  /** A mall display's item, drawn on top of the stand. */
+  extra: Sprite | null;
 }
 
 /** Inclusive chunk rectangle. */
@@ -81,7 +84,7 @@ export class Scene {
     this.placed = map.objects
       // Drawn elsewhere, or invisible.
       .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot")
-      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null }));
+      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, extra: null }));
     this.resize();
   }
 
@@ -132,9 +135,22 @@ export class Scene {
         s.zIndex = (p.o.y + p.o.h) * TILE - 1;
         this.sorted.addChild(s);
         p.sprite = s;
+        if (p.o.item) {
+          // Furniture stands on the floor; small goods sit on the shelf.
+          const it = new Sprite(itemTexture(p.o.item, p.o.itemKind ?? ""));
+          it.anchor.set(0.5, 1);
+          const onShelf = p.o.kind === "shelf";
+          it.scale.set(onShelf && p.o.itemKind === "furniture" ? 0.75 : 1);
+          it.position.set(p.o.x * TILE + TILE / 2, p.o.y * TILE + (onShelf ? 2 : TILE - 2));
+          it.zIndex = s.zIndex + 0.5;
+          this.sorted.addChild(it);
+          p.extra = it;
+        }
       } else if (!near && p.sprite) {
         p.sprite.destroy({ texture: true, textureSource: true });
         p.sprite = null;
+        p.extra?.destroy();
+        p.extra = null;
       }
     }
   }
@@ -178,7 +194,10 @@ export class Scene {
   /** Frees the baked chunk and object textures, then everything else. */
   destroy() {
     for (const [key, c] of this.chunks) this.unload(key, c);
-    for (const p of this.placed) p.sprite?.destroy({ texture: true, textureSource: true });
+    for (const p of this.placed) {
+      p.sprite?.destroy({ texture: true, textureSource: true });
+      p.extra?.destroy();
+    }
     this.world.destroy({ children: true });
   }
 

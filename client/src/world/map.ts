@@ -9,6 +9,9 @@ export interface MapObject {
   w: number;
   h: number;
   label?: string;
+  /** Mall displays: the item on show, set from the shop's stock. */
+  item?: string;
+  itemKind?: string;
 }
 
 /** The street grid of a city map (mirror of sim::map::StreetGrid). */

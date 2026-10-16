@@ -42,6 +42,12 @@ impl Item {
     fn meta_i64(&self, k: &str) -> Option<i64> {
         self.meta.get(k).and_then(|v| v.as_i64())
     }
+    /// Bound to the account that got it (ADR 0011): never sold, given or
+    /// put on a stall. Nothing is yet; the rule holds from the start.
+    pub fn account_bound(&self) -> bool {
+        self.meta.get("account_bound").and_then(|v| v.as_bool()) == Some(true)
+    }
+
     pub fn sell(&self) -> Option<i64> {
         self.meta_i64("sell")
     }
@@ -88,6 +94,10 @@ impl Catalog {
 
     pub fn get(&self, id: i32) -> Option<&Item> {
         self.by_id.get(&id).map(|&i| &self.items[i])
+    }
+
+    pub fn by_key(&self, key: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.key == key)
     }
 
     pub fn of_kind<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a Item> + 'a {
@@ -311,6 +321,11 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/daily", post(daily))
 }
 
+/// The player behind a bearer token.
+pub fn bearer_player(state: &AppState, headers: &HeaderMap) -> ApiResult<Uuid> {
+    player_uuid(state, headers)
+}
+
 fn player_uuid(state: &AppState, headers: &HeaderMap) -> ApiResult<Uuid> {
     let who = bearer(state, headers)?;
     Uuid::parse_str(&who.sub).map_err(|_| ApiError::unauthorized("not a player account"))
@@ -386,6 +401,7 @@ async fn sell(
     let price = state
         .catalog
         .get(req.item)
+        .filter(|i| !i.account_bound())
         .and_then(Item::sell)
         .ok_or_else(|| ApiError::bad_request("not_for_sale", "The market doesn't buy that."))?;
     let ops = [

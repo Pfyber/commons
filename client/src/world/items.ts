@@ -4,7 +4,7 @@
 
 import { Texture } from "pixi.js";
 import { PALETTE, toTexture } from "./art";
-import { disc, oval } from "./pixeldraw";
+import { disc, oval, polygon } from "./pixeldraw";
 
 type Draw = (ctx: CanvasRenderingContext2D) => void;
 
@@ -179,6 +179,76 @@ function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
       px(ctx, "#7fa7d4", 4, 13, 24, 15);
       px(ctx, "#a9c4e4", 4, 13, 24, 3);
       break;
+    case "armchair":
+      px(ctx, O, 5, 6, 22, 24);
+      px(ctx, "#6f8fb5", 6, 7, 20, 10);
+      px(ctx, "#8aa8cc", 9, 17, 14, 6);
+      px(ctx, "#5a7598", 6, 15, 4, 10);
+      px(ctx, "#5a7598", 22, 15, 4, 10);
+      px(ctx, D, 7, 25, 3, 5);
+      px(ctx, D, 22, 25, 3, 5);
+      break;
+    case "sofa":
+      px(ctx, O, 0, 8, 32, 22);
+      px(ctx, "#b5544a", 1, 9, 30, 9);
+      px(ctx, "#cf6f63", 4, 18, 24, 6);
+      px(ctx, "#99443b", 1, 16, 4, 10);
+      px(ctx, "#99443b", 27, 16, 4, 10);
+      px(ctx, "#f4f1d8", 6, 12, 6, 5);
+      px(ctx, D, 2, 26, 3, 4);
+      px(ctx, D, 27, 26, 3, 4);
+      break;
+    case "side_table":
+      px(ctx, O, 8, 14, 16, 5);
+      px(ctx, W, 9, 15, 14, 3);
+      px(ctx, D, 10, 19, 3, 11);
+      px(ctx, D, 19, 19, 3, 11);
+      px(ctx, "#9fc3d6", 13, 9, 5, 6);
+      px(ctx, "#e8566b", 14, 6, 3, 3);
+      break;
+    case "potted_palm":
+      px(ctx, O, 10, 21, 12, 10);
+      px(ctx, "#d9a05b", 11, 22, 10, 8);
+      px(ctx, PALETTE.trunk, 15, 10, 2, 12);
+      for (const [x, y, w] of [[4, 6, 12], [16, 6, 12], [6, 2, 9], [17, 2, 9], [12, 0, 8]] as [number, number, number][]) px(ctx, PALETTE.leaf, x, y, w, 4);
+      px(ctx, PALETTE.leafLight, 8, 7, 6, 2);
+      break;
+    case "wall_clock":
+      disc(ctx, O, 16, 13, 11);
+      disc(ctx, "#f4f1d8", 16, 13, 9);
+      px(ctx, O, 15, 6, 2, 8);
+      px(ctx, O, 16, 12, 6, 2);
+      px(ctx, D, 15, 24, 2, 7);
+      px(ctx, "#f6c343", 14, 27, 4, 4);
+      break;
+    case "flower_box":
+      px(ctx, O, 3, 19, 26, 11);
+      px(ctx, W, 4, 20, 24, 9);
+      px(ctx, D, 4, 20, 24, 2);
+      for (let i = 0; i < 6; i++) {
+        px(ctx, PALETTE.leaf, 5 + i * 4, 12, 2, 8);
+        px(ctx, ["#e8566b", "#f6c343", "#9b7fd4"][i % 3], 4 + i * 4, 9, 4, 4);
+      }
+      break;
+    case "garden_gnome":
+      px(ctx, O, 10, 3, 12, 28);
+      polygon(ctx, "#c8553d", [[11, 14], [16, 2], [21, 14]]);
+      px(ctx, "#f5d0b0", 12, 14, 8, 5);
+      px(ctx, "#fff9ec", 12, 18, 8, 5);
+      px(ctx, "#5f8fc4", 11, 22, 10, 7);
+      px(ctx, "#3b3a2e", 11, 28, 4, 2);
+      px(ctx, "#3b3a2e", 17, 28, 4, 2);
+      break;
+    case "birdbath":
+      oval(ctx, O, 16, 10, 13, 5);
+      oval(ctx, "#c9c2b0", 16, 10, 12, 4);
+      oval(ctx, "#7fc3e8", 16, 9, 9, 2.5);
+      px(ctx, O, 13, 13, 6, 15);
+      px(ctx, "#c9c2b0", 14, 13, 4, 15);
+      px(ctx, O, 9, 27, 14, 4);
+      px(ctx, "#b2aa96", 10, 28, 12, 2);
+      px(ctx, "#8f6a4a", 20, 4, 4, 3);
+      break;
     default:
       px(ctx, O, 6, 6, 20, 20);
       px(ctx, W, 7, 7, 18, 18);
@@ -206,6 +276,17 @@ function cachedTex(key: string, draw: () => HTMLCanvasElement): Texture {
     texCache.set(key, t);
   }
   return t;
+}
+
+/** Any item drawn at 32×32 (furniture as itself, anything else as its icon). */
+export function itemTexture(key: string, kind: string): Texture {
+  if (kind === "furniture") return furnitureTexture(key);
+  return cachedTex(`item:${key}`, () =>
+    canvas(32, 32, (ctx) => {
+      ctx.scale(2, 2);
+      drawIcon(ctx, key, kind);
+    }),
+  );
 }
 
 export function furnitureTexture(key: string): Texture {

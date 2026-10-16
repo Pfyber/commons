@@ -104,7 +104,13 @@ pub async fn put(
             "Between 1 and 99 of something, at 1 to 9999 coins each.",
         ));
     }
-    if req.item == COIN || state.catalog.get(req.item).is_none() {
+    // Coins aren't goods, and account-bound things are yours to keep.
+    if req.item == COIN
+        || state
+            .catalog
+            .get(req.item)
+            .is_none_or(|i| i.account_bound())
+    {
         return Err(ApiError::bad_request("bad_item", "That can't be sold."));
     }
     let lease = lease_of(&state.db, me, "stall")

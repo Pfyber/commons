@@ -18,6 +18,7 @@ const GROUND: Record<string, string> = {
   stones: "#7fb5d8",
   road: "#8a857b",
   curb: "#cfc6b2",
+  carpet: "#c48d7a",
   fog: "#e3e9e6",
 };
 
@@ -48,6 +49,8 @@ const OBJECTS: Record<string, string> = {
   apartments: "#a8735a",
   mall_entrance: "#4f6d8a",
   counter: "#a0703f",
+  display: "#c98d5e",
+  shelf: "#a0703f",
   popup: "#e8566b",
   mall_directory: "#3f7a8a",
   mall_exit: "#3f7a8a",
