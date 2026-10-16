@@ -3088,3 +3088,68 @@ body.woozy #stage canvas {
   font-weight: 700;
   color: #3a9a52;
 }
+
+/* Zoom buttons, on touch screens (a mouse has its wheel). */
+.zoom-pad {
+  display: none;
+  position: fixed;
+  right: max(10px, env(safe-area-inset-right));
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+  flex-direction: column;
+  gap: 8px;
+}
+@media (pointer: coarse) {
+  .zoom-pad {
+    display: flex;
+  }
+}
+.zoom-pad button {
+  width: 44px;
+  height: 44px;
+  font: inherit;
+  font-size: 24px;
+  line-height: 1;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  background: var(--paper-3, #fff6e0);
+  box-shadow: var(--frame-thin), 0 2px 0 rgba(0, 0, 0, 0.25);
+  opacity: 0.85;
+  touch-action: manipulation;
+}
+.zoom-pad button:active {
+  transform: translateY(1px);
+  opacity: 1;
+}
+
+/* Touch pads for the arcade's keyboard games: big, thumb-sized buttons. */
+.arcade-pad.tank-pad,
+.arcade-pad.dance-pad {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.arcade-pad button.hold {
+  min-width: 56px;
+  min-height: 52px;
+  font-size: 22px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.arcade-pad button.hold.fire {
+  min-width: 110px;
+  font-size: 18px;
+  background: #c8553d;
+  color: #fff;
+}
+.arcade-pad button.hold.down {
+  transform: translateY(2px);
+  filter: brightness(1.2);
+}
+.dance-pad button.hold {
+  min-width: 64px;
+  min-height: 64px;
+  font-size: 28px;
+}

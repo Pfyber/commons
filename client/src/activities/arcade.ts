@@ -164,6 +164,11 @@ export class ArcadePanel extends Panel {
   private flipKeys = 0;
   private presses: Press[] = [];
   private mouseFlip = false;
+  /** The touch pads, made once. */
+  private tankPad: HTMLDivElement | null = null;
+  private dancePad: HTMLDivElement | null = null;
+  /** Fingers on the pinball screen: which flipper each holds. */
+  private touchFlips = new Map<number, number>();
   /** Pinball: where the ball's drawn, its trail, when each bumper last lit (server time). */
   private pinShow: { x: number; y: number } | null = null;
   private pinTrail: { x: number; y: number }[] = [];
@@ -285,6 +290,7 @@ export class ArcadePanel extends Panel {
       if (this.state?.kind === TANKS) this.input(0);
     }
     this.mouseFlip = false;
+    this.touchFlips.clear();
     if (this.flipKeys) {
       this.flipKeys = 0;
       if (this.state?.kind === PINBALL) this.input(0);
@@ -322,17 +328,42 @@ export class ArcadePanel extends Panel {
     if (s?.kind === PINBALL && this.open) this.sendFlips();
   };
 
-  private onPointerUp = () => {
-    if (!this.mouseFlip) return;
-    this.mouseFlip = false;
+  private onPointerUp = (e: PointerEvent) => {
+    const touch = this.touchFlips.delete(e.pointerId);
+    if (!this.mouseFlip && !touch) return;
+    if (e.pointerType !== "touch") this.mouseFlip = false;
     if (this.state?.kind === PINBALL && this.open) this.sendFlips();
   };
 
-  /** Pinball: your flippers as held (keys or the mouse), sent when they change. */
+  /** A touch button that acts the moment a finger lands, and again as it lifts. */
+  private holdButton(label: string, down: () => void, up: () => void, cls = ""): HTMLButtonElement {
+    const b = el("button", `small hold ${cls}`, label);
+    b.type = "button";
+    // Released wherever the finger lifts (the panel may redraw under it meanwhile).
+    let held: number | null = null;
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      held = e.pointerId;
+      b.classList.add("down");
+      down();
+    });
+    const release = (e: PointerEvent) => {
+      if (held !== e.pointerId) return;
+      held = null;
+      b.classList.remove("down");
+      up();
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    return b;
+  }
+
+  /** Pinball: your flippers as held (keys, the mouse, or fingers), sent when they change. */
   private sendFlips() {
     let v = 0;
     if (this.keys.has("up") || this.keys.has("fire") || this.mouseFlip) v |= FLIP_TOP;
     if (this.keys.has("down") || this.keys.has("fire") || this.mouseFlip) v |= FLIP_BOTTOM;
+    for (const f of this.touchFlips.values()) v |= f;
     if (v === this.flipKeys) return;
     if (v & ~this.flipKeys) snd.flipper();
     this.flipKeys = v;
@@ -410,10 +441,12 @@ export class ArcadePanel extends Panel {
       return;
     }
     if (s.kind === PINBALL) {
-      if (click) {
-        this.mouseFlip = true;
-        this.sendFlips();
-      }
+      if (!click) return;
+      // A finger flips the top or bottom flipper, by which half it touches;
+      // a mouse button flips both.
+      if (e.pointerType === "touch") this.touchFlips.set(e.pointerId, p.y < CH / 2 ? FLIP_TOP : FLIP_BOTTOM);
+      else this.mouseFlip = true;
+      this.sendFlips();
       return;
     }
     if (s.kind === CATCH || s.kind === RACER) {
@@ -646,6 +679,43 @@ export class ArcadePanel extends Panel {
         pad.append(button(label, () => this.input(dir), "small"));
       }
       this.body.append(pad);
+    }
+    const touch = matchMedia("(pointer: coarse)").matches;
+    if (touch && s.status === PLAYING && this.side() >= 0) {
+      if (s.kind === TANKS) {
+        // Hold to drive; fire with the big button. (Made once, kept across redraws.)
+        if (!this.tankPad) {
+        const pad = (this.tankPad = el("div", "arcade-pad tank-pad"));
+        for (const [label, k] of [["◀", "left"], ["▲", "up"], ["▼", "down"], ["▶", "right"], ["💥 Fire", "fire"]] as [string, string][]) {
+          pad.append(
+            this.holdButton(
+              label,
+              () => {
+                this.keys.add(k);
+                this.sendTankKeys();
+              },
+              () => {
+                this.keys.delete(k);
+                this.sendTankKeys();
+              },
+              k === "fire" ? "fire" : "",
+            ),
+          );
+        }
+        }
+        this.body.append(this.tankPad);
+      }
+      if (s.kind === DANCE) {
+        // A pad of four arrows, in the lanes' order.
+        if (!this.dancePad) {
+          this.dancePad = el("div", "arcade-pad dance-pad");
+          for (const [label, lane] of [["←", 0], ["↓", 1], ["↑", 2], ["→", 3]] as [string, number][]) {
+            this.dancePad.append(this.holdButton(label, () => this.local?.hit(lane, this.serverNow()), () => {}));
+          }
+        }
+        this.body.append(this.dancePad);
+      }
+      if (s.kind === PINBALL) this.body.append(el("p", "hint", "Tap the top half for your top flipper, the bottom half for the bottom one (both at once works too)."));
     }
 
     const row = el("div", "arcade-actions");

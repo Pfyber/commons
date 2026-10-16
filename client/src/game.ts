@@ -1220,10 +1220,68 @@ export class Game {
   }
 
   private bindInput() {
+    // Two fingers pinch the world to zoom.
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinch: { dist: number; from: number } | null = null;
+    let pinchedAt = 0;
+    const spread = () => {
+      const [a, b] = [...touches.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    const touchDown = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) pinch = { dist: Math.max(20, spread()), from: this.scene.zoomLevel };
+    };
+    const touchMove = (e: PointerEvent) => {
+      const t = touches.get(e.pointerId);
+      if (!t) return;
+      t.x = e.clientX;
+      t.y = e.clientY;
+      if (pinch && touches.size >= 2) {
+        this.scene.pinch(pinch.from, spread() / pinch.dist);
+        pinchedAt = performance.now();
+      }
+    };
+    const touchUp = (e: PointerEvent) => {
+      if (!touches.delete(e.pointerId)) return;
+      if (pinch && touches.size < 2) {
+        pinch = null;
+        pinchedAt = performance.now();
+        this.scene.pinchEnd();
+      }
+    };
+    const surface = this.app.canvas;
+    surface.addEventListener("pointerdown", touchDown);
+    window.addEventListener("pointermove", touchMove);
+    window.addEventListener("pointerup", touchUp);
+    window.addEventListener("pointercancel", touchUp);
+    // And on touch screens, zoom buttons too.
+    const zoomPad = document.createElement("div");
+    zoomPad.className = "zoom-pad";
+    for (const [label, dir, name] of [["+", 1, "Zoom in"], ["−", -1, "Zoom out"]] as [string, number, string][]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.setAttribute("aria-label", name);
+      b.onclick = () => this.scene.zoomBy(dir);
+      zoomPad.append(b);
+    }
+    document.body.append(zoomPad);
+    this.disposers.push(() => {
+      surface.removeEventListener("pointerdown", touchDown);
+      window.removeEventListener("pointermove", touchMove);
+      window.removeEventListener("pointerup", touchUp);
+      window.removeEventListener("pointercancel", touchUp);
+      zoomPad.remove();
+    });
+
     const stage = this.app.stage;
     stage.eventMode = "static";
     stage.hitArea = this.app.screen;
     const tap = (e: FederatedPointerEvent) => {
+      // A pinch isn't a tap.
+      if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
       const t = this.scene.screenToTile(e.global.x, e.global.y);
       if (this.tapBall(e.global.x, e.global.y)) return;
       if (this.tapCat(e.global.x, e.global.y)) return;
@@ -1269,6 +1327,18 @@ export class Game {
     const up = (e: KeyboardEvent) => this.keys.delete(e.code);
     const blur = () => this.keys.clear();
     const resize = () => this.scene.resize();
+    // The mouse wheel zooms (a trackpad's many small scrolls add up to a step).
+    let wheel = 0;
+    const zoom = (e: WheelEvent) => {
+      e.preventDefault();
+      wheel += e.deltaY;
+      if (Math.abs(wheel) < 60) return;
+      this.scene.zoomBy(wheel < 0 ? 1 : -1);
+      wheel = 0;
+    };
+    const canvas = this.app.canvas;
+    canvas.addEventListener("wheel", zoom, { passive: false });
+    this.disposers.push(() => canvas.removeEventListener("wheel", zoom));
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", blur);

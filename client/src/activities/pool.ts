@@ -417,14 +417,25 @@ export class PoolPanel extends Panel {
     };
     this.canvas.addEventListener("pointermove", aimAt);
     // Left click: the first locks the aim, the second strikes.
+    // With a finger: drag to aim, lift to lock it; then tap again (or the meter) to strike.
+    let touchAiming = false;
     this.canvas.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 || !this.myTurn()) return;
       if (this.lockedAt === null) {
         aimAt(e);
-        this.lock();
+        if (e.pointerType === "touch") {
+          touchAiming = true;
+          this.canvas.setPointerCapture(e.pointerId);
+        } else this.lock();
       } else {
         this.strike();
       }
+    });
+    this.canvas.addEventListener("pointerup", (e) => {
+      if (!touchAiming || e.pointerType !== "touch") return;
+      touchAiming = false;
+      aimAt(e);
+      this.lock();
     });
     // Right click or Esc: unlock and aim again.
     this.canvas.addEventListener("contextmenu", (e) => {
