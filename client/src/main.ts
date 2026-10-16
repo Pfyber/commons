@@ -1,6 +1,7 @@
 import { Application } from "pixi.js";
 import cityUrl from "../../assets/maps/city.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
+import mallUrl from "../../assets/maps/mall.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { Homes } from "./homes";
@@ -13,6 +14,7 @@ import { Gov } from "./gov";
 import { CityMapPanel } from "./ui/citymap";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
 import { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
+import { DirectoryPanel } from "./ui/mall";
 import { Minimap } from "./ui/minimap";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
@@ -34,7 +36,7 @@ import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
 import "./styles.css";
 
-const MAP_URLS: Record<string, string> = { city: cityUrl, home: homeUrl };
+const MAP_URLS: Record<string, string> = { city: cityUrl, home: homeUrl, mall: mallUrl };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
 
@@ -165,6 +167,14 @@ async function main() {
   const postOffice = new PostOfficePanel(homes, rent, rentHost);
   const apartments = new ApartmentsPanel(homes, rent, rentHost);
   const stall = new StallPanel(rent, eco, rentHost);
+  const directory = new DirectoryPanel({
+    where: () => {
+      const g = game as Game | null;
+      const here = g?.position;
+      return g && here ? { map: g.scene.map, here } : null;
+    },
+    walk: (t) => (game as Game | null)?.walkTo(t),
+  });
   const showMood = (m: number) => hud.setMood(m ? (MOODS.find((x) => x.id === m)?.icon ?? "💬") : "💬", m > 0);
   const moodPicker = new MoodPicker((m) => {
     game?.setMood(m);
@@ -181,6 +191,7 @@ async function main() {
     postOffice,
     apartments,
     stall,
+    directory,
     bag: new BagPanel(eco, (item) => {
       ui.bag.hide();
       place.show(item);
@@ -254,7 +265,8 @@ async function main() {
           // Out of a home's door into the city: you come out of that house.
           onTravel: (z) => {
             const from = game as Game | null;
-            const arrive = z === "city" && from?.zoneId === "home" ? (from.place.owner ?? "home") : undefined;
+            const arrive =
+              z !== "city" ? undefined : from?.zoneId === "home" ? (from.place.owner ?? "home") : from?.zoneId === "mall" ? "place:mall" : undefined;
             void travel({ zone: z, arrive });
           },
           onVisit: (owner) => void travel({ zone: "home", owner }),

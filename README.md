@@ -91,7 +91,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | All Rust tests (includes a check that the generated TS is current) | `cargo test --workspace` |
 | Client tests (decodes Rust-produced bytes) | `cd client && npm test` |
 | Regenerate the TS protocol after editing `server/crates/protocol/src/lib.rs` | `cargo run -p commons-protocol --bin gen-ts` |
-| Regenerate the maps (city, home) | `cargo run -p commons-sim --bin mapgen` |
+| Regenerate the maps (city, mall, home) | `cargo run -p commons-sim --bin mapgen` |
 | Perf gate (start the zone server first) | `cargo run --release --bin botswarm -- --bots 500 --gate` |
 
 ## Configuration
@@ -104,7 +104,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `API_BIND` / `ORCHESTRATOR_BIND` / `ZONE_BIND` | `0.0.0.0:8080/8081/8082` | each service |
 | `COMMONS_CLIENT_URL` | `http://localhost:5173` | api (magic-link URLs) |
 | `ZONE_PUBLIC_URL` | `ws://localhost:8082/ws` | orchestrator |
-| `COMMONS_ZONES` | `city,home` | orchestrator |
+| `COMMONS_ZONES` | `city,home,mall` | orchestrator |
 | `COMMONS_MAPS_DIR` | `assets/maps` | zone |
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |

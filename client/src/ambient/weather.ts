@@ -53,9 +53,11 @@ export class Weather {
     private app: Application,
     private scene: Scene,
     private map: ZoneMap,
+    /** Indoors: no rain, no mist, no cloud shadows. */
+    private indoor = false,
   ) {
     const q = new URLSearchParams(location.search).get("weather");
-    this.override = (["clear", "cloudy", "rain", "mist"] as const).find((k) => k === q) ?? null;
+    this.override = indoor ? "clear" : ((["clear", "cloudy", "rain", "mist"] as const).find((k) => k === q) ?? null);
     scene.world.addChild(this.ripples, this.shadows);
     this.sky.addChild(this.mist, this.rain);
     app.stage.addChild(this.sky);
@@ -79,7 +81,7 @@ export class Weather {
   /** Big soft cloud shadows drifting with the wind. */
   private drawShadows(now: number) {
     const g = this.shadows.clear();
-    const count = this.kind === "clear" ? 2 : this.kind === "mist" ? 0 : 7;
+    const count = this.indoor ? 0 : this.kind === "clear" ? 2 : this.kind === "mist" ? 0 : 7;
     const mw = this.map.width * TILE;
     const mh = this.map.height * TILE;
     const drift = (now / 1000) * (8 + this.wind * 22);

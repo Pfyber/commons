@@ -1,0 +1,16 @@
+{
+  "_comment": "The mall's departments (ADR 0011). `unit` is the shop's rectangle on the mall floor [x0, y0, x1, y1] (inclusive, walls included); `door` is the wall its doorway is in (n, s, e, w), facing the walking loop. `open: false` shops show 'opening soon'. Neighbours are placed side by side: seeds beside tools, furniture beside home exterior, clothing beside skins.",
+  "departments": [
+    { "key": "seeds", "name": "Seeds & Garden", "type": "shelves", "unit": [2, 2, 23, 18], "door": "s", "open": false },
+    { "key": "tools", "name": "Tools", "type": "racks", "unit": [25, 2, 46, 18], "door": "s", "open": false },
+    { "key": "furniture", "name": "Furniture", "type": "showroom", "unit": [48, 2, 69, 18], "door": "s", "open": false },
+    { "key": "exterior", "name": "Home Exterior", "type": "showroom", "unit": [71, 2, 93, 18], "door": "s", "open": false },
+    { "key": "clothing", "name": "Clothing", "type": "racks", "unit": [72, 23, 93, 39], "door": "w", "open": false },
+    { "key": "skins", "name": "Skins", "type": "racks", "unit": [72, 40, 93, 56], "door": "w", "open": false },
+    { "key": "vehicles", "name": "Vehicles", "type": "track", "unit": [2, 23, 23, 56], "door": "e", "open": false },
+    { "key": "pets", "name": "Pets", "type": "showroom", "unit": [2, 61, 23, 77], "door": "n", "open": false },
+    { "key": "gifts", "name": "Gift Shop", "type": "shelves", "unit": [25, 61, 35, 77], "door": "n", "open": false },
+    { "key": "toys", "name": "Toys & Games", "type": "shelves", "unit": [60, 61, 70, 77], "door": "n", "open": false },
+    { "key": "music", "name": "Music", "type": "racks", "unit": [72, 61, 93, 77], "door": "n", "open": false }
+  ]
+}

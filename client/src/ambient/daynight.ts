@@ -62,9 +62,11 @@ export class DayNight {
     private app: Application,
     scene: Scene,
     map: ZoneMap,
+    /** Indoors (the mall) it's always bright. */
+    indoor = false,
   ) {
     const q = new URLSearchParams(location.search).get("hour");
-    this.override = q !== null && !Number.isNaN(Number(q)) ? Number(q) : null;
+    this.override = indoor ? 12 : q !== null && !Number.isNaN(Number(q)) ? Number(q) : null;
     this.shade.blendMode = "multiply";
     app.stage.addChild(this.shade);
     this.lights.blendMode = "add";

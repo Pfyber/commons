@@ -444,6 +444,18 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       px(ctx, P.lampGlow, 12, 5, 9, 8);
       break;
     }
+    case "cafe_table": {
+      // A round café table with a little vase.
+      [c, ctx] = makeCanvas(32, 32);
+      oval(ctx, "rgba(0,0,0,0.15)", 16, 28, 11, 3);
+      px(ctx, P.outline, 14, 16, 4, 12);
+      oval(ctx, P.outline, 16, 14, 13, 7);
+      oval(ctx, "#f1e4cc", 16, 13, 11, 5);
+      px(ctx, "#9fc3d6", 14, 6, 4, 6);
+      px(ctx, "#e8566b", 13, 3, 3, 3);
+      px(ctx, "#f6c343", 16, 4, 3, 3);
+      break;
+    }
     case "chess_table": {
       [c, ctx] = makeCanvas(32, 28);
       px(ctx, P.outline, 3, 4, 26, 14);
@@ -639,11 +651,16 @@ function label(ctx: CanvasRenderingContext2D, text: string, cx: number, y: numbe
 }
 
 /** Texture for a map object plus how far it extends above its footprint. */
-export function objectTexture(o: MapObject): { texture: Texture; overhang: number } {
+/**
+ * An object's art: drawn from `overhang` px above its footprint, and from
+ * `left` px left of it when it's wider than the footprint.
+ */
+export function objectTexture(o: MapObject): { texture: Texture; overhang: number; left: number } {
   const P = PALETTE;
   const w = o.w * TILE;
   const h = o.h * TILE;
   let overhang = 0;
+  let left = 0;
   let c: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D;
   switch (o.kind) {
@@ -712,6 +729,70 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       label(ctx, o.label ?? "Town Hall", w / 2, top + 25, "#5a3b2b", 14);
       break;
     }
+    case "shopfront": {
+      // A hanging sign on a post with the shop's name.
+      const name = o.label ?? "";
+      const sw = Math.max(64, name.length * 7 + 14);
+      [c, ctx] = makeCanvas(sw, h + 40);
+      overhang = 40;
+      const x0 = Math.round((sw - w) / 2);
+      px(ctx, P.outline, x0 + w / 2 - 2, 16, 4, h + 22);
+      px(ctx, P.outline, 0, 4, sw, 18);
+      px(ctx, "#3f7a8a", 1, 5, sw - 2, 16);
+      label(ctx, name, sw / 2, 13, "#fff9ec", 10);
+      // Wider than its tile: the art reaches `left` px left of it.
+      left = x0;
+      break;
+    }
+    case "counter": {
+      // A shop counter with a little bell.
+      [c, ctx] = makeCanvas(w, h + 20);
+      overhang = 20;
+      px(ctx, "rgba(0,0,0,0.15)", 2, h + 14, w - 4, 6);
+      px(ctx, P.outline, 0, 6, w, h + 12);
+      px(ctx, P.wood, 1, 7, w - 2, h + 10);
+      px(ctx, P.woodDark, 1, 7, w - 2, 4);
+      px(ctx, "#f6c343", w / 2 - 3, 1, 6, 6);
+      px(ctx, P.outline, w / 2 - 1, 0, 2, 2);
+      break;
+    }
+    case "mall_directory": {
+      // A lit board with a little map of the floor.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      px(ctx, P.outline, w / 2 - 2, 30, 4, h + 10);
+      px(ctx, P.outline, 0, 0, w, 34);
+      px(ctx, "#2d3540", 2, 2, w - 4, 30);
+      px(ctx, "#8cc46a", 20, 10, w - 40, 14);
+      for (let i = 0; i < 6; i++) px(ctx, ["#c8553d", "#3f7a8a", "#c27a3c", "#8a5d8a", "#5d8a4e", "#f6c343"][i], 6 + i * 9, 5, 7, 4);
+      px(ctx, "#e8566b", w / 2 - 2, 26, 4, 4);
+      break;
+    }
+    case "popup": {
+      // The seasonal pop-up: a striped tent stand with bunting.
+      [c, ctx] = makeCanvas(w, h + 36);
+      overhang = 36;
+      px(ctx, "rgba(0,0,0,0.15)", 4, h + 30, w - 8, 6);
+      for (let i = 0; i < 8; i++) px(ctx, i % 2 ? "#fff9ec" : "#e8566b", i * (w / 8), 6, w / 8, 18);
+      px(ctx, P.outline, 0, 24, w, 2);
+      for (let i = 0; i < 12; i++) px(ctx, ["#f6c343", "#9fc3d6", "#a5d27a"][i % 3], 4 + i * (w / 12), 0, 6, 6);
+      px(ctx, P.outline, 4, 26, w - 8, h + 8);
+      px(ctx, P.wood, 5, 27, w - 10, h + 6);
+      label(ctx, "Pop-up", w / 2, 38, "#fff9ec", 11);
+      break;
+    }
+    case "mall_exit": {
+      // Glass double doors out to the Market.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      px(ctx, P.outline, 0, 0, w, h + 40);
+      px(ctx, "#9fc3d6", 3, 3, w / 2 - 4, h + 34);
+      px(ctx, "#9fc3d6", w / 2 + 1, 3, w / 2 - 4, h + 34);
+      px(ctx, "#d6ecf5", 6, 6, 6, 18);
+      px(ctx, "#d6ecf5", w / 2 + 4, 6, 6, 18);
+      label(ctx, "Exit", w / 2, h + 26, "#3b3a2e", 10);
+      break;
+    }
     case "postbox": {
       // A red postbox on a post, by a home's door.
       [c, ctx] = makeCanvas(w, h + 22);
@@ -742,6 +823,7 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       label(ctx, String(n), w / 2, 44, "#fff9ec", 12);
       break;
     }
+    case "mall_entrance":
     case "apartments":
     case "post_office":
     case "building": {
@@ -1231,7 +1313,7 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       [c, ctx] = makeCanvas(w, h);
       px(ctx, "rgba(0,0,0,0.2)", 0, 0, w, h);
   }
-  return { texture: toTexture(c), overhang };
+  return { texture: toTexture(c), overhang, left };
 }
 
 // ---- avatars ------------------------------------------------------------------

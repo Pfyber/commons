@@ -31,6 +31,8 @@ const DECOR: Record<string, string> = {
   pine_secret: "#4f8040",
   bush: "#6aa152",
   hedge: "#4e7d3c",
+  wall: "#8a7a68",
+  cafe_table: "#a0703f",
   fence: "#a0703f",
 };
 
@@ -44,11 +46,16 @@ const OBJECTS: Record<string, string> = {
   tailor: "#c8553d",
   post_office: "#c8553d",
   apartments: "#a8735a",
+  mall_entrance: "#4f6d8a",
+  counter: "#a0703f",
+  popup: "#e8566b",
+  mall_directory: "#3f7a8a",
+  mall_exit: "#3f7a8a",
   stall: "#c27a3c",
 };
 
 /** Kinds that aren't drawn at all: markers and tiny props. */
-const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox"]);
+const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront"]);
 
 export function mapImage(map: ZoneMap): HTMLCanvasElement {
   const c = document.createElement("canvas");

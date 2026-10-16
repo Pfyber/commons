@@ -683,6 +683,36 @@ the period renews both leases, move out. Earlier flows and 500 bots pass.
 
 Next: C5, transit (tram ring and two metro lines).
 
+## Mall M1 · The Commons Mall opens its doors: done (2026-10-16)
+
+ADR 0011 plans the mall (departments, rotation, vehicles, pets by house
+with daily walks, no real money). M1 is the building and its floor:
+
+- **Market Hall** on the Market's north side: the Commons Mall's door in
+  the middle, the apartments' door to the west.
+- **The floor** (`mall` zone, 96 × 80, generated from
+  `assets/mall/departments.json`): eleven shops round a walking loop, each
+  with walls, a doorway, a sign outside and a counter ("opening soon");
+  related shops side by side; concourses join the corner shops. The food
+  court fills the middle: planters, a tree under the skylight and 30 café
+  tables with a bench either side (60 seats). The entrance hall has the
+  directory and the seasonal pop-up stand.
+- **Directory:** the floor drawn with every shop named and "you are here";
+  tap a shop to walk to its doorway.
+- **Doors:** in by the Market Hall's door, out the same way: leaving joins
+  with `arrive: "place:mall"` (public doors, generalising C3's homes) and
+  you're back on the square at the mall's door.
+- **Indoors:** always daylight and no weather in the mall.
+- Mapgen checks every shop, spot and doorway can be walked to.
+
+Checked: in the browser (at night, in rain outside): in, the directory to
+Furniture, two players meet and sit at a café table, out onto the square
+at the door. 500 bots in the mall pass the perf gate (tick p99 4.7 ms);
+the city's gate, homes and the welcome flow pass again.
+
+Next: M2, the first shops (Furniture, Seeds & garden) with displays and
+buying.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

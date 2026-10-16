@@ -35,6 +35,7 @@ import type { Homes } from "./homes";
 import type { Rent } from "./rent";
 import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
+import type { DirectoryPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
 import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar } from "./world/avatars";
@@ -68,6 +69,7 @@ export interface Ui {
   postOffice: PostOfficePanel;
   apartments: ApartmentsPanel;
   stall: StallPanel;
+  directory: DirectoryPanel;
   eco: Economy;
   bag: BagPanel;
   album: AlbumPanel;
@@ -258,7 +260,8 @@ export class Game {
       this.scene.sorted.addChild(this.screen.sprite);
     }
     this.ambient = new Ambient(this.scene, map);
-    this.daynight = new DayNight(app, this.scene, map);
+    const indoor = zoneId === "mall";
+    this.daynight = new DayNight(app, this.scene, map, indoor);
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     if (zoneId === "city") {
       ui.town
@@ -267,7 +270,7 @@ export class Game {
         .catch(() => {});
     }
     this.setupCorners(map);
-    this.weather = new Weather(app, this.scene, map);
+    this.weather = new Weather(app, this.scene, map, indoor);
     this.critters = new Critters(app, this.scene, map);
     if (zoneId === "city") {
       this.cat = new Cat(map);
@@ -1178,6 +1181,27 @@ export class Game {
       const at = front ?? { x: obj.x, y: obj.y };
       if (obj.kind === "stall" && obj.label) this.near(ui.stall, at, 6).openFor(obj.label);
       else this.near(ui.apartments, at, 8).show();
+      return true;
+    }
+    // The mall: in by the Market Hall's door, out the same way.
+    if (obj?.kind === "mall_entrance") {
+      this.events.onTravel("mall");
+      return true;
+    }
+    if (obj?.kind === "mall_exit") {
+      this.events.onTravel("city");
+      return true;
+    }
+    if (obj?.kind === "mall_directory") {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+        const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.directory, { x: obj.x, y: obj.y + 1 }, 8).show();
+      return true;
+    }
+    if (obj && (obj.kind === "counter" || obj.kind === "popup" || obj.kind === "shopfront")) {
+      this.hud.toast(`🛍️ ${obj.label ?? ""}`, 4000);
       return true;
     }
     if (obj?.kind === "post_office") {

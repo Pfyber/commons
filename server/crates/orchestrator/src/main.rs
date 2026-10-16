@@ -35,8 +35,8 @@ struct JoinReq {
     /// For `zone_id: "home"`: whose home (default: your own).
     #[serde(default)]
     owner: Option<String>,
-    /// Leaving a home: its owner's id (or `"home"` for your own), to come
-    /// out of its front door.
+    /// Leaving through a door: `place:<name>` (a public building), a home's
+    /// owner, or `"home"` (your own), to come out of that door.
     #[serde(default)]
     arrive: Option<String>,
 }
@@ -67,6 +67,9 @@ struct Located {
     instance: u16,
     owner: Option<String>,
 }
+
+/// Public buildings with a door onto the city (a `door:<name>` spot there).
+const PUBLIC_DOORS: &[&str] = &["mall"];
 
 #[derive(Deserialize)]
 struct Lot {
@@ -175,16 +178,20 @@ async fn join(
             (zone, 1, None, String::new())
         }
     };
-    // Leaving a home: step out of its front door (best effort). `arrive` is
-    // the home's owner, or "home" for your own.
+    // Leaving somewhere through a door: step out of that door (best effort).
+    // `arrive` is a public place (`place:mall`), a home's owner, or "home"
+    // for your own.
     let arrive = match req.arrive.as_deref() {
-        Some(a) if zone == "city" => {
-            let owner = if a == "home" { who.sub.as_str() } else { a };
-            ask_social::<Lot>(&state, &format!("/internal/home?player={owner}"))
-                .await
-                .ok()
-                .map(|l| l.lot)
-        }
+        Some(a) if zone == "city" => match a.strip_prefix("place:") {
+            Some(place) => PUBLIC_DOORS.contains(&place).then(|| place.to_string()),
+            None => {
+                let owner = if a == "home" { who.sub.as_str() } else { a };
+                ask_social::<Lot>(&state, &format!("/internal/home?player={owner}"))
+                    .await
+                    .ok()
+                    .map(|l| l.lot)
+            }
+        },
         _ => None,
     };
     if !state.zones.contains(&zone) {
@@ -219,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         secret: config::secret(),
         zone_server_url: config::env_str("ZONE_PUBLIC_URL", "ws://localhost:8082/ws"),
-        zones: config::env_str("COMMONS_ZONES", "city,home")
+        zones: config::env_str("COMMONS_ZONES", "city,home,mall")
             .split(',')
             .map(|s| s.trim().to_string())
             .collect(),

@@ -1,10 +1,12 @@
 //! Generates the zone maps: `city.json`, the city of blocks (see `city.rs`,
-//! ADR 0010), and `home.json`, the cottage interior.
+//! ADR 0010), `mall.json`, the Commons Mall (`mall.rs`, ADR 0011), and
+//! `home.json`, the cottage interior.
 //!
 //! Deterministic: rerunning produces the same file. Hand-authored maps will
 //! replace this once `tools/mapedit` exists.
 
 mod city;
+mod mall;
 
 use commons_sim::map::{MapFile, MapObject, Spawn, StreetGrid};
 use std::path::PathBuf;
@@ -53,6 +55,7 @@ const DECOR: &[&str] = &[
     "pine_secret",
     "log_seat",
     "lantern",
+    "cafe_table",
 ];
 
 fn g(name: &str) -> u8 {
@@ -434,5 +437,6 @@ fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
 
 fn main() -> std::io::Result<()> {
     write("city", &city::city())?;
+    write("mall", &mall::mall())?;
     write("home", &home())
 }

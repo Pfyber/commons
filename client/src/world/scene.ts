@@ -126,9 +126,9 @@ export class Scene {
     for (const p of this.placed) {
       const near = p.x1 >= tx0 && p.x0 < tx1 && p.y1 >= ty0 && p.y0 < ty1;
       if (near && !p.sprite) {
-        const { texture, overhang } = objectTexture(p.o);
+        const { texture, overhang, left } = objectTexture(p.o);
         const s = new Sprite(texture);
-        s.position.set(p.o.x * TILE, p.o.y * TILE - overhang);
+        s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
         s.zIndex = (p.o.y + p.o.h) * TILE - 1;
         this.sorted.addChild(s);
         p.sprite = s;

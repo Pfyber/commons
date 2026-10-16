@@ -234,7 +234,7 @@ fn market(k: &mut Blk) {
         35,
         1,
         1,
-        "Welcome to Commons! North: the Park with the Founders' Grove and chess · South: the Pond and its pier · West: the Library and the Town Hall · East: the Cinema and the Casino",
+        "Welcome to Commons! Here: the Commons Mall, north side · North: the Park with the Founders' Grove and chess · South: the Pond and its pier · West: the Library and the Town Hall · East: the Cinema and the Casino",
     );
     k.bench(14, 18, 3);
     for (x, y) in [(10, 10), (37, 10), (10, 37), (37, 37)] {
@@ -245,13 +245,18 @@ fn market(k: &mut Blk) {
         k.ground(x, y, "flowers");
         k.decor(x, y, "tree");
     }
-    // Apartments above the shops along the north side (C4): one door, a
-    // `door:apt:<n>` spot per flat so each tenant steps out of it.
-    k.object("apartments", 11, 2, 26, 7, "Market Apartments");
+    // The Market Hall along the north side: the Commons Mall on the ground
+    // floor (ADR 0011) and the apartments above (C4), each with its door
+    // on the square. A `door:apt:<n>` spot per flat so each tenant steps
+    // out of the apartments' door; `door:mall` for leaving the mall.
+    k.object("apartments", 11, 2, 9, 7, "Apartments");
     for n in 1..=APARTMENTS {
-        k.spot(&format!("door:apt:{n}"), 24, 9);
+        k.spot(&format!("door:apt:{n}"), 15, 9);
     }
-    k.spot("apartments", 24, 10);
+    k.spot("apartments", 15, 10);
+    k.object("mall_entrance", 21, 2, 16, 8, "Commons Mall");
+    k.spot("door:mall", 29, 10);
+    k.spot("mall", 29, 11);
     // Market stalls along the south side, to rent and sell from.
     for n in 0..STALLS as u16 {
         let x = 12 + n * 4;
