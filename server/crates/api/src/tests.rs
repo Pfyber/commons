@@ -1702,7 +1702,7 @@ mod mall_shop {
     use super::town_life::{bearer_for, call};
     use super::*;
     use crate::economy::{self, COIN};
-    use crate::mall::{self, DEPARTMENTS, PLAYER_MADE};
+    use crate::mall::{self, DEPARTMENTS, EVENTS, PLAYER_MADE};
     use axum::Router;
     use serde_json::json;
 
@@ -1727,6 +1727,15 @@ mod mall_shop {
                     c.item
                 );
                 assert!(!item.account_bound());
+            }
+        }
+        for e in &EVENTS.events {
+            for c in &e.items {
+                let item = s
+                    .catalog
+                    .by_key(&c.item)
+                    .unwrap_or_else(|| panic!("{}: no item {}", e.key, c.item));
+                assert!(!PLAYER_MADE.contains(&item.kind.as_str()));
             }
         }
     }
@@ -1790,5 +1799,100 @@ mod mall_shop {
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn limited_items_run_out_for_everyone() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = app(s.clone());
+        let (a, b) = (player(&s).await, player(&s).await);
+        let (auth_a, auth_b) = (bearer_for(&s, a, "A"), bearer_for(&s, b, "B"));
+        // Every season has a limited item at the pop-up.
+        let (_, stock) = call(&app, &auth_a, "GET", "/api/mall/stock", json!({})).await;
+        let popup = stock["departments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["key"] == "popup")
+            .unwrap()
+            .clone();
+        assert_eq!(popup["open"], true);
+        assert!(popup["event"]["name"].is_string());
+        let shelf = popup["shelves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["limited"].is_number())
+            .unwrap()
+            .clone();
+        assert!(shelf["new"].is_boolean() && shelf["left"].is_number());
+        let (item, slot) = (
+            shelf["item"].as_i64().unwrap() as i32,
+            shelf["slot"].as_i64().unwrap(),
+        );
+        // Pretend the rest have gone: one left this rotation.
+        sqlx::query(
+            "INSERT INTO mall_stock (rotation, dept, item_id, remaining) VALUES ($1, 'popup', $2, 1)
+             ON CONFLICT (rotation, dept, item_id) DO UPDATE SET remaining = 1",
+        )
+        .bind(stock["rotation"].as_i64().unwrap())
+        .bind(item)
+        .execute(&s.db)
+        .await
+        .unwrap();
+        // Both can afford it; the welcome coins aren't enough for every price.
+        for p in [a, b] {
+            apply_tx(
+                &s.db,
+                &s.catalog,
+                p,
+                &[Op {
+                    item: COIN,
+                    delta: 500,
+                }],
+                "test",
+                &format!("{p}:coins"),
+            )
+            .await
+            .unwrap();
+        }
+        let buy = json!({ "dept": "popup", "slot": slot, "key": "last" });
+        let (st, r) = call(&app, &auth_a, "POST", "/api/mall/buy", buy.clone()).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let (st, r) = call(&app, &auth_b, "POST", "/api/mall/buy", buy).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("sold_out"))
+        );
+        // B wasn't charged for nothing.
+        let coins_b = economy::totals(&mut s.db.acquire().await.unwrap(), b, &[COIN])
+            .await
+            .unwrap()[0]
+            .1;
+        assert_eq!(coins_b, 600);
+        let (_, stock) = call(&app, &auth_a, "GET", "/api/mall/stock", json!({})).await;
+        let left = stock["departments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["key"] == "popup")
+            .unwrap()["shelves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["item"] == item)
+            .unwrap()["left"]
+            .clone();
+        assert_eq!(left, 0);
+        // Put this week's real stock back (the test database is shared).
+        sqlx::query(
+            "DELETE FROM mall_stock WHERE rotation = $1 AND dept = 'popup' AND item_id = $2",
+        )
+        .bind(stock["rotation"].as_i64().unwrap())
+        .bind(item)
+        .execute(&s.db)
+        .await
+        .unwrap();
     }
 }

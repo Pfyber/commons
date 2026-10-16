@@ -1,5 +1,6 @@
 // The Commons Mall's shops (server: crates/api/src/mall.rs): what's on each
-// display, and buying it. Coins only.
+// display this week (stock rotates; some items are limited), the seasonal
+// pop-up, and buying. Coins only.
 
 import type { Applied, Economy } from "./economy";
 import type { Auth } from "./net/api";
@@ -10,6 +11,12 @@ export interface Shelf {
   item: number;
   key: string;
   price: number;
+  /** How many go round each week, if limited. */
+  limited: number | null;
+  /** How many are left this week, if limited. */
+  left: number | null;
+  /** Not on show last week. */
+  new: boolean;
 }
 
 export interface Dept {
@@ -17,6 +24,9 @@ export interface Dept {
   name: string;
   open: boolean;
   shelves: Shelf[];
+  /** The pop-up: the season on now ("to" is MM-DD), and the next one. */
+  event?: { name: string; to: string };
+  next?: { name: string; from: string };
 }
 
 /** An idempotency key for one press (randomUUID needs a secure context). */
@@ -26,6 +36,9 @@ function pressKey(): string {
 
 export class Shop {
   depts = new Map<string, Dept>();
+  rotation = 0;
+  /** When the shelves change next (unix seconds). */
+  endsAt = 0;
 
   constructor(
     private auth: Auth,
@@ -33,8 +46,10 @@ export class Shop {
   ) {}
 
   async load() {
-    const r = await this.auth.get<{ departments: Dept[] }>("/api/mall/stock");
+    const r = await this.auth.get<{ rotation: number; ends_at: number; departments: Dept[] }>("/api/mall/stock");
     this.depts = new Map(r.departments.map((d) => [d.key, d]));
+    this.rotation = r.rotation;
+    this.endsAt = r.ends_at;
   }
 
   shelf(dept: string, slot: number): Shelf | null {
@@ -49,10 +64,23 @@ export class Shop {
       const s = this.shelf(dept, Number(slot));
       o.item = s?.key;
       o.itemKind = s ? this.eco.items.get(s.item)?.kind : undefined;
+      o.isNew = s?.new ?? false;
     }
   }
 
+  /** What's new on show this week, by shop. */
+  newThisWeek(): { dept: string; items: number[] }[] {
+    return [...this.depts.values()]
+      .map((d) => ({ dept: d.name, items: [...new Set(d.shelves.filter((s) => s.new).map((s) => s.item))] }))
+      .filter((x) => x.items.length);
+  }
+
   async buy(dept: string, slot: number) {
-    this.eco.applyResult(await this.auth.send<Applied>("/api/mall/buy", { dept, slot, key: pressKey() }));
+    try {
+      this.eco.applyResult(await this.auth.send<Applied>("/api/mall/buy", { dept, slot, key: pressKey() }));
+    } finally {
+      // Limited counts (and, at the turn of the week, the shelves) change.
+      await this.load().catch(() => {});
+    }
   }
 }

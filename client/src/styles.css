@@ -2613,3 +2613,31 @@ img.px-icon,
 .panel.shop .shop-card strong {
   font-size: 16px;
 }
+
+.panel.shop .badges {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.panel.shop .badge {
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: #fff9ec;
+  box-shadow: var(--frame-thin);
+}
+
+.panel.shop .badge.new {
+  background: #e8566b;
+}
+
+.panel.shop .badge.limited {
+  background: #8a5d8a;
+}
+
+.panel.shop .shop-card .badges {
+  grid-column: 2;
+  margin-left: 0;
+}

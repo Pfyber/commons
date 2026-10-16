@@ -156,15 +156,19 @@ pub fn mall() -> MapFile {
     b.object("mall_exit", door_x, hy1, 4, 1, Some("To the Market"), true);
     b.object("spot", door_x + 1, hy1 - 2, 1, 1, Some("entrance"), false);
     b.object("mall_directory", hx0 + 3, 70, 2, 1, Some("Directory"), true);
-    b.object(
-        "popup",
-        hx1 - 8,
-        64,
-        6,
-        3,
-        Some("Seasonal pop-up: coming soon"),
-        true,
-    );
+    b.object("popup", hx1 - 8, 64, 6, 3, Some("Seasonal Pop-up"), true);
+    // The pop-up's goods on stands in front of it (the season's items).
+    for n in 0..deps.popup.slots {
+        b.object(
+            "shelf",
+            hx1 - 8 + n * 2,
+            68,
+            1,
+            1,
+            Some(&format!("popup:{n}")),
+            true,
+        );
+    }
     for (x, y) in [(hx0 + 1, 63), (hx1 - 1, 74), (hx0 + 1, 74)] {
         b.ground(x, y, "flowers");
         b.decor(x, y, "tree");
@@ -184,6 +188,7 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
     let mut spots: Vec<Tile> = vec![];
     let kind = match d.kind.as_str() {
         "showroom" => {
+            let mut rooms: Vec<[Tile; 3]> = vec![];
             for (vx, vy) in [
                 (ix0 + 1, iy0 + 1),
                 (ix1 - 6, iy0 + 1),
@@ -195,7 +200,11 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
                         b.ground(x, y, "carpet");
                     }
                 }
-                spots.extend([(vx + 1, vy + 1), (vx + 4, vy + 1), (vx + 2, vy + 3)]);
+                rooms.push([(vx + 1, vy + 1), (vx + 4, vy + 1), (vx + 2, vy + 3)]);
+            }
+            // Take one piece from each room in turn, so no room stands empty.
+            for i in 0..3 {
+                spots.extend(rooms.iter().map(|r| r[i]));
             }
             "display"
         }

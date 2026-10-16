@@ -1,19 +1,20 @@
 {
-  "_comment": "The mall's departments (ADR 0011). `unit` is the shop's rectangle on the mall floor [x0, y0, x1, y1] (inclusive, walls included); `door` is the wall its doorway is in (n, s, e, w), facing the walking loop. `open: false` shops show 'opening soon'. Neighbours are placed side by side: seeds beside tools, furniture beside home exterior, clothing beside skins. `slots` is how many displays the shop floor has; `catalog` is what it sells (item key and price in coins). Player-made things (fish, plants, junk, crafted goods) are never sold here: they stay with player stalls.",
+  "_comment": "The mall's departments (ADR 0011). `unit` is the shop's rectangle on the mall floor [x0, y0, x1, y1] (inclusive, walls included); `door` is the wall its doorway is in (n, s, e, w), facing the walking loop. `open: false` shops show 'opening soon'. Neighbours are placed side by side: seeds beside tools, furniture beside home exterior, clothing beside skins. `slots` is how many displays the shop floor has; `catalog` is what it sells (item key and price in coins). Player-made things (fish, plants, junk, crafted goods) are never sold here: they stay with player stalls. Each rotation (a week) a shop shows its `always` items and draws the rest of its displays by `weight` from the rest of its catalog; `limited` items have that many to go round each rotation. The pop-up sells the current season's items from events.json.",
+  "popup": {"name": "Seasonal Pop-up", "slots": 4},
   "departments": [
-    {"key": "seeds", "name": "Seeds & Garden", "type": "shelves", "unit": [2, 2, 23, 18], "door": "s", "open": true, "slots": 7,
+    {"key": "seeds", "name": "Seeds & Garden", "type": "shelves", "unit": [2, 2, 23, 18], "door": "s", "open": true, "slots": 6,
       "catalog": [
-        {"item": "tulip_seeds", "price": 10},
-        {"item": "sunflower_seeds", "price": 15},
-        {"item": "lavender_seeds", "price": 20},
-        {"item": "strawberry_seeds", "price": 25},
+        {"item": "tulip_seeds", "price": 10, "always": true},
+        {"item": "sunflower_seeds", "price": 15, "always": true},
+        {"item": "lavender_seeds", "price": 20, "always": true},
+        {"item": "strawberry_seeds", "price": 25, "always": true},
         {"item": "flower_box", "price": 35},
         {"item": "garden_gnome", "price": 45},
         {"item": "birdbath", "price": 80}
       ]
     },
     {"key": "tools", "name": "Tools", "type": "racks", "unit": [25, 2, 46, 18], "door": "s", "open": false},
-    {"key": "furniture", "name": "Furniture", "type": "showroom", "unit": [48, 2, 69, 18], "door": "s", "open": true, "slots": 12,
+    {"key": "furniture", "name": "Furniture", "type": "showroom", "unit": [48, 2, 69, 18], "door": "s", "open": true, "slots": 9,
       "catalog": [
         {"item": "wooden_chair", "price": 60},
         {"item": "small_table", "price": 80},
@@ -26,7 +27,9 @@
         {"item": "sofa", "price": 140},
         {"item": "side_table", "price": 55},
         {"item": "potted_palm", "price": 75},
-        {"item": "wall_clock", "price": 65}
+        {"item": "wall_clock", "price": 65},
+        {"item": "rocking_chair", "price": 110},
+        {"item": "grandfather_clock", "price": 250, "limited": 5}
       ]
     },
     {"key": "exterior", "name": "Home Exterior", "type": "showroom", "unit": [71, 2, 93, 18], "door": "s", "open": false},

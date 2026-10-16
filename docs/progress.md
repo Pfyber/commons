@@ -741,7 +741,37 @@ mall, all 19 displays dressed, inspect and buy a fern (100 → 50 coins, in
 the bag), the counter's 12 rows, seeds off a shelf, a closed shop says so.
 500 bots in the mall pass the perf gate.
 
-Next: M3, weekly rotation, limited stock and the seasonal pop-up.
+## Mall M3 · Something new every week: done (2026-10-16)
+
+- **Weekly rotation** (`sim::mall`): each week (Monday 00:00 UTC; set
+  `COMMONS_MALL_ROTATION_SECS` to change the length) every shop shows its
+  `always` items and draws the rest of its displays by weight from the rest
+  of its catalog. It's a pure function of the week number, so everyone sees
+  the same shelves without storing them. Furniture now shows 9 of its 14
+  pieces a week (one or two in each model room); Seeds & Garden keeps its
+  four seeds and rotates two of three garden pieces.
+- **Limited items:** a stock per week shared by everyone (`mall_stock`,
+  migration 0012), taken in the same transaction as the payment; when it's
+  gone, it's "Sold out this week" and nobody is charged.
+- **Seasonal pop-up** by the entrance (`assets/mall/events.json`): Spring
+  Blossom, Summer Fair, Autumn Harvest, Winter Lights, each with its own
+  pieces and one limited one. Eleven new items with art (rocking chair,
+  grandfather clock and the seasonal ones).
+- **What's new:** items that weren't on show last week get a NEW tag on
+  their display and a badge in the shop; the directory lists them and says
+  when the shelves change; walking in, once a week, a nudge says what's
+  new. Tap the pop-up stand for the season's goods.
+
+Checked: sim tests (every display filled, `always` items stay, shelves the
+same for everyone and changing weekly, every item gets its turn, the
+calendar covers every day and wraps the year); API tests (the catalog rule
+covers the pop-up; the last limited item goes to one buyer and the next is
+told it's sold out and not charged). In the browser: the nudge, NEW tags on
+this week's three new pieces, Autumn Harvest at the pop-up with "10 of 10
+left", buying a pumpkin lantern, the directory's "New this week". 500 bots
+in the mall pass the perf gate.
+
+Next: M4, clothing and skins (owned cosmetics, fitting rooms, protocol v7).
 
 ## Next: M5 · Crowds
 

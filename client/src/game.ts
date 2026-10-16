@@ -1223,7 +1223,16 @@ export class Game {
       this.near(ui.shop, { x: obj.x + 1, y: obj.y }, 6).openDept(shopAt.label);
       return true;
     }
-    if (obj && (obj.kind === "counter" || obj.kind === "popup" || obj.kind === "shopfront")) {
+    if (obj?.kind === "popup") {
+      // The pop-up stand: this season's things.
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+        const spot = nearestWalkable(map, obj.x + 2, obj.y + obj.h + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.shop, { x: obj.x + 2, y: obj.y + obj.h }, 7).openDept("popup");
+      return true;
+    }
+    if (obj && (obj.kind === "counter" || obj.kind === "shopfront")) {
       this.hud.toast(`🛍️ ${obj.label ?? ""}`, 4000);
       return true;
     }

@@ -65,7 +65,7 @@ The seasonal pop-up and the directory map are in the entrance hall.
 |---|---|---|
 | **M1** ✓ | Market Hall with the mall door; the interior: entrance hall with directory map and pop-up stand, food court tables and benches, the loop, storefronts with signs (shops "opening soon"); in and out by the front door. | A new place; nothing else changes. |
 | **M2** ✓ | Departments from data (`assets/mall/departments.json`: type, layout, catalog); displays on shelves, racks and in model rooms; inspect and quick-buy at a display, or browse at the counter. Opens Furniture and Seeds & garden. | Buying goes through the economy ledger; other shops stay "opening soon". |
-| **M3** | Weekly stock rotation (shared deterministic choice per department and week), limited stock, the seasonal pop-up from an event calendar, "new this week" signs. | Same shop, changing. |
+| **M3** ✓ | Weekly stock rotation (shared deterministic choice per department and week), limited stock, the seasonal pop-up from an event calendar, "new this week" signs. | Same shop, changing. |
 | **M4** | Owned cosmetics, protocol v7 (extended look, vehicle, pet), Clothing and Skins with fitting rooms and a mirror, `account_bound` enforcement. | Free looks keep working. |
 | **M5** | Pets: adopt at the Pets shop (needs a house), the pet at home, daily walks, pets meeting. | Optional. |
 | **M6** | Vehicles: equip from the bag or hotbar, speed outdoors, dismount at doors, the test track. | Walking is unchanged. |
@@ -75,8 +75,9 @@ The seasonal pop-up and the directory map are in the entrance hall.
 ## Data model
 
 - `assets/mall/departments.json`: departments with key, name, unit (which
-  storefront), type (`shelves`, `racks`, `showroom`, `track`, `popup`),
-  catalog pool (item, weight), display slots, limited items.
+  storefront), type (`shelves`, `racks`, `showroom`, `track`), display
+  slots and a catalog (item, price, `always`, `weight`, `limited`); the
+  pop-up's slots. `assets/mall/events.json`: the seasons and their items.
 - Item `meta`: `price`, `dept`, `source` (`npc` or `player`),
   `account_bound`, `speed` (vehicles), `slot` (cosmetics), `pet`.
 - `mall_stock(rotation, dept, item_id, remaining)` for limited items only;

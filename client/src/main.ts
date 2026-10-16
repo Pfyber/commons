@@ -177,6 +177,8 @@ async function main() {
       return g && here ? { map: g.scene.map, here } : null;
     },
     walk: (t) => (game as Game | null)?.walkTo(t),
+    newThisWeek: () => shop.newThisWeek().map((f) => ({ dept: f.dept, items: f.items.map((i) => eco.name(i)) })),
+    endsAt: () => shop.endsAt,
   });
   const showMood = (m: number) => hud.setMood(m ? (MOODS.find((x) => x.id === m)?.icon ?? "💬") : "💬", m > 0);
   const moodPicker = new MoodPicker((m) => {
@@ -264,6 +266,23 @@ async function main() {
       if (ticket.zone_id === "mall") {
         await shop.load().catch(() => {});
         shop.dress(map);
+        // Once a week, a nudge about what's new.
+        const seen = (() => {
+          try {
+            return localStorage.getItem("commons.mallRotation");
+          } catch {
+            return null;
+          }
+        })();
+        const fresh = shop.newThisWeek().flatMap((f) => f.items.map((i) => eco.name(i)));
+        if (seen !== String(shop.rotation) && fresh.length) {
+          window.setTimeout(() => hud.toast(`🛍️ New at the mall this week: ${fresh.slice(0, 4).join(", ")}${fresh.length > 4 ? "…" : ""}`, 6000), 1500);
+          try {
+            localStorage.setItem("commons.mallRotation", String(shop.rotation));
+          } catch {
+            // storage unavailable
+          }
+        }
       }
       const placeInfo = { label: ticket.label, owner: ticket.owner };
       if (!game || game.zoneId !== ticket.zone_id || game.place.owner !== placeInfo.owner) {

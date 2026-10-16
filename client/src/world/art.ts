@@ -663,6 +663,21 @@ function label(ctx: CanvasRenderingContext2D, text: string, cx: number, y: numbe
 }
 
 /** Texture for a map object plus how far it extends above its footprint. */
+/** A small "NEW" tag for mall displays. */
+export function newTagTexture(): Texture {
+  const key = "tag:new";
+  let t = decorCache.get(key);
+  if (!t) {
+    const [c, ctx] = makeCanvas(26, 11);
+    px(ctx, PALETTE.outline, 0, 0, 26, 11);
+    px(ctx, "#e8566b", 1, 1, 24, 9);
+    label(ctx, "NEW", 13, 6, "#fff9ec", 8);
+    t = toTexture(c);
+    decorCache.set(key, t);
+  }
+  return t;
+}
+
 /**
  * An object's art: drawn from `overhang` px above its footprint, and from
  * `left` px left of it when it's wider than the footprint.

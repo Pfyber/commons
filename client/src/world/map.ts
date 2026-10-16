@@ -12,6 +12,8 @@ export interface MapObject {
   /** Mall displays: the item on show, set from the shop's stock. */
   item?: string;
   itemKind?: string;
+  /** Mall displays: new on show this week. */
+  isNew?: boolean;
 }
 
 /** The street grid of a city map (mirror of sim::map::StreetGrid). */

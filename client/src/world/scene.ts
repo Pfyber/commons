@@ -2,7 +2,7 @@
 // props and avatars, and a camera that follows the player.
 
 import { type Application, Container, Graphics, Sprite } from "pixi.js";
-import { TILE, bakeChunk, decorTexture, hash, objectTexture } from "./art";
+import { TILE, bakeChunk, decorTexture, hash, newTagTexture, objectTexture } from "./art";
 import { itemTexture } from "./items";
 import { type MapObject, type ZoneMap, groundAt } from "./map";
 import type { TileXY } from "./motion";
@@ -39,8 +39,8 @@ interface Placed {
   x1: number;
   y1: number;
   sprite: Sprite | null;
-  /** A mall display's item, drawn on top of the stand. */
-  extra: Sprite | null;
+  /** A mall display's item (and its "new" tag), drawn on the stand. */
+  extras: Sprite[];
 }
 
 /** Inclusive chunk rectangle. */
@@ -84,7 +84,7 @@ export class Scene {
     this.placed = map.objects
       // Drawn elsewhere, or invisible.
       .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot")
-      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, extra: null }));
+      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, extras: [] }));
     this.resize();
   }
 
@@ -144,13 +144,21 @@ export class Scene {
           it.position.set(p.o.x * TILE + TILE / 2, p.o.y * TILE + (onShelf ? 2 : TILE - 2));
           it.zIndex = s.zIndex + 0.5;
           this.sorted.addChild(it);
-          p.extra = it;
+          p.extras.push(it);
+          if (p.o.isNew) {
+            const tag = new Sprite(newTagTexture());
+            tag.anchor.set(0.5, 1);
+            tag.position.set(p.o.x * TILE + TILE / 2 + 8, it.position.y - it.height + 4);
+            tag.zIndex = s.zIndex + 0.6;
+            this.sorted.addChild(tag);
+            p.extras.push(tag);
+          }
         }
       } else if (!near && p.sprite) {
         p.sprite.destroy({ texture: true, textureSource: true });
         p.sprite = null;
-        p.extra?.destroy();
-        p.extra = null;
+        for (const e of p.extras) e.destroy();
+        p.extras = [];
       }
     }
   }
@@ -196,7 +204,7 @@ export class Scene {
     for (const [key, c] of this.chunks) this.unload(key, c);
     for (const p of this.placed) {
       p.sprite?.destroy({ texture: true, textureSource: true });
-      p.extra?.destroy();
+      for (const e of p.extras) e.destroy();
     }
     this.world.destroy({ children: true });
   }

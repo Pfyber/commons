@@ -4,7 +4,7 @@
 
 import departments from "../../../assets/mall/departments.json";
 import type { Economy } from "../economy";
-import type { Shelf, Shop } from "../shop";
+import type { Dept, Shelf, Shop } from "../shop";
 import { type ZoneMap, nearestWalkable, spot } from "../world/map";
 import type { TileXY } from "../world/motion";
 import { cityImage, drawYou } from "./citymap";
@@ -15,6 +15,10 @@ const NAMES = new Map(departments.departments.map((d) => [d.key, d.name]));
 export interface DirectoryHost {
   where(): { map: ZoneMap; here: TileXY } | null;
   walk(t: TileXY): void;
+  /** What's new on show this week, by shop (item names). */
+  newThisWeek(): { dept: string; items: string[] }[];
+  /** When the shelves change (unix seconds; 0 if unknown). */
+  endsAt(): number;
 }
 
 /** CSS pixels across the map in the panel. */
@@ -33,6 +37,13 @@ export class DirectoryPanel extends Panel {
   render() {
     this.body.replaceChildren();
     this.body.append(el("p", "hint", "Tap a shop to walk there. The food court is in the middle."), this.canvas);
+    const fresh = this.host.newThisWeek();
+    if (fresh.length) {
+      this.body.append(el("h3", "", "New this week"));
+      for (const f of fresh) this.body.append(el("p", "hint", `${f.dept}: ${f.items.join(", ")}`));
+    }
+    const days = Math.max(0, Math.ceil((this.host.endsAt() * 1000 - Date.now()) / 86_400_000));
+    if (this.host.endsAt()) this.body.append(el("p", "hint", days <= 1 ? "The shelves change tomorrow." : `The shelves change in ${days} days.`));
     this.draw();
     window.clearInterval(this.timer);
     this.timer = window.setInterval(() => (this.open ? this.draw() : window.clearInterval(this.timer)), 50);
@@ -140,10 +151,32 @@ export class ShopPanel extends Panel {
       this.shop
         .buy(this.dept, s.slot)
         .then(() => (this.msg.textContent = `✓ ${this.eco.name(s.item)} is in your bag.`))
-        .catch((e) => (this.msg.textContent = e instanceof Error ? e.message : "That didn't work."));
+        .catch((e) => (this.msg.textContent = e instanceof Error ? e.message : "That didn't work."))
+        // Fresh counts ("2 left"), or the new week's shelves.
+        .finally(() => this.open && this.render());
     }, cls);
-    b.disabled = this.eco.coins < s.price;
+    b.disabled = this.eco.coins < s.price || s.left === 0;
+    if (s.left === 0) b.textContent = "Sold out";
     return b;
+  }
+
+  /** "New this week", "Only 3 left this week". */
+  private badges(s: Shelf): HTMLElement {
+    const box = el("span", "badges");
+    if (s.new) box.append(el("span", "badge new", "New"));
+    if (s.limited !== null) box.append(el("span", "badge limited", s.left === 0 ? "Sold out this week" : `${s.left} of ${s.limited} left`));
+    return box;
+  }
+
+  /** The pop-up's season, or when the next one starts. */
+  private season(d: Dept): HTMLElement | null {
+    if (this.dept !== "popup") return null;
+    const day = (md: string) => {
+      const [m, dd] = md.split("-").map(Number);
+      return new Date(2026, m - 1, dd).toLocaleDateString([], { day: "numeric", month: "short" });
+    };
+    if (d.event) return el("p", "hint", `${d.event.name}, until ${day(d.event.to)}.${d.next ? ` Then ${d.next.name}.` : ""}`);
+    return d.next ? el("p", "hint", `Between seasons. ${d.next.name} opens ${day(d.next.from)}.`) : null;
   }
 
   render() {
@@ -151,9 +184,11 @@ export class ShopPanel extends Panel {
     const d = this.shop.depts.get(this.dept);
     this.titleEl.textContent = d?.name ?? "Shop";
     if (!d?.open) {
-      this.body.append(el("p", "hint", "Opening soon."));
+      this.body.append((d && this.season(d)) || el("p", "hint", "Opening soon."));
       return;
     }
+    const season = this.season(d);
+    if (season) this.body.append(season);
     const coins = el("p", "hint", `You have ${this.eco.coins} coins.`);
     if (this.slot !== null) {
       const s = d.shelves.find((x) => x.slot === this.slot);
@@ -162,7 +197,7 @@ export class ShopPanel extends Panel {
       const card = el("div", "shop-card");
       const pic = icon(it);
       pic.classList.add("big");
-      card.append(pic, el("strong", "", it?.name ?? s.key), el("span", "price", `${s.price} coins`));
+      card.append(pic, el("strong", "", it?.name ?? s.key), el("span", "price", `${s.price} coins`), this.badges(s));
       const owned = this.eco.qty(s.item);
       this.body.append(card, el("p", "hint", ABOUT[it?.kind ?? ""] ?? ""), el("p", "hint", owned ? `You have ${owned}.` : ""), coins, this.buyButton(s, "primary"));
     } else {
@@ -171,7 +206,9 @@ export class ShopPanel extends Panel {
       const rows = [...d.shelves].sort((a, b) => a.price - b.price).filter((s) => !seen.has(s.item) && seen.add(s.item));
       for (const s of rows) {
         const row = el("div", "row");
-        row.append(icon(this.eco.items.get(s.item)), el("span", "name", this.eco.name(s.item)), el("span", "price", `${s.price}c`), this.buyButton(s, "small"));
+        const name = el("span", "name", this.eco.name(s.item));
+        name.append(this.badges(s));
+        row.append(icon(this.eco.items.get(s.item)), name, el("span", "price", `${s.price}c`), this.buyButton(s, "small"));
         this.body.append(row);
       }
       this.body.append(coins);

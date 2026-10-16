@@ -249,6 +249,109 @@ function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
       px(ctx, "#b2aa96", 10, 28, 12, 2);
       px(ctx, "#8f6a4a", 20, 4, 4, 3);
       break;
+    case "rocking_chair":
+      px(ctx, O, 9, 3, 14, 22);
+      px(ctx, W, 10, 4, 12, 12);
+      px(ctx, D, 10, 16, 12, 4);
+      px(ctx, W, 11, 20, 2, 6);
+      px(ctx, W, 19, 20, 2, 6);
+      oval(ctx, O, 16, 28, 12, 2.5);
+      oval(ctx, D, 16, 28, 11, 1.5);
+      break;
+    case "grandfather_clock":
+      px(ctx, O, 9, -4, 14, 35);
+      px(ctx, D, 10, -3, 12, 33);
+      disc(ctx, O, 16, 4, 5);
+      disc(ctx, "#f4f1d8", 16, 4, 4);
+      px(ctx, O, 16, 1, 1, 4);
+      px(ctx, O, 16, 4, 3, 1);
+      px(ctx, "#2d2a24", 12, 11, 8, 15);
+      px(ctx, "#f6c343", 15, 14, 2, 9);
+      disc(ctx, "#f6c343", 16, 23, 2);
+      break;
+    case "pumpkin_lantern":
+      oval(ctx, O, 16, 21, 12, 9);
+      oval(ctx, "#e07a2f", 16, 21, 11, 8);
+      px(ctx, "#c8602a", 11, 14, 2, 15);
+      px(ctx, "#c8602a", 19, 14, 2, 15);
+      px(ctx, "#5d8a4e", 15, 9, 3, 5);
+      polygon(ctx, "#ffe39a", [[10, 18], [13, 16], [14, 19]]);
+      polygon(ctx, "#ffe39a", [[22, 18], [19, 16], [18, 19]]);
+      px(ctx, "#ffe39a", 11, 23, 10, 3);
+      break;
+    case "harvest_basket":
+      px(ctx, O, 6, 16, 20, 14);
+      px(ctx, "#c99a6a", 7, 17, 18, 12);
+      for (let i = 0; i < 4; i++) px(ctx, "#a0703f", 7, 19 + i * 3, 18, 1);
+      disc(ctx, "#e8566b", 11, 15, 3);
+      disc(ctx, "#f6c343", 17, 14, 3);
+      disc(ctx, "#e07a2f", 22, 15, 3);
+      px(ctx, O, 8, 6, 2, 11);
+      px(ctx, O, 22, 6, 2, 11);
+      px(ctx, O, 8, 5, 16, 2);
+      break;
+    case "scarecrow":
+      px(ctx, PALETTE.trunk, 15, 8, 3, 23);
+      px(ctx, PALETTE.trunk, 5, 13, 22, 3);
+      px(ctx, O, 9, 12, 14, 12);
+      px(ctx, "#5f8fc4", 10, 13, 12, 10);
+      px(ctx, "#f6c343", 6, 15, 3, 3);
+      px(ctx, "#f6c343", 23, 15, 3, 3);
+      disc(ctx, O, 16, 7, 5);
+      disc(ctx, "#ead9a6", 16, 7, 4);
+      px(ctx, O, 9, 1, 14, 3);
+      px(ctx, "#a0703f", 11, -2, 10, 4);
+      break;
+    case "string_lights":
+      for (let i = 0; i < 5; i++) {
+        const y = 10 + Math.round(Math.sin(i * 0.9) * 3);
+        px(ctx, O, 3 + i * 6, y - 2, 1, 3);
+        disc(ctx, ["#f6c343", "#e8566b", "#9fc3d6", "#a5d27a", "#f6c343"][i], 4 + i * 6, y + 2, 2);
+      }
+      px(ctx, O, 2, 6, 28, 1);
+      px(ctx, PALETTE.woodDark, 2, 6, 2, 25);
+      px(ctx, PALETTE.woodDark, 28, 6, 2, 25);
+      break;
+    case "snow_globe":
+      disc(ctx, O, 16, 15, 10);
+      disc(ctx, "#cfe8f5", 16, 15, 9);
+      px(ctx, "#5d8a4e", 13, 14, 6, 6);
+      polygon(ctx, "#4f8040", [[11, 16], [16, 7], [21, 16]]);
+      for (const [x, y] of [[10, 10], [20, 12], [14, 8], [22, 17], [9, 17]] as [number, number][]) px(ctx, "#fff", x, y, 1, 1);
+      px(ctx, O, 8, 23, 16, 7);
+      px(ctx, "#a0703f", 9, 24, 14, 5);
+      break;
+    case "blossom_pot":
+      px(ctx, O, 10, 21, 12, 10);
+      px(ctx, "#c8693e", 11, 22, 10, 8);
+      px(ctx, PALETTE.trunk, 15, 10, 2, 12);
+      for (const [x, y] of [[9, 6], [17, 4], [12, 2], [20, 9], [7, 11], [14, 8]] as [number, number][]) disc(ctx, "#f4b6c8", x, y, 3);
+      for (const [x, y] of [[10, 6], [18, 4], [13, 2]] as [number, number][]) px(ctx, "#fff", x, y, 1, 1);
+      break;
+    case "birdhouse":
+      px(ctx, PALETTE.trunk, 15, 18, 3, 13);
+      px(ctx, O, 9, 7, 14, 13);
+      px(ctx, "#e6b450", 10, 8, 12, 11);
+      polygon(ctx, "#b5544a", [[7, 9], [16, 1], [25, 9]]);
+      disc(ctx, "#3b3a2e", 16, 13, 2);
+      px(ctx, O, 15, 16, 3, 1);
+      break;
+    case "picnic_set":
+      px(ctx, "#e8566b", 2, 14, 28, 14);
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) px(ctx, "#fff9ec", 2 + i * 7 + (j % 2) * 3, 14 + j * 7, 4, 4);
+      px(ctx, O, 9, 8, 14, 9);
+      px(ctx, "#c99a6a", 10, 9, 12, 7);
+      px(ctx, O, 12, 5, 8, 2);
+      disc(ctx, "#e8566b", 24, 11, 2);
+      break;
+    case "beach_umbrella":
+      px(ctx, O, 15, 8, 2, 23);
+      polygon(ctx, O, [[2, 11], [16, 0], [30, 11]]);
+      for (let i = 0; i < 4; i++) {
+        polygon(ctx, i % 2 ? "#fff9ec" : "#3f7a8a", [[3 + i * 6.5, 10], [16, 1], [9.5 + i * 6.5, 10]]);
+      }
+      oval(ctx, "rgba(0,0,0,0.15)", 16, 30, 12, 2);
+      break;
     default:
       px(ctx, O, 6, 6, 20, 20);
       px(ctx, W, 7, 7, 18, 18);
