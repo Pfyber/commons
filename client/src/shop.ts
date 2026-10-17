@@ -59,7 +59,7 @@ export class Shop {
   /** Puts what's on each display onto the map's display objects, for drawing. */
   dress(map: ZoneMap) {
     for (const o of map.objects) {
-      if ((o.kind !== "display" && o.kind !== "shelf" && o.kind !== "mannequin") || !o.label) continue;
+      if ((o.kind !== "display" && o.kind !== "shelf" && o.kind !== "mannequin" && o.kind !== "pet_pen") || !o.label) continue;
       const [dept, slot] = o.label.split(":");
       const s = this.shelf(dept, Number(slot));
       o.item = s?.key;
@@ -75,9 +75,10 @@ export class Shop {
       .filter((x) => x.items.length);
   }
 
-  async buy(dept: string, slot: number) {
+  /** Buys what's on a display (`name`: adopting a pet, its name). */
+  async buy(dept: string, slot: number, name?: string) {
     try {
-      this.eco.applyResult(await this.auth.send<Applied>("/api/mall/buy", { dept, slot, key: pressKey() }));
+      this.eco.applyResult(await this.auth.send<Applied>("/api/mall/buy", { dept, slot, key: pressKey(), name }));
     } finally {
       // Limited counts (and, at the turn of the week, the shelves) change.
       await this.load().catch(() => {});

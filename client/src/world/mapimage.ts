@@ -19,6 +19,7 @@ const GROUND: Record<string, string> = {
   road: "#8a857b",
   curb: "#cfc6b2",
   carpet: "#c48d7a",
+  straw: "#e3c77a",
   fog: "#e3e9e6",
 };
 

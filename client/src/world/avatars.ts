@@ -7,6 +7,7 @@ import { TILE, avatarTexture } from "./art";
 import { type Motion, type TileXY, headingAt, posAt } from "./motion";
 import type { Scene } from "./scene";
 import { moodIcon } from "../activities/together";
+import { Follower, type PetSprite } from "./pets";
 
 export const EMOTES: Record<number, { icon: string; label: string }> = {
   1: { icon: "👋", label: "Wave" },
@@ -44,6 +45,8 @@ export class Avatar {
   state = 0;
   /** Where we stood before sitting down; standing up returns here. */
   standTile: TileXY | null = null;
+  /** The pet out on a walk with us, at our heels. */
+  private follower: Follower | null = null;
 
   constructor(
     public info: EntityInfo,
@@ -218,6 +221,7 @@ export class Avatar {
     this.sprite.position.set(Math.round(feetX), Math.round(feetY + bob));
     this.sprite.scale.x = this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
+    this.updatePet({ x, y }, wallNow);
 
     // DOM label above the head.
     const s = this.scene.tileToScreen(x + 0.5, y + 1 - 4 / TILE - 34 / TILE);
@@ -245,7 +249,27 @@ export class Avatar {
     return { x0: s.x - w / 2, x1: s.x + w / 2, y: s.y };
   }
 
+  /** The pet with us (if any), keeping up. */
+  get pet(): PetSprite | null {
+    return this.follower?.pet ?? null;
+  }
+
+  private updatePet(at: TileXY, now: number) {
+    const code = this.info.pet;
+    if (this.follower && this.follower.pet.code !== code) {
+      this.follower.destroy();
+      this.follower = null;
+    }
+    if (!code) return;
+    if (!this.follower) {
+      this.follower = new Follower(code, at);
+      this.scene.sorted.addChild(this.follower.pet.view);
+    }
+    this.follower.update(at, this.facing, now);
+  }
+
   destroy() {
+    this.follower?.destroy();
     this.sprite.destroy();
     this.label.remove();
   }

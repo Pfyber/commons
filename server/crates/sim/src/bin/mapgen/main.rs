@@ -28,6 +28,7 @@ const GROUND: &[&str] = &[
     "road",
     "curb",
     "carpet",
+    "straw",
 ];
 const DECOR: &[&str] = &[
     "none",

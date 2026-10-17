@@ -9,6 +9,7 @@ import { Rent } from "./rent";
 import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
 import { Shop } from "./shop";
+import { Pets } from "./pets";
 import { Social } from "./social";
 import { Town } from "./town";
 import { Gov } from "./gov";
@@ -169,7 +170,17 @@ async function main() {
   const apartments = new ApartmentsPanel(homes, rent, rentHost);
   const stall = new StallPanel(rent, eco, rentHost);
   const shop = new Shop(auth, eco);
-  const shopPanel = new ShopPanel(shop, eco, (dept, item) => ui.wardrobe.openFitting(dept, dept === "skins" ? "The mirror" : "Fitting room", item));
+  const pets = new Pets(auth);
+  const shopPanel = new ShopPanel(
+    shop,
+    eco,
+    (dept, item) => ui.wardrobe.openFitting(dept, dept === "skins" ? "The mirror" : "Fitting room", item),
+    () => (pets.mine ? "have_pet" : !rent.home ? "no_house" : rent.home.kind === "apartment" ? "apartment" : "ok"),
+    (name) => {
+      void pets.load().catch(() => {});
+      hud.toast(`🐾 Welcome to the family, ${name}! They've gone ahead to wait in your yard. Walk home and take them out.`, 6500);
+    },
+  );
   const directory = new DirectoryPanel({
     where: () => {
       const g = game as Game | null;
@@ -193,6 +204,7 @@ async function main() {
     minimap,
     homes,
     rent,
+    pets,
     postOffice,
     apartments,
     stall,
@@ -255,7 +267,7 @@ async function main() {
   eco.onChange(() => hud.setCoins(eco.coins));
   social.onChange(() => hud.setBadge(social.unreadCount));
   social.onToast = (t) => hud.toast(t, 4000);
-  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {})]);
+  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {}), pets.load().catch(() => {})]);
 
   let dest: Destination = { zone: "city" };
   let retry = 0;

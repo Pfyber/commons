@@ -122,4 +122,5 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `COMMONS_RENT_GRACE_SECS` | from `assets/city/rent.json` (three days) | social: time to pay overdue rent before a lease ends |
 | `COMMONS_RENT_SWEEP_SECS` | `60` | social: how often leases are checked |
 | `COMMONS_MALL_ROTATION_SECS` | `604800` (a week) | api: how often the mall's shelves change |
+| `COMMONS_PET_WALK_SECS` | `180` | api: how long a pet's walk has to be to count as the day's walk |
 | `COMMONS_GROWTH_STAGE_SECS` | `21600` (6 h; dev script: 60) | api, zone |

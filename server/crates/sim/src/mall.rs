@@ -42,7 +42,7 @@ fn one() -> u32 {
 pub struct Department {
     pub key: String,
     pub name: String,
-    /// `shelves`, `racks`, `showroom`, `track`.
+    /// `shelves`, `racks`, `showroom`, `pens`, `track`.
     #[serde(rename = "type")]
     pub kind: String,
     /// The shop's rectangle on the floor, walls included (inclusive).
@@ -299,7 +299,7 @@ mod tests {
             }
         }
         assert!(
-            d.get("pets").unwrap().stock_at(3).is_empty(),
+            d.get("tools").unwrap().stock_at(3).is_empty(),
             "closed shops sell nothing"
         );
     }

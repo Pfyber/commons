@@ -59,7 +59,18 @@
       ]
     },
     {"key": "vehicles", "name": "Vehicles", "type": "track", "unit": [2, 23, 23, 56], "door": "e", "open": false},
-    {"key": "pets", "name": "Pets", "type": "showroom", "unit": [2, 61, 23, 77], "door": "n", "open": false},
+    {"key": "pets", "name": "Pets", "type": "pens", "unit": [2, 61, 23, 77], "door": "n", "open": true, "slots": 6,
+      "catalog": [
+        {"item": "puppy_golden", "price": 150, "always": true},
+        {"item": "kitten_ginger", "price": 140, "always": true},
+        {"item": "puppy_spotted", "price": 150, "weight": 2},
+        {"item": "kitten_black", "price": 140, "weight": 2},
+        {"item": "bunny", "price": 120, "weight": 2},
+        {"item": "duckling", "price": 100, "weight": 2},
+        {"item": "hedgehog", "price": 180},
+        {"item": "corgi", "price": 250, "limited": 2}
+      ]
+    },
     {"key": "gifts", "name": "Gift Shop", "type": "shelves", "unit": [25, 61, 35, 77], "door": "n", "open": false},
     {"key": "toys", "name": "Toys & Games", "type": "shelves", "unit": [60, 61, 70, 77], "door": "n", "open": false},
     {"key": "music", "name": "Music", "type": "racks", "unit": [72, 61, 93, 77], "door": "n", "open": false}

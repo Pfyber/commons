@@ -56,11 +56,14 @@ pub struct PlotResult {
     pub applied: Applied,
 }
 
-/// A player's saved look (`look`) and what they wear from the mall (`style`).
+/// A player's saved look (`look`), what they wear from the mall (`style`)
+/// and the pet out on a walk with them (`pet`, 0 for none).
 #[derive(Debug, Clone, Deserialize)]
 pub struct SavedLook {
     pub look: u32,
     pub style: u32,
+    #[serde(default)]
+    pub pet: u16,
 }
 
 #[derive(Debug, Clone, Deserialize)]

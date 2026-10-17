@@ -56,37 +56,59 @@ impl Instance {
         if commons_protocol::NPC_LOOKS.contains(&look) || !a.emote_rl.try_take(now as u64) {
             return;
         }
-        match self.economy.clone() {
-            None => self.wear(id, look, 0),
-            Some(econ) => {
-                let player = a.player_id.clone();
-                let who = player.clone();
-                self.spawn_call(
-                    async move { econ.player_look(&who).await },
-                    move |inst, saved| {
-                        if let Ok(l) = saved
-                            && inst.avatars.get(&id).is_some_and(|a| a.player_id == player)
-                        {
-                            inst.wear(id, l.look, l.style);
-                        }
-                    },
-                );
-            }
+        if self.economy.is_none() {
+            let (style, pet) = (a.style, a.pet);
+            self.wear(id, look, style, pet);
+        } else {
+            self.refresh_look(id);
         }
     }
 
+    /// Shows avatar `id` as the API has it saved: its look, what it wears
+    /// from the mall and the pet out with it (set on joining, after saving
+    /// new clothes and after taking a pet out or home).
+    pub(super) fn refresh_look(&mut self, id: u32) {
+        let (Some(econ), Some(a)) = (self.economy.clone(), self.avatars.get(&id)) else {
+            return;
+        };
+        let player = a.player_id.clone();
+        let who = player.clone();
+        self.spawn_call(
+            async move { econ.player_look(&who).await },
+            move |inst, saved| {
+                if let Ok(l) = saved
+                    && inst.avatars.get(&id).is_some_and(|a| a.player_id == player)
+                {
+                    inst.wear(id, l.look, l.style, l.pet);
+                }
+            },
+        );
+    }
+
     /// Shows avatar `id` in a look (if it's new), to everyone nearby.
-    pub(super) fn wear(&mut self, id: u32, look: u32, style: u32) {
+    pub(super) fn wear(&mut self, id: u32, look: u32, style: u32, pet: u16) {
         let Some(a) = self.avatars.get_mut(&id) else {
             return;
         };
-        if commons_protocol::NPC_LOOKS.contains(&look) || (a.look == look && a.style == style) {
+        if commons_protocol::NPC_LOOKS.contains(&look)
+            || (a.look == look && a.style == style && a.pet == pet)
+        {
             return;
         }
         a.look = look;
         a.style = style;
+        a.pet = pet;
         let cell = a.cell;
-        self.broadcast(cell, &ServerMsg::LookChanged { id, look, style }, None);
+        self.broadcast(
+            cell,
+            &ServerMsg::LookChanged {
+                id,
+                look,
+                style,
+                pet,
+            },
+            None,
+        );
     }
 
     pub(super) fn set_mood(&mut self, id: u32, m: u8, now: u32) {
@@ -340,7 +362,8 @@ mod tests {
             ServerMsg::LookChanged {
                 id: 1,
                 look: 0x8100_00ff,
-                style: 0
+                style: 0,
+                pet: 0
             }
         )));
         assert_eq!(inst.avatars[&1].info(inst.clock.now_ms()).look, 0x8100_00ff);

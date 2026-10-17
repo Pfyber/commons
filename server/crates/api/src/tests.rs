@@ -1733,10 +1733,10 @@ mod mall_shop {
                     d.key,
                     c.item
                 );
-                // Only things to wear are bound to whoever buys them.
+                // Only things to wear and pets are bound to whoever buys them.
                 assert_eq!(
                     item.account_bound(),
-                    crate::cosmetics::is_cosmetic(&item.kind)
+                    crate::cosmetics::is_cosmetic(&item.kind) || crate::pets::is_pet(&item.kind)
                 );
             }
         }
@@ -1797,7 +1797,7 @@ mod mall_shop {
             &auth,
             "POST",
             "/api/mall/buy",
-            json!({ "dept": "pets", "slot": 0, "key": "k2" }),
+            json!({ "dept": "tools", "slot": 0, "key": "k2" }),
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
@@ -2017,5 +2017,157 @@ mod mall_shop {
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
         assert!(item.account_bound());
+    }
+
+    #[tokio::test]
+    async fn a_pet_needs_a_house_and_a_daily_walk() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = Router::new()
+            .nest("/api", mall::routes().merge(crate::pets::routes()))
+            .nest("/internal", crate::internal::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Walker");
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            p,
+            &[Op {
+                item: COIN,
+                delta: 1000,
+            }],
+            "test",
+            &format!("{p}:coins"),
+        )
+        .await
+        .unwrap();
+        let (_, stock) = call(&app, &auth, "GET", "/api/mall/stock", json!({})).await;
+        let pets = stock["departments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["key"] == "pets")
+            .unwrap()
+            .clone();
+        let shelf = pets["shelves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["limited"].is_null())
+            .unwrap()
+            .clone();
+        let (item, price) = (
+            shelf["item"].as_i64().unwrap() as i32,
+            shelf["price"].as_i64().unwrap() as i32,
+        );
+        let adopt = |key: &str, name: &str| json!({ "dept": "pets", "slot": shelf["slot"], "key": key, "name": name });
+        // No house yet (and a name is needed).
+        let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", adopt("a0", "B")).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::BAD_REQUEST, Some("invalid_name"))
+        );
+        let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", adopt("a1", "Biscuit")).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("no_house"))
+        );
+        sqlx::query(
+            "INSERT INTO leases (kind, plot, player_id, tier, paid_until) VALUES ('home', $1, $2, 1, now() + interval '7 days')",
+        )
+        .bind(format!("test:{p}"))
+        .bind(p)
+        .execute(&s.db)
+        .await
+        .unwrap();
+        let before = economy::totals(&mut s.db.acquire().await.unwrap(), p, &[COIN, item])
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", adopt("a2", "Biscuit")).await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+        }
+        let after = economy::totals(&mut s.db.acquire().await.unwrap(), p, &[COIN, item])
+            .await
+            .unwrap();
+        assert_eq!(after[0].1, before[0].1 - price, "paid once");
+        assert_eq!(after[1].1, 0, "a pet isn't put in the bag");
+        let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", adopt("a3", "Mochi")).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("have_pet"))
+        );
+
+        // At home, in the yard, hoping for a walk.
+        let mine = |r: &serde_json::Value| {
+            r["pets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|x| x["owner"] == p.to_string())
+                .cloned()
+                .unwrap()
+        };
+        let (_, r) = call(&app, &auth, "GET", "/api/pets", json!({})).await;
+        let pet = mine(&r);
+        assert_eq!(pet["name"], "Biscuit");
+        assert_eq!(pet["plot"], format!("test:{p}"));
+        assert_eq!(
+            (pet["out"].as_bool(), pet["walked_today"].as_bool()),
+            (Some(false), Some(false))
+        );
+
+        // Out: the zone draws it at your heels.
+        let svc = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &ServiceClaims { svc: "zone".into() }, 60)
+        );
+        let code = s.catalog.get(item).unwrap().meta["code"].as_u64().unwrap();
+        let walk = |out: bool| json!({ "out": out });
+        let (st, r) = call(&app, &auth, "POST", "/api/me/pet/walk", walk(true)).await;
+        assert_eq!(
+            (st, r["pet"]["out"].as_bool()),
+            (StatusCode::OK, Some(true))
+        );
+        let (_, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
+        assert_eq!(r["pet"].as_u64(), Some(code));
+        // Straight back in: too short to count.
+        let (_, r) = call(&app, &auth, "POST", "/api/me/pet/walk", walk(false)).await;
+        assert_eq!(
+            (r["walked"].as_bool(), r["pet"]["walks"].as_i64()),
+            (Some(false), Some(0))
+        );
+        let (_, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
+        assert_eq!(r["pet"].as_u64(), Some(0));
+        // A proper walk counts, once a day.
+        for expect in [true, false] {
+            call(&app, &auth, "POST", "/api/me/pet/walk", walk(true)).await;
+            sqlx::query(
+                "UPDATE pets SET out_since = now() - interval '10 minutes' WHERE owner = $1",
+            )
+            .bind(p)
+            .execute(&s.db)
+            .await
+            .unwrap();
+            let (_, r) = call(&app, &auth, "POST", "/api/me/pet/walk", walk(false)).await;
+            assert_eq!(r["walked"].as_bool(), Some(expect));
+            assert_eq!(r["pet"]["walks"].as_i64(), Some(1));
+            assert_eq!(r["pet"]["walked_today"].as_bool(), Some(true));
+        }
+        // Forgotten out for hours: home again on its own.
+        sqlx::query("UPDATE pets SET out_since = now() - interval '5 hours' WHERE owner = $1")
+            .bind(p)
+            .execute(&s.db)
+            .await
+            .unwrap();
+        let (_, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
+        assert_eq!(r["pet"].as_u64(), Some(0));
+        for q in [
+            "DELETE FROM pets WHERE owner = $1",
+            "DELETE FROM leases WHERE player_id = $1",
+        ] {
+            sqlx::query(q).bind(p).execute(&s.db).await.unwrap();
+        }
     }
 }

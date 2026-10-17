@@ -109,6 +109,7 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     pitch: P.pitch,
     road: "#8f8a80",
     carpet: "#c48d7a",
+    straw: "#e3c77a",
     curb: "#cfc6b2",
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
@@ -195,6 +196,16 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
           const x1 = Math.min(ox + TILE, x + 8);
           if (x1 > x0) px(ctx, tone, x0, oy + r * 8 + 1, x1 - x0, 6);
         }
+      }
+      break;
+    case "straw":
+      // Loose straw in a pen: short strokes every which way.
+      for (let i = 0; i < 9; i++) {
+        const r = hash(tx * 9 + i, ty, 23);
+        const sx = ox + (r % 28) + 2;
+        const sy = oy + ((r >>> 8) % 28) + 2;
+        if ((r >>> 16) % 2) px(ctx, "#c9a95a", sx, sy, 4, 1);
+        else px(ctx, "#f2dc98", sx, sy, 1, 3);
       }
       break;
     case "carpet":
@@ -778,6 +789,30 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.outline, w - 13, h - 18, 10, 8);
       px(ctx, "#fff9ec", w - 12, h - 17, 8, 6);
       px(ctx, "#e8566b", w - 10, h - 15, 4, 2);
+      break;
+    }
+    case "pet_pen": {
+      // A low picket fence round the straw, with a water bowl and a tag.
+      [c, ctx] = makeCanvas(w, h + 6);
+      overhang = 6;
+      const wood = "#f2ead8";
+      const shade = "#c9bfa6";
+      for (let x = 2; x < w - 2; x += 6) {
+        px(ctx, P.outline, x, 0, 4, 12);
+        px(ctx, wood, x + 1, 1, 2, 10);
+        px(ctx, P.outline, x, h - 6, 4, 12);
+        px(ctx, wood, x + 1, h - 5, 2, 10);
+      }
+      px(ctx, P.outline, 1, 4, w - 2, 3);
+      px(ctx, shade, 2, 5, w - 4, 1);
+      px(ctx, P.outline, 1, h - 2, w - 2, 3);
+      px(ctx, shade, 2, h - 1, w - 4, 1);
+      px(ctx, P.outline, 0, 0, 3, h + 6);
+      px(ctx, wood, 1, 1, 1, h + 4);
+      px(ctx, P.outline, w - 3, 0, 3, h + 6);
+      px(ctx, wood, w - 2, 1, 1, h + 4);
+      oval(ctx, P.outline, w - 14, h - 14, 6, 3);
+      oval(ctx, "#7fb5d8", w - 14, h - 14.5, 5, 2);
       break;
     }
     case "mannequin": {

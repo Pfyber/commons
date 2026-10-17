@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -25,11 +25,14 @@ records! {
     /// walk in progress so it can be simulated locally, and what it signals
     /// to others (`mood::*`). `style` is what they wear from the mall (v7):
     /// outfit, hat, accessory and skin codes, a byte each, 0 for none.
+    /// `pet` is the pet out on a walk with them (v8): the pet's code, 0 for
+    /// none.
     EntityInfo {
         id: u32,
         name: String,
         look: u32,
         style: u32,
+        pet: u16,
         x: u16,
         y: u16,
         state: u8,
@@ -157,8 +160,9 @@ message_enum! {
         24 Together { a: u32, b: u32, kind: u8 }
         /// Someone nearby released a sky lantern from (x, y).
         25 LanternRise { id: u32, x: u16, y: u16, text: String }
-        /// Avatar `id` changed its look (and what it wears from the mall).
-        26 LookChanged { id: u32, look: u32, style: u32 }
+        /// Avatar `id` changed its look (and what it wears from the mall),
+        /// or took its pet out or home.
+        26 LookChanged { id: u32, look: u32, style: u32, pet: u16 }
     }
 }
 
@@ -291,6 +295,7 @@ mod tests {
             name: "Ana ✿".into(),
             look: 0xdead_beef,
             style: 0x0102_0304,
+            pet: 0x0201,
             x: 3,
             y: 4,
             state: 0,

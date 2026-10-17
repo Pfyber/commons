@@ -47,7 +47,7 @@ The seasonal pop-up and the directory map are in the entrance hall.
 | Question | Decision |
 |---|---|
 | Free looks | Today's styles stay free at the Tailor. The mall sells new outfits, hats, accessories and skins; fitting rooms and the mirror let you try before buying. |
-| Protocol | The bigger look and visible vehicles and pets need protocol v7. It ships with the Clothing/Skins step on its own, not tied to the zone-per-block work. |
+| Protocol | The bigger look and visible vehicles and pets need new protocol versions, each shipped with its own step, not tied to the zone-per-block work: v7 (what's worn from the mall) with Clothing/Skins, v8 (the pet out with you) with Pets. |
 | Real money | None. Items carry `account_bound`, enforced (no stalls, gifts or selling back) from the start, so nothing changes if that's ever used. |
 | Player shops | The mall never sells what players produce (fish, plants, junk, crafted things): items are tagged by source and a test keeps player-made items out of every mall catalog. |
 | Tools | Cosmetic for now (a nicer rod, a watering can you're seen holding). Effects on catches or growth would need economy balancing. |
@@ -66,8 +66,8 @@ The seasonal pop-up and the directory map are in the entrance hall.
 | **M1** ✓ | Market Hall with the mall door; the interior: entrance hall with directory map and pop-up stand, food court tables and benches, the loop, storefronts with signs (shops "opening soon"); in and out by the front door. | A new place; nothing else changes. |
 | **M2** ✓ | Departments from data (`assets/mall/departments.json`: type, layout, catalog); displays on shelves, racks and in model rooms; inspect and quick-buy at a display, or browse at the counter. Opens Furniture and Seeds & garden. | Buying goes through the economy ledger; other shops stay "opening soon". |
 | **M3** ✓ | Weekly stock rotation (shared deterministic choice per department and week), limited stock, the seasonal pop-up from an event calendar, "new this week" signs. | Same shop, changing. |
-| **M4** ✓ | Owned cosmetics, protocol v7 (extended look, vehicle, pet), Clothing and Skins with fitting rooms and a mirror, `account_bound` enforcement. | Free looks keep working. |
-| **M5** | Pets: adopt at the Pets shop (needs a house), the pet at home, daily walks, pets meeting. | Optional. |
+| **M4** ✓ | Owned cosmetics, protocol v7 (what's worn from the mall), Clothing and Skins with fitting rooms and a mirror, `account_bound` enforcement. | Free looks keep working. |
+| **M5** ✓ | Pets: adopt at the Pets shop (needs a house), the pet at home, daily walks, pets meeting; protocol v8 (the pet out with you). | Optional. |
 | **M6** | Vehicles: equip from the bag or hotbar, speed outdoors, dismount at doors, the test track. | Walking is unchanged. |
 | **M7** | Tools, Music, Gift shop (wrapping and cards for doorstep gifts), Toys & games, Home exterior. | One shop at a time. |
 | **M8** | Shopkeepers, music and lighting per department, a crowded-mall bot test. | Polish. |

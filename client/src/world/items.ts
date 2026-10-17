@@ -4,6 +4,7 @@
 
 import { Texture } from "pixi.js";
 import { PALETTE, avatarCanvas, styleFor, toTexture } from "./art";
+import { petCanvas, petTexture } from "./pets";
 import { disc, oval, polygon } from "./pixeldraw";
 
 type Draw = (ctx: CanvasRenderingContext2D) => void;
@@ -64,6 +65,11 @@ function wearing(key: string, kind: string): HTMLCanvasElement {
 
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
+  if (kind === "pet") {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(petCanvas(COSMETIC_CODES.get(key) ?? 1, 2), 0, 0, 24, 18, 0, 2, 16, 12);
+    return;
+  }
   if (WEARABLE.has(kind)) {
     // Hats show the head; everything else the whole figure.
     ctx.imageSmoothingEnabled = false;
@@ -408,6 +414,7 @@ function cachedTex(key: string, draw: () => HTMLCanvasElement): Texture {
 export function itemTexture(key: string, kind: string): Texture {
   if (kind === "furniture") return furnitureTexture(key);
   if (WEARABLE.has(kind)) return cachedTex(`wear:${key}`, () => wearing(key, kind));
+  if (kind === "pet") return petTexture(COSMETIC_CODES.get(key) ?? 1, 2);
   return cachedTex(`item:${key}`, () =>
     canvas(32, 32, (ctx) => {
       ctx.scale(2, 2);

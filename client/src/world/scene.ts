@@ -142,6 +142,8 @@ export class Scene {
           const onShelf = p.o.kind === "shelf";
           it.scale.set(onShelf && p.o.itemKind === "furniture" ? 0.75 : 1);
           it.position.set(p.o.x * TILE + TILE / 2, p.o.y * TILE + (onShelf ? 2 : TILE - 2));
+          // A pet waits in the middle of its pen.
+          if (p.o.kind === "pet_pen") it.position.set((p.o.x + p.o.w / 2) * TILE, (p.o.y + p.o.h) * TILE - 14);
           it.zIndex = s.zIndex + 0.5;
           this.sorted.addChild(it);
           p.extras.push(it);

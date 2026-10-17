@@ -180,7 +180,8 @@ pub fn mall() -> MapFile {
 }
 
 /// Where a shop's goods stand. Showrooms (furniture) are four carpeted
-/// model rooms with three pieces each; shelves stand in rows. Each display is
+/// model rooms with three pieces each; racks are mannequins; pens hold the
+/// Pets shop's animals; shelves stand in rows. Each display is
 /// labelled `<dept>:<slot>`; what's on it comes from the stock.
 fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
     let [x0, y0, x1, y1] = d.unit;
@@ -229,6 +230,26 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
             }
             "mannequin"
         }
+        "pens" => {
+            // Low fenced pens on straw, two rows either side of the way in
+            // to the counter, each with an animal waiting for a home.
+            let mid = (ix0 + ix1) / 2;
+            for y in [iy0 + 2, iy1 - 3] {
+                for x in [ix0 + 1, ix0 + 5, mid + 3, mid + 7] {
+                    if x + 2 <= ix1 {
+                        spots.push((x, y));
+                    }
+                }
+            }
+            for &(x, y) in spots.iter().take(d.slots as usize) {
+                for dy in 0..2 {
+                    for dx in 0..3 {
+                        b.ground(x + dx, y + dy, "straw");
+                    }
+                }
+            }
+            "pet_pen"
+        }
         _ => {
             for y in [iy0 + 2, iy0 + 5, iy1 - 2] {
                 if y.abs_diff(counter_y) <= 1 {
@@ -248,8 +269,9 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
         spots.len(),
         d.slots
     );
+    let (w, h) = if kind == "pet_pen" { (3, 2) } else { (1, 1) };
     for (slot, &(x, y)) in spots.iter().take(d.slots as usize).enumerate() {
-        b.object(kind, x, y, 1, 1, Some(&format!("{}:{slot}", d.key)), true);
+        b.object(kind, x, y, w, h, Some(&format!("{}:{slot}", d.key)), true);
     }
 }
 
@@ -276,13 +298,19 @@ fn check(map: &MapFile) {
             "dept" => (o.y..o.y + o.h)
                 .any(|y| (o.x..o.x + o.w).any(|x| seen[y as usize * w + x as usize])),
             // Something on show has to be reachable to look at and buy.
-            "display" | "shelf" | "mannequin" | "fitting_room" | "mirror" => {
-                [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)]
-                    .iter()
-                    .any(|(dx, dy)| {
-                        let (x, y) = (o.x as i32 + dx, o.y as i32 + dy);
-                        grid.walkable_i(x, y) && seen[y as usize * w + x as usize]
+            "display" | "shelf" | "mannequin" | "fitting_room" | "mirror" | "pet_pen" => {
+                // Any tile just outside the object.
+                let (x0, y0) = (o.x as i32 - 1, o.y as i32 - 1);
+                let (x1, y1) = (o.x as i32 + o.w as i32, o.y as i32 + o.h as i32);
+                (y0..=y1).any(|y| {
+                    (x0..=x1).any(|x| {
+                        let edge = x == x0 || x == x1 || y == y0 || y == y1;
+                        let corner = (x == x0 || x == x1) && (y == y0 || y == y1);
+                        edge && !corner
+                            && grid.walkable_i(x, y)
+                            && seen[y as usize * w + x as usize]
                     })
+                })
             }
             _ => continue,
         };

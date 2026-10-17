@@ -113,7 +113,11 @@ const ABOUT: Record<string, string> = {
   hat: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
   accessory: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
   skin: "A full-body suit: you, as a whole new character. Yours to keep (it can't be sold on or given).",
+  pet: "A friend for life. Pets live at your house and wait in the yard by your door. They'd love a walk every day: take them out, show them the city, bring them home.",
 };
+
+/** Whether you can give a pet a home. */
+export type PetHome = "ok" | "no_house" | "apartment" | "have_pet";
 
 /** A shop's goods: one display up close, or everything at the counter. */
 export class ShopPanel extends Panel {
@@ -126,6 +130,9 @@ export class ShopPanel extends Panel {
     private eco: Economy,
     /** Opens the fitting room with this thing to wear on. */
     private tryOn: (dept: string, item: number) => void,
+    /** Whether you can adopt (a house, no pet yet), and after adopting. */
+    private petHome: () => PetHome,
+    private adopted: (name: string) => void,
   ) {
     super("Shop", "shop");
     eco.onChange(() => this.open && this.render());
@@ -165,6 +172,36 @@ export class ShopPanel extends Panel {
     b.disabled = this.eco.coins < s.price || s.left === 0;
     if (s.left === 0) b.textContent = "Sold out";
     return b;
+  }
+
+  /** A name and "Adopt", if you can give it a home. */
+  private adoptForm(s: Shelf): HTMLElement[] {
+    const why: Record<Exclude<PetHome, "ok">, string> = {
+      no_house: "A pet needs a garden: rent a house first (ask at the Post Office).",
+      apartment: "A pet needs a garden: the apartments don't have one. A house in the home blocks does.",
+      have_pet: "You have a pet already: one is plenty of love.",
+    };
+    const home = this.petHome();
+    if (home !== "ok") return [el("p", "hint", why[home])];
+    const name = el("input", "pet-name");
+    name.placeholder = "Their name";
+    name.maxLength = 16;
+    name.onkeydown = (e) => e.stopPropagation();
+    const adopt = button(`Adopt for ${s.price}`, () => {
+      this.msg.textContent = "";
+      const n = name.value.trim();
+      if (n.length < 2) return void (this.msg.textContent = "Give them a name first.");
+      this.shop
+        .buy(this.dept, s.slot, n)
+        .then(() => {
+          this.hide();
+          this.adopted(n);
+        })
+        .catch((e) => (this.msg.textContent = e instanceof Error ? e.message : "That didn't work."));
+    }, "primary");
+    adopt.disabled = this.eco.coins < s.price || s.left === 0;
+    if (s.left === 0) adopt.textContent = "Adopted this week";
+    return [el("p", "hint", `You have ${this.eco.coins} coins.`), name, adopt];
   }
 
   /** "New this week", "Only 3 left this week". */
@@ -207,6 +244,7 @@ export class ShopPanel extends Panel {
       card.append(pic, el("strong", "", it?.name ?? s.key), el("span", "price", `${s.price} coins`), this.badges(s));
       const owned = this.eco.qty(s.item);
       this.body.append(card, el("p", "hint", ABOUT[it?.kind ?? ""] ?? ""));
+      if (it?.kind === "pet") return void this.body.append(...this.adoptForm(s), this.msg);
       if (it && isWearable(it.kind)) {
         const dept = this.dept;
         this.body.append(button("Try it on 👗", () => (this.hide(), this.tryOn(dept, s.item)), owned ? "primary" : ""));

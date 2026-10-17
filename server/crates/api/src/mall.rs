@@ -128,6 +128,9 @@ struct BuyReq {
     slot: u16,
     /// Client-generated idempotency key (one per button press).
     key: String,
+    /// A pet's name, adopting one.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 async fn buy(
@@ -154,6 +157,13 @@ async fn buy(
         return Err(gone());
     }
     let key = format!("mall:{player}:{}", req.key);
+    // A pet isn't goods for the bag: it needs a name, and comes home with you.
+    let pet = crate::pets::is_pet(&item.kind);
+    let pet_name = if pet {
+        Some(crate::pets::clean_name(req.name.as_deref().unwrap_or(""))?)
+    } else {
+        None
+    };
     // Things to wear are bought once and kept (a repeat of the same press is
     // fine: it's answered as a duplicate below).
     if crate::cosmetics::is_cosmetic(&item.kind) {
@@ -173,16 +183,16 @@ async fn buy(
             ));
         }
     }
-    let ops = [
-        Op {
-            item: COIN,
-            delta: -shelf.price,
-        },
-        Op {
+    let mut ops = vec![Op {
+        item: COIN,
+        delta: -shelf.price,
+    }];
+    if !pet {
+        ops.push(Op {
             item: item.id,
             delta: 1,
-        },
-    ];
+        });
+    }
     let mut tx = state.db.begin().await.map_err(db_err)?;
     let applied = match apply(&mut tx, &state.catalog, player, &ops, "mall_buy", &key).await {
         Ok(a) => a,
@@ -197,6 +207,9 @@ async fn buy(
     };
     if applied.duplicate {
         return Ok(Json(applied));
+    }
+    if let Some(name) = &pet_name {
+        crate::pets::adopt(&mut tx, player, item.id, name).await?;
     }
     // Limited: one fewer to go round this rotation, or none left.
     if let Some(n) = shelf.limited {

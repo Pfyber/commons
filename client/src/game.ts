@@ -32,6 +32,9 @@ import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Homes } from "./homes";
+import type { Pets } from "./pets";
+import { PetLife, petTitle } from "./ambient/petlife";
+import { PET_SOUNDS } from "./world/pets";
 import type { Rent } from "./rent";
 import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
@@ -66,6 +69,7 @@ export interface Ui {
   minimap: Minimap;
   homes: Homes;
   rent: Rent;
+  pets: Pets;
   postOffice: PostOfficePanel;
   apartments: ApartmentsPanel;
   stall: StallPanel;
@@ -219,6 +223,7 @@ export class Game {
   private critters: Critters;
   private cat: Cat | null = null;
   private caretaker: Caretaker | null = null;
+  private petLife: PetLife;
   private grove: Grove | null = null;
   private caretakerTalkAt = 0;
   private sky: Sky;
@@ -283,6 +288,22 @@ export class Game {
       if (grove.active) this.grove = grove;
       if (map.objects.some((o) => o.kind === "founders_stone")) this.caretaker = new Caretaker(map, this.scene, labels);
     }
+    this.petLife = new PetLife(
+      this.scene,
+      map,
+      ui.pets,
+      ui.eco,
+      {
+        self: () => this.self,
+        avatars: () => this.avatars.values(),
+        toast: (t, ms) => this.hud.toast(t, ms),
+        refreshLook: () => this.refreshLook(),
+      },
+      zoneId === "city",
+    );
+    if (zoneId === "city") void ui.pets.load().catch(() => {});
+    // In through your own front door: a pet out with you is home.
+    if (zoneId === "home" && place.owner === ui.social.selfId && ui.pets.mine?.out) void this.petLife.bringHome().catch(() => {});
     this.sky = new Sky(app, this.scene, () => this.onShootingStar());
     const fire = map.objects.find((o) => o.kind === "campfire");
     if (fire) {
@@ -379,7 +400,11 @@ export class Game {
     const r = homes.resident(lot);
     const menu = this.near(this.ui.menu, door, 6);
     if (homes.mine === lot) {
-      menu.showWith("Your home", "", [["Go inside", () => this.events.onTravel("home")]]);
+      const pet = this.ui.pets.mine;
+      const actions: [string, () => void][] = [["Go inside", () => this.events.onTravel("home")]];
+      if (pet?.out) actions.push([`Bring ${pet.name} home`, () => void this.petLife.bringHome().catch(() => {})]);
+      else if (pet) actions.push([`Take ${pet.name} for a walk 🐾`, () => void this.petLife.takeOut().catch(() => {})]);
+      menu.showWith("Your home", "", actions);
     } else if (r) {
       menu.showWith(`${r.name}'s home`, "Friends can come in when they're invited.", [["Knock", () => this.events.onVisit(r.owner)]]);
     } else if (homes.mine) {
@@ -643,6 +668,57 @@ export class Game {
     this.socket?.send({ t: "SetLook", look });
   }
 
+  /** Asks the zone to show us as saved (after taking a pet out or home). */
+  refreshLook() {
+    const self = this.self;
+    if (self) this.socket?.send({ t: "SetLook", look: self.info.look });
+  }
+
+  /** Tapping a pet: yours (a walk, home), or someone else's (a pat). */
+  private tapPet(sx: number, sy: number): boolean {
+    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
+    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    const ui = this.ui;
+    const self = this.self;
+    const fail = (e: unknown) => this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 4000);
+    const sound = (item: number) => {
+      const s = PET_SOUNDS[(ui.eco.items.get(item)?.meta.code ?? 1) & 0xff] ?? [];
+      return s[Math.floor(Math.random() * s.length)] ?? "";
+    };
+    const yard = this.petLife.yardPetAt(x, y);
+    if (yard) {
+      const at = { x: Math.floor(x), y: Math.floor(y) };
+      const mine = yard.owner === ui.social.selfId;
+      this.petLife.patYard(yard.owner);
+      if (!mine) {
+        this.hud.toast(`🐾 You pat ${petTitle(ui.eco, yard, false)}. ${sound(yard.item)}`, 3500);
+        return true;
+      }
+      if (self && cheb(self.destination, at) > 2) this.walkTo(at);
+      const note = yard.walked_today ? `Had a walk today. ${yard.walks} walks together.` : `Hoping for a walk! ${yard.walks ? `${yard.walks} walks together so far.` : "Your first one together?"}`;
+      this.near(ui.menu, at, 6).showWith(petTitle(ui.eco, yard, true), note, [["Take for a walk 🐾", () => void this.petLife.takeOut().catch(fail)]]);
+      return true;
+    }
+    const walker = this.petLife.walkerAt(x, y);
+    if (!walker?.pet) return false;
+    const pet = ui.pets.ofName(walker.info.name);
+    walker.pet.greet(performance.now());
+    if (walker !== self) {
+      this.hud.toast(`🐾 You pat ${pet ? petTitle(ui.eco, pet, false) : "the pet"}. ${pet ? sound(pet.item) : ""}`, 3500);
+      // A heart for its walker to see.
+      this.socket?.send({ t: "Emote", emote: 7 });
+      return true;
+    }
+    const mins = Math.floor((Date.now() - ui.pets.outSince) / 60_000);
+    const plot = ui.pets.mine?.plot;
+    const actions: [string, () => void][] = [];
+    if (plot && this.zoneId === "city") actions.push(["Walk home", () => void this.walkToSpot(`door:${plot}`)]);
+    actions.push(["Bring home now", () => void this.petLife.bringHome().catch(fail)]);
+    const note = ui.pets.outSince ? `Out together for ${mins < 1 ? "a minute" : `${mins} min`}. Back at your door, they're home.` : "Out for a walk with you.";
+    this.near(ui.menu, walker.destination, 6).showWith(pet ? petTitle(ui.eco, pet, true) : "Your pet", note, actions);
+    return true;
+  }
+
   /** Sends a wish up on a sky lantern. */
   releaseLantern(text: string) {
     this.socket?.send({ t: "SkyLantern", text });
@@ -787,9 +863,17 @@ export class Game {
         break;
       case "LookChanged": {
         const a = this.avatars.get(m.id);
-        if (!a || m.id === this.selfId) break;
-        a.info = { ...a.info, look: m.look, style: m.style };
-        a.flash("✨");
+        if (!a) break;
+        const clothes = a.info.look !== m.look || a.info.style !== m.style;
+        // Our own clothes are shown already; a pet coming along is news.
+        if (m.id === this.selfId) {
+          a.info = { ...a.info, pet: m.pet };
+          break;
+        }
+        a.info = { ...a.info, look: m.look, style: m.style, pet: m.pet };
+        if (clothes) a.flash("✨");
+        // Someone took a pet out: know its name.
+        if (m.pet && !this.ui.pets.ofName(a.info.name)?.out) void this.ui.pets.load().catch(() => {});
         break;
       }
       case "Offered": {
@@ -952,6 +1036,7 @@ export class Game {
     const tap = (e: FederatedPointerEvent) => {
       const t = this.scene.screenToTile(e.global.x, e.global.y);
       if (this.tapBall(e.global.x, e.global.y)) return;
+      if (this.tapPet(e.global.x, e.global.y)) return;
       if (this.tapCat(e.global.x, e.global.y)) return;
       if (this.tapCaretaker(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
@@ -1214,7 +1299,7 @@ export class Game {
       this.near(ui.wardrobe, { x: obj.x + 1, y: obj.y + obj.h }, 6).openFitting(obj.label, obj.kind === "mirror" ? "The mirror" : "Fitting room");
       return true;
     }
-    if (obj && (obj.kind === "display" || obj.kind === "shelf" || obj.kind === "mannequin") && obj.label) {
+    if (obj && (obj.kind === "display" || obj.kind === "shelf" || obj.kind === "mannequin" || obj.kind === "pet_pen") && obj.label) {
       // Walk up to it and look: what it is, what it costs, buy it.
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
@@ -1469,6 +1554,7 @@ export class Game {
     this.weather.update(wallNow, hour);
     this.critters.update(wallNow, this.daynight.dark);
     this.cat?.update(Date.now());
+    this.petLife.update(wallNow);
     if (this.caretaker) {
       this.caretaker.update(Date.now(), wallNow);
       this.caretakerChat(wallNow);
@@ -1518,6 +1604,7 @@ export class Game {
     this.weather.destroy();
     this.critters.destroy();
     this.caretaker?.destroy();
+    this.petLife.destroy();
     this.campfire?.destroy();
     this.sky.destroy();
     this.ui.offer.hide();

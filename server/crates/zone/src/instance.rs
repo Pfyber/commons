@@ -118,6 +118,8 @@ struct Avatar {
     look: u32,
     /// What it wears from the mall (outfit, hat, accessory, skin codes).
     style: u32,
+    /// The pet out on a walk with it (0: none).
+    pet: u16,
     tile: TilePos,
     motion: Option<Motion>,
     cell: u16,
@@ -185,6 +187,7 @@ impl Avatar {
             name: self.name.clone(),
             look: self.look,
             style: self.style,
+            pet: self.pet,
             x: self.tile.0,
             y: self.tile.1,
             state: self.state,
@@ -573,6 +576,7 @@ impl Instance {
             name: claims.name,
             look: claims.look,
             style: claims.style,
+            pet: 0,
             tile,
             motion: None,
             cell,
@@ -617,6 +621,8 @@ impl Instance {
         self.update_subs(id, now);
         let player = self.avatars[&id].player_id.clone();
         self.report_presence(&player, true);
+        // A pet out on a walk comes along through every door.
+        self.refresh_look(id);
         if let Some(msg) = self.screen_state(now) {
             self.send_to(id, &msg);
         }

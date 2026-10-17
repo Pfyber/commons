@@ -807,7 +807,46 @@ a fox suit you can't wear out until it's bought, the look survives a
 reload; the old wardrobe, the earlier mall steps and following pass again;
 500 bots pass the perf gate.
 
-Next: M5, pets (adopt at the Pets shop, live at your house, daily walks).
+## Mall M5 · Pets: done (2026-10-17)
+
+- **The Pets shop opens** (migration 0014): six fenced pens on straw, each
+  with an animal waiting for a home. Golden and spotted puppies, ginger and
+  black kittens, a lop bunny, a duckling, a hedgehog and a limited corgi
+  (two a week), 100–250 coins. Like everything else in the mall, the pens
+  change weekly.
+- **Adopting** takes a name and a house: pets need a garden, so not the
+  apartments. One pet each. The payment and the adoption are one
+  transaction, and a pet never goes in the bag.
+- **At home** the pet waits in the yard by your front door, for everyone
+  passing to see. Until it's had a walk today, a thought bubble with a
+  ball hovers over it. Moving house takes it along; without a house it
+  waits off the map until you have one.
+- **Walks.** Tap your pet (or your door) and take it out: it trots at your
+  heels everywhere, through the city, the mall and every door, and everyone
+  sees it. Coming back to your door after a proper walk
+  (`COMMONS_PET_WALK_SECS`, 3 minutes) is its walk for the day; so is going
+  inside. Missing a day costs nothing (the spec has no streaks): the pet
+  just looks hopeful. A pet left out for 3 hours goes home on its own.
+- **Meeting.** Pets that meet (out walking, or one passing a yard) sniff
+  hello with hearts, and your pet's walker hears who it met ("Say hi to
+  Kai?"). Tap someone else's pet to pat it, which sends its walker a heart.
+- **Protocol v8:** `EntityInfo.pet` and `LookChanged.pet`. The zone takes
+  the pet from the API (`/internal/look`) when you join and when you take
+  it out or home, never from the client.
+
+Checked: API tests (a name and a house are needed, adopting charges once
+and never twice for one press, a second pet is refused, a short walk
+doesn't count, a proper one counts once a day, a forgotten pet goes home);
+the pens are reachable (mapgen check). In the browser: two players each
+rent a house and adopt at the pens, the pet waits in the yard hoping for a
+walk, you take it out from the yard, it follows you, the other player sees
+it, the two pets meet and sniff hello, you come back to your door and it's
+the day's walk, and going inside brings the other pet home. Clothing and
+Skins, the earlier mall steps, homes and following pass again, and 500 bots
+pass the perf gate.
+
+Next: M6, vehicles (skates, scooter, bike; speed outdoors, off at doors,
+the test track).
 
 ## Next: M5 · Crowds
 
