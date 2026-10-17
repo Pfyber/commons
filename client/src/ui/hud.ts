@@ -12,6 +12,7 @@ export interface HudHandlers {
   onChat(text: string): void;
   onEmote(id: number): void;
   onSit(): void;
+  onRide(): void;
   onBag(): void;
   onAlbum(): void;
   onFriends(): void;
@@ -30,6 +31,7 @@ export class Hud {
   readonly input: HTMLInputElement;
   private toastEl: HTMLDivElement;
   private sitBtn: HTMLButtonElement;
+  private rideBtn: HTMLButtonElement;
   private coinsEl: HTMLDivElement;
   private badgeEl!: HTMLSpanElement;
   private toastTimer = 0;
@@ -90,6 +92,7 @@ export class Hud {
       if (e.key === "f" || e.key === "F") h.onFriends();
       if (e.key === "n" || e.key === "N") h.onNotifications();
       if (e.key === "m" || e.key === "M") sound();
+      if ((e.key === "r" || e.key === "R") && !this.rideBtn.hidden) h.onRide();
     });
 
     const form = root.querySelector<HTMLFormElement>(".chat")!;
@@ -119,6 +122,12 @@ export class Hud {
     this.sitBtn.className = "sit";
     this.sitBtn.onclick = () => h.onSit();
     bar.appendChild(this.sitBtn);
+    this.rideBtn = document.createElement("button");
+    this.rideBtn.type = "button";
+    this.rideBtn.className = "ride-btn";
+    this.rideBtn.hidden = true;
+    this.rideBtn.onclick = () => h.onRide();
+    bar.appendChild(this.rideBtn);
     this.setSitting(false);
     for (const [id, e] of Object.entries(EMOTES)) {
       const b = document.createElement("button");
@@ -129,6 +138,22 @@ export class Hud {
       b.onclick = () => h.onEmote(Number(id));
       bar.appendChild(b);
     }
+  }
+
+  /** The ride button: what you'd ride (its icon), and whether you're on it; null hides it. */
+  setRide(ride: { icon: string; name: string; on: boolean } | null) {
+    this.rideBtn.hidden = ride === null;
+    if (!ride) return;
+    const img = document.createElement("img");
+    img.className = "px-icon";
+    img.alt = "";
+    img.width = 24;
+    img.height = 24;
+    img.src = ride.icon;
+    this.rideBtn.replaceChildren(img);
+    this.rideBtn.title = ride.on ? `Get off the ${ride.name} (R)` : `Ride the ${ride.name} (R)`;
+    this.rideBtn.setAttribute("aria-label", this.rideBtn.title);
+    this.rideBtn.classList.toggle("on", ride.on);
   }
 
   setSitting(sitting: boolean) {

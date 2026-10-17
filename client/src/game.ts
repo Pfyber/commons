@@ -19,7 +19,7 @@ import { Weather } from "./ambient/weather";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
 import { DayNight } from "./ambient/daynight";
-import type { Economy } from "./economy";
+import type { Economy, Item } from "./economy";
 import type { ServerMsg } from "./net/protocol.gen";
 import type { Social } from "./social";
 import type { Gov } from "./gov";
@@ -33,6 +33,9 @@ import { Grove } from "./world/grove";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Homes } from "./homes";
 import type { Pets } from "./pets";
+import type { Rides } from "./rides";
+import { rideSpeed } from "./world/vehicles";
+import { itemIconUrl } from "./world/items";
 import { PetLife, petTitle } from "./ambient/petlife";
 import { PET_SOUNDS } from "./world/pets";
 import type { Rent } from "./rent";
@@ -70,6 +73,7 @@ export interface Ui {
   homes: Homes;
   rent: Rent;
   pets: Pets;
+  rides: Rides;
   postOffice: PostOfficePanel;
   apartments: ApartmentsPanel;
   stall: StallPanel;
@@ -224,6 +228,7 @@ export class Game {
   private cat: Cat | null = null;
   private caretaker: Caretaker | null = null;
   private petLife: PetLife;
+  private endingTest = false;
   private grove: Grove | null = null;
   private caretakerTalkAt = 0;
   private sky: Sky;
@@ -302,6 +307,20 @@ export class Game {
       zoneId === "city",
     );
     if (zoneId === "city") void ui.pets.load().catch(() => {});
+    // Through a door, you get off what you ride (it waits for you outside);
+    // a test ride ends when you leave the mall.
+    const rides = ui.rides;
+    if ((zoneId !== "city" && rides.riding) || (zoneId !== "mall" && rides.testRide)) {
+      const was = rides.riding ? rides.item(rides.ride)?.name : null;
+      void rides
+        .set(0)
+        .then(() => {
+          this.refreshLook();
+          if (was) this.hud.toast(`You hop off the ${was.toLowerCase()} at the door. It'll be waiting when you're back outside.`, 4000);
+        })
+        .catch(() => {});
+    }
+    this.showRideButton();
     // In through your own front door: a pet out with you is home.
     if (zoneId === "home" && place.owner === ui.social.selfId && ui.pets.mine?.out) void this.petLife.bringHome().catch(() => {});
     this.sky = new Sky(app, this.scene, () => this.onShootingStar());
@@ -525,6 +544,7 @@ export class Game {
     if (this.following === from) {
       this.following = null;
       this.hud.setFollow(null);
+    this.hud.setRide(null);
       this.showFollowers();
       this.hud.toast(`👣 ${name} let you go off on your own.`, 3000);
     }
@@ -668,6 +688,83 @@ export class Game {
     this.socket?.send({ t: "SetLook", look });
   }
 
+  /** How fast we'll go on `path` (the server decides; this is its rule). */
+  private predictSpeed(path: TileXY[]): number {
+    const v = this.self?.info.vehicle ?? 0;
+    const speed = rideSpeed(v);
+    if (!speed) return WALK_SPEED_X10;
+    if (this.zoneId === "city") return speed;
+    const map = this.scene.map;
+    const track = map.ground_legend.indexOf("track");
+    return track >= 0 && path.slice(1).every((t) => map.ground[t.y * map.width + t.x] === track) ? speed : WALK_SPEED_X10;
+  }
+
+  /** The ride button: in the city, if you own something to ride. */
+  showRideButton() {
+    const rides = this.ui.rides;
+    const owned = rides.owned();
+    if (this.zoneId !== "city" || !owned.length) return this.hud.setRide(null);
+    const it = (rides.riding && rides.item(rides.ride)) || owned[owned.length - 1];
+    this.hud.setRide({ icon: itemIconUrl(it.key, it.kind), name: it.name.toLowerCase(), on: rides.riding });
+  }
+
+  /** The ride button: get off, or on (choosing, if there's more than one). */
+  toggleRide() {
+    const rides = this.ui.rides;
+    if (rides.riding) return void this.rideOn(null);
+    const owned = rides.owned();
+    if (owned.length === 1) return void this.rideOn(owned[0]);
+    const at = this.self?.destination ?? { x: 0, y: 0 };
+    this.near(this.ui.menu, at, 6).showWith(
+      "Ride",
+      "",
+      owned.map((it) => [it.name, () => void this.rideOn(it)] as [string, () => void]),
+    );
+  }
+
+  /** Gets on something of yours (outdoors only), or off with null. */
+  async rideOn(it: Item | null) {
+    if (it && this.zoneId !== "city") return this.hud.toast("Vehicles are for outdoors: ride once you're back outside.", 3500);
+    try {
+      await this.ui.rides.set(it?.id ?? 0);
+      this.refreshLook();
+      this.showRideButton();
+      if (it) this.hud.toast(`${it.name}: off you go! Faster anywhere outdoors; you'll hop off at doors.`, 3500);
+    } catch (e) {
+      this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 3500);
+    }
+  }
+
+  /** A test ride round the Vehicles shop's track. */
+  async testRide(item: number) {
+    try {
+      await this.ui.rides.set(item, true);
+      this.refreshLook();
+      this.walkToSpot("track");
+      this.hud.toast(`🛼 Test ride! Tap along the track to go round. Walk off it to hand the ${this.ui.eco.name(item).toLowerCase()} back.`, 5000);
+    } catch (e) {
+      this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 3500);
+    }
+  }
+
+  /** A test ride ends when you leave the Vehicles shop. */
+  private checkTestRide() {
+    const self = this.self;
+    if (!self || this.zoneId !== "mall" || !this.ui.rides.testRide || this.endingTest) return;
+    const shop = this.scene.map.objects.find((o) => o.kind === "dept" && o.label === "vehicles");
+    const p = self.pos;
+    if (shop && p.x >= shop.x && p.x < shop.x + shop.w && p.y >= shop.y && p.y < shop.y + shop.h) return;
+    this.endingTest = true;
+    void this.ui.rides
+      .set(0)
+      .then(() => {
+        this.refreshLook();
+        this.hud.toast("You hand the test ride back. Like it? It's on the display by the door.", 3500);
+      })
+      .catch(() => {})
+      .finally(() => (this.endingTest = false));
+  }
+
   /** Asks the zone to show us as saved (after taking a pet out or home). */
   refreshLook() {
     const self = this.self;
@@ -782,10 +879,11 @@ export class Game {
         const a = this.avatars.get(m.id);
         if (!a) break;
         if (m.id === this.selfId) {
-          // The server confirming our predicted walk: keep the local timing.
+          // The server confirming our predicted walk: keep the local timing
+          // (unless it says we go at another pace: on wheels, or keeping up).
           const end = m.path[m.path.length - 1];
           const dest = a.destination;
-          if (end.x === dest.x && end.y === dest.y) break;
+          if (end.x === dest.x && end.y === dest.y && a.currentMotion?.speedX10 === m.speedX10) break;
         }
         a.setMotion({ path: m.path, t0: m.t0, speedX10: m.speedX10 }, now);
         break;
@@ -867,10 +965,10 @@ export class Game {
         const clothes = a.info.look !== m.look || a.info.style !== m.style;
         // Our own clothes are shown already; a pet coming along is news.
         if (m.id === this.selfId) {
-          a.info = { ...a.info, pet: m.pet };
+          a.info = { ...a.info, pet: m.pet, vehicle: m.vehicle };
           break;
         }
-        a.info = { ...a.info, look: m.look, style: m.style, pet: m.pet };
+        a.info = { ...a.info, look: m.look, style: m.style, pet: m.pet, vehicle: m.vehicle };
         if (clothes) a.flash("✨");
         // Someone took a pet out: know its name.
         if (m.pet && !this.ui.pets.ofName(a.info.name)?.out) void this.ui.pets.load().catch(() => {});
@@ -1024,7 +1122,7 @@ export class Game {
       return;
     }
     if (sp) full.unshift(sp.prev);
-    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10: WALK_SPEED_X10 }, now);
+    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10: this.predictSpeed(full) }, now);
     this.socket.send({ t: "MoveTo", x: t.x, y: t.y });
     if (marker) this.scene.showTarget(t);
   }
@@ -1575,6 +1673,7 @@ export class Game {
         this.discover("fairy_ring", DISCOVERIES.fairy_ring);
       }
       if (self) this.checkNook(self.pos);
+      this.checkTestRide();
       this.closeIfWalkedAway();
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });

@@ -113,6 +113,7 @@ const ABOUT: Record<string, string> = {
   hat: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
   accessory: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
   skin: "A full-body suit: you, as a whole new character. Yours to keep (it can't be sold on or given).",
+  vehicle: "Faster anywhere outdoors in the city; you hop off at every door. Yours to keep. Try it on the test track first!",
   pet: "A friend for life. Pets live at your house and wait in the yard by your door. They'd love a walk every day: take them out, show them the city, bring them home.",
 };
 
@@ -133,6 +134,8 @@ export class ShopPanel extends Panel {
     /** Whether you can adopt (a house, no pet yet), and after adopting. */
     private petHome: () => PetHome,
     private adopted: (name: string) => void,
+    /** A test ride on the Vehicles shop's track. */
+    private testRide: (item: number) => void,
   ) {
     super("Shop", "shop");
     eco.onChange(() => this.open && this.render());
@@ -245,6 +248,10 @@ export class ShopPanel extends Panel {
       const owned = this.eco.qty(s.item);
       this.body.append(card, el("p", "hint", ABOUT[it?.kind ?? ""] ?? ""));
       if (it?.kind === "pet") return void this.body.append(...this.adoptForm(s), this.msg);
+      if (it?.kind === "vehicle") {
+        this.body.append(button("Test ride on the track 🛼", () => (this.hide(), this.testRide(s.item)), owned ? "" : "primary"));
+        if (owned) return void this.body.append(el("p", "hint", "It's yours: ride it outside from your bag or the ride button."), this.msg);
+      }
       if (it && isWearable(it.kind)) {
         const dept = this.dept;
         this.body.append(button("Try it on 👗", () => (this.hide(), this.tryOn(dept, s.item)), owned ? "primary" : ""));

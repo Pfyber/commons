@@ -30,7 +30,10 @@ use commons_common::token::JoinClaims;
 use commons_protocol::{
     CELL_TILES, ClientMsg, EntityInfo, ServerMsg, Tile, emote, error_code, push_framed, state,
 };
-use commons_sim::{Grid, Motion, TilePos, WALK_SPEED_X10, compress, route};
+use commons_sim::{Grid, Motion, TilePos, WALK_SPEED_X10, compress, route, vehicles};
+
+/// The zone where vehicles can be ridden (everywhere else, you're on foot).
+pub(crate) const OUTDOORS: &str = "city";
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -120,6 +123,10 @@ struct Avatar {
     style: u32,
     /// The pet out on a walk with it (0: none).
     pet: u16,
+    /// What it's riding, as saved (`commons_sim::vehicles`; may be a test
+    /// ride), and what others see of it here (0: on foot).
+    ride: u8,
+    vehicle: u8,
     tile: TilePos,
     motion: Option<Motion>,
     cell: u16,
@@ -188,6 +195,7 @@ impl Avatar {
             look: self.look,
             style: self.style,
             pet: self.pet,
+            vehicle: self.vehicle,
             x: self.tile.0,
             y: self.tile.1,
             state: self.state,
@@ -218,6 +226,9 @@ pub struct Instance {
     elders: HashMap<u32, hangout::Elder>,
     /// Open offers to do something together: (from, to) → (kind, expires).
     offers: HashMap<(u32, u32), (u8, u32)>,
+    /// Who walks after whom: follower → leader. A follower keeps up with a
+    /// leader on wheels.
+    follows: HashMap<u32, u32>,
     /// The pitch's ball, if the zone has a pitch.
     ball: Option<play::Ball>,
     /// Activity of players who left since the last report.
@@ -280,6 +291,7 @@ impl Instance {
             games: HashMap::new(),
             elders: HashMap::new(),
             offers: HashMap::new(),
+            follows: HashMap::new(),
             ball,
             activity_left: Vec::new(),
             next_activity_report: ACTIVITY_EVERY_MS,
@@ -577,6 +589,8 @@ impl Instance {
             look: claims.look,
             style: claims.style,
             pet: 0,
+            ride: 0,
+            vehicle: 0,
             tile,
             motion: None,
             cell,
@@ -632,6 +646,7 @@ impl Instance {
     }
 
     fn remove(&mut self, id: u32) {
+        self.follows.retain(|&f, &mut l| f != id && l != id);
         self.leave_seat(id);
         self.stop_fishing(id, false);
         let Some(a) = self.avatars.remove(&id) else {
@@ -754,10 +769,18 @@ impl Instance {
         if full.len() < 2 {
             return;
         }
+        // On wheels where they apply; following someone, at least their pace.
+        let own = self.ride_speed(id, &full);
+        let leader = self
+            .follows
+            .get(&id)
+            .and_then(|&l| self.ride_speed(l, &full));
+        let speed_x10 = own.max(leader).unwrap_or(WALK_SPEED_X10);
+        let a = self.avatars.get_mut(&id).unwrap();
         let motion = Motion {
             path: compress(&full),
             t0,
-            speed_x10: WALK_SPEED_X10,
+            speed_x10,
         };
         let msg = ServerMsg::MoveStart {
             id,
@@ -768,6 +791,26 @@ impl Instance {
         a.motion = Some(motion);
         let cell = a.cell;
         self.broadcast(cell, &msg, None);
+    }
+
+    /// How fast avatar `id` goes on `path` riding what it rides: outdoors in
+    /// the city, or a test ride kept to a test track. `None`: on foot.
+    fn ride_speed(&self, id: u32, path: &[TilePos]) -> Option<u8> {
+        let a = self.avatars.get(&id)?;
+        let speed = vehicles::speed_x10(a.ride)?;
+        let test = a.ride & vehicles::TEST_RIDE != 0;
+        if test {
+            let map = &self.zone.map;
+            let track = map
+                .ground_legend
+                .iter()
+                .position(|g| g == vehicles::TRACK_GROUND)?;
+            let on = |&(x, y): &TilePos| {
+                map.ground.get(y as usize * map.width as usize + x as usize) == Some(&(track as u8))
+            };
+            return path.iter().skip(1).all(on).then_some(speed);
+        }
+        (self.zone.id == OUTDOORS).then_some(speed)
     }
 
     fn chat(&mut self, id: u32, text: &str, now: u32) {

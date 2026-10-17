@@ -1736,7 +1736,9 @@ mod mall_shop {
                 // Only things to wear and pets are bound to whoever buys them.
                 assert_eq!(
                     item.account_bound(),
-                    crate::cosmetics::is_cosmetic(&item.kind) || crate::pets::is_pet(&item.kind)
+                    crate::cosmetics::is_cosmetic(&item.kind)
+                        || crate::pets::is_pet(&item.kind)
+                        || crate::vehicles::is_vehicle(&item.kind)
                 );
             }
         }
@@ -2169,5 +2171,104 @@ mod mall_shop {
         ] {
             sqlx::query(q).bind(p).execute(&s.db).await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn ride_what_you_own_or_test_ride_whats_on_show() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = Router::new()
+            .nest("/api", mall::routes().merge(crate::vehicles::routes()))
+            .nest("/internal", crate::internal::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Rider");
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            p,
+            &[Op {
+                item: COIN,
+                delta: 1000,
+            }],
+            "test",
+            &format!("{p}:coins"),
+        )
+        .await
+        .unwrap();
+        let svc = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &ServiceClaims { svc: "zone".into() }, 60)
+        );
+        let bike = s.catalog.by_key("city_bike").unwrap().clone();
+        let code = bike.meta["code"].as_u64().unwrap();
+        let ride = |item: i32, test: bool| json!({ "item": item, "test": test });
+        // Not yours: no riding it in the street, but a test ride is fine.
+        let (st, r) = call(&app, &auth, "POST", "/api/me/ride", ride(bike.id, false)).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not_yours"))
+        );
+        let (st, r) = call(&app, &auth, "POST", "/api/me/ride", ride(bike.id, true)).await;
+        assert_eq!(
+            (st, r["ride"].as_u64()),
+            (StatusCode::OK, Some(code | 0x80))
+        );
+        let (_, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
+        assert_eq!(r["vehicle"].as_u64(), Some(code | 0x80));
+        // Something that isn't for riding.
+        let seed = s
+            .catalog
+            .items
+            .iter()
+            .find(|i| i.kind == "seed")
+            .unwrap()
+            .id;
+        let (st, _) = call(&app, &auth, "POST", "/api/me/ride", ride(seed, true)).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        // Bought: off you go.
+        let (_, stock) = call(&app, &auth, "GET", "/api/mall/stock", json!({})).await;
+        let shelf = stock["departments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["key"] == "vehicles")
+            .unwrap()["shelves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["key"] == "city_bike")
+            .unwrap()
+            .clone();
+        let (st, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/mall/buy",
+            json!({ "dept": "vehicles", "slot": shelf["slot"], "key": "v1" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let (st, r) = call(&app, &auth, "POST", "/api/me/ride", ride(bike.id, false)).await;
+        assert_eq!((st, r["ride"].as_u64()), (StatusCode::OK, Some(code)));
+        let (_, r) = call(&app, &auth, "GET", "/api/me/ride", json!({})).await;
+        assert_eq!(r["ride"].as_u64(), Some(code));
+        // Bought once and kept.
+        let (st, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/mall/buy",
+            json!({ "dept": "vehicles", "slot": shelf["slot"], "key": "v2" }),
+        )
+        .await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("have_it"))
+        );
+        let (_, r) = call(&app, &auth, "POST", "/api/me/ride", ride(0, false)).await;
+        assert_eq!(r["ride"].as_u64(), Some(0));
+        let (_, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
+        assert_eq!(r["vehicle"].as_u64(), Some(0));
     }
 }

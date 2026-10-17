@@ -1650,7 +1650,8 @@ body.fading #stage {
   color: #6b7563;
 }
 
-.emotes .mood-btn.on {
+.emotes .mood-btn.on,
+.emotes .ride-btn.on {
   background: #e7f2dc;
   outline: 2px solid #8fb875;
 }
@@ -2092,7 +2093,8 @@ img.px-icon,
   background: var(--paper-3);
 }
 
-.emotes .mood-btn.on {
+.emotes .mood-btn.on,
+.emotes .ride-btn.on {
   background: #d9e6bf;
   outline: none;
 }

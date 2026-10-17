@@ -106,9 +106,13 @@ pub fn mall() -> MapFile {
         } else {
             format!("{}: opening soon", d.name)
         };
-        b.object("counter", cx - 1, cy, 3, 1, Some(&label), true);
+        // The track takes the middle of the Vehicles shop; its counter is by
+        // the door.
+        let counter_x = if d.kind == "track" { x1 - 5 } else { cx - 1 };
+        let counter_y = if d.kind == "track" { cy - 5 } else { cy };
+        b.object("counter", counter_x, counter_y, 3, 1, Some(&label), true);
         if d.open {
-            displays(&mut b, d, cy);
+            displays(&mut b, d, counter_y);
         }
     }
 
@@ -229,6 +233,46 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
                 _ => {}
             }
             "mannequin"
+        }
+        "track" => {
+            // A test track: a two-lane loop round a fenced lawn, fenced off
+            // from the shop floor but for a gap facing the door. Bikes and
+            // the like stand on the floor by the door to look at and try.
+            let (tx0, ty0, tx1, ty1) = (ix0, iy0, ix1 - 7, iy1);
+            for y in ty0..=ty1 {
+                for x in tx0..=tx1 {
+                    let lane = x <= tx0 + 1 || x >= tx1 - 1 || y <= ty0 + 1 || y >= ty1 - 1;
+                    if lane {
+                        b.ground(x, y, "track");
+                    } else {
+                        b.ground(x, y, "grass");
+                        let edge = x == tx0 + 2 || x == tx1 - 2 || y == ty0 + 2 || y == ty1 - 2;
+                        if edge {
+                            b.decor(x, y, "fence");
+                        } else if (x + y) % 7 == 0 && (x * 3 + y) % 5 == 0 {
+                            b.decor(x, y, "tree");
+                        }
+                    }
+                }
+            }
+            let cy = (y0 + y1) / 2;
+            for y in iy0..=iy1 {
+                if !(cy - 1..=cy + 2).contains(&y) {
+                    b.decor(tx1 + 1, y, "fence");
+                }
+            }
+            b.object("spot", tx1, cy, 1, 1, Some("track"), false);
+            for y in [iy0 + 3, iy1 - 4] {
+                for x in [tx1 + 3, tx1 + 6] {
+                    for dy in 0..2 {
+                        for dx in 0..2 {
+                            b.ground(x + dx - 1, y + dy, "carpet");
+                        }
+                    }
+                    spots.push((x, y));
+                }
+            }
+            "display"
         }
         "pens" => {
             // Low fenced pens on straw, two rows either side of the way in

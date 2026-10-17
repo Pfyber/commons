@@ -10,6 +10,7 @@ import { ApiError, Auth, type Destination } from "./net/api";
 import type { CloseReason } from "./net/socket";
 import { Shop } from "./shop";
 import { Pets } from "./pets";
+import { Rides } from "./rides";
 import { Social } from "./social";
 import { Town } from "./town";
 import { Gov } from "./gov";
@@ -128,6 +129,7 @@ async function main() {
     onChat: (text) => game?.chat(text),
     onEmote: (id) => game?.emote(id),
     onSit: () => game?.toggleSit(),
+    onRide: () => game?.toggleRide(),
     onBag: () => ui.bag.toggle(),
     onAlbum: () => ui.album.toggle(),
     onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
@@ -171,6 +173,7 @@ async function main() {
   const stall = new StallPanel(rent, eco, rentHost);
   const shop = new Shop(auth, eco);
   const pets = new Pets(auth);
+  const rides = new Rides(auth, eco);
   const shopPanel = new ShopPanel(
     shop,
     eco,
@@ -180,6 +183,7 @@ async function main() {
       void pets.load().catch(() => {});
       hud.toast(`🐾 Welcome to the family, ${name}! They've gone ahead to wait in your yard. Walk home and take them out.`, 6500);
     },
+    (item) => void (game as Game | null)?.testRide(item),
   );
   const directory = new DirectoryPanel({
     where: () => {
@@ -205,15 +209,24 @@ async function main() {
     homes,
     rent,
     pets,
+    rides,
     postOffice,
     apartments,
     stall,
     directory,
     shop: shopPanel,
-    bag: new BagPanel(eco, (item) => {
-      ui.bag.hide();
-      place.show(item);
-    }),
+    bag: new BagPanel(
+      eco,
+      (item) => {
+        ui.bag.hide();
+        place.show(item);
+      },
+      (item) => {
+        ui.bag.hide();
+        void (game as Game | null)?.rideOn(rides.ride === item.meta.code ? null : item);
+      },
+      (item) => rides.ride === item.meta.code,
+    ),
     album: new AlbumPanel(eco),
     market: new MarketPanel(eco),
     plot: new PlotMenu(eco, (x, y, action, item) => game?.plotAction(x, y, action, item)),
@@ -267,7 +280,8 @@ async function main() {
   eco.onChange(() => hud.setCoins(eco.coins));
   social.onChange(() => hud.setBadge(social.unreadCount));
   social.onToast = (t) => hud.toast(t, 4000);
-  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {}), pets.load().catch(() => {})]);
+  await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {}), pets.load().catch(() => {}), rides.load().catch(() => {})]);
+  eco.onChange(() => (game as Game | null)?.showRideButton());
 
   let dest: Destination = { zone: "city" };
   let retry = 0;

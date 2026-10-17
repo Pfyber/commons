@@ -105,6 +105,7 @@ const KIND_ORDER: [string, string][] = [
   ["plant", "Harvest"],
   ["seed", "Seeds"],
   ["furniture", "Furniture"],
+  ["vehicle", "To ride"],
 ];
 
 export class BagPanel extends Panel {
@@ -113,6 +114,9 @@ export class BagPanel extends Panel {
   constructor(
     private eco: Economy,
     private onPlace: (item: Item) => void,
+    /** Riding: get on (`item`) or off (null); whether you're on it now. */
+    private onRide?: (item: Item) => void,
+    private ridingNow?: (item: Item) => boolean,
   ) {
     super("Bag", "bag");
     eco.onChange(() => this.open && this.render());
@@ -136,6 +140,7 @@ export class BagPanel extends Panel {
         cell.append(icon(it), el("span", "qty", `${this.eco.qty(it.id)}`), el("span", "name", it.name));
         if (kind === "furniture" && this.placeable) cell.append(button("Place", () => this.onPlace(it), "small"));
         if (kind === "seed") cell.append(el("span", "hint", "Tap a garden plot"));
+        if (kind === "vehicle" && this.onRide) cell.append(button(this.ridingNow?.(it) ? "Get off" : "Ride", () => this.onRide?.(it), "small"));
         grid.append(cell);
       }
       this.body.append(grid);

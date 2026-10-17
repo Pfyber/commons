@@ -11,8 +11,8 @@
 
 use super::Instance;
 use commons_protocol::{ServerMsg, error_code, mood, together};
-use commons_sim::TilePos;
 use commons_sim::map::MapFile;
+use commons_sim::{TilePos, vehicles};
 
 /// An offer stands this long.
 pub(super) const OFFER_MS: u32 = 20_000;
@@ -57,8 +57,8 @@ impl Instance {
             return;
         }
         if self.economy.is_none() {
-            let (style, pet) = (a.style, a.pet);
-            self.wear(id, look, style, pet);
+            let (style, pet, ride) = (a.style, a.pet, a.ride);
+            self.wear(id, look, style, pet, ride);
         } else {
             self.refresh_look(id);
         }
@@ -79,25 +79,35 @@ impl Instance {
                 if let Ok(l) = saved
                     && inst.avatars.get(&id).is_some_and(|a| a.player_id == player)
                 {
-                    inst.wear(id, l.look, l.style, l.pet);
+                    inst.wear(id, l.look, l.style, l.pet, l.vehicle);
                 }
             },
         );
     }
 
-    /// Shows avatar `id` in a look (if it's new), to everyone nearby.
-    pub(super) fn wear(&mut self, id: u32, look: u32, style: u32, pet: u16) {
+    /// Shows avatar `id` in a look (if it's new), to everyone nearby. `ride`
+    /// is what it rides, as saved: seen outdoors in the city, or a test ride
+    /// in the mall; anywhere else you've got off at the door.
+    pub(super) fn wear(&mut self, id: u32, look: u32, style: u32, pet: u16, ride: u8) {
+        let outdoors = self.zone.id == super::OUTDOORS;
         let Some(a) = self.avatars.get_mut(&id) else {
             return;
         };
+        let test = ride & vehicles::TEST_RIDE != 0;
+        let vehicle = match vehicles::speed_x10(ride) {
+            Some(_) if outdoors != test => ride & !vehicles::TEST_RIDE,
+            _ => 0,
+        };
+        a.ride = ride;
         if commons_protocol::NPC_LOOKS.contains(&look)
-            || (a.look == look && a.style == style && a.pet == pet)
+            || (a.look == look && a.style == style && a.pet == pet && a.vehicle == vehicle)
         {
             return;
         }
         a.look = look;
         a.style = style;
         a.pet = pet;
+        a.vehicle = vehicle;
         let cell = a.cell;
         self.broadcast(
             cell,
@@ -106,6 +116,7 @@ impl Instance {
                 look,
                 style,
                 pet,
+                vehicle,
             },
             None,
         );
@@ -153,6 +164,8 @@ impl Instance {
             return self.error(id, error_code::TOO_FAR, "walk a little closer");
         }
         if kind == together::STOP_FOLLOW {
+            self.follows
+                .retain(|&f, &mut l| (f, l) != (id, to) && (f, l) != (to, id));
             // Nothing to accept: just let the other side know.
             return self.send_to(to, &ServerMsg::Offered { from: id, kind });
         }
@@ -174,6 +187,10 @@ impl Instance {
                 // A hug or a dance is time together; agreeing to be followed isn't yet.
                 a.sat_together |= kind < together::FOLLOW;
             }
+        }
+        // `from` asked to walk after `id`.
+        if kind == together::FOLLOW {
+            self.follows.insert(from, id);
         }
         let cell = self.avatars[&id].cell;
         self.broadcast(
@@ -363,7 +380,8 @@ mod tests {
                 id: 1,
                 look: 0x8100_00ff,
                 style: 0,
-                pet: 0
+                pet: 0,
+                vehicle: 0
             }
         )));
         assert_eq!(inst.avatars[&1].info(inst.clock.now_ms()).look, 0x8100_00ff);
@@ -462,5 +480,133 @@ mod tests {
             .filter(|m| matches!(m, ServerMsg::LanternRise { .. }))
             .count();
         assert_eq!(n, 1, "one lantern per half minute");
+    }
+
+    /// The speed of the next walk `conn`'s avatar starts, seen by `watcher`.
+    fn walk_speed(
+        inst: &mut Instance,
+        conn: u64,
+        id: u32,
+        to: (u16, u16),
+        watcher: &mut Client,
+    ) -> u8 {
+        inst.handle(Cmd::Msg {
+            conn,
+            msg: ClientMsg::MoveTo { x: to.0, y: to.1 },
+        });
+        inst.flush();
+        watcher.pump();
+        watcher
+            .log
+            .iter()
+            .rev()
+            .find_map(|m| match m {
+                ServerMsg::MoveStart {
+                    id: i, speed_x10, ..
+                } if *i == id => Some(*speed_x10),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn wheels_outdoors_and_on_the_track_only() {
+        use commons_sim::vehicles::{TEST_RIDE, speed_x10};
+        let bike = speed_x10(3).unwrap();
+        // Outdoors (the city): a bike you own goes faster; a test ride doesn't.
+        let mut inst = instance_for(Arc::new(ZoneDef::new(
+            crate::instance::OUTDOORS.into(),
+            map(32, 32),
+            None,
+        )));
+        let mut a = connect(&mut inst, 1, "a", (20, 12));
+        inst.wear(1, 0, 0, 0, 3);
+        inst.flush();
+        a.pump();
+        assert!(a.log.iter().any(|m| matches!(
+            m,
+            ServerMsg::LookChanged {
+                id: 1,
+                vehicle: 3,
+                ..
+            }
+        )));
+        assert_eq!(walk_speed(&mut inst, 1, 1, (20, 8), &mut a), bike);
+        inst.wear(1, 0, 0, 0, 3 | TEST_RIDE);
+        assert_eq!(inst.avatars[&1].vehicle, 0, "no test rides in the street");
+        assert_eq!(walk_speed(&mut inst, 1, 1, (8, 20), &mut a), WALK_SPEED_X10);
+
+        // Indoors: off at the door, except a test ride kept to the track.
+        let mut m = map(32, 32);
+        m.ground_legend
+            .push(commons_sim::vehicles::TRACK_GROUND.into());
+        for x in 0..32 {
+            m.ground[20 * 32 + x] = 1;
+        }
+        let mut inst = instance_for(Arc::new(ZoneDef::new("mall".into(), m, None)));
+        let mut a = connect(&mut inst, 1, "a", (20, 12));
+        inst.wear(1, 0, 0, 0, 3);
+        assert_eq!(inst.avatars[&1].vehicle, 0, "parked at the door");
+        assert_eq!(walk_speed(&mut inst, 1, 1, (8, 20), &mut a), WALK_SPEED_X10);
+        inst.wear(1, 0, 0, 0, 3 | TEST_RIDE);
+        assert_eq!(inst.avatars[&1].vehicle, 3);
+        inst.avatars.get_mut(&1).unwrap().tile = (8, 20);
+        inst.avatars.get_mut(&1).unwrap().motion = None;
+        assert_eq!(
+            walk_speed(&mut inst, 1, 1, (24, 20), &mut a),
+            bike,
+            "round the track"
+        );
+        inst.avatars.get_mut(&1).unwrap().tile = (24, 20);
+        inst.avatars.get_mut(&1).unwrap().motion = None;
+        assert_eq!(
+            walk_speed(&mut inst, 1, 1, (24, 4), &mut a),
+            WALK_SPEED_X10,
+            "off the track"
+        );
+    }
+
+    #[test]
+    fn following_a_rider_keeps_up() {
+        use commons_sim::vehicles::speed_x10;
+        let mut inst = instance_for(Arc::new(ZoneDef::new(
+            crate::instance::OUTDOORS.into(),
+            map(32, 32),
+            None,
+        )));
+        let mut a = connect(&mut inst, 1, "a", (20, 12));
+        let _b = connect(&mut inst, 2, "b", (20, 12));
+        inst.wear(1, 0, 0, 0, 2);
+        // b asks to follow a; a says yes.
+        inst.handle(Cmd::Msg {
+            conn: 2,
+            msg: ClientMsg::Offer {
+                to: 1,
+                kind: together::FOLLOW,
+            },
+        });
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::Accept {
+                from: 2,
+                kind: together::FOLLOW,
+            },
+        });
+        let pos = inst.avatars[&1].tile;
+        assert_eq!(
+            walk_speed(&mut inst, 2, 2, (pos.0 + 6, pos.1), &mut a),
+            speed_x10(2).unwrap()
+        );
+        inst.handle(Cmd::Msg {
+            conn: 2,
+            msg: ClientMsg::Offer {
+                to: 1,
+                kind: together::STOP_FOLLOW,
+            },
+        });
+        assert_eq!(
+            walk_speed(&mut inst, 2, 2, (pos.0, pos.1 + 6), &mut a),
+            WALK_SPEED_X10
+        );
     }
 }

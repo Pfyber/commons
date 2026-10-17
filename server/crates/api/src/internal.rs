@@ -382,8 +382,8 @@ pub struct HomeObject {
     pub item: i32,
 }
 
-/// A player's saved look, what they wear from the mall and the pet out with
-/// them: the zone shows this, not what a client says (ownership was checked
+/// A player's saved look, what they wear from the mall, the pet out with
+/// them and what they're riding: the zone shows this, not what a client says (ownership was checked
 /// when it was saved).
 async fn player_look(
     State(state): S,
@@ -396,12 +396,15 @@ async fn player_look(
         .player(&player)
         .await?
         .ok_or_else(|| ApiError::bad_request("bad_player", "no such player"))?;
-    let pet = match uuid::Uuid::parse_str(&player) {
-        Ok(id) => crate::pets::out_with(&state, id).await?,
-        Err(_) => 0,
+    let (pet, vehicle) = match uuid::Uuid::parse_str(&player) {
+        Ok(id) => (
+            crate::pets::out_with(&state, id).await?,
+            crate::vehicles::riding(&state, id).await?,
+        ),
+        Err(_) => (0, 0),
     };
     Ok(Json(
-        serde_json::json!({ "look": p.look, "style": p.style, "pet": pet }),
+        serde_json::json!({ "look": p.look, "style": p.style, "pet": pet, "vehicle": vehicle }),
     ))
 }
 

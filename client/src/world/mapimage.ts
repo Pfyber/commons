@@ -20,6 +20,7 @@ const GROUND: Record<string, string> = {
   curb: "#cfc6b2",
   carpet: "#c48d7a",
   straw: "#e3c77a",
+  track: "#c0674e",
   fog: "#e3e9e6",
 };
 

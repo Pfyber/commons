@@ -845,8 +845,42 @@ the day's walk, and going inside brings the other pet home. Clothing and
 Skins, the earlier mall steps, homes and following pass again, and 500 bots
 pass the perf gate.
 
-Next: M6, vehicles (skates, scooter, bike; speed outdoors, off at doors,
-the test track).
+## Mall M6 · Vehicles: done (2026-10-17)
+
+- **The Vehicles shop opens** (migration 0015): roller skates (150 coins,
+  1.3× walking speed), a kick scooter (220, 1.5×), a city bike (320, 1.8×)
+  and a limited vintage bike with a basket (400, 1.8×, three a week).
+  Bought once and kept (account-bound).
+- **The test track:** a two-lane loop round a fenced lawn, filling most of
+  the shop. Anything on show there can be taken for a test ride without
+  buying it, on the track only. Walk out of the shop and you hand it back.
+- **Riding:** a ride button on the bar (R) appears once you own something
+  to ride, and there's a Ride button in the bag ("To ride"). Riding is
+  faster anywhere outdoors in the city, and everyone sees you on it: you
+  stride on skates, stand on the scooter and sit on a bike, with the
+  wheels turning. You hop off at every door ("It'll be waiting when you're
+  back outside").
+- **A ride-along:** whoever is following you keeps your pace, so friends
+  on foot aren't left behind. The zone now remembers who follows whom.
+- **The server decides the speed.** Saving a ride checks you own it (or,
+  for a test ride, that it's on show this week). The zone gets the ride
+  from the API and applies it only where it may: owned rides outdoors in
+  the city, test rides on the track's ground. Protocol v9:
+  `EntityInfo.vehicle` and `LookChanged.vehicle`. The client predicts the
+  same pace and takes the server's pace when they differ.
+
+Checked: zone tests (a bike outdoors, no test rides in the street, parked
+at the door indoors, a test ride fast on the track and walking off it, a
+follower keeping up until they stop following); API tests (no riding what
+you don't own, a test ride of what's on show, not things that aren't for
+riding, bought once). In the browser: a test ride round the track at bike
+speed, handed back on leaving the shop, buying the bike (1100 → 780), the
+ride button outside, riding at bike speed, another player seeing it and
+keeping up while following, and getting off at the mall door. The
+earlier steps pass again, and 500 bots pass the perf gate.
+
+Next: M7, the last shops (Tools, Music, Gift Shop, Toys & Games, Home
+exterior).
 
 ## Next: M5 · Crowds
 

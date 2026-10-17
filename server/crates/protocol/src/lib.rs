@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 9;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -26,13 +26,15 @@ records! {
     /// to others (`mood::*`). `style` is what they wear from the mall (v7):
     /// outfit, hat, accessory and skin codes, a byte each, 0 for none.
     /// `pet` is the pet out on a walk with them (v8): the pet's code, 0 for
-    /// none.
+    /// none. `vehicle` is what they're riding (v9; `commons_sim::vehicles`
+    /// codes), 0 when on foot.
     EntityInfo {
         id: u32,
         name: String,
         look: u32,
         style: u32,
         pet: u16,
+        vehicle: u8,
         x: u16,
         y: u16,
         state: u8,
@@ -161,8 +163,8 @@ message_enum! {
         /// Someone nearby released a sky lantern from (x, y).
         25 LanternRise { id: u32, x: u16, y: u16, text: String }
         /// Avatar `id` changed its look (and what it wears from the mall),
-        /// or took its pet out or home.
-        26 LookChanged { id: u32, look: u32, style: u32, pet: u16 }
+        /// took its pet out or home, or got on or off something to ride.
+        26 LookChanged { id: u32, look: u32, style: u32, pet: u16, vehicle: u8 }
     }
 }
 
@@ -296,6 +298,7 @@ mod tests {
             look: 0xdead_beef,
             style: 0x0102_0304,
             pet: 0x0201,
+            vehicle: 3,
             x: 3,
             y: 4,
             state: 0,

@@ -262,7 +262,7 @@ export class PetSprite {
 }
 
 /** Tiles per second a pet can trot to catch up. */
-const TROT = 6;
+const TROT = 8;
 
 /**
  * A pet at someone's heels: it keeps about a tile behind them, trotting to

@@ -8,6 +8,7 @@ import { type Motion, type TileXY, headingAt, posAt } from "./motion";
 import type { Scene } from "./scene";
 import { moodIcon } from "../activities/together";
 import { Follower, type PetSprite } from "./pets";
+import { RIDE_POSE, vehicleTexture } from "./vehicles";
 
 export const EMOTES: Record<number, { icon: string; label: string }> = {
   1: { icon: "👋", label: "Wave" },
@@ -47,6 +48,8 @@ export class Avatar {
   standTile: TileXY | null = null;
   /** The pet out on a walk with us, at our heels. */
   private follower: Follower | null = null;
+  /** What we're riding, drawn under us. */
+  private wheels: Sprite | null = null;
 
   constructor(
     public info: EntityInfo,
@@ -212,15 +215,19 @@ export class Avatar {
     const walking = heading !== null;
     const sitting = this.state === 1 && !walking;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;
-    const frame: 0 | 1 | 2 = sitting ? 2 : walking || dancing ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
+    // On wheels: glide (skates still stride), sit on a bike, stand on a scooter.
+    const ride = this.info.vehicle && !sitting ? RIDE_POSE[this.info.vehicle] : undefined;
+    const stride = walking || dancing ? ((Math.floor(wallNow / (ride ? 220 : 160)) % 2) as 0 | 1) : 0;
+    const frame: 0 | 1 | 2 = sitting || ride?.pose === "sit" ? 2 : ride?.pose === "stand" ? 0 : stride;
     this.sprite.texture = avatarTexture(this.info.look, frame, this.info.style);
-    const bob = walking ? Math.abs(Math.sin(wallNow / 90)) * -1.5 : dancing && !sitting ? Math.sin(wallNow / 70) * 2 : 0;
+    const bob = ride ? 0 : walking ? Math.abs(Math.sin(wallNow / 90)) * -1.5 : dancing && !sitting ? Math.sin(wallNow / 70) * 2 : 0;
     const feetX = x * TILE + TILE / 2;
     // Seated avatars sit on the bench's slats, drawn just in front of it.
     const feetY = y * TILE + TILE - (sitting ? 6 : 4);
-    this.sprite.position.set(Math.round(feetX), Math.round(feetY + bob));
+    this.sprite.position.set(Math.round(feetX), Math.round(feetY + bob - (ride?.lift ?? 0)));
     this.sprite.scale.x = this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
+    this.updateWheels(ride ? this.info.vehicle : 0, feetX, feetY, walking, wallNow);
     this.updatePet({ x, y }, wallNow);
 
     // DOM label above the head.
@@ -249,6 +256,25 @@ export class Avatar {
     return { x0: s.x - w / 2, x1: s.x + w / 2, y: s.y };
   }
 
+  private updateWheels(code: number, feetX: number, feetY: number, moving: boolean, now: number) {
+    if (!code) {
+      if (this.wheels) this.wheels.visible = false;
+      return;
+    }
+    if (!this.wheels) {
+      this.wheels = new Sprite(vehicleTexture(code));
+      this.wheels.anchor.set(0.5, 1);
+      this.scene.sorted.addChild(this.wheels);
+    }
+    const w = this.wheels;
+    w.visible = true;
+    w.texture = vehicleTexture(code, moving ? ((Math.floor(now / 90) % 2) as 0 | 1) : 0);
+    w.position.set(Math.round(feetX), Math.round(feetY + 3));
+    w.scale.x = this.facing;
+    // In front of the rider's legs.
+    w.zIndex = feetY + 0.6;
+  }
+
   /** The pet with us (if any), keeping up. */
   get pet(): PetSprite | null {
     return this.follower?.pet ?? null;
@@ -270,6 +296,7 @@ export class Avatar {
 
   destroy() {
     this.follower?.destroy();
+    this.wheels?.destroy();
     this.sprite.destroy();
     this.label.remove();
   }

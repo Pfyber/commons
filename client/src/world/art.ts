@@ -110,6 +110,7 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     road: "#8f8a80",
     carpet: "#c48d7a",
     straw: "#e3c77a",
+    track: "#c0674e",
     curb: "#cfc6b2",
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
@@ -198,6 +199,20 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
         }
       }
       break;
+    case "track": {
+      // A rubber running track: a fine grain, white lane lines where it
+      // meets something else.
+      for (let i = 0; i < 6; i++) {
+        const r = hash(tx * 7 + i, ty, 29);
+        px(ctx, (r >>> 16) % 2 ? "#ad5842" : "#cf7a60", ox + (r % 30) + 1, oy + ((r >>> 8) % 30) + 1, 2, 1);
+      }
+      const edge = (dx: number, dy: number) => at(tx + dx, ty + dy) !== "track";
+      if (edge(0, -1)) px(ctx, "#fff6e6", ox, oy, TILE, 2);
+      if (edge(0, 1)) px(ctx, "#fff6e6", ox, oy + TILE - 2, TILE, 2);
+      if (edge(-1, 0)) px(ctx, "#fff6e6", ox, oy, 2, TILE);
+      if (edge(1, 0)) px(ctx, "#fff6e6", ox + TILE - 2, oy, 2, TILE);
+      break;
+    }
     case "straw":
       // Loose straw in a pen: short strokes every which way.
       for (let i = 0; i < 9; i++) {

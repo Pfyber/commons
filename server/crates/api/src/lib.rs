@@ -18,6 +18,7 @@ pub mod store;
 #[cfg(test)]
 mod tests;
 pub mod town;
+pub mod vehicles;
 pub mod welcome;
 
 use anyhow::Context;

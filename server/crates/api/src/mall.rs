@@ -164,9 +164,9 @@ async fn buy(
     } else {
         None
     };
-    // Things to wear are bought once and kept (a repeat of the same press is
+    // Things to wear and to ride are bought once and kept (a repeat of the same press is
     // fine: it's answered as a duplicate below).
-    if crate::cosmetics::is_cosmetic(&item.kind) {
+    if crate::cosmetics::is_cosmetic(&item.kind) || crate::vehicles::is_vehicle(&item.kind) {
         let mut conn = state.db.acquire().await.map_err(db_err)?;
         let repeat = crate::economy::key_used(&mut conn, &key)
             .await
@@ -179,7 +179,11 @@ async fn buy(
             return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 "have_it",
-                "You have this already: it's in your wardrobe.",
+                if crate::vehicles::is_vehicle(&item.kind) {
+                    "You have this already: ride it from your bag."
+                } else {
+                    "You have this already: it's in your wardrobe."
+                },
             ));
         }
     }

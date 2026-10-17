@@ -56,14 +56,17 @@ pub struct PlotResult {
     pub applied: Applied,
 }
 
-/// A player's saved look (`look`), what they wear from the mall (`style`)
-/// and the pet out on a walk with them (`pet`, 0 for none).
+/// A player's saved look (`look`), what they wear from the mall (`style`),
+/// the pet out on a walk with them (`pet`, 0 for none) and what they ride.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SavedLook {
     pub look: u32,
     pub style: u32,
     #[serde(default)]
     pub pet: u16,
+    /// What they're riding (`commons_sim::vehicles`), 0 on foot.
+    #[serde(default)]
+    pub vehicle: u8,
 }
 
 #[derive(Debug, Clone, Deserialize)]

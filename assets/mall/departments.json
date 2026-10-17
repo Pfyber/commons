@@ -58,7 +58,14 @@
         {"item": "robot_suit", "price": 300, "limited": 3}
       ]
     },
-    {"key": "vehicles", "name": "Vehicles", "type": "track", "unit": [2, 23, 23, 56], "door": "e", "open": false},
+    {"key": "vehicles", "name": "Vehicles", "type": "track", "unit": [2, 23, 23, 56], "door": "e", "open": true, "slots": 4,
+      "catalog": [
+        {"item": "roller_skates", "price": 150, "always": true},
+        {"item": "kick_scooter", "price": 220, "always": true},
+        {"item": "city_bike", "price": 320, "always": true},
+        {"item": "vintage_bike", "price": 400, "limited": 3}
+      ]
+    },
     {"key": "pets", "name": "Pets", "type": "pens", "unit": [2, 61, 23, 77], "door": "n", "open": true, "slots": 6,
       "catalog": [
         {"item": "puppy_golden", "price": 150, "always": true},
