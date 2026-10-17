@@ -771,7 +771,43 @@ this week's three new pieces, Autumn Harvest at the pop-up with "10 of 10
 left", buying a pumpkin lantern, the directory's "New this week". 500 bots
 in the mall pass the perf gate.
 
-Next: M4, clothing and skins (owned cosmetics, fitting rooms, protocol v7).
+## Mall M4 · Clothing and Skins: done (2026-10-17)
+
+- **Seventeen things to wear** (migration 0013): six outfits (denim jacket,
+  raincoat, cosy sweater, sundress, kimono, a limited tuxedo), four hats
+  (beanie, sun hat, wizard hat, a limited crown), three accessories
+  (satchel, bow tie, limited butterfly wings) and four full-body skins (fox,
+  frog, bear, a limited robot). Each has a `code`; what a player wears from
+  the mall is their **style**, a byte per slot (outfit, hat, accessory,
+  skin). Bought once and kept: account-bound, so never sold back, given or
+  put on a stall (the gift and stall pickers leave them out). The look's
+  own styles stay free.
+- **Protocol v7:** `EntityInfo` and `LookChanged` carry `style`; access and
+  join tokens carry it too.
+- **Server-authoritative:** saving a look (`POST /api/me/look`) checks you
+  own everything in the style; the zone then shows the *saved* look (it
+  asks the API, `/internal/look/{player}`), never the client's word.
+- **The shops:** Clothing shows 8 of its 13 pieces a week on mannequins
+  (each figure wearing the piece), with two fitting rooms; Skins shows its
+  four suits, with a mirror. A piece's card has **Try it on**; the fitting
+  room or mirror opens on you wearing it, lists this week's things to try,
+  and buys the one you're trying ("Buy the Sun Hat for 40") right next to
+  **Wear it**, which only works once you own it.
+- **Wardrobes everywhere** (the Tailor, home, the fitting rooms) gain a
+  **Mine** tab with what you've bought, to put on or take off.
+- **Drawing:** mall outfits, hats and accessories layer over the look;
+  skins replace the whole figure (a hood with ears, the robot's visor).
+
+Checked: API tests (can't wear what you haven't bought, a repeat press is
+the same purchase but buying again isn't allowed, the zone reads the saved
+style, made-up codes are refused); the protocol vectors round-trip in the
+client. In the browser: a mannequin's card, Try it on, buy in the fitting
+room, wear it out, another player nearby sees it at once, the mirror shows
+a fox suit you can't wear out until it's bought, the look survives a
+reload; the old wardrobe, the earlier mall steps and following pass again;
+500 bots pass the perf gate.
+
+Next: M5, pets (adopt at the Pets shop, live at your house, daily walks).
 
 ## Next: M5 · Crowds
 

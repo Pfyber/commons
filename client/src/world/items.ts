@@ -3,7 +3,7 @@
 // the item's stable `key` from the catalogue.
 
 import { Texture } from "pixi.js";
-import { PALETTE, toTexture } from "./art";
+import { PALETTE, avatarCanvas, styleFor, toTexture } from "./art";
 import { disc, oval, polygon } from "./pixeldraw";
 
 type Draw = (ctx: CanvasRenderingContext2D) => void;
@@ -46,8 +46,31 @@ function plantOf(key: string) {
   return key.replace(/_seeds$/, "");
 }
 
+/** Things to wear: their code by item key (set from the catalogue). */
+export const COSMETIC_CODES = new Map<string, number>();
+const WEARABLE = new Set(["outfit", "hat", "accessory", "skin"]);
+/** The look mannequins (and bag icons) show things to wear on. */
+const MANNEQUIN_LOOK = 0x0b_00_04_70;
+
+/** Whether an item kind is something to wear. */
+export function isWearable(kind: string): boolean {
+  return WEARABLE.has(kind);
+}
+
+/** The figure wearing item `key`, at 24×34. */
+function wearing(key: string, kind: string): HTMLCanvasElement {
+  return avatarCanvas(MANNEQUIN_LOOK, 0, styleFor(kind, COSMETIC_CODES.get(key) ?? 0));
+}
+
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
+  if (WEARABLE.has(kind)) {
+    // Hats show the head; everything else the whole figure.
+    ctx.imageSmoothingEnabled = false;
+    if (kind === "hat") ctx.drawImage(wearing(key, kind), 2, -6, 20, 20, 0, 0, 16, 16);
+    else ctx.drawImage(wearing(key, kind), 0, -2, 24, 36, 2, 0, 11, 16);
+    return;
+  }
   if (key === "coin") {
     disc(ctx, O, 8, 8, 7);
     disc(ctx, "#f6c343", 8, 8, 6);
@@ -384,6 +407,7 @@ function cachedTex(key: string, draw: () => HTMLCanvasElement): Texture {
 /** Any item drawn at 32×32 (furniture as itself, anything else as its icon). */
 export function itemTexture(key: string, kind: string): Texture {
   if (kind === "furniture") return furnitureTexture(key);
+  if (WEARABLE.has(kind)) return cachedTex(`wear:${key}`, () => wearing(key, kind));
   return cachedTex(`item:${key}`, () =>
     canvas(32, 32, (ctx) => {
       ctx.scale(2, 2);

@@ -780,6 +780,38 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, "#e8566b", w - 10, h - 15, 4, 2);
       break;
     }
+    case "mannequin": {
+      // A round base and a pole: the figure on it wears the goods.
+      [c, ctx] = makeCanvas(w, h);
+      oval(ctx, P.outline, 16, 28, 9, 3.5);
+      oval(ctx, "#c9c2b0", 16, 27.5, 8, 2.5);
+      break;
+    }
+    case "fitting_room": {
+      // A booth with a curtain half drawn.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      px(ctx, "rgba(0,0,0,0.15)", 2, h + 34, w - 4, 6);
+      px(ctx, P.outline, 0, 0, w, h + 40);
+      px(ctx, P.wood, 2, 2, w - 4, 6);
+      px(ctx, "#efe3cf", 2, 8, w - 4, h + 30);
+      px(ctx, "#8a5d8a", 2, 8, (w - 4) * 0.6, h + 30);
+      for (let x = 6; x < (w - 4) * 0.6; x += 6) px(ctx, "#6f4a6f", x, 8, 2, h + 30);
+      label(ctx, "Fitting", w / 2, 5, "#fff9ec", 8);
+      break;
+    }
+    case "mirror": {
+      // A tall standing mirror.
+      [c, ctx] = makeCanvas(w, h + 44);
+      overhang = 44;
+      px(ctx, "rgba(0,0,0,0.15)", 6, h + 38, w - 12, 6);
+      px(ctx, P.outline, 10, 0, w - 20, h + 40);
+      px(ctx, P.wood, 12, 2, w - 24, h + 36);
+      px(ctx, "#cfe8f5", 15, 5, w - 30, h + 28);
+      px(ctx, "#f4fbff", 18, 8, 4, 18);
+      px(ctx, "#f4fbff", 24, 12, 2, 10);
+      break;
+    }
     case "shelf": {
       // A small wooden stand with the goods on top.
       [c, ctx] = makeCanvas(w, h + 10);
@@ -1393,28 +1425,52 @@ const canvasCache = new Map<string, HTMLCanvasElement>();
  * 24×34 avatar sprite, feet at the bottom centre. Frames 0/1 alternate the
  * legs while walking; frame 2 is sitting (body lowered, legs forward).
  */
-export function avatarTexture(look: number, frame: 0 | 1 | 2): Texture {
-  const key = `${look}:${frame}`;
+export function avatarTexture(look: number, frame: 0 | 1 | 2, style = 0): Texture {
+  const key = `${look}:${frame}:${style}`;
   const cached = avatarCache.get(key);
   if (cached) return cached;
-  const t = toTexture(avatarCanvas(look, frame));
+  const t = toTexture(avatarCanvas(look, frame, style));
   avatarCache.set(key, t);
   return t;
 }
 
-/** The avatar drawn on a 24×34 canvas (also for previews in the changing room). */
-export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement {
-  const key = `${look}:${frame}`;
+/** What's worn from the mall, from a `style` (a byte per slot, 0: none). */
+export function styleParts(style: number) {
+  return { outfit: style & 0xff, hat: (style >>> 8) & 0xff, accessory: (style >>> 16) & 0xff, skin: (style >>> 24) & 0xff };
+}
+
+/** The `style` that wears item `code` in `slot` (outfit, hat, accessory, skin). */
+export function styleFor(slot: string, code: number): number {
+  const i = ["outfit", "hat", "accessory", "skin"].indexOf(slot);
+  return i < 0 ? 0 : (code << (8 * i)) >>> 0;
+}
+
+/**
+ * The avatar drawn on a 24×34 canvas (also for previews in the changing
+ * room). `style` adds what's worn from the mall: an outfit, hat or
+ * accessory over the look, or a full-body skin instead of it.
+ */
+export function avatarCanvas(look: number, frame: 0 | 1 | 2, style = 0): HTMLCanvasElement {
+  const key = `${look}:${frame}:${style}`;
   const cached = canvasCache.get(key);
   if (cached) return cached;
   const caretaker = look === CARETAKER_LOOK;
   const p = caretaker
     ? { ...lookParts(0), outfitColor: "#e8dcc0", outfitDark: "#5f8f4e", skinColor: SKIN[1], hairColor: "#c4c4c4", hat: 0 }
     : lookParts(look);
+  const m = styleParts(caretaker ? 0 : style);
+  // Mall pieces take the place of the look's own in their slot.
+  if (m.hat) p.hat = 0;
+  if (m.accessory) p.accessory = 0;
   const [c, ctx] = makeCanvas(24, 34);
   const o = PALETTE.outline;
   const hair = p.hairColor;
   px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
+  if (m.skin) {
+    drawSkin(ctx, m.skin, frame, p.skinColor);
+    canvasCache.set(key, c);
+    return c;
+  }
   // legs
   if (frame === 2) {
     px(ctx, o, 6, 27, 12, 5);
@@ -1452,12 +1508,23 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement 
     px(ctx, o, 3, 15, 18, 10);
     px(ctx, "#a0703f", 4, 16, 16, 8);
   }
+  if (m.accessory === 2) {
+    // Butterfly wings, behind.
+    for (const [x, dir] of [[0, 1], [17, -1]] as [number, number][]) {
+      px(ctx, o, x, 12, 7, 12);
+      px(ctx, "#e8a3d8", x + 1, 13, 5, 5);
+      px(ctx, "#b48ae0", x + 1, 18, 5, 5);
+      px(ctx, "#fff8e3", x + (dir > 0 ? 2 : 3), 14, 1, 1);
+    }
+  }
 
   // ---- body and outfit ----
   const shirt = p.outfitColor;
   const dark = p.outfitDark;
   px(ctx, o, 5, 15, 14, 12);
   px(ctx, shirt, 6, 16, 12, 10);
+  if (m.outfit) p.outfit = -1;
+  drawMallOutfit(ctx, m.outfit);
   switch (p.outfit) {
     case 0: // tee
       px(ctx, dark, 6, 23, 12, 3);
@@ -1510,9 +1577,10 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement 
       break;
   }
   // arms: long sleeves for stripes, hoodies, jackets and jumpers
-  const sleeves = p.outfit === 2 || p.outfit === 4 || p.outfit === 5 || p.outfit === 6;
+  const mallSleeve = MALL_SLEEVES[m.outfit];
+  const sleeves = p.outfit === 2 || p.outfit === 4 || p.outfit === 5 || p.outfit === 6 || !!mallSleeve;
   for (const ax of [4, 18]) {
-    px(ctx, sleeves ? dark : p.skinColor, ax, 18, 2, 5);
+    px(ctx, mallSleeve ?? (sleeves ? dark : p.skinColor), ax, 18, 2, 5);
     if (sleeves) px(ctx, p.skinColor, ax, 22, 2, 1);
   }
   if (p.accessory === 4) {
@@ -1586,6 +1654,21 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement 
     px(ctx, "#f7d35c", 16, 4, 2, 2);
   }
 
+  drawMallHat(ctx, m.hat);
+  if (m.accessory === 1) {
+    // A satchel on a strap across the body.
+    for (let i = 0; i < 9; i++) px(ctx, "#6e4b30", 7 + i, 16 + i, 1, 1);
+    px(ctx, o, 14, 22, 7, 6);
+    px(ctx, "#a0703f", 15, 23, 5, 4);
+    px(ctx, "#f6c343", 17, 24, 1, 1);
+  } else if (m.accessory === 3) {
+    // A bow tie.
+    px(ctx, o, 9, 15, 6, 3);
+    px(ctx, "#c8553d", 10, 15, 2, 2);
+    px(ctx, "#c8553d", 13, 15, 2, 2);
+    px(ctx, "#8f3a2b", 12, 16, 1, 1);
+  }
+
   // ---- accessories in front ----
   switch (p.accessory) {
     case 1: // glasses
@@ -1647,6 +1730,168 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2): HTMLCanvasElement 
   }
   canvasCache.set(key, c);
   return c;
+}
+
+// ---- worn from the mall ----------------------------------------------------
+
+/** Sleeve colours of the mall's outfits (no entry: bare arms). */
+const MALL_SLEEVES: Record<number, string> = { 1: "#4f6fa0", 2: "#f6c343", 3: "#efe3cf", 5: "#2d2a24", 6: "#c8553d" };
+
+/** A mall outfit over the body (code 0: the look's own). */
+function drawMallOutfit(ctx: CanvasRenderingContext2D, code: number) {
+  const o = PALETTE.outline;
+  switch (code) {
+    case 1: // denim jacket over a white tee
+      px(ctx, "#4f6fa0", 6, 16, 12, 10);
+      px(ctx, "#f4f1d8", 10, 16, 4, 10);
+      px(ctx, "#3d5a85", 9, 16, 1, 10);
+      px(ctx, "#3d5a85", 14, 16, 1, 10);
+      px(ctx, "#f6c343", 8, 19, 1, 1);
+      px(ctx, "#f6c343", 15, 19, 1, 1);
+      break;
+    case 2: // raincoat, long and buttoned
+      px(ctx, o, 5, 15, 14, 14);
+      px(ctx, "#f6c343", 6, 16, 12, 12);
+      px(ctx, "#d9a52a", 6, 16, 12, 2);
+      for (const y of [19, 22, 25]) px(ctx, o, 11, y, 2, 1);
+      break;
+    case 3: // cosy knitted sweater
+      px(ctx, "#efe3cf", 6, 16, 12, 10);
+      for (const y of [18, 21, 24]) for (let x = 7; x < 17; x += 2) px(ctx, "#d9c9ac", x, y, 1, 1);
+      px(ctx, "#d9c9ac", 6, 24, 12, 2);
+      break;
+    case 4: // sundress with dots
+      px(ctx, o, 4, 21, 16, 7);
+      px(ctx, "#9fc3d6", 5, 21, 14, 6);
+      px(ctx, "#9fc3d6", 6, 16, 12, 6);
+      for (const [x, y] of [[7, 22], [11, 24], [15, 22], [9, 18], [14, 19]] as [number, number][]) px(ctx, "#fff8e3", x, y, 1, 1);
+      break;
+    case 5: // tuxedo
+      px(ctx, "#2d2a24", 6, 16, 12, 10);
+      px(ctx, "#f4f1d8", 10, 16, 4, 8);
+      px(ctx, "#2d2a24", 11, 16, 2, 2);
+      px(ctx, "#f4f1d8", 11, 20, 1, 1);
+      px(ctx, "#f4f1d8", 11, 22, 1, 1);
+      break;
+    case 6: // kimono with an obi
+      px(ctx, "#c8553d", 6, 16, 12, 10);
+      for (let i = 0; i < 4; i++) {
+        px(ctx, "#f4f1d8", 8 + i, 16 + i, 1, 1);
+        px(ctx, "#f4f1d8", 15 - i, 16 + i, 1, 1);
+      }
+      px(ctx, "#f6c343", 6, 21, 12, 2);
+      px(ctx, "#f4a7b9", 8, 24, 2, 1);
+      px(ctx, "#f4a7b9", 14, 25, 2, 1);
+      break;
+  }
+}
+
+/** A mall hat on the head (code 0: none). */
+function drawMallHat(ctx: CanvasRenderingContext2D, code: number) {
+  const o = PALETTE.outline;
+  switch (code) {
+    case 1: // knitted beanie with a pompom
+      px(ctx, o, 5, 1, 14, 6);
+      px(ctx, "#3f7a8a", 6, 2, 12, 4);
+      px(ctx, "#5f9aaa", 6, 5, 12, 1);
+      px(ctx, o, 10, -1, 4, 3);
+      px(ctx, "#fff8e3", 11, 0, 2, 2);
+      break;
+    case 2: // wide straw sun hat
+      px(ctx, o, 1, 4, 22, 3);
+      px(ctx, "#e6c27a", 2, 5, 20, 1);
+      px(ctx, o, 6, 0, 12, 5);
+      px(ctx, "#e6c27a", 7, 1, 10, 4);
+      px(ctx, "#e8566b", 7, 3, 10, 1);
+      break;
+    case 3: // wizard hat with stars
+      polygon(ctx, o, [[3, 6], [12, -6], [21, 6]]);
+      polygon(ctx, "#5a4a9a", [[5, 5], [12, -4], [19, 5]]);
+      px(ctx, o, 3, 5, 18, 2);
+      px(ctx, "#5a4a9a", 4, 5, 16, 1);
+      px(ctx, "#f6c343", 10, 1, 1, 1);
+      px(ctx, "#f6c343", 14, 3, 1, 1);
+      break;
+    case 4: // a golden crown
+      px(ctx, o, 6, 0, 12, 5);
+      px(ctx, "#f6c343", 7, 1, 10, 3);
+      for (const x of [7, 11, 15]) {
+        px(ctx, o, x - 1, -2, 3, 3);
+        px(ctx, "#f6c343", x, -1, 1, 2);
+      }
+      px(ctx, "#e8566b", 11, 2, 2, 1);
+      break;
+  }
+}
+
+/** A full-body skin: the whole figure in a suit (fox, frog, bear, robot). */
+function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2, face: string) {
+  const o = PALETTE.outline;
+  const [suit, light] = ({ 1: ["#e07a2f", "#fff4e0"], 2: ["#6aa152", "#c5e0a8"], 3: ["#8f6a4a", "#d9b48a"], 4: ["#9aa3a8", "#d6dde0"] } as Record<number, [string, string]>)[code] ?? ["#9aa3a8", "#d6dde0"];
+  // legs
+  if (frame === 2) {
+    px(ctx, o, 6, 27, 12, 5);
+    px(ctx, suit, 7, 28, 10, 3);
+    ctx.translate(0, 4);
+  } else {
+    px(ctx, o, frame ? 7 : 8, 25, 4, 7);
+    px(ctx, o, frame ? 14 : 13, 25, 4, 7);
+    px(ctx, suit, frame ? 8 : 9, 25, 2, 6);
+    px(ctx, suit, frame ? 15 : 14, 25, 2, 6);
+  }
+  // a fox's tail, behind
+  if (code === 1) {
+    px(ctx, o, 17, 18, 6, 6);
+    px(ctx, suit, 18, 19, 4, 4);
+    px(ctx, "#fff4e0", 21, 19, 1, 2);
+  }
+  // body with a light belly, arms
+  px(ctx, o, 5, 15, 14, 12);
+  px(ctx, suit, 6, 16, 12, 10);
+  px(ctx, light, 9, 18, 6, 7);
+  for (const ax of [4, 18]) px(ctx, suit, ax, 18, 2, 6);
+  if (code === 4) {
+    px(ctx, "#5f6a70", 9, 18, 6, 1);
+    px(ctx, "#e8566b", 10, 20, 1, 1);
+    px(ctx, "#a5d27a", 12, 20, 1, 1);
+  }
+  // head: a hood with the face showing (the robot has a visor)
+  px(ctx, o, 5, 3, 14, 13);
+  px(ctx, suit, 6, 4, 12, 11);
+  if (code === 4) {
+    px(ctx, o, 7, 7, 10, 5);
+    px(ctx, "#7fd3e8", 8, 8, 8, 3);
+    px(ctx, "#fff", 9, 8, 2, 1);
+    px(ctx, o, 11, 0, 2, 4);
+    px(ctx, "#e8566b", 11, -1, 2, 2);
+    return;
+  }
+  px(ctx, face, 8, 7, 8, 7);
+  px(ctx, o, 9, 9, 2, 2);
+  px(ctx, o, 13, 9, 2, 2);
+  px(ctx, "#e89a8f", 8, 12, 2, 1);
+  px(ctx, "#e89a8f", 14, 12, 2, 1);
+  if (code === 1) {
+    // pointed ears
+    polygon(ctx, o, [[5, 5], [7, -2], [11, 4]]);
+    polygon(ctx, o, [[13, 4], [17, -2], [19, 5]]);
+    polygon(ctx, suit, [[6, 4], [7, 0], [10, 4]]);
+    polygon(ctx, suit, [[14, 4], [17, 0], [18, 4]]);
+  } else if (code === 2) {
+    // frog eyes on top
+    for (const x of [6, 14]) {
+      px(ctx, o, x, 0, 5, 5);
+      px(ctx, "#fff", x + 1, 1, 3, 3);
+      px(ctx, o, x + 2, 2, 1, 1);
+    }
+  } else if (code === 3) {
+    // round ears
+    for (const x of [4, 16]) {
+      px(ctx, o, x, 1, 5, 5);
+      px(ctx, suit, x + 1, 2, 3, 3);
+      px(ctx, light, x + 2, 3, 1, 1);
+    }
+  }
 }
 
 // ---- ambient creatures (client-only, spec §7.1) -------------------------

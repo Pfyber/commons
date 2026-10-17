@@ -633,10 +633,11 @@ export class Game {
   }
 
   /** You changed clothes: show it here and to everyone nearby. */
-  changeLook(look: number) {
+  /** New clothes (saved already): show them, and tell the zone to show them to everyone. */
+  changeLook(look: number, style: number) {
     const self = this.self;
     if (self) {
-      self.info = { ...self.info, look };
+      self.info = { ...self.info, look, style };
       self.flash("✨");
     }
     this.socket?.send({ t: "SetLook", look });
@@ -787,7 +788,7 @@ export class Game {
       case "LookChanged": {
         const a = this.avatars.get(m.id);
         if (!a || m.id === this.selfId) break;
-        a.info = { ...a.info, look: m.look };
+        a.info = { ...a.info, look: m.look, style: m.style };
         a.flash("✨");
         break;
       }
@@ -1204,7 +1205,16 @@ export class Game {
       this.near(ui.directory, { x: obj.x, y: obj.y + 1 }, 8).show();
       return true;
     }
-    if (obj && (obj.kind === "display" || obj.kind === "shelf") && obj.label) {
+    if (obj && (obj.kind === "fitting_room" || obj.kind === "mirror") && obj.label) {
+      // Try things on before buying (only you see it until you wear it out).
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+        const spot = nearestWalkable(map, obj.x + 1, obj.y + obj.h, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.wardrobe, { x: obj.x + 1, y: obj.y + obj.h }, 6).openFitting(obj.label, obj.kind === "mirror" ? "The mirror" : "Fitting room");
+      return true;
+    }
+    if (obj && (obj.kind === "display" || obj.kind === "shelf" || obj.kind === "mannequin") && obj.label) {
       // Walk up to it and look: what it is, what it costs, buy it.
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);

@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -89,6 +89,7 @@ export interface EntityInfo {
   id: number;
   name: string;
   look: number;
+  style: number;
   x: number;
   y: number;
   state: number;
@@ -102,6 +103,7 @@ export function encEntityInfo(w: Writer, v: EntityInfo) {
   w.u32(v.id);
   w.str(v.name);
   w.u32(v.look);
+  w.u32(v.style);
   w.u16(v.x);
   w.u16(v.y);
   w.u8(v.state);
@@ -116,6 +118,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
     id: r.u32(),
     name: r.str(),
     look: r.u32(),
+    style: r.u32(),
     x: r.u16(),
     y: r.u16(),
     state: r.u8(),
@@ -351,7 +354,7 @@ export type ServerMsg =
   | { t: "Offered"; from: number; kind: number }
   | { t: "Together"; a: number; b: number; kind: number }
   | { t: "LanternRise"; id: number; x: number; y: number; text: string }
-  | { t: "LookChanged"; id: number; look: number }
+  | { t: "LookChanged"; id: number; look: number; style: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -522,6 +525,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(26);
       w.u32(m.id);
       w.u32(m.look);
+      w.u32(m.style);
       break;
   }
   return w.finish();
@@ -608,7 +612,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "LanternRise", id: r.u32(), x: r.u16(), y: r.u16(), text: r.str() };
       break;
     case 26:
-      m = { t: "LookChanged", id: r.u32(), look: r.u32() };
+      m = { t: "LookChanged", id: r.u32(), look: r.u32(), style: r.u32() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

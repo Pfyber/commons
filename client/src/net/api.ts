@@ -5,6 +5,8 @@ export interface PlayerView {
   id: string;
   display_name: string;
   look: number;
+  /** What's worn from the mall (a byte per slot: outfit, hat, accessory, skin). */
+  style: number;
   trust_tier: string;
   minor: boolean;
 }
@@ -100,8 +102,8 @@ export class Auth {
   }
 
   /** Saves a new look (the changing room); the fresh session carries it. */
-  async saveLook(look: number) {
-    this.adopt(await this.send<Session>("/api/me/look", { look }));
+  async saveLook(look: number, style: number) {
+    this.adopt(await this.send<Session>("/api/me/look", { look, style }));
   }
 
   /** Restores a session from the stored refresh token, if any. */

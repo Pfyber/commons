@@ -67,6 +67,7 @@ async fn player(s: &State) -> P {
         sub: p.id.clone(),
         name: name.clone(),
         look: 1,
+        style: 0,
         tier: TrustTier::Visitor,
         minor: false,
         muted_until: 0,

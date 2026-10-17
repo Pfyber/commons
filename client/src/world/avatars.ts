@@ -52,7 +52,7 @@ export class Avatar {
     readonly isSelf: boolean,
     now: number,
   ) {
-    this.sprite = new Sprite(avatarTexture(info.look, 0));
+    this.sprite = new Sprite(avatarTexture(info.look, 0, info.style));
     this.sprite.anchor.set(0.5, 1);
     this.tile = { x: info.x, y: info.y };
     this.pos = { ...this.tile };
@@ -210,7 +210,7 @@ export class Avatar {
     const sitting = this.state === 1 && !walking;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;
     const frame: 0 | 1 | 2 = sitting ? 2 : walking || dancing ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
-    this.sprite.texture = avatarTexture(this.info.look, frame);
+    this.sprite.texture = avatarTexture(this.info.look, frame, this.info.style);
     const bob = walking ? Math.abs(Math.sin(wallNow / 90)) * -1.5 : dancing && !sitting ? Math.sin(wallNow / 70) * 2 : 0;
     const feetX = x * TILE + TILE / 2;
     // Seated avatars sit on the bench's slats, drawn just in front of it.

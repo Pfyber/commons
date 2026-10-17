@@ -53,6 +53,9 @@ pub struct Department {
     /// Displays on the shop floor.
     #[serde(default)]
     pub slots: u16,
+    /// Where things to wear can be tried on: `fitting_room` or `mirror`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub try_on: Option<String>,
     #[serde(default)]
     pub catalog: Vec<CatalogEntry>,
 }

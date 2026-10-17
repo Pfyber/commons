@@ -391,6 +391,7 @@ mod town_life {
             sub: id.to_string(),
             name: name.into(),
             look: 1,
+            style: 0,
             tier: token::TrustTier::Newcomer,
             minor: false,
             muted_until: 0,
@@ -642,6 +643,7 @@ mod corner_play {
             sub: id.to_string(),
             name: name.into(),
             look: 1,
+            style: 0,
             tier: token::TrustTier::Newcomer,
             minor: false,
             muted_until: 0,
@@ -874,6 +876,7 @@ mod governance {
             sub: id.to_string(),
             name: name.into(),
             look: 1,
+            style: 0,
             tier: token::TrustTier::Newcomer,
             minor: false,
             muted_until: 0,
@@ -1429,6 +1432,7 @@ mod founding {
             sub: id.to_string(),
             name: name.into(),
             look: 1,
+            style: 0,
             tier: token::TrustTier::Newcomer,
             minor: false,
             muted_until: 0,
@@ -1571,6 +1575,7 @@ mod bottles {
             sub: id.to_string(),
             name: "t".into(),
             look: 1,
+            style: 0,
             tier: token::TrustTier::Newcomer,
             minor: false,
             muted_until: 0,
@@ -1654,6 +1659,7 @@ mod changing_room {
             sub: p.to_string(),
             name: "t".into(),
             look: 1,
+            style: 0,
             tier: token::TrustTier::Newcomer,
             minor: false,
             muted_until: 0,
@@ -1704,6 +1710,7 @@ mod mall_shop {
     use crate::economy::{self, COIN};
     use crate::mall::{self, DEPARTMENTS, EVENTS, PLAYER_MADE};
     use axum::Router;
+    use commons_common::token::{self, ServiceClaims};
     use serde_json::json;
 
     fn app(s: Arc<AppState>) -> Router {
@@ -1726,7 +1733,11 @@ mod mall_shop {
                     d.key,
                     c.item
                 );
-                assert!(!item.account_bound());
+                // Only things to wear are bound to whoever buys them.
+                assert_eq!(
+                    item.account_bound(),
+                    crate::cosmetics::is_cosmetic(&item.kind)
+                );
             }
         }
         for e in &EVENTS.events {
@@ -1894,5 +1905,117 @@ mod mall_shop {
         .execute(&s.db)
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn you_can_only_wear_what_you_bought() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = Router::new()
+            .nest("/api", mall::routes().merge(crate::auth::routes()))
+            .nest("/internal", crate::internal::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Wearer");
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            p,
+            &[Op {
+                item: COIN,
+                delta: 1000,
+            }],
+            "test",
+            &format!("{p}:coins"),
+        )
+        .await
+        .unwrap();
+        // Something to wear in Clothing this week.
+        let (_, stock) = call(&app, &auth, "GET", "/api/mall/stock", json!({})).await;
+        let clothing = stock["departments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["key"] == "clothing")
+            .unwrap()
+            .clone();
+        let shelf = clothing["shelves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["limited"].is_null())
+            .unwrap()
+            .clone();
+        let item = s
+            .catalog
+            .get(shelf["item"].as_i64().unwrap() as i32)
+            .unwrap();
+        let slot = crate::cosmetics::SLOTS
+            .iter()
+            .position(|&k| k == item.kind)
+            .unwrap();
+        let style = (item.meta["code"].as_u64().unwrap() as u32) << (8 * slot);
+        // Not bought yet: can't wear it.
+        let (st, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/me/look",
+            json!({ "look": 5, "style": style }),
+        )
+        .await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not_yours"))
+        );
+        let buy = json!({ "dept": "clothing", "slot": shelf["slot"], "key": "w1" });
+        let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", buy.clone()).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        // Pressing again is the same purchase; buying it again isn't allowed.
+        let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", buy).await;
+        assert_eq!((st, r["duplicate"].as_bool()), (StatusCode::OK, Some(true)));
+        let (st, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/mall/buy",
+            json!({ "dept": "clothing", "slot": shelf["slot"], "key": "w2" }),
+        )
+        .await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("have_it"))
+        );
+        // Now it can be worn; the session and the zone both see it.
+        let (st, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/me/look",
+            json!({ "look": 5, "style": style }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["player"]["style"], style);
+        let svc = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &ServiceClaims { svc: "zone".into() }, 60)
+        );
+        let (st, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
+        assert_eq!(
+            (st, r["look"].as_u64(), r["style"].as_u64()),
+            (StatusCode::OK, Some(5), Some(style as u64))
+        );
+        // Made-up codes don't exist; things to wear can't be given away.
+        let (st, _) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/me/look",
+            json!({ "look": 5, "style": 0x00ee_0000u32 }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(item.account_bound());
     }
 }

@@ -172,7 +172,8 @@ export class FriendsPanel extends Panel {
     note.placeholder = "Add a note (optional)";
     note.maxLength = 140;
     note.addEventListener("keydown", (e) => e.stopPropagation());
-    const giftable = [...this.eco.items.values()].filter((i) => this.eco.qty(i.id) > 0);
+    // Account-bound things (what you wear from the mall) are yours to keep.
+    const giftable = [...this.eco.items.values()].filter((i) => this.eco.qty(i.id) > 0 && !i.meta.account_bound);
     if (!giftable.length) this.body.append(el("p", "empty", "Your bag is empty."));
     const list = el("div", "rows");
     for (const it of giftable) {

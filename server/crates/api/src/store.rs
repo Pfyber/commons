@@ -16,6 +16,8 @@ pub struct Player {
     pub display_name: String,
     pub birth_year: i32,
     pub look: u32,
+    /// What they wear from the mall (outfit, hat, accessory, skin codes).
+    pub style: u32,
     pub trust_tier: TrustTier,
 }
 
@@ -51,7 +53,8 @@ pub fn db_err(e: sqlx::Error) -> ApiError {
 }
 
 const PLAYER_COLS: &str = "p.id, a.email, p.display_name, a.birth_year, \
-    COALESCE((p.avatar->>'look')::bigint, 0) AS look, p.trust_tier::text AS tier";
+    COALESCE((p.avatar->>'look')::bigint, 0) AS look, \
+    COALESCE((p.avatar->>'style')::bigint, 0) AS style, p.trust_tier::text AS tier";
 
 fn player_from(row: &sqlx::postgres::PgRow) -> Player {
     Player {
@@ -60,6 +63,7 @@ fn player_from(row: &sqlx::postgres::PgRow) -> Player {
         display_name: row.get("display_name"),
         birth_year: row.get::<i16, _>("birth_year") as i32,
         look: row.get::<i64, _>("look") as u32,
+        style: row.get::<i64, _>("style") as u32,
         trust_tier: tier_from(row.get::<&str, _>("tier")),
     }
 }
@@ -197,6 +201,7 @@ impl Store {
             display_name: name.to_string(),
             birth_year,
             look,
+            style: 0,
             trust_tier: TrustTier::Visitor,
         }))
     }

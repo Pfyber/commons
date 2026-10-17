@@ -54,6 +54,7 @@ pub struct PlayerView {
     id: String,
     display_name: String,
     look: u32,
+    style: u32,
     trust_tier: token::TrustTier,
     minor: bool,
 }
@@ -149,6 +150,7 @@ async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
         sub: p.id.clone(),
         name: p.display_name.clone(),
         look: p.look,
+        style: p.style,
         tier: p.trust_tier,
         minor: is_minor(p),
         muted_until,
@@ -166,6 +168,7 @@ async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
             id: p.id.clone(),
             display_name: p.display_name.clone(),
             look: p.look,
+            style: p.style,
             trust_tier: p.trust_tier,
             minor: is_minor(p),
         },
@@ -239,13 +242,17 @@ pub fn bearer_with(secret: &[u8], headers: &HeaderMap) -> ApiResult<AccessClaims
 #[derive(Deserialize)]
 struct LookReq {
     look: u32,
+    /// What to wear from the mall (0: nothing).
+    #[serde(default)]
+    style: u32,
 }
 
 /// Looks reserved for non-player characters (protocol `NPC_LOOKS`).
 const NPC_LOOKS: [u32; 1] = [0xffff_fff1];
 
-/// The changing room: saves your look and returns a fresh session carrying
-/// it, so the next zone you join already shows it.
+/// The changing room: saves your look (and what you wear from the mall, if
+/// you own it) and returns a fresh session carrying it, so the next zone you
+/// join already shows it.
 async fn set_look(
     State(state): S,
     headers: HeaderMap,
@@ -257,11 +264,14 @@ async fn set_look(
     }
     let id = uuid::Uuid::parse_str(&who.sub)
         .map_err(|_| ApiError::unauthorized("not a player account"))?;
+    crate::cosmetics::check_owned(&state.db, &state.catalog, id, req.style).await?;
     sqlx::query(
-        "UPDATE players SET avatar = jsonb_set(COALESCE(avatar, '{}'::jsonb), '{look}', to_jsonb($2::bigint)) WHERE id = $1",
+        "UPDATE players SET avatar = COALESCE(avatar, '{}'::jsonb)
+             || jsonb_build_object('look', $2::bigint, 'style', $3::bigint) WHERE id = $1",
     )
     .bind(id)
     .bind(req.look as i64)
+    .bind(req.style as i64)
     .execute(&state.db)
     .await
     .map_err(db_err)?;

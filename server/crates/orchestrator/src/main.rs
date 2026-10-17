@@ -201,6 +201,7 @@ async fn join(
         sub: who.sub,
         name: who.name,
         look: who.look,
+        style: who.style,
         tier: who.tier,
         minor: who.minor,
         zone: zone.clone(),

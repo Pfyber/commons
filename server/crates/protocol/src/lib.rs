@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -23,11 +23,13 @@ records! {
 
     /// Everything a client needs to render another avatar, including any
     /// walk in progress so it can be simulated locally, and what it signals
-    /// to others (`mood::*`).
+    /// to others (`mood::*`). `style` is what they wear from the mall (v7):
+    /// outfit, hat, accessory and skin codes, a byte each, 0 for none.
     EntityInfo {
         id: u32,
         name: String,
         look: u32,
+        style: u32,
         x: u16,
         y: u16,
         state: u8,
@@ -155,8 +157,8 @@ message_enum! {
         24 Together { a: u32, b: u32, kind: u8 }
         /// Someone nearby released a sky lantern from (x, y).
         25 LanternRise { id: u32, x: u16, y: u16, text: String }
-        /// Avatar `id` changed its look.
-        26 LookChanged { id: u32, look: u32 }
+        /// Avatar `id` changed its look (and what it wears from the mall).
+        26 LookChanged { id: u32, look: u32, style: u32 }
     }
 }
 
@@ -288,6 +290,7 @@ mod tests {
             id: 7,
             name: "Ana ✿".into(),
             look: 0xdead_beef,
+            style: 0x0102_0304,
             x: 3,
             y: 4,
             state: 0,

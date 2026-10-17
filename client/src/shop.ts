@@ -59,7 +59,7 @@ export class Shop {
   /** Puts what's on each display onto the map's display objects, for drawing. */
   dress(map: ZoneMap) {
     for (const o of map.objects) {
-      if ((o.kind !== "display" && o.kind !== "shelf") || !o.label) continue;
+      if ((o.kind !== "display" && o.kind !== "shelf" && o.kind !== "mannequin") || !o.label) continue;
       const [dept, slot] = o.label.split(":");
       const s = this.shelf(dept, Number(slot));
       o.item = s?.key;

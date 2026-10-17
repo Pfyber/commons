@@ -94,6 +94,9 @@ pub struct AccessClaims {
     pub sub: String,
     pub name: String,
     pub look: u32,
+    /// What you wear from the mall (protocol `EntityInfo::style`).
+    #[serde(default)]
+    pub style: u32,
     pub tier: TrustTier,
     /// Under 16: friends-only DMs and filtered chat (spec §12).
     pub minor: bool,
@@ -112,6 +115,8 @@ pub struct JoinClaims {
     pub sub: String,
     pub name: String,
     pub look: u32,
+    #[serde(default)]
+    pub style: u32,
     pub tier: TrustTier,
     pub minor: bool,
     pub zone: String,
@@ -154,6 +159,7 @@ mod tests {
             sub: "p1".into(),
             name: "Ana".into(),
             look: 3,
+            style: 0,
             tier: TrustTier::Visitor,
             minor: false,
             muted_until: 0,

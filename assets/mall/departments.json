@@ -1,5 +1,5 @@
 {
-  "_comment": "The mall's departments (ADR 0011). `unit` is the shop's rectangle on the mall floor [x0, y0, x1, y1] (inclusive, walls included); `door` is the wall its doorway is in (n, s, e, w), facing the walking loop. `open: false` shops show 'opening soon'. Neighbours are placed side by side: seeds beside tools, furniture beside home exterior, clothing beside skins. `slots` is how many displays the shop floor has; `catalog` is what it sells (item key and price in coins). Player-made things (fish, plants, junk, crafted goods) are never sold here: they stay with player stalls. Each rotation (a week) a shop shows its `always` items and draws the rest of its displays by `weight` from the rest of its catalog; `limited` items have that many to go round each rotation. The pop-up sells the current season's items from events.json.",
+  "_comment": "The mall's departments (ADR 0011). `unit` is the shop's rectangle on the mall floor [x0, y0, x1, y1] (inclusive, walls included); `door` is the wall its doorway is in (n, s, e, w), facing the walking loop. `open: false` shops show 'opening soon'. Neighbours are placed side by side: seeds beside tools, furniture beside home exterior, clothing beside skins. `slots` is how many displays the shop floor has; `catalog` is what it sells (item key and price in coins). Player-made things (fish, plants, junk, crafted goods) are never sold here: they stay with player stalls. Each rotation (a week) a shop shows its `always` items and draws the rest of its displays by `weight` from the rest of its catalog; `limited` items have that many to go round each rotation. The pop-up sells the current season's items from events.json. `try_on` puts fitting rooms or a mirror in the shop, where things to wear can be tried before buying.",
   "popup": {"name": "Seasonal Pop-up", "slots": 4},
   "departments": [
     {"key": "seeds", "name": "Seeds & Garden", "type": "shelves", "unit": [2, 2, 23, 18], "door": "s", "open": true, "slots": 6,
@@ -33,8 +33,31 @@
       ]
     },
     {"key": "exterior", "name": "Home Exterior", "type": "showroom", "unit": [71, 2, 93, 18], "door": "s", "open": false},
-    {"key": "clothing", "name": "Clothing", "type": "racks", "unit": [72, 23, 93, 39], "door": "w", "open": false},
-    {"key": "skins", "name": "Skins", "type": "racks", "unit": [72, 40, 93, 56], "door": "w", "open": false},
+    {"key": "clothing", "name": "Clothing", "type": "racks", "unit": [72, 23, 93, 39], "door": "w", "open": true, "try_on": "fitting_room", "slots": 8,
+      "catalog": [
+        {"item": "denim_jacket", "price": 60},
+        {"item": "raincoat", "price": 70},
+        {"item": "cosy_sweater", "price": 55},
+        {"item": "sundress", "price": 65},
+        {"item": "kimono", "price": 90},
+        {"item": "tuxedo", "price": 150, "limited": 5},
+        {"item": "beanie", "price": 30},
+        {"item": "sun_hat", "price": 40},
+        {"item": "wizard_hat", "price": 80},
+        {"item": "crown", "price": 300, "limited": 3},
+        {"item": "satchel", "price": 45},
+        {"item": "bow_tie", "price": 25},
+        {"item": "butterfly_wings", "price": 120, "limited": 5}
+      ]
+    },
+    {"key": "skins", "name": "Skins", "type": "racks", "unit": [72, 40, 93, 56], "door": "w", "open": true, "try_on": "mirror", "slots": 4,
+      "catalog": [
+        {"item": "fox_suit", "price": 200},
+        {"item": "frog_suit", "price": 200},
+        {"item": "bear_suit", "price": 220},
+        {"item": "robot_suit", "price": 300, "limited": 3}
+      ]
+    },
     {"key": "vehicles", "name": "Vehicles", "type": "track", "unit": [2, 23, 23, 56], "door": "e", "open": false},
     {"key": "pets", "name": "Pets", "type": "showroom", "unit": [2, 61, 23, 77], "door": "n", "open": false},
     {"key": "gifts", "name": "Gift Shop", "type": "shelves", "unit": [25, 61, 35, 77], "door": "n", "open": false},

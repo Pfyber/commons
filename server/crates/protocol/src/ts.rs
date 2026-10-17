@@ -221,6 +221,7 @@ pub fn sample_vectors() -> String {
         id: 42,
         name: "Ćiril ☘".into(),
         look: 0x8000_0001,
+        style: 0x0400_0201,
         x: 95,
         y: 0,
         state: 0,
@@ -367,6 +368,7 @@ pub fn sample_vectors() -> String {
         ServerMsg::LookChanged {
             id: 9,
             look: 0x8000_0001,
+            style: 0x0000_0300,
         },
     ];
     let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();

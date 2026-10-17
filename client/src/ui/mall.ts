@@ -5,6 +5,7 @@
 import departments from "../../../assets/mall/departments.json";
 import type { Economy } from "../economy";
 import type { Dept, Shelf, Shop } from "../shop";
+import { isWearable } from "../world/items";
 import { type ZoneMap, nearestWalkable, spot } from "../world/map";
 import type { TileXY } from "../world/motion";
 import { cityImage, drawYou } from "./citymap";
@@ -108,6 +109,10 @@ export class DirectoryPanel extends Panel {
 const ABOUT: Record<string, string> = {
   furniture: "For your home: place it from your bag. How many pieces fit depends on your home.",
   seed: "Plant it in a soil patch: the Community Garden, your courtyard beds, or at home.",
+  outfit: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
+  hat: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
+  accessory: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
+  skin: "A full-body suit: you, as a whole new character. Yours to keep (it can't be sold on or given).",
 };
 
 /** A shop's goods: one display up close, or everything at the counter. */
@@ -119,6 +124,8 @@ export class ShopPanel extends Panel {
   constructor(
     private shop: Shop,
     private eco: Economy,
+    /** Opens the fitting room with this thing to wear on. */
+    private tryOn: (dept: string, item: number) => void,
   ) {
     super("Shop", "shop");
     eco.onChange(() => this.open && this.render());
@@ -199,7 +206,13 @@ export class ShopPanel extends Panel {
       pic.classList.add("big");
       card.append(pic, el("strong", "", it?.name ?? s.key), el("span", "price", `${s.price} coins`), this.badges(s));
       const owned = this.eco.qty(s.item);
-      this.body.append(card, el("p", "hint", ABOUT[it?.kind ?? ""] ?? ""), el("p", "hint", owned ? `You have ${owned}.` : ""), coins, this.buyButton(s, "primary"));
+      this.body.append(card, el("p", "hint", ABOUT[it?.kind ?? ""] ?? ""));
+      if (it && isWearable(it.kind)) {
+        const dept = this.dept;
+        this.body.append(button("Try it on 👗", () => (this.hide(), this.tryOn(dept, s.item)), owned ? "primary" : ""));
+        if (owned) return void this.body.append(el("p", "hint", "It's yours: wear it from any changing room."), this.msg);
+      } else if (owned) this.body.append(el("p", "hint", `You have ${owned}.`));
+      this.body.append(coins, this.buyButton(s, "primary"));
     } else {
       // Each item once, cheapest first.
       const seen = new Set<number>();

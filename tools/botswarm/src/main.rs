@@ -196,6 +196,7 @@ async fn bot_loop(
         sub: format!("bot-{i}"),
         name: format!("Bot {i}"),
         look: rng.random(),
+        style: 0,
         tier: TrustTier::Visitor,
         minor: false,
         zone: args.zone.clone(),

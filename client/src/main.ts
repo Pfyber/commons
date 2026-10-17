@@ -169,7 +169,7 @@ async function main() {
   const apartments = new ApartmentsPanel(homes, rent, rentHost);
   const stall = new StallPanel(rent, eco, rentHost);
   const shop = new Shop(auth, eco);
-  const shopPanel = new ShopPanel(shop, eco);
+  const shopPanel = new ShopPanel(shop, eco, (dept, item) => ui.wardrobe.openFitting(dept, dept === "skins" ? "The mirror" : "Fitting room", item));
   const directory = new DirectoryPanel({
     where: () => {
       const g = game as Game | null;
@@ -235,12 +235,14 @@ async function main() {
     offer: new OfferCard(),
     mood: moodPicker,
     wardrobe: new WardrobePanel(
-      () => auth.player?.look ?? 0,
-      async (look) => {
-        await auth.saveLook(look);
-        (game as Game | null)?.changeLook(look);
+      () => ({ look: auth.player?.look ?? 0, style: auth.player?.style ?? 0 }),
+      async (look, style) => {
+        await auth.saveLook(look, style);
+        (game as Game | null)?.changeLook(look, style);
         hud.toast("✨ Looking good!", 3000);
       },
+      eco,
+      shop,
     ),
   };
   // The Caretaker's tasks chip, until you're a founder (or the season closes).

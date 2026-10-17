@@ -56,6 +56,13 @@ pub struct PlotResult {
     pub applied: Applied,
 }
 
+/// A player's saved look (`look`) and what they wear from the mall (`style`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SavedLook {
+    pub look: u32,
+    pub style: u32,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct HomeObject {
     pub x: i16,
@@ -289,6 +296,15 @@ impl EconomyClient {
             reqwest::Method::POST,
             "/internal/plots/harvest",
             Some(&body),
+        )
+        .await
+    }
+
+    pub async fn player_look(&self, player: &str) -> Result<SavedLook, CallError> {
+        self.call::<(), _>(
+            reqwest::Method::GET,
+            &format!("/internal/look/{player}"),
+            None,
         )
         .await
     }

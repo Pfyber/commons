@@ -153,6 +153,26 @@ async fn buy(
     if PLAYER_MADE.contains(&item.kind.as_str()) {
         return Err(gone());
     }
+    let key = format!("mall:{player}:{}", req.key);
+    // Things to wear are bought once and kept (a repeat of the same press is
+    // fine: it's answered as a duplicate below).
+    if crate::cosmetics::is_cosmetic(&item.kind) {
+        let mut conn = state.db.acquire().await.map_err(db_err)?;
+        let repeat = crate::economy::key_used(&mut conn, &key)
+            .await
+            .map_err(db_err)?;
+        let have = crate::economy::totals(&mut conn, player, &[item.id])
+            .await
+            .map_err(db_err)?[0]
+            .1;
+        if have > 0 && !repeat {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "have_it",
+                "You have this already: it's in your wardrobe.",
+            ));
+        }
+    }
     let ops = [
         Op {
             item: COIN,
@@ -163,7 +183,6 @@ async fn buy(
             delta: 1,
         },
     ];
-    let key = format!("mall:{player}:{}", req.key);
     let mut tx = state.db.begin().await.map_err(db_err)?;
     let applied = match apply(&mut tx, &state.catalog, player, &ops, "mall_buy", &key).await {
         Ok(a) => a,

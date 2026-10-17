@@ -3,6 +3,7 @@
 // the zone server's `Granted` messages.
 
 import type { Auth } from "./net/api";
+import { COSMETIC_CODES } from "./world/items";
 
 export interface Item {
   id: number;
@@ -10,7 +11,7 @@ export interface Item {
   kind: "currency" | "fish" | "junk" | "seed" | "plant" | "furniture" | string;
   name: string;
   rarity: number;
-  meta: { sell?: number; buy?: number; grows?: number; seed?: number; night?: boolean };
+  meta: { sell?: number; buy?: number; grows?: number; seed?: number; night?: boolean; code?: number; account_bound?: boolean };
 }
 
 export interface AlbumEntry {
@@ -41,7 +42,10 @@ export class Economy {
       this.auth.get<{ items: Item[] }>("/api/catalog"),
       this.auth.get<{ items: { item: number; qty: number }[] }>("/api/inventory"),
     ]);
-    for (const it of cat.items) this.items.set(it.id, it);
+    for (const it of cat.items) {
+      this.items.set(it.id, it);
+      if (it.meta.code) COSMETIC_CODES.set(it.key, it.meta.code);
+    }
     this.inventory.clear();
     for (const s of inv.items) this.inventory.set(s.item, s.qty);
     this.emit();

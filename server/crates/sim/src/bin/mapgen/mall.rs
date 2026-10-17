@@ -208,6 +208,27 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
             }
             "display"
         }
+        "racks" => {
+            // Mannequins in rows, leaving the far wall for trying things on.
+            for y in [iy0 + 2, iy0 + 6, iy1 - 3] {
+                if y.abs_diff(counter_y) <= 1 {
+                    continue;
+                }
+                for x in (ix0 + 2..=ix1 - 5).step_by(3) {
+                    spots.push((x, y));
+                }
+            }
+            match d.try_on.as_deref() {
+                Some("fitting_room") => {
+                    for y in [iy0 + 1, iy1 - 3] {
+                        b.object("fitting_room", ix1 - 3, y, 3, 2, Some(&d.key), true);
+                    }
+                }
+                Some("mirror") => b.object("mirror", ix1 - 2, iy0 + 2, 2, 1, Some(&d.key), true),
+                _ => {}
+            }
+            "mannequin"
+        }
         _ => {
             for y in [iy0 + 2, iy0 + 5, iy1 - 2] {
                 if y.abs_diff(counter_y) <= 1 {
@@ -255,7 +276,7 @@ fn check(map: &MapFile) {
             "dept" => (o.y..o.y + o.h)
                 .any(|y| (o.x..o.x + o.w).any(|x| seen[y as usize * w + x as usize])),
             // Something on show has to be reachable to look at and buy.
-            "display" | "shelf" => {
+            "display" | "shelf" | "mannequin" | "fitting_room" | "mirror" => {
                 [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)]
                     .iter()
                     .any(|(dx, dy)| {

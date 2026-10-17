@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod bottles;
+pub mod cosmetics;
 pub mod economy;
 pub mod error;
 pub mod gov;

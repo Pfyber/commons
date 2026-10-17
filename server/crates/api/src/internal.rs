@@ -34,6 +34,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/plots/water", post(water))
         .route("/plots/harvest", post(harvest))
         .route("/home/{owner}/objects", get(home_objects))
+        .route("/look/{player}", get(player_look))
         .route("/home/place", post(place))
         .route("/home/pickup", post(pickup))
         .route("/activity", post(activity))
@@ -379,6 +380,24 @@ pub struct HomeObject {
     pub x: i16,
     pub y: i16,
     pub item: i32,
+}
+
+/// A player's saved look and what they wear from the mall: the zone shows
+/// this, not what a client says (ownership was checked when it was saved).
+async fn player_look(
+    State(state): S,
+    headers: HeaderMap,
+    Path(player): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    service(&state, &headers)?;
+    let p = state
+        .store
+        .player(&player)
+        .await?
+        .ok_or_else(|| ApiError::bad_request("bad_player", "no such player"))?;
+    Ok(Json(
+        serde_json::json!({ "look": p.look, "style": p.style }),
+    ))
 }
 
 async fn home_objects(

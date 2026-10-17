@@ -47,19 +47,46 @@ impl Instance {
             .unwrap_or(0)
     }
 
-    /// New clothes: everyone nearby sees them at once. (The API saved them;
-    /// a look is only cosmetic, so any non-NPC look is fine here.)
+    /// New clothes: everyone nearby sees them at once. The API saved them
+    /// (and checked you own what you wear from the mall), so the zone takes
+    /// the saved look from there rather than the client's word. Without an
+    /// API (tests) it takes the message's look, with nothing from the mall.
     pub(super) fn set_look(&mut self, id: u32, look: u32, now: u32) {
         let a = self.avatars.get_mut(&id).unwrap();
-        if commons_protocol::NPC_LOOKS.contains(&look)
-            || a.look == look
-            || !a.emote_rl.try_take(now as u64)
-        {
+        if commons_protocol::NPC_LOOKS.contains(&look) || !a.emote_rl.try_take(now as u64) {
+            return;
+        }
+        match self.economy.clone() {
+            None => self.wear(id, look, 0),
+            Some(econ) => {
+                let player = a.player_id.clone();
+                let who = player.clone();
+                self.spawn_call(
+                    async move { econ.player_look(&who).await },
+                    move |inst, saved| {
+                        if let Ok(l) = saved
+                            && inst.avatars.get(&id).is_some_and(|a| a.player_id == player)
+                        {
+                            inst.wear(id, l.look, l.style);
+                        }
+                    },
+                );
+            }
+        }
+    }
+
+    /// Shows avatar `id` in a look (if it's new), to everyone nearby.
+    pub(super) fn wear(&mut self, id: u32, look: u32, style: u32) {
+        let Some(a) = self.avatars.get_mut(&id) else {
+            return;
+        };
+        if commons_protocol::NPC_LOOKS.contains(&look) || (a.look == look && a.style == style) {
             return;
         }
         a.look = look;
+        a.style = style;
         let cell = a.cell;
-        self.broadcast(cell, &ServerMsg::LookChanged { id, look }, None);
+        self.broadcast(cell, &ServerMsg::LookChanged { id, look, style }, None);
     }
 
     pub(super) fn set_mood(&mut self, id: u32, m: u8, now: u32) {
@@ -312,7 +339,8 @@ mod tests {
             m,
             ServerMsg::LookChanged {
                 id: 1,
-                look: 0x8100_00ff
+                look: 0x8100_00ff,
+                style: 0
             }
         )));
         assert_eq!(inst.avatars[&1].info(inst.clock.now_ms()).look, 0x8100_00ff);

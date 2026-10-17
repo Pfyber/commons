@@ -228,7 +228,7 @@ export class StallPanel extends Panel {
     }
     const pick = el("select", "stall-item");
     for (const [id, qty] of this.eco.inventory) {
-      if (qty <= 0 || id === 1) continue;
+      if (qty <= 0 || id === 1 || this.eco.items.get(id)?.meta.account_bound) continue;
       const o = el("option", "", `${this.eco.name(id)} (you have ${qty})`);
       o.value = String(id);
       pick.append(o);
