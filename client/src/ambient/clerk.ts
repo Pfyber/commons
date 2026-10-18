@@ -46,7 +46,7 @@ export const BARTENDER: Keeper = {
   look: encodeLook({ hue: 10, skin: 1, hair: 3, hat: 2, hatHue: 30, style: 0, accessory: 0, outfit: 5 }),
   hellos: ["Welcome to the Mossy Mug! Pull up a stool.", "Evening! Fire's warm, beer's cold.", "Come on in. The pool shark's been waiting for a challenger."],
   tips: [
-    "A beer's 5 coins. Fair warning: it goes straight to your head.",
+    "A beer's $5. Fair warning: it goes straight to your head.",
     "Water's free, and it'll set you straight.",
     "Fancy a game? The pool shark doesn't go easy.",
     "Best seat's by the fire, if you ask me.",
@@ -101,7 +101,7 @@ export class Clerk {
       if (walkable(map, x, counter.y - 1)) this.spots.push({ x, y: counter.y - 1 });
     }
     const at = this.spots[0] ?? { x: counter.x, y: counter.y - 1 };
-    const info: EntityInfo = { id: who.id, name: who.name, look: who.look, x: at.x, y: at.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0 };
+    const info: EntityInfo = { id: who.id, name: who.name, look: who.look, x: at.x, y: at.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0, away: false };
     this.avatar = new Avatar(info, scene, labels, false, Date.now());
     this.avatar.markNpc();
   }

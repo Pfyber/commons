@@ -185,7 +185,7 @@ async function main() {
       buy: async (look, price) => {
         eco.applyResult({ totals: await auth.buyLook(look, price) });
         (game as Game | null)?.changeLook(look);
-        hud.toast(price ? `🛍️ Bought for ${price} coins. Looking good!` : "✨ Looking good!", 3500);
+        hud.toast(price ? `🛍️ Bought for $${price}. Looking good!` : "✨ Looking good!", 3500);
       },
       preview: (look) => (game as Game | null)?.previewLook(look),
     }),

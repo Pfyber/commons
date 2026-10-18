@@ -3153,3 +3153,53 @@ body.woozy #stage canvas {
   min-height: 64px;
   font-size: 28px;
 }
+
+/* "z Z Z" drifting up from someone asleep on their feet. */
+.snore {
+  position: absolute;
+  left: 60%;
+  bottom: 100%;
+  width: 30px;
+  height: 36px;
+  pointer-events: none;
+}
+.snore span {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  font-weight: 800;
+  color: #e8eefc;
+  text-shadow: 1px 1px 0 #2a2f4a, -1px 1px 0 #2a2f4a, 1px -1px 0 #2a2f4a, -1px -1px 0 #2a2f4a;
+  opacity: 0;
+  animation: snore 3s ease-out infinite;
+}
+.snore span:nth-child(1) { font-size: 10px; }
+.snore span:nth-child(2) { font-size: 13px; animation-delay: 1s; }
+.snore span:nth-child(3) { font-size: 16px; animation-delay: 2s; }
+@keyframes snore {
+  0% { opacity: 0; transform: translate(0, 0) rotate(-8deg); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: translate(18px, -30px) rotate(10deg); }
+}
+
+/* A missed rare fish that stayed hooked: a quick shake and a gold flash. */
+.reel.lucky {
+  animation: reel-lucky 0.5s ease-out;
+}
+.reel.lucky.tier-4,
+.reel.lucky.tier-5 {
+  animation: reel-lucky 0.5s ease-out, reel-glow 0.8s ease-in-out 0.5s infinite alternate;
+}
+.reel .lucky-note {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #1f8a3a;
+  color: #fff;
+}
+@keyframes reel-lucky {
+  0%, 100% { transform: translateX(-50%); }
+  20% { transform: translateX(calc(-50% - 8px)); }
+  40% { transform: translateX(calc(-50% + 8px)); }
+  60% { transform: translateX(calc(-50% - 5px)); }
+  80% { transform: translateX(calc(-50% + 3px)); }
+}

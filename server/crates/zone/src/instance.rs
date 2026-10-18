@@ -133,6 +133,8 @@ struct Avatar {
     move_rl: Bucket,
     chat_rl: Bucket,
     emote_rl: Bucket,
+    /// Smacks at a flopping fish (a few a second).
+    hit_rl: Bucket,
     game_rl: Bucket,
     /// Jam notes and paint strokes.
     play_rl: Bucket,
@@ -151,6 +153,8 @@ struct Avatar {
     sat_together: bool,
     /// What the avatar signals to others (`mood::*`).
     mood: u8,
+    /// Away from the keyboard (their client says so).
+    away: bool,
     /// Instance time the next sky lantern may go up.
     next_lantern: u32,
     fish: Option<fishing::FishSession>,
@@ -194,6 +198,7 @@ impl Avatar {
             t0,
             path,
             mood: self.mood,
+            away: self.away,
         }
     }
 }
@@ -612,6 +617,7 @@ impl Instance {
             move_rl: Bucket::new(10.0, 5.0),
             chat_rl: Bucket::new(3.0, 0.5),
             emote_rl: Bucket::new(3.0, 1.0),
+            hit_rl: Bucket::new(4.0, 8.0),
             game_rl: Bucket::new(5.0, 2.0),
             play_rl: Bucket::new(24.0, 12.0),
             seat: None,
@@ -623,6 +629,7 @@ impl Instance {
             interactions: 0,
             sat_together: false,
             mood: 0,
+            away: false,
             next_lantern: 0,
         };
         avatar.send(
@@ -711,6 +718,15 @@ impl Instance {
                 self.broadcast(cell, &ServerMsg::EmoteShown { id, emote: e }, None);
             }
             ClientMsg::ChatSay { text } => self.chat(id, &text, now),
+            ClientMsg::Away { away } => {
+                let a = self.avatars.get_mut(&id).unwrap();
+                if a.away == away {
+                    return;
+                }
+                a.away = away;
+                let cell = a.cell;
+                self.broadcast(cell, &ServerMsg::AwayChanged { id, away }, None);
+            }
             ClientMsg::Ping { client_t } => {
                 self.send_to(
                     id,
@@ -725,6 +741,7 @@ impl Instance {
             ClientMsg::GameMove { table, uci } => self.game_move(id, table, &uci, now),
             ClientMsg::FishCast { x, y } => self.fish_cast(id, (x, y), now),
             ClientMsg::FishReel { quality } => self.fish_reel(id, quality, now),
+            ClientMsg::FishHit {} => self.fish_hit(id, now),
             ClientMsg::PlotAction { x, y, action, item } => {
                 self.plot_action(id, (x, y), action, item, now)
             }

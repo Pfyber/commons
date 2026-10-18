@@ -38,6 +38,7 @@ import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
 import { tier } from "./ui/rarity";
 import { CatchShows } from "./world/catchfx";
+import { FlopShows } from "./world/flopfx";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Hud } from "./ui/hud";
 import { type ActionMenu, type AlbumPanel, type BagPanel, FishermanPanel, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
@@ -67,7 +68,10 @@ const BEER = 1;
 const WATER = 2;
 /** Protocol `state::SKATING`. */
 const SKATING = 3;
-const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3 };
+const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5 };
+/** protocol `fish_event::FLOP_MS`; and the treasure chest (opened for coins). */
+const FLOP_MS = 4500;
+const TREASURE_ITEM = 113;
 /** Casts reach this far from where you stand (server: CAST_RANGE). */
 const CAST_RANGE = 2;
 /** Matches the server's bite window minus a little latency headroom. */
@@ -185,6 +189,8 @@ const WATCH_RANGE = 12;
 const MAX_NAMES = 25;
 /** How far ahead a held arrow key plans the walk (twice that on a board). */
 const KEY_STEPS = 6;
+/** No input for this long and you're away from the keyboard (you doze off). */
+const AWAY_AFTER_MS = 60_000;
 /** Map objects that are game machines (the server numbers them in map order, as here). */
 const CABINET_KINDS = ["arcade_cabinet", "dance_machine", "pinball"];
 const KEY_RESEND_MS = 180;
@@ -231,8 +237,13 @@ export class Game {
   private pool: PoolPanel | null = null;
   /** The arcade's cabinets and its prize counter, where the map has them. */
   private arcade: ArcadePanel | null = null;
+  /** When who's playing at which table was last worked out. */
+  private playingCheckAt = 0;
   /** Fish just landed, held up above their anglers. */
   private catches: CatchShows;
+  /** Rare fish flopping on the bank, to be hit; and where each angler's line went in. */
+  private flops: FlopShows;
+  private castAt = new Map<number, TileXY>();
   /** The fisherman on the pier, who buys your catch. */
   private fisherman: FishermanPanel | null = null;
   private prizes: PrizePanel | null = null;
@@ -296,6 +307,7 @@ export class Game {
     this.setupCorners(map);
     this.weather = new Weather(app, this.scene, map, indoors);
     this.catches = new CatchShows(this.scene);
+    this.flops = new FlopShows(this.scene);
     this.critters = new Critters(app, this.scene, map);
     if (zoneId === "founders_park") {
       this.cat = new Cat(map);
@@ -311,8 +323,8 @@ export class Game {
     if (fisher) {
       this.clerk = new Clerk(map, { ...fisher, x: fisher.x - 1, y: fisher.y + 1, w: 3, h: 1 }, this.scene, labels, FISHERMAN);
       this.fisherman = new FishermanPanel(ui.eco, (coins, best) => {
-        this.clerk?.say(coins >= 8 ? `Now that's a catch! ${coins} coins for you.` : `${coins} coin${coins === 1 ? "" : "s"}, as promised. Thanks!`);
-        this.hud.toast(`🎣 Sold to the fisherman: +${coins} coins (best: ${best.name})`, 3500);
+        this.clerk?.say(coins >= 8 ? `Now that's a catch! $${coins} for you.` : `$${coins}, as promised. Thanks!`);
+        this.hud.toast(`🎣 Sold to the fisherman: +$${coins} (best: ${best.name})`, 3500);
       }, () => {
         this.clerk?.say("She's a beauty. Fish'll practically jump onto that hook!");
         this.hud.toast("🎣 You bought the Angler's Rod! Fish bite sooner and you get an extra swing.", 4500);
@@ -417,6 +429,7 @@ export class Game {
     if (existing) existing.apply(info, now);
     else {
       const a = new Avatar(info, this.scene, this.labels, info.id === this.selfId, now);
+      a.setAway(info.away);
       a.setFounder(this.ui.welcome.founderNamed(info.name)?.no ?? null);
       this.avatars.set(info.id, a);
     }
@@ -480,6 +493,27 @@ export class Game {
     return true;
   }
 
+  /**
+   * Everyone in a game at a cabinet or the pool table faces it and looks
+   * busy at it (and doesn't doze off, however long they think).
+   */
+  private markPlayers() {
+    const at = new Map<number, { x: number; y: number; kind: "arcade" | "pool" }>();
+    const map = this.scene.map;
+    if (this.arcade) {
+      map.objects
+        .filter((o) => CABINET_KINDS.includes(o.kind))
+        .forEach((o, cab) => {
+          const st = this.arcade?.stateOf(cab);
+          if (st?.status !== ARCADE_PLAYING) return;
+          for (const id of [st.a, st.b]) at.set(id, { x: o.x + o.w / 2 - 0.5, y: o.y + o.h / 2, kind: "arcade" });
+        });
+    }
+    const table = map.objects.find((o) => o.kind === "pool_table");
+    if (table && this.pool) for (const id of this.pool.players) at.set(id, { x: table.x + table.w / 2 - 0.5, y: table.y + table.h / 2, kind: "pool" });
+    for (const [id, a] of this.avatars) a.setPlaying(at.get(id) ?? null);
+  }
+
   /** Walk up to the fisherman and see what he'll give for your catch. */
   private openFisherman(spot: MapObject) {
     const self = this.self;
@@ -505,7 +539,7 @@ export class Game {
       this.clerk?.say(line);
     };
     this.near(this.ui.menu, front, 6).showWith("Bartender 🍺", "The Mossy Mug", [
-      ["🍺 A beer · 5 coins", () => order(BEER, "One cold one, coming up!")],
+      ["🍺 A beer · $5", () => order(BEER, "One cold one, coming up!")],
       ["💧 A glass of water · free", () => order(WATER, "Here you go. Sip slowly.")],
     ]);
   }
@@ -605,6 +639,7 @@ export class Game {
 
   private followStarted(a: number, b: number) {
     const name = (id: number) => this.avatars.get(id)?.info.name ?? "someone";
+    if (a === this.selfId || b === this.selfId) sfx.follow();
     if (a === this.selfId) {
       this.following = b;
       this.followGoal = "";
@@ -749,6 +784,16 @@ export class Game {
       if (kind === 3) p.emote(4);
       else p.flash(t.icon);
     }
+    // They turn to each other and really hug, or slap hands.
+    if (pa && pb && (kind === 1 || kind === 2)) {
+      const how = kind === 1 ? "hug" : "five";
+      pa.together(how, () => (this.avatars.has(b) ? pb.pos : null));
+      pb.together(how, () => (this.avatars.has(a) ? pa.pos : null));
+    }
+    const vol = Math.max(this.nearbyVolume(a), this.nearbyVolume(b));
+    if (kind === 1) sfx.hug(vol);
+    else if (kind === 2) sfx.highFive(vol, 450);
+    else if (kind === 3) sfx.danceRiff(vol);
     if (kind === 1) window.setTimeout(() => [pa, pb].forEach((p) => p?.flash("💞")), 900);
     const other = a === this.selfId ? pb : b === this.selfId ? pa : null;
     if (other) this.hud.toast(`${t.icon} You and ${other.info.name} ${t.done}${kind === 1 ? " 💞" : "!"}`, 3500);
@@ -781,6 +826,9 @@ export class Game {
     const now = performance.now();
     pa?.pumpFist(now);
     pb?.pumpFist(now);
+    // "Rock… paper… scissors!": a thump with each pump.
+    const rpsVol = mine ? 1 : Math.max(this.nearbyVolume(m.a), this.nearbyVolume(m.b));
+    for (let i = 0; i < 3; i++) sfx.fistPump(rpsVol, (PUMP_MS / 3) * i);
     window.setTimeout(() => {
       this.avatars.get(m.a)?.flash(pickIcon(m.aPick));
       this.avatars.get(m.b)?.flash(pickIcon(m.bPick));
@@ -789,6 +837,7 @@ export class Game {
       const winner = beats(m.aPick, m.bPick) ? m.a : beats(m.bPick, m.aPick) ? m.b : 0;
       if (winner) this.avatars.get(winner)?.say("🏆 Wins!");
       if (!mine) return;
+      sfx.rpsResult(winner === this.selfId ? "win" : winner ? "lose" : "draw");
       const [me, them] = m.a === this.selfId ? [m.aPick, m.bPick] : [m.bPick, m.aPick];
       const text =
         !me && !them
@@ -820,7 +869,7 @@ export class Game {
       // On the second pad, beside yours (the server puts you on the first).
       const you = this.avatars.get(st.a);
       const x = d.floor.x + 2;
-      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0 };
+      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0, away: false };
       this.danceBot = new Avatar(info, this.scene, this.labels, false, serverNow);
       this.danceBot.markNpc();
       if (you) this.danceBot.faceToward(you.pos.x);
@@ -962,8 +1011,12 @@ export class Game {
       case "Snap":
         this.avatars.get(m.id)?.snap({ x: m.x, y: m.y });
         break;
+      case "AwayChanged":
+        this.avatars.get(m.id)?.setAway(m.away);
+        break;
       case "EmoteShown":
         this.avatars.get(m.id)?.emote(m.emote);
+        sfx.emoteSound(m.emote, this.nearbyVolume(m.id) * 0.8);
         break;
       case "ChatBubble": {
         const a = this.avatars.get(m.id);
@@ -1051,6 +1104,7 @@ export class Game {
           this.socket?.send({ t: "Accept", from: m.from, kind: m.kind });
           break;
         }
+        sfx.asked();
         this.ui.offer.show(from.info.name, m.kind, () => this.socket?.send({ t: "Accept", from: m.from, kind: m.kind }));
         break;
       }
@@ -1220,6 +1274,29 @@ export class Game {
   }
 
   private bindInput() {
+    // Away from the keyboard: a minute with no key, click, touch, scroll or
+    // even a mouse move (tabbed out counts), and everyone sees you doze off.
+    let lastInput = performance.now();
+    let away = false;
+    const active = () => {
+      lastInput = performance.now();
+      if (away) {
+        away = false;
+        this.socket?.send({ t: "Away", away: false });
+      }
+    };
+    const awayCheck = window.setInterval(() => {
+      if (!away && performance.now() - lastInput > AWAY_AFTER_MS) {
+        away = true;
+        this.socket?.send({ t: "Away", away: true });
+      }
+    }, 2000);
+    for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) window.addEventListener(ev, active, { passive: true });
+    this.disposers.push(() => {
+      window.clearInterval(awayCheck);
+      for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) window.removeEventListener(ev, active);
+    });
+
     // Two fingers pinch the world to zoom.
     const touches = new Map<number, { x: number; y: number }>();
     let pinch: { dist: number; from: number } | null = null;
@@ -1282,6 +1359,13 @@ export class Game {
     const tap = (e: FederatedPointerEvent) => {
       // A pinch isn't a tap.
       if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
+      // Your fish flopping on the bank: hit it.
+      const wx = (e.global.x - this.scene.world.position.x) / this.scene.scale;
+      const wy = (e.global.y - this.scene.world.position.y) / this.scene.scale;
+      if (this.flops.hits(this.selfId, wx, wy)) {
+        this.socket?.send({ t: "FishHit" });
+        return;
+      }
       const t = this.scene.screenToTile(e.global.x, e.global.y);
       if (this.tapBall(e.global.x, e.global.y)) return;
       if (this.tapCat(e.global.x, e.global.y)) return;
@@ -1674,6 +1758,7 @@ export class Game {
     const vol = this.nearbyVolume(m.id);
     switch (m.kind) {
       case FISH.CAST:
+        this.castAt.set(m.id, { x: m.x, y: m.y });
         this.props.cast(m.id, { x: m.x, y: m.y });
         this.avatars.get(m.id)?.castLine({ x: m.x, y: m.y }, performance.now());
         sfx.splash(vol, CAST_SWING_MS);
@@ -1689,7 +1774,28 @@ export class Game {
           this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }), rarity, rod);
         }
         break;
+      case FISH.FLOP: {
+        // Out it comes, onto the bank beside the angler, flopping: hit it!
+        this.props.reelIn(m.id);
+        this.avatars.get(m.id)?.reelIn(performance.now());
+        const fish = this.ui.eco.items.get(m.item);
+        const water = this.castAt.get(m.id) ?? { x: m.x, y: m.y };
+        // Rare: 3 hits; epic: 4; legendary and mythical: 5 (the server's flop_toughness).
+        const need = [3, 3, 3, 4, 5, 5][fish?.rarity ?? 2] ?? 5;
+        this.flops.start(m.id, water, { x: m.x, y: m.y }, fish?.key ?? "minnow", fish?.rarity ?? 2, FLOP_MS, isSelf, need);
+        sfx.flop(vol);
+        if (isSelf) {
+          this.ui.reel.stop();
+          this.hud.toast(`🐟 It's out, and flopping! Tap it ${need} times in 4.5 seconds (it hops away each time) or it jumps back in!`, 4000);
+        }
+        break;
+      }
+      case FISH.HIT:
+        this.flops.hit(m.id, m.item, { x: m.x, y: m.y });
+        sfx.whack(vol, m.item);
+        break;
       case FISH.CAUGHT: {
+        this.flops.remove(m.id);
         this.props.reelIn(m.id);
         this.avatars.get(m.id)?.reelIn(performance.now());
         const caught = this.ui.eco.items.get(m.item);
@@ -1707,6 +1813,7 @@ export class Game {
           caught?.key ?? "minnow",
           caught?.name ?? "A fish",
           rarity,
+          caught?.kind ?? "fish",
         );
         if (isSelf && rarity >= 4) {
           // A legendary or mythical catch lights up the whole screen.
@@ -1720,11 +1827,17 @@ export class Game {
         if (isSelf) {
           this.ui.reel.stop();
           this.taskMaybeDone();
-          this.hud.toast(`${sparkle} ${t.name} catch: ${this.ui.eco.name(m.item)}! (worth ${caught?.meta.sell ?? 0}c to the fisherman)`, (caught?.rarity ?? 0) >= 3 ? 5000 : 3000);
+          if (m.item === TREASURE_ITEM) this.hud.toast("💰 A treasure chest! You prise it open: +$50!", 5000);
+          else this.hud.toast(`${sparkle} ${t.name} catch: ${this.ui.eco.name(m.item)}! (worth $${caught?.meta.sell ?? 0} to the fisherman)`, (caught?.rarity ?? 0) >= 3 ? 5000 : 3000);
         }
         break;
       }
       case FISH.ESCAPED:
+        if (this.flops.has(m.id)) {
+          // Back into the water it goes.
+          this.flops.escape(m.id);
+          sfx.splash(vol, 450);
+        }
         this.props.reelIn(m.id);
         this.avatars.get(m.id)?.reelIn(performance.now());
         if (isSelf) {
@@ -1927,6 +2040,11 @@ export class Game {
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
     this.catches.update(wallNow);
+    this.flops.update(wallNow);
+    if (wallNow > this.playingCheckAt) {
+      this.playingCheckAt = wallNow + 300;
+      this.markPlayers();
+    }
     sfx.skate.update(!!self?.riding, wallNow);
     // The jam pads go away when you walk off from the bandstand.
     if (this.jam?.open && self) {
@@ -1960,6 +2078,7 @@ export class Game {
     this.arcade?.destroy();
     this.fisherman?.destroy();
     this.catches.destroy();
+    this.flops.destroy();
     this.danceBot?.destroy();
     this.prizes?.destroy();
     document.body.classList.remove("woozy");

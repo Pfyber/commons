@@ -339,6 +339,11 @@ const METER_MS = 1600;
  */
 export class PoolPanel extends Panel {
   private state: State = { a: 0, b: 0, turn: 0, groups: 0, status: EMPTY, shot: 0, hole: NO_HOLE, balls: [] };
+
+  /** Who's playing at the table now (none between games). */
+  get players(): number[] {
+    return this.state.status === PLAYING ? [this.state.a, this.state.b] : [];
+  }
   private balls: Ball[] = [];
   /** A shot rolling on screen, and the state to show once it stops. */
   private rolling = false;

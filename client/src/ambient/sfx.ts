@@ -278,6 +278,121 @@ function celebrate(t: number, vol: number, rarity: number) {
   }
 }
 
+/** A fish slapping down onto the bank. */
+export function flop(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.12, 0.25 * vol, "lowpass", 900, 300);
+  tone(t, 0.08, 0.1 * vol, "sine", 180, 90);
+  burst(t + 0.18, 0.06, 0.12 * vol, "bandpass", 1400, 900, 2);
+}
+
+/** A smack at a flopping fish: higher with each hit (`hits` so far). */
+export function whack(vol = 1, hits = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.07, 0.3 * vol, "lowpass", 1600, 400);
+  tone(t, 0.06, 0.12 * vol, "square", 220 + hits * 90, 120 + hits * 60);
+  tone(t + 0.02, 0.12, 0.06 * vol, "triangle", 660 + hits * 220);
+}
+
+// ---- people together, and emotes -------------------------------------------------
+
+/** A high five: a sharp slap of palms, a thump, and a bright ding. */
+export function highFive(vol = 1, delayMs = 0) {
+  if (muted) return;
+  const t = at(delayMs);
+  burst(t, 0.05, 0.45 * vol, "bandpass", 2600, 1800, 1.2);
+  burst(t, 0.02, 0.3 * vol, "highpass", 5000);
+  tone(t, 0.08, 0.15 * vol, "sine", 160, 90);
+  tone(t + 0.04, 0.4, 0.07 * vol, "triangle", 1568);
+  tone(t + 0.1, 0.45, 0.06 * vol, "triangle", 2093);
+}
+
+/** A hug: a soft rustle of clothes and a warm, rising "aww". */
+export function hug(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.35, 0.08 * vol, "lowpass", 700, 300);
+  tone(t + 0.15, 0.5, 0.06 * vol, "triangle", 392, 440);
+  tone(t + 0.3, 0.7, 0.06 * vol, "triangle", 494, 523);
+  tone(t + 0.45, 0.9, 0.05 * vol, "sine", 659);
+}
+
+/** Dancing together: a funky little bass riff. */
+export function danceRiff(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  [82, 82, 123, 110, 98, 123].forEach((hz, i) => tone(t + i * 0.12, 0.1, 0.14 * vol, "square", hz));
+  [659, 784].forEach((hz, i) => tone(t + 0.36 + i * 0.24, 0.12, 0.05 * vol, "triangle", hz));
+}
+
+/** Someone asks you to do something together: a friendly two-note pop. */
+export function asked(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  tone(t, 0.1, 0.08 * vol, "sine", 660, 700);
+  tone(t + 0.1, 0.16, 0.08 * vol, "sine", 990, 1000);
+}
+
+/** Setting off following someone: two soft footstep ticks and a rising note. */
+export function follow(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.04, 0.1 * vol, "bandpass", 900, 700, 2);
+  burst(t + 0.16, 0.04, 0.1 * vol, "bandpass", 900, 700, 2);
+  tone(t + 0.1, 0.25, 0.05 * vol, "triangle", 523, 659);
+}
+
+/** Rock, paper, scissors: a fist pumping down. */
+export function fistPump(vol = 1, delayMs = 0) {
+  if (muted) return;
+  const t = at(delayMs);
+  burst(t, 0.06, 0.15 * vol, "lowpass", 600, 200);
+  tone(t, 0.06, 0.08 * vol, "sine", 140, 90);
+}
+
+/** …and the result: a win, a loss or a draw. */
+export function rpsResult(kind: "win" | "lose" | "draw", vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  const notes = kind === "win" ? [523, 659, 784, 1046] : kind === "lose" ? [392, 330, 262] : [523, 523];
+  notes.forEach((hz, i) => tone(t + i * 0.1, i === notes.length - 1 ? 0.35 : 0.1, 0.07 * vol, "triangle", hz));
+}
+
+/** An emote's little sound (ids as in protocol `emote::*`). */
+export function emoteSound(id: number, vol = 1) {
+  if (muted || vol <= 0.01) return;
+  const t = at(0);
+  switch (id) {
+    case 1: // wave: a breezy whoosh
+      burst(t, 0.3, 0.07 * vol, "bandpass", 800, 2400, 1.5);
+      break;
+    case 2: // laugh: "ha-ha-ha"
+      [700, 640, 580].forEach((hz, i) => tone(t + i * 0.11, 0.08, 0.07 * vol, "square", hz, hz * 0.9));
+      break;
+    case 3: // clap: three quick claps
+      for (let i = 0; i < 3; i++) burst(t + i * 0.16, 0.05, 0.3 * vol, "bandpass", 1600, 1100, 1.5);
+      break;
+    case 4: // dance: a bar of groove
+      [98, 147, 98, 131].forEach((hz, i) => tone(t + i * 0.13, 0.1, 0.1 * vol, "square", hz));
+      break;
+    case 5: // sleep: a little snore
+      tone(t, 0.6, 0.05 * vol, "sawtooth", 90, 70);
+      break;
+    case 6: // cheer: a rising sparkle, "yay!"
+      [523, 659, 784, 1046, 1318].forEach((hz, i) => tone(t + i * 0.06, 0.2, 0.06 * vol, "triangle", hz));
+      break;
+    case 7: // heart: a soft two-note chime
+      tone(t, 0.5, 0.06 * vol, "sine", 784);
+      tone(t + 0.14, 0.7, 0.06 * vol, "sine", 1046);
+      break;
+    case 8: // robot: bleep bloop
+      [440, 880, 330, 660].forEach((hz, i) => tone(t + i * 0.09, 0.07, 0.05 * vol, "square", hz));
+      break;
+  }
+}
+
 /** The fish slipping off: a sad two-note drop. */
 export function gotAway(vol = 1) {
   if (muted) return;

@@ -11,12 +11,15 @@
 //! Bots are good sports: they accept friend requests, being followed, hugs,
 //! high fives, dances and rock paper scissors (picking at random), wave back
 //! at people who wave at them, and stop walking when someone comes close.
+//! Now and then one goes fishing: walks to the water, casts, reels in (not
+//! always well) and smacks a rare catch flopping on the bank (not always fast
+//! enough).
 
 use anyhow::{Context, bail};
 use clap::{Parser, ValueEnum};
 use commons_common::token::{self, AccessClaims, JoinClaims, TrustTier};
 use commons_protocol::{
-    ClientMsg, EntityInfo, PROTOCOL_VERSION, ServerMsg, emote, push_framed, rps, split_frame,
+    ClientMsg, EntityInfo, PROTOCOL_VERSION, ServerMsg, emote, fish_event, push_framed, rps, split_frame,
     together,
 };
 use commons_sim::furniture::{Furniture, Side};
@@ -230,6 +233,41 @@ fn frame(msg: &ClientMsg) -> Message {
 struct World {
     grid: Grid,
     furniture: Furniture,
+    /// Where one can fish: a dry tile to stand on and a water tile in casting reach.
+    fishing: Vec<(TilePos, TilePos)>,
+}
+
+/// Bots fish within this many tiles of the fisherman (the pond by the pier).
+const FISHING_NEAR: i32 = 14;
+/// One bot in this many is a keen angler, out at the pond nearly all the
+/// time, so there's almost always someone fishing.
+const ANGLER_EVERY: usize = 7;
+
+/// Every dry, walkable tile right by the water, with a water tile next to it;
+/// around the fisherman's pond if the map has him.
+fn fishing_spots(map: &MapFile, grid: &Grid) -> Vec<(TilePos, TilePos)> {
+    let fisherman = map.objects.iter().find(|o| o.kind == "fisherman").map(|o| (o.x, o.y));
+    let Some(water) = map.ground_legend.iter().position(|n| n == "water") else {
+        return vec![];
+    };
+    let is_water = |x: i32, y: i32| {
+        x >= 0 && y >= 0 && (x as u16) < map.width && (y as u16) < map.height && map.ground[y as usize * map.width as usize + x as usize] as usize == water
+    };
+    let mut spots = vec![];
+    for y in 0..map.height as i32 {
+        for x in 0..map.width as i32 {
+            if !grid.walkable_i(x, y) || is_water(x, y) {
+                continue;
+            }
+            if fisherman.is_some_and(|f| cheb(f, (x as u16, y as u16)) > FISHING_NEAR) {
+                continue;
+            }
+            if let Some((wx, wy)) = [(0, 1), (0, -1), (1, 0), (-1, 0)].iter().map(|(dx, dy)| (x + dx, y + dy)).find(|&(wx, wy)| is_water(wx, wy)) {
+                spots.push(((x as u16, y as u16), (wx as u16, wy as u16)));
+            }
+        }
+    }
+    spots
 }
 
 /// A walkable tile next to `seat`, to stand on before sitting.
@@ -305,7 +343,9 @@ async fn bot_loop(
     report: &mut BotReport,
 ) -> anyhow::Result<()> {
     let mut rng = SmallRng::seed_from_u64(i as u64 ^ rand::random::<u64>());
-    let behaviour = match args.behaviour {
+    // Keen anglers wander (between casts) and fish all day.
+    let angler = i % ANGLER_EVERY == 0;
+    let behaviour = if angler { Behaviour::Wander } else { match args.behaviour {
         Behaviour::Mix => {
             if rng.random_bool(0.3) {
                 Behaviour::Crowd
@@ -314,7 +354,7 @@ async fn bot_loop(
             }
         }
         b => b,
-    };
+    } };
     let name = format!("Bot {i}");
     let (sub, look) = match &args.api {
         Some(api) => sign_in(api, &name).await?,
@@ -384,6 +424,9 @@ async fn bot_loop(
     let mut replies: Vec<(Instant, ClientMsg)> = Vec::new();
     let mut paused_until = Instant::now();
     let mut next_wave_back = Instant::now();
+    // Fishing: when to go next, and, while out fishing, when to give up on it.
+    let mut next_fish = Instant::now() + Duration::from_secs(if angler { rng.random_range(3..15) } else { rng.random_range(20..90) });
+    let mut fishing_until: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -483,6 +526,35 @@ async fn bot_loop(
                                 chess_move = Some((Instant::now() + delay * 3, table, "new".into()));
                             }
                         }
+                        // Out fishing: reel in a bite (fumbling it now and then); smack a fish
+                        // flopping on the bank, mostly quick enough; done when it's caught or gone.
+                        ServerMsg::FishEvent { id, kind, .. } if id == self_id => match kind {
+                            fish_event::BITE => {
+                                let after = Duration::from_millis(rng.random_range(500..1800));
+                                let quality = if rng.random_bool(0.75) { rng.random_range(500..1000) } else { 100 };
+                                replies.push((Instant::now() + after, ClientMsg::FishReel { quality }));
+                            }
+                            fish_event::FLOP => {
+                                let hits = if rng.random_bool(0.8) { 5 } else { 2 };
+                                let mut at = Instant::now();
+                                for _ in 0..hits {
+                                    at += Duration::from_millis(rng.random_range(450..850));
+                                    replies.push((at, ClientMsg::FishHit {}));
+                                }
+                            }
+                            fish_event::CAUGHT | fish_event::ESCAPED => {
+                                fishing_until = None;
+                                if angler {
+                                    // Straight back to it, from about the same spot.
+                                    next_fish = Instant::now() + Duration::from_secs(rng.random_range(5..15));
+                                    next_move = next_fish + Duration::from_secs(30);
+                                } else {
+                                    next_fish = Instant::now() + Duration::from_secs(rng.random_range(60..180));
+                                    next_move = Instant::now() + Duration::from_secs(rng.random_range(2..6));
+                                }
+                            }
+                            _ => {}
+                        },
                         ServerMsg::Error { code, message } => {
                             report.server_errors += 1;
                             if code == commons_protocol::error_code::UNAUTHORIZED { bail!("unauthorized: {message}"); }
@@ -535,7 +607,24 @@ async fn bot_loop(
                     }
                 } else if paused {
                     // Standing still for the person close by.
-                } else if now >= next_sit && self_id != 0 && behaviour == Behaviour::Wander {
+                } else if let Some(until) = fishing_until {
+                    // Out fishing; giving up if nothing comes of it.
+                    if now >= until {
+                        fishing_until = None;
+                        next_move = now;
+                    }
+                } else if now >= next_fish && self_id != 0 && behaviour == Behaviour::Wander && !world.fishing.is_empty() {
+                    // Off to the water: walk to a spot nearby (casting on arrival).
+                    next_fish = now + Duration::from_secs(if angler { rng.random_range(5..15) } else { rng.random_range(60..180) });
+                    // An angler already at the pond stays near where they were; others pick any spot there.
+                    let near: Vec<_> = world.fishing.iter().filter(|(stand, _)| cheb(*stand, me) <= 4).collect();
+                    let pick = if angler && !near.is_empty() { near.choose(&mut rng).copied() } else { world.fishing.choose(&mut rng) };
+                    if let Some(&(stand, water)) = pick {
+                        tx.send(frame(&ClientMsg::MoveTo { x: stand.0, y: stand.1 })).await?;
+                        tx.send(frame(&ClientMsg::FishCast { x: water.0, y: water.1 })).await?;
+                        fishing_until = Some(now + Duration::from_secs(60));
+                    }
+                } else if now >= next_sit && self_id != 0 && behaviour == Behaviour::Wander && !angler {
                     next_sit = now + Duration::from_secs(rng.random_range(30..90));
                     // Table seats a third of the time, so games actually happen.
                     let table_seats: Vec<_> = world.furniture.seats.iter().filter(|(_, s)| s.table.is_some()).collect();
@@ -609,8 +698,10 @@ async fn main() -> anyhow::Result<()> {
     let map_text =
         std::fs::read_to_string(&args.map).with_context(|| format!("reading {}", args.map))?;
     let map = MapFile::from_json(&map_text).map_err(anyhow::Error::msg)?;
+    let grid = map.grid();
     let world = Arc::new(World {
-        grid: map.grid(),
+        fishing: fishing_spots(&map, &grid),
+        grid,
         furniture: Furniture::from_map(&map),
     });
     let spawn = (map.spawn.x, map.spawn.y);

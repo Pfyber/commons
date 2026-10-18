@@ -160,6 +160,26 @@ const SPECS: Record<string, FishSpec> = {
       ".........OO.....",
     ],
   },
+  /** A big-mouthed, humped bass with a dark stripe down its side. */
+  bass: {
+    H: "#3f6a2a",
+    B: "#7fae4a",
+    L: "#dce8b0",
+    F: "#2f5220",
+    A: "#24401a",
+    rows: [
+      ".....O.O.O......",
+      "....OFOFOFOO....",
+      "..OOOOOOOOOOO.OO",
+      ".OHHHOBBBBBBBOTO",
+      "OHEWHOBABBABBTTO",
+      "OOOOHOAAAAAAATTO",
+      "OHHHHOLLLLLLLTTO",
+      ".OHHHOLLLLLLOOTO",
+      "..OOOOOFFOOOO.OO",
+      "......OO........",
+    ],
+  },
   // ---- epic: strange creatures ----
   /** Long and armoured: bony plates down its back, a pointed snout, a shark's tail. */
   sturgeon: {
@@ -204,6 +224,25 @@ const SPECS: Record<string, FishSpec> = {
       "......OO........",
     ],
   },
+  /** A long eel wriggling in a wave, crackling with yellow lightning. */
+  electric_eel: {
+    H: "#3f6272",
+    B: "#4f7a8a",
+    L: "#9ab8c0",
+    F: "#2a4656",
+    T: "#4f7a8a",
+    A: "#ffe14f",
+    rows: [
+      "..............O.",
+      "....OOOO.....OTO",
+      ".OOOBBBBO...OBTO",
+      "OHEWOABBBO.OBAO.",
+      "OHHHOBBABBOBABO.",
+      ".OOOLLLOABBBAO..",
+      "....OOOOOLLLO...",
+      "........OOOO....",
+    ],
+  },
   // ---- legendary ----
   /** A butterfly koi: patched gold and red and white, with a great flowing tail and whiskers. */
   golden_koi: {
@@ -226,6 +265,27 @@ const SPECS: Record<string, FishSpec> = {
       "O.OOOOOOO..OTTTO",
       "O...OFFO....OTO.",
       "....OOO......O..",
+    ],
+  },
+  /** A long silver dragon of the river: big aqua-rimmed scales, an upturned jaw and chin barbels. */
+  arowana: {
+    H: "#8a9aa8",
+    B: "#eef4f8",
+    L: "#ffffff",
+    F: "#4fb8c8",
+    T: "#3fa8b8",
+    A: "#a8e4ee",
+    rows: [
+      "..........OOO...",
+      "..OOOOOOOOFFFO.O",
+      ".OHHOBABABABOOTO",
+      "OHEWOABABABABTTO",
+      "OHHHOBABABABATTO",
+      "OHHHOLLLLLLLLTTO",
+      ".OOHOLLLLLLLOOTO",
+      "..OOOOOOOOFFFO.O",
+      "..O.O.....OOO...",
+      "..O.O...........",
     ],
   },
   // ---- mythical ----

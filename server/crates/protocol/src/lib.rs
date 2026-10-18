@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 12;
+pub const PROTOCOL_VERSION: u16 = 14;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -39,6 +39,8 @@ records! {
         t0: u32,
         path: Vec<Tile>,
         mood: u8,
+        // away: away from the keyboard (see `Away`), shown dozing on their feet.
+        away: bool,
     }
 }
 
@@ -111,6 +113,11 @@ message_enum! {
         /// (`angle` as `PoolShoot`) and how far the cue is drawn back
         /// (`pull` 0–1000), so the people watching see you line it up.
         30 PoolAim { angle: u16, pull: u16 }
+        /// You've been away from the keyboard a while (no input for a
+        /// minute), or you're back. Others see you doze off on your feet.
+        31 Away { away: bool }
+        /// A smack at your fish flopping on the bank (`fish_event::FLOP`).
+        32 FishHit {}
     }
 }
 
@@ -213,6 +220,8 @@ message_enum! {
         /// `by` (a player, or `pool::BOT`) lining up their shot: the cue at
         /// `angle`, drawn back `pull` (as `PoolAim`).
         32 PoolAim { by: u32, angle: u16, pull: u16 }
+        /// Avatar `id` went away from the keyboard, or came back (as `Away`).
+        33 AwayChanged { id: u32, away: bool }
     }
 }
 
@@ -410,6 +419,15 @@ pub mod fish_event {
     pub const BITE: u8 = 1;
     pub const CAUGHT: u8 = 2;
     pub const ESCAPED: u8 = 3;
+    /// A rare (or rarer) fish landed on the bank beside its angler, at
+    /// (x, y): it flops about until hit enough times (`FishHit`: 3 for a
+    /// rare fish, 4 epic, 5 legendary or mythical, which hops two tiles), or
+    /// jumps back in `FLOP_MS` after landing (ESCAPED), however many hits it took.
+    pub const FLOP: u8 = 4;
+    /// The flopping fish was hit and flopped off to (x, y); `item` is how
+    /// many hits so far.
+    pub const HIT: u8 = 5;
+    pub const FLOP_MS: u32 = 4_500;
 }
 
 /// Shared jam beat length (a sixteenth note at 120 bpm).
@@ -477,6 +495,7 @@ mod tests {
             t0: 1234,
             path: vec![Tile { x: 3, y: 4 }, Tile { x: 9, y: 4 }],
             mood: 2,
+            away: false,
         };
         let msgs = vec![
             ServerMsg::Welcome {

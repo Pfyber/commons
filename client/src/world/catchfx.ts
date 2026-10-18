@@ -40,14 +40,14 @@ export class CatchShows {
    * A fish (`key`) of `rarity` caught at `water`, landing above wherever
    * `head` says the angler's head is.
    */
-  start(water: TileXY, head: () => { x: number; y: number } | null, key: string, name: string, rarity: number) {
+  start(water: TileXY, head: () => { x: number; y: number } | null, key: string, name: string, rarity: number, kind = "fish") {
     const t = tier(rarity);
     const color = Number.parseInt(t.color.slice(1), 16);
     const root = new Container();
     root.zIndex = 1e9;
     const glow = new Graphics();
     const rays = new Graphics();
-    const fish = new Sprite(itemTexture(key, "fish"));
+    const fish = new Sprite(itemTexture(key, kind));
     fish.anchor.set(0.5);
     fish.texture.source.scaleMode = "nearest";
     const label = new Text({

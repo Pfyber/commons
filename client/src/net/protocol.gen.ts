@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 14;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -116,6 +116,7 @@ export interface EntityInfo {
   t0: number;
   path: Tile[];
   mood: number;
+  away: boolean;
 }
 
 export function encEntityInfo(w: Writer, v: EntityInfo) {
@@ -129,6 +130,7 @@ export function encEntityInfo(w: Writer, v: EntityInfo) {
   w.u32(v.t0);
   w.vec(v.path, (x) => encTile(w, x));
   w.u8(v.mood);
+  w.bool(v.away);
 }
 
 export function decEntityInfo(r: Reader): EntityInfo {
@@ -143,6 +145,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
     t0: r.u32(),
     path: r.vec(() => decTile(r)),
     mood: r.u8(),
+    away: r.bool(),
   };
 }
 
@@ -177,6 +180,8 @@ export type ClientMsg =
   | { t: "ArcadeLeave"; cab: number }
   | { t: "ArcadeInput"; cab: number; value: number }
   | { t: "PoolAim"; angle: number; pull: number }
+  | { t: "Away"; away: boolean }
+  | { t: "FishHit" }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -322,6 +327,13 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u16(m.angle);
       w.u16(m.pull);
       break;
+    case "Away":
+      w.u8(31);
+      w.bool(m.away);
+      break;
+    case "FishHit":
+      w.u8(32);
+      break;
   }
   return w.finish();
 }
@@ -421,6 +433,12 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 30:
       m = { t: "PoolAim", angle: r.u16(), pull: r.u16() };
       break;
+    case 31:
+      m = { t: "Away", away: r.bool() };
+      break;
+    case 32:
+      m = { t: "FishHit" };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -461,6 +479,7 @@ export type ServerMsg =
   | { t: "PoolShot"; by: number; vx: number; vy: number; shot: number }
   | { t: "ArcadeState"; cab: number; kind: number; a: number; b: number; status: number; turn: number; t0: number; data: number[] }
   | { t: "PoolAim"; by: number; angle: number; pull: number }
+  | { t: "AwayChanged"; id: number; away: boolean }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -681,6 +700,11 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.angle);
       w.u16(m.pull);
       break;
+    case "AwayChanged":
+      w.u8(33);
+      w.u32(m.id);
+      w.bool(m.away);
+      break;
   }
   return w.finish();
 }
@@ -785,6 +809,9 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 32:
       m = { t: "PoolAim", by: r.u32(), angle: r.u16(), pull: r.u16() };
+      break;
+    case 33:
+      m = { t: "AwayChanged", id: r.u32(), away: r.bool() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

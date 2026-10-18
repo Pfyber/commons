@@ -260,7 +260,7 @@ export class BagPanel extends Panel {
   render() {
     this.body.replaceChildren();
     const coins = el("div", "coins");
-    coins.append(icon(this.eco.items.get(COIN)), `${this.eco.coins} coins`);
+    coins.append(icon(this.eco.items.get(COIN)), `$${this.eco.coins}`);
     this.body.append(coins);
     let any = false;
     for (const [kind, label] of KIND_ORDER) {
@@ -345,7 +345,7 @@ export class MarketPanel extends Panel {
       button("Buy", () => ((this.tab = "buy"), this.render()), this.tab === "buy" ? "on" : ""),
     );
     const coins = el("div", "coins");
-    coins.append(icon(this.eco.items.get(COIN)), `${this.eco.coins} coins`);
+    coins.append(icon(this.eco.items.get(COIN)), `$${this.eco.coins}`);
     this.body.append(tabs, coins, this.err);
     const list = el("div", "rows");
     if (this.tab === "sell") {
@@ -354,7 +354,7 @@ export class MarketPanel extends Panel {
       for (const it of sellable) {
         const n = this.eco.qty(it.id);
         const row = el("div", "row");
-        row.append(icon(it), el("span", "name", `${it.name} ×${n}`), el("span", "price", `${it.meta.sell}c`));
+        row.append(icon(it), el("span", "name", `${it.name} ×${n}`), el("span", "price", `$${it.meta.sell}`));
         row.append(button("Sell 1", () => this.act(() => this.eco.sell(it.id, 1)), "small"));
         if (n > 1) row.append(button(`All ${n}`, () => this.act(() => this.eco.sell(it.id, Math.min(n, 99))), "small"));
         list.append(row);
@@ -364,7 +364,7 @@ export class MarketPanel extends Panel {
         const row = el("div", "row");
         const b = button("Buy", () => this.act(() => this.eco.buy(it.id, 1)), "small");
         b.disabled = this.eco.coins < (it.meta.buy ?? 0);
-        row.append(icon(it), el("span", "name", it.name), el("span", "price", `${it.meta.buy}c`), b);
+        row.append(icon(it), el("span", "name", it.name), el("span", "price", `$${it.meta.buy}`), b);
         list.append(row);
       }
     }
@@ -435,8 +435,8 @@ export class FishermanPanel extends Panel {
     const total = mine.reduce((sum, [i, n]) => sum + (i.meta.sell ?? 0) * n, 0);
     const head = el("div", "fisher-head");
     const coins = el("div", "coins");
-    coins.append(icon(this.eco.items.get(COIN)), `${this.eco.coins} coins`);
-    const all_btn = button(total ? `Sell the lot · +${total}c` : "Nothing to sell yet", () => this.sell(mine), "primary");
+    coins.append(icon(this.eco.items.get(COIN)), `$${this.eco.coins}`);
+    const all_btn = button(total ? `Sell the lot · +$${total}` : "Nothing to sell yet", () => this.sell(mine), "primary");
     all_btn.disabled = !total || this.busy;
     head.append(coins, all_btn);
     this.body.append(el("p", "hint", "\"I'll buy whatever you pull out of that pond. The rarer it is, the more it's worth.\""), head, this.err);
@@ -451,7 +451,7 @@ export class FishermanPanel extends Panel {
       card.append(icon(rod), text);
       if (owned) card.append(el("span", "fisher-rod-owned", "✓ Yours"));
       else {
-        const buy = button(`Buy · ${price}c`, () => this.buyRod(), "primary");
+        const buy = button(`Buy · $${price}`, () => this.buyRod(), "primary");
         buy.disabled = this.busy || this.eco.coins < price;
         card.append(buy);
       }
@@ -474,7 +474,7 @@ export class FishermanPanel extends Panel {
       row.style.setProperty("--tier", t.color);
       const name = el("span", "name");
       name.append(el("b", "", known ? it.name : "???"), el("small", "tier-name", t.name + (it.meta.night ? " · night" : "")));
-      row.append(icon(it), name, el("span", "qty", n ? `×${n}` : ""), el("span", "price", `${it.meta.sell}c`));
+      row.append(icon(it), name, el("span", "qty", n ? `×${n}` : ""), el("span", "price", `$${it.meta.sell}`));
       const one = button("Sell 1", () => this.sell([[it, 1]]), "small");
       one.disabled = !n || this.busy;
       row.append(one);
@@ -559,6 +559,13 @@ export const ROD_ITEM = 112;
 const ROD_PACE = 0.85;
 const ROD_EXTRA_MAX_MS = 3000;
 
+/** Rare fish and up, missed, may stay hooked for one more swing (the server holds them this long: 3 s). */
+const SECOND_CHANCE_FROM = 2;
+const SECOND_CHANCE_MAX_MS = 2800;
+/** Legendary and mythical fish must be stopped in the zone twice (the server holds them 2 s longer). */
+const DOUBLE_HIT_FROM = 4;
+const DOUBLE_HIT_MS = 1800;
+
 export class ReelGame {
   private el = el("div", "reel");
   private needle = el("div", "needle");
@@ -568,7 +575,12 @@ export class ReelGame {
   /** This bite's difficulty (rarity tier), and the needle's pace (slower with the upgraded rod). */
   private tier: Tier = TIERS[0];
   private pace = TIERS[0].pace;
-  private wild = false;
+  /** When the fish gets away; a rare one, missed, may stay hooked once (pushing it back). */
+  private deadline = 0;
+  private rarity = 0;
+  private secondChance = false;
+  /** A two-hit fish: the first hit's quality, once landed. */
+  private firstHit = 0;
   private raf = 0;
   private done: ((q: number) => void) | null = null;
   private key = (e: KeyboardEvent) => {
@@ -589,12 +601,9 @@ export class ReelGame {
   }
 
   private pos(t: number) {
-    // Back and forth from one end, quicker the rarer the fish; legendary and
-    // mythical fish thrash, so the needle surges and stalls as well.
+    // Back and forth from one end, quicker the rarer the fish.
     const s = (t - this.start) / 1000;
-    const p = this.pace;
-    const surge = this.wild ? 0.7 * Math.sin(s * p * 1.7) : 0;
-    return 0.5 + 0.5 * Math.sin(s * p + surge - Math.PI / 2);
+    return 0.5 + 0.5 * Math.sin(s * this.pace - Math.PI / 2);
   }
 
   /**
@@ -607,7 +616,6 @@ export class ReelGame {
     this.tier = tier(rarity);
     this.pace = this.tier.pace * (rod ? ROD_PACE : 1);
     if (rod) windowMs += Math.min(ROD_EXTRA_MAX_MS, ((2 * Math.PI) / this.pace) * 1000);
-    this.wild = rarity >= 4;
     const w = this.tier.sweet;
     this.sweet.style.left = `${(0.5 - w) * 100}%`;
     this.sweet.style.width = `${w * 200}%`;
@@ -617,13 +625,18 @@ export class ReelGame {
     this.title.replaceChildren();
     const name = el("b", "", this.tier.name.toUpperCase());
     name.style.color = this.tier.color;
-    this.title.append(rarity >= 3 ? "‼️ " : "", name, " bite! Stop the needle in the coloured zone", rod ? " (🎣 Angler's Rod: an extra swing)" : "");
+    this.title.append(rarity >= 3 ? "‼️ " : "", name, " bite! Stop the needle in the coloured zone", rarity >= DOUBLE_HIT_FROM ? " twice" : "", rod ? " (🎣 Angler's Rod: an extra swing)" : "");
     this.start = performance.now();
+    this.deadline = this.start + windowMs;
+    this.rarity = rarity;
+    this.secondChance = false;
+    this.firstHit = 0;
+    if (rarity >= DOUBLE_HIT_FROM) this.deadline += DOUBLE_HIT_MS;
     this.el.hidden = false;
     window.addEventListener("keydown", this.key, true);
     const frame = (t: number) => {
       this.needle.style.left = `${this.pos(t) * 100}%`;
-      if (t - this.start > windowMs) return this.stop();
+      if (t > this.deadline) return this.stop();
       this.raf = requestAnimationFrame(frame);
     };
     this.raf = requestAnimationFrame(frame);
@@ -635,9 +648,25 @@ export class ReelGame {
     const d = Math.abs(this.pos(performance.now()) - 0.5);
     const w = this.tier.sweet + 0.008;
     const quality = d <= w ? Math.round(1000 - (d / w) * 600) : 0;
+    // Missed a rare one: a coin flip says whether it stays hooked for one more go.
+    if (quality === 0 && this.rarity >= SECOND_CHANCE_FROM && !this.secondChance && Math.random() < 0.5) {
+      this.secondChance = true;
+      this.deadline += Math.min(SECOND_CHANCE_MAX_MS, ((2 * Math.PI) / this.pace) * 1000);
+      this.title.replaceChildren(el("span", "lucky-note", "🍀 Lucky! Still hooked, try again"));
+      this.el.classList.remove("lucky");
+      void this.el.offsetWidth;
+      this.el.classList.add("lucky");
+      return;
+    }
+    // A big one needs a second hit; the catch is as good as the two together.
+    if (quality > 0 && this.rarity >= DOUBLE_HIT_FROM && !this.firstHit) {
+      this.firstHit = quality;
+      this.title.replaceChildren(el("span", "lucky-note", "💪 Hit! Once more to land it"));
+      return;
+    }
     const f = this.done;
     this.stop();
-    f(quality);
+    f(quality > 0 && this.firstHit ? Math.round((quality + this.firstHit) / 2) : quality);
   }
 
   stop() {

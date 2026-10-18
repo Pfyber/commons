@@ -228,6 +228,7 @@ pub fn sample_vectors() -> String {
         t0: 4_000_000_000,
         path: vec![Tile { x: 95, y: 0 }, Tile { x: 90, y: 5 }],
         mood: 1,
+            away: false,
     };
     let client = [
         ClientMsg::Hello {

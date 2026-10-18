@@ -66,6 +66,19 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     px(ctx, "#e8566b", 14, 12, 1, 1);
     return;
   }
+  if (key === "treasure_chest") {
+    // A little chest, banded in gold, a coin peeking out of the lid.
+    px(ctx, O, 1, 5, 14, 10);
+    px(ctx, "#8a5a2a", 2, 6, 12, 8);
+    px(ctx, "#a8743a", 2, 6, 12, 3);
+    px(ctx, O, 1, 8, 14, 1);
+    px(ctx, "#f6c343", 2, 9, 12, 1);
+    px(ctx, "#f6c343", 7, 8, 2, 4);
+    px(ctx, O, 7, 11, 2, 1);
+    px(ctx, "#f6c343", 4, 4, 3, 2);
+    px(ctx, "#fff3c4", 5, 4, 1, 1);
+    return;
+  }
   if (key === "old_boot") {
     px(ctx, O, 4, 2, 6, 10);
     px(ctx, "#7a5532", 5, 3, 4, 8);

@@ -204,7 +204,7 @@ export class Hud {
   }
 
   setCoins(n: number) {
-    this.coinsEl.replaceChildren(pxIcon("coin"), document.createTextNode(String(n)));
+    this.coinsEl.replaceChildren(pxIcon("coin"), document.createTextNode(`$${n}`));
   }
 
   setNearby(n: number) {

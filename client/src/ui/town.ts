@@ -175,7 +175,7 @@ export class RequestsPanel extends Panel {
       const item = this.eco.items.get(r.item);
       const row = el("div", r.done ? "row request done" : "row request");
       const text = el("div", "request-text");
-      text.append(el("span", "", r.text), el("span", "price", `Reward: ${r.reward} coins`));
+      text.append(el("span", "", r.text), el("span", "price", `Reward: $${r.reward}`));
       row.append(icon(item), text);
       if (r.done) row.append(el("span", "badge new", "Done"));
       else {
@@ -218,7 +218,7 @@ export class GoalPanel extends Panel {
       const r = await this.town.donate(amount);
       this.eco.setTotal(COIN, r.coins, false);
       this.msg.className = "ok";
-      this.msg.textContent = r.completed ? "You did it, together! 🎉" : `You gave ${r.accepted} coins. Thank you!`;
+      this.msg.textContent = r.completed ? "You did it, together! 🎉" : `You gave $${r.accepted}. Thank you!`;
       if (r.completed) this.onReached(r.goal);
     } catch (e) {
       this.msg.className = "error";
@@ -239,8 +239,8 @@ export class GoalPanel extends Panel {
     const fill = el("div", "fill");
     fill.style.width = `${Math.min(100, (g.raised / g.target) * 100)}%`;
     bar.append(fill);
-    this.body.append(bar, el("p", "progress-text", `${g.raised} / ${g.target} coins${g.done ? " · reached!" : ""}`));
-    if (g.mine > 0) this.body.append(el("p", "hint", `You've given ${g.mine} coins to this.`));
+    this.body.append(bar, el("p", "progress-text", `$${g.raised} / $${g.target}${g.done ? " · reached!" : ""}`));
+    if (g.mine > 0) this.body.append(el("p", "hint", `You've given $${g.mine} to this.`));
     if (!g.done) {
       const btns = el("div", "btns");
       for (const amount of [10, 50, 100]) {

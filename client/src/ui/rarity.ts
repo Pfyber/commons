@@ -15,8 +15,8 @@ export const TIERS: Tier[] = [
   { name: "Uncommon", color: "#5fd07a", sweet: 0.085, pace: 3.1 },
   { name: "Rare", color: "#4fa8ff", sweet: 0.07, pace: 3.7 },
   { name: "Epic", color: "#b07bff", sweet: 0.055, pace: 4.4 },
-  { name: "Legendary", color: "#ffb84f", sweet: 0.042, pace: 5.2 },
-  { name: "Mythical", color: "#ff4fa3", sweet: 0.032, pace: 6.2 },
+  { name: "Legendary", color: "#ffb84f", sweet: 0.042, pace: 4.6 },
+  { name: "Mythical", color: "#ff4fa3", sweet: 0.034, pace: 4.8 },
 ];
 
 export function tier(rarity: number | undefined): Tier {

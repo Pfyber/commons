@@ -165,7 +165,7 @@ export class WardrobePanel extends Panel {
       button("🎲 Surprise me", () => this.set(this.surprise()), "small"),
       button("Undo all", () => this.set(decodeLook(this.hooks.current())), "small subtle"),
     );
-    if (shop) side.append(el("p", "coins-line", `🪙 ${this.eco.coins} coins`));
+    if (shop) side.append(el("p", "coins-line", `🪙 $${this.eco.coins}`));
     top.append(stage, side);
     this.body.append(top);
 
@@ -199,12 +199,12 @@ export class WardrobePanel extends Panel {
       const list = el("ul", "basket");
       for (const it of items) {
         const row = el("li", "");
-        row.append(el("span", "", it.name), el("span", "price", `${it.meta.price}c`));
+        row.append(el("span", "", it.name), el("span", "price", `$${it.meta.price}`));
         list.append(row);
       }
       const short = total - this.eco.coins;
-      const sum = el("p", "total", `Total ${total} coins`);
-      const buy = button(`Buy & wear · ${total}c`, () => void this.save(() => this.hooks.buy(encodeLook(this.look), total)), "primary");
+      const sum = el("p", "total", `Total $${total}`);
+      const buy = button(`Buy & wear · $${total}`, () => void this.save(() => this.hooks.buy(encodeLook(this.look), total)), "primary");
       buy.disabled = this.saving || short > 0;
       box.append(el("h3", "", "Trying on"), list, sum);
       if (short > 0) box.append(el("p", "hint", `You need ${short} more coins. Fish, garden or sell at the market cart.`));
@@ -289,8 +289,8 @@ export class WardrobePanel extends Panel {
       const view = el("div", crop === "head" ? "pic head" : "pic");
       view.append(pic);
       b.append(view, el("span", "", name));
-      if (item && this.mode === "shop") b.append(el("span", owned ? "tag owned" : "tag", owned ? "✓ Yours" : `${item.meta.price}c`));
-      else if (locked) b.append(el("span", "tag", `🔒 ${item?.meta.price ?? ""}c`));
+      if (item && this.mode === "shop") b.append(el("span", owned ? "tag owned" : "tag", owned ? "✓ Yours" : `$${item.meta.price}`));
+      else if (locked) b.append(el("span", "tag", `🔒 $${item?.meta.price ?? ""}`));
       grid.append(b);
     });
     return grid;

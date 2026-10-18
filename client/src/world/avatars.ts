@@ -3,7 +3,7 @@
 
 import { Graphics, Sprite } from "pixi.js";
 import type { EntityInfo } from "../net/protocol.gen";
-import { type AvatarFrame, PUSH_CROUCH, SKIN_COLORS, TILE, avatarTexture } from "./art";
+import { type AvatarFrame, PUSH_CROUCH, dozeFrame, SKIN_COLORS, TILE, avatarTexture } from "./art";
 import { decodeLook } from "./look";
 import { type Motion, type TileXY, headingAt, posAt } from "./motion";
 import type { Scene } from "./scene";
@@ -70,6 +70,16 @@ const HUB: [number, number][] = [
  * front foot, the push, a hold at full stretch, a quick lift, and the foot
  * coming back to the board.
  */
+/** A hug and a high five: how long, and how close (px) the two come. */
+const HUG_MS = 1900;
+const FIVE_MS = 900;
+const HUG_GAP = 10;
+const FIVE_GAP = 18;
+/** Asleep on their feet: every so often they sag lower (s). */
+const NOD_S = 9;
+/** One slow breath, in and out (s). */
+const BREATH_S = 3.4;
+
 const PUSH_POSES: { frame: AvatarFrame; lean: number; ms: number }[] = [
   { frame: 5, lean: 0.3, ms: 80 },
   { frame: 3, lean: 0.5, ms: 110 },
@@ -107,6 +117,14 @@ export class Avatar {
   readonly sprite: Sprite;
   private label: HTMLDivElement;
   private stack: HTMLDivElement;
+  /** Hugging or high-fiving someone: where they are (each frame), and since when. */
+  private act: { kind: "hug" | "five"; partner: () => TileXY | null; start: number } | null = null;
+  /** Away from the keyboard, and since when (they doze off); in a game, and where. */
+  private away = false;
+  private dozeAt = 0;
+  private playing: { x: number; y: number; kind: "arcade" | "pool" } | null = null;
+  private snore: HTMLDivElement | null = null;
+  private npc = false;
   private nameEl: HTMLSpanElement;
   private bubble: HTMLDivElement | null = null;
   private bubbleUntil = 0;
@@ -193,6 +211,21 @@ export class Avatar {
   /** Styles the name tag as a non-player character's. */
   markNpc() {
     this.label.classList.add("npc");
+    this.npc = true;
+  }
+
+  /** Away from the keyboard (AwayChanged): they doze off on their feet. */
+  setAway(away: boolean) {
+    if (away && !this.away) this.dozeAt = performance.now();
+    this.away = away;
+  }
+
+  /**
+   * In a game at a machine or table at (x, y) (tiles): they face it and look
+   * busy: pressing buttons at a cabinet, cue in hand at the pool table.
+   */
+  setPlaying(at: { x: number; y: number; kind: "arcade" | "pool" } | null) {
+    this.playing = at;
   }
 
   /** Shows a founder's leaf by the name (title: "Founder #n"). */
@@ -218,6 +251,7 @@ export class Avatar {
     this.info = info;
     this.state = info.state;
     this.setMood(info.mood);
+    this.setAway(info.away);
     if (info.path.length > 0) this.setMotion({ path: info.path, t0: info.t0, speedX10: info.speedX10 }, now);
     else this.snap({ x: info.x, y: info.y });
   }
@@ -349,7 +383,63 @@ export class Avatar {
     this.rolling = skating && walking;
     const push = this.rolling ? pushPose(wallNow - this.rollStart) : null;
     const stepping = (walking && !skating) || dancing;
-    const frame: AvatarFrame = sitting ? 2 : skating ? (push?.frame ?? 4) : robot ? robot.frame : stepping ? ((Math.floor(wallNow / 160) % 2) as 0 | 1) : 0;
+    // Hugging or high-fiving: lean in toward them (whole pixels), arms busy.
+    let leanX = 0;
+    let leanY = 0;
+    let actFrame: AvatarFrame | null = null;
+    if (this.act) {
+      const t = wallNow - this.act.start;
+      const dur = this.act.kind === "hug" ? HUG_MS : FIVE_MS;
+      const p = t < dur && !walking && !sitting ? this.act.partner() : null;
+      if (!p) this.act = null;
+      else {
+        const dx = (p.x - x) * TILE;
+        const dy = (p.y - y) * TILE;
+        const d = Math.hypot(dx, dy);
+        if (Math.abs(dx) > 1) this.facing = dx > 0 ? 1 : -1;
+        if (this.act.kind === "hug") {
+          // In over 0.2 s, hold (with a slow sway together), out over 0.25 s.
+          const ease = Math.min(1, t / 200) * Math.min(1, (dur - t) / 250);
+          const move = d > 0 ? (Math.max(0, d - HUG_GAP) / 2) * ease : 0;
+          leanX = Math.round((dx / (d || 1)) * move + (ease >= 1 ? Math.round(Math.sin(t / 220)) : 0));
+          leanY = Math.round((dy / (d || 1)) * move);
+          actFrame = 8;
+        } else {
+          // Wind up, then lean in and slap at the top.
+          const swing = Math.sin(Math.PI * Math.min(1, Math.max(0, (t - 150) / 600)));
+          const move = d > 0 ? (Math.max(0, d - FIVE_GAP) / 2) * swing : 0;
+          leanX = Math.round((dx / (d || 1)) * move);
+          leanY = Math.round((dy / (d || 1)) * move);
+          actFrame = t < 300 ? 9 : t < 700 ? 10 : 0;
+        }
+      }
+    }
+    // Away from the keyboard: nodding off on their feet (never mid-game, or doing something).
+    const busy = walking || this.state !== 0 || dancing || robot || this.fishing || actFrame !== null;
+    const dozing = !this.npc && this.away && !this.playing && !busy;
+    // In a game: facing the machine or table, hands busy.
+    const playing = this.playing && !busy ? this.playing : null;
+    if (playing && Math.abs(playing.x - x) > 0.3) this.facing = playing.x > x ? 1 : -1;
+    this.showSnore(dozing);
+    const frame: AvatarFrame = actFrame !== null
+      ? actFrame
+      : dozing
+        ? dozeFrame(this.slump(wallNow))
+        : sitting
+        ? 2
+        : skating
+          ? (push?.frame ?? 4)
+          : robot
+            ? robot.frame
+            : stepping
+              ? ((Math.floor(wallNow / 160) % 2) as 0 | 1)
+              : playing
+                ? playing.kind === "pool"
+                  ? 8
+                  : Math.floor(wallNow / 140) % 3 === 0
+                    ? 12
+                    : 11
+                : 0;
     this.sprite.texture = avatarTexture(this.info.look, frame);
     const bob = skating
       ? -BOARD_RISE
@@ -360,13 +450,16 @@ export class Avatar {
           : robot?.pop
             ? 1
             : 0;
-    const feetX = x * TILE + TILE / 2;
+    const feetX = x * TILE + TILE / 2 + leanX;
     // Seated avatars sit on the bench's slats, drawn just in front of it.
-    const feetY = y * TILE + TILE - (sitting ? 6 : 4);
+    const feetY = y * TILE + TILE - (sitting ? 6 : 4) + leanY;
     // Woozy: a slow sway, a stagger from side to side while walking, a tilt.
     const woozy = wallNow < this.woozyUntil && !sitting;
     const sway = woozy ? Math.sin(wallNow / 420) * 2.5 + (walking ? Math.sin(wallNow / 140) * 3 : 0) : 0;
     this.sprite.rotation = woozy ? Math.sin(wallNow / 560) * 0.1 : 0;
+    // Asleep on their feet, in whole pixels only (no tilting or stretching):
+    // a slow breath sinks them a pixel and back; every few seconds they sag
+    // a pixel lower still, then jerk awake a pixel up for a blink, and settle.
     this.sprite.position.set(Math.round(feetX + sway), Math.round(feetY + bob));
     // The robot turns on the beat: every four beats it faces the other way.
     this.sprite.scale.x = robot && Math.floor(beat / 4) % 2 === 1 ? -this.facing : this.facing;
@@ -454,6 +547,15 @@ export class Avatar {
   }
 
   /** Turns to face tile column `x` (standing still; walking turns you anyway). */
+  /**
+   * A hug or a high five with someone (whose spot `partner` gives each frame):
+   * the two turn to each other and step in close; a hug wraps its arms round
+   * and squeezes, swaying, then lets go; a high five winds up and slaps.
+   */
+  together(kind: "hug" | "five", partner: () => TileXY | null) {
+    this.act = { kind, partner, start: performance.now() };
+  }
+
   faceToward(x: number) {
     if (Math.abs(x - this.pos.x) > 0.1) this.facing = x > this.pos.x ? 1 : -1;
   }
@@ -521,6 +623,37 @@ export class Avatar {
     const w = this.nameW || this.info.name.length * 7;
     const s = this.scene.tileToScreen(this.pos.x + 0.5, this.pos.y);
     return { x0: s.x - w / 2, x1: s.x + w / 2, y: s.y };
+  }
+
+  /**
+   * How far a sleeper's upper body has slumped (0–2 pixels; the legs stay
+   * put): slow, eased breaths in and out, and every so often a long, slow
+   * sag that eases back up, never a snap.
+   */
+  private slump(wallNow: number): number {
+    const z = (wallNow - this.dozeAt) / 1000;
+    const breath = (1 - Math.cos((z / BREATH_S) * Math.PI * 2)) / 2;
+    const n = (z % NOD_S) / NOD_S;
+    // Sag over the first two thirds, ease back up over the last third.
+    const sag = n < 0.66 ? (1 - Math.cos((n / 0.66) * Math.PI)) / 2 : (1 + Math.cos(((n - 0.66) / 0.34) * Math.PI)) / 2;
+    return Math.round(breath * 0.9 + sag * 1.1);
+  }
+
+  /** "z Z Z" floating up over a sleeper's head. */
+  private showSnore(on: boolean) {
+    if (on && !this.snore) {
+      this.snore = document.createElement("div");
+      this.snore.className = "snore";
+      for (const z of ["z", "Z", "Z"]) {
+        const s = document.createElement("span");
+        s.textContent = z;
+        this.snore.appendChild(s);
+      }
+      this.stack.appendChild(this.snore);
+    } else if (!on && this.snore) {
+      this.snore.remove();
+      this.snore = null;
+    }
   }
 
   destroy() {

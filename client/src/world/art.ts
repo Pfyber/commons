@@ -1868,7 +1868,14 @@ export function lookParts(look: number) {
 }
 
 /** 0, 1 walking; 2 sitting; 4 riding a skateboard; 3, 5, 6 pushing one; 7–12 the robot. */
-export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+/**
+ * Standing asleep, eyes shut, the upper body slumped `slump` (0–2) pixels
+ * on legs that stay put (see Avatar's dozing).
+ */
+export function dozeFrame(slump: number): AvatarFrame {
+  return (13 + Math.max(0, Math.min(2, slump))) as AvatarFrame;
+}
 
 /** How an arm is held: hanging, straight out, or bent at a right angle up or down. */
 type ArmPose = "down" | "out" | "up" | "bent";
@@ -1918,7 +1925,7 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
   const o = PALETTE.outline;
   const hair = p.hairColor;
   // On a board the shadow is on the ground below it, drawn with the board.
-  if (frame < 3 || frame in ROBOT_ARMS) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
+  if (frame < 3 || frame in ROBOT_ARMS || frame >= 13) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
   // legs
   if (frame === 2) {
     px(ctx, o, 6, 27, 12, 5);
@@ -1940,6 +1947,9 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
     px(ctx, "#4a4a5a", frame === 1 ? 8 : 9, 25, 2, 6);
     px(ctx, "#4a4a5a", frame === 1 ? 15 : 14, 25, 2, 6);
   }
+
+  // Dozing: everything above the legs sinks a pixel or two.
+  if (frame >= 13) ctx.translate(0, frame - 13);
 
   // ---- behind the body: long hair, curls, buns, a ponytail, a backpack ----
   if (p.style === 1) {
@@ -2118,10 +2128,19 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
       px(ctx, hair, 17, 8, 1, 6);
       break;
   }
-  px(ctx, o, 9, 10, 2, 2);
-  px(ctx, o, 14, 10, 2, 2);
-  px(ctx, "#e89a8f", 8, 12, 2, 1);
-  px(ctx, "#e89a8f", 15, 12, 2, 1);
+  if (frame >= 13) {
+    // Asleep: eyes shut (little downturned lines), cheeks a touch rosier, mouth a small "o".
+    px(ctx, o, 9, 11, 2, 1);
+    px(ctx, o, 14, 11, 2, 1);
+    px(ctx, "#f0a89c", 8, 12, 2, 1);
+    px(ctx, "#f0a89c", 15, 12, 2, 1);
+    px(ctx, o, 12, 13, 1, 1);
+  } else {
+    px(ctx, o, 9, 10, 2, 2);
+    px(ctx, o, 14, 10, 2, 2);
+    px(ctx, "#e89a8f", 8, 12, 2, 1);
+    px(ctx, "#e89a8f", 15, 12, 2, 1);
+  }
 
   // ---- hat ----
   if (p.hat === 1) {
