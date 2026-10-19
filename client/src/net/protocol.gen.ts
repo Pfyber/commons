@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 16;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -114,6 +114,7 @@ export interface EntityInfo {
   state: number;
   speedX10: number;
   t0: number;
+  sprintIn: number;
   path: Tile[];
   mood: number;
   away: boolean;
@@ -128,6 +129,7 @@ export function encEntityInfo(w: Writer, v: EntityInfo) {
   w.u8(v.state);
   w.u8(v.speedX10);
   w.u32(v.t0);
+  w.u16(v.sprintIn);
   w.vec(v.path, (x) => encTile(w, x));
   w.u8(v.mood);
   w.bool(v.away);
@@ -143,6 +145,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
     state: r.u8(),
     speedX10: r.u8(),
     t0: r.u32(),
+    sprintIn: r.u16(),
     path: r.vec(() => decTile(r)),
     mood: r.u8(),
     away: r.bool(),
@@ -151,7 +154,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
 
 export type ClientMsg =
   | { t: "Hello"; joinToken: string; version: number; viewW: number; viewH: number }
-  | { t: "MoveTo"; x: number; y: number }
+  | { t: "MoveTo"; x: number; y: number; sprint: boolean }
   | { t: "Emote"; emote: number }
   | { t: "ChatSay"; text: string }
   | { t: "Ping"; clientT: number }
@@ -198,6 +201,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(2);
       w.u16(m.x);
       w.u16(m.y);
+      w.bool(m.sprint);
       break;
     case "Emote":
       w.u8(3);
@@ -347,7 +351,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "Hello", joinToken: r.str(), version: r.u16(), viewW: r.u8(), viewH: r.u8() };
       break;
     case 2:
-      m = { t: "MoveTo", x: r.u16(), y: r.u16() };
+      m = { t: "MoveTo", x: r.u16(), y: r.u16(), sprint: r.bool() };
       break;
     case 3:
       m = { t: "Emote", emote: r.u8() };
@@ -452,7 +456,7 @@ export type ServerMsg =
   | { t: "CellLeave"; cell: number; ids: number[] }
   | { t: "Spawn"; entity: EntityInfo }
   | { t: "Despawn"; id: number }
-  | { t: "MoveStart"; id: number; speedX10: number; t0: number; path: Tile[] }
+  | { t: "MoveStart"; id: number; speedX10: number; t0: number; sprintIn: number; path: Tile[] }
   | { t: "Snap"; id: number; x: number; y: number }
   | { t: "EmoteShown"; id: number; emote: number }
   | { t: "ChatBubble"; id: number; text: string }
@@ -515,6 +519,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.id);
       w.u8(m.speedX10);
       w.u32(m.t0);
+      w.u16(m.sprintIn);
       w.vec(m.path, (x) => encTile(w, x));
       break;
     case "Snap":
@@ -730,7 +735,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "Despawn", id: r.u32() };
       break;
     case 6:
-      m = { t: "MoveStart", id: r.u32(), speedX10: r.u8(), t0: r.u32(), path: r.vec(() => decTile(r)) };
+      m = { t: "MoveStart", id: r.u32(), speedX10: r.u8(), t0: r.u32(), sprintIn: r.u16(), path: r.vec(() => decTile(r)) };
       break;
     case 7:
       m = { t: "Snap", id: r.u32(), x: r.u16(), y: r.u16() };

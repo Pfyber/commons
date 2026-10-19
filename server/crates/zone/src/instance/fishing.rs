@@ -547,7 +547,7 @@ mod tests {
         inst.handle(Cmd::Msg { conn: 1, msg: ClientMsg::FishReel { quality: 900 } });
         assert_eq!(inst.avatars[&1].state, state::IDLE, "rod down, free to move");
         // Walk off after it: the fish is still there to be hit.
-        inst.handle(Cmd::Msg { conn: 1, msg: ClientMsg::MoveTo { x: 6, y: 3 } });
+        inst.handle(Cmd::Msg { conn: 1, msg: ClientMsg::MoveTo { x: 6, y: 3, sprint: false } });
         let spot = |inst: &crate::instance::Instance| inst.avatars[&1].fish.as_ref().unwrap().flop.as_ref().unwrap().at;
         let before = spot(&inst);
         inst.handle(Cmd::Msg { conn: 1, msg: ClientMsg::FishHit {} });

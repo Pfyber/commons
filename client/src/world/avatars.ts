@@ -3,9 +3,9 @@
 
 import { Graphics, Sprite } from "pixi.js";
 import type { EntityInfo } from "../net/protocol.gen";
-import { type AvatarFrame, PUSH_CROUCH, dozeFrame, SKIN_COLORS, TILE, avatarTexture } from "./art";
+import { type AvatarFrame, PUSH_CROUCH, SPRINT_FRAMES, dozeFrame, SKIN_COLORS, TILE, avatarTexture } from "./art";
 import { decodeLook } from "./look";
-import { type Motion, type TileXY, headingAt, posAt } from "./motion";
+import { type Motion, type TileXY, headingAt, posAt, sprintingAt } from "./motion";
 import type { Scene } from "./scene";
 import { moodIcon } from "../activities/together";
 
@@ -70,6 +70,8 @@ const HUB: [number, number][] = [
  * front foot, the push, a hold at full stretch, a quick lift, and the foot
  * coming back to the board.
  */
+/** Sprinting: each step of the run cycle (a frame); up a pixel on the strides. */
+const SPRINT_STRIDE_MS = 115;
 /** A hug and a high five: how long, and how close (px) the two come. */
 const HUG_MS = 1900;
 const FIVE_MS = 900;
@@ -252,7 +254,7 @@ export class Avatar {
     this.state = info.state;
     this.setMood(info.mood);
     this.setAway(info.away);
-    if (info.path.length > 0) this.setMotion({ path: info.path, t0: info.t0, speedX10: info.speedX10 }, now);
+    if (info.path.length > 0) this.setMotion({ path: info.path, t0: info.t0, speedX10: info.speedX10, sprintIn: info.sprintIn }, now);
     else this.snap({ x: info.x, y: info.y });
   }
 
@@ -285,7 +287,12 @@ export class Avatar {
   }
 
   setMotion(m: Motion, now: number) {
-    const before = this.pos;
+    // Where we are drawn right now: on the old walk at this very moment (not
+    // where the last frame put us, a frame behind), plus any blend still easing out.
+    const old = this.motion;
+    const at = old ? posAt(old, now) : this.pos;
+    const left = Math.max(0, (this.blend.until - performance.now()) / BLEND_MS);
+    const before = { x: at.x + this.blend.x * left, y: at.y + this.blend.y * left };
     this.motion = m;
     const target = posAt(m, now);
     this.blend = { x: before.x - target.x, y: before.y - target.y, until: performance.now() + BLEND_MS };
@@ -383,6 +390,8 @@ export class Avatar {
     this.rolling = skating && walking;
     const push = this.rolling ? pushPose(wallNow - this.rollStart) : null;
     const stepping = (walking && !skating) || dancing;
+    // Walking on and on outdoors breaks into a sprint: quick long strides.
+    const sprinting = walking && !skating && !!this.motion && sprintingAt(this.motion, serverNow);
     // Hugging or high-fiving: lean in toward them (whole pixels), arms busy.
     let leanX = 0;
     let leanY = 0;
@@ -431,7 +440,9 @@ export class Avatar {
           ? (push?.frame ?? 4)
           : robot
             ? robot.frame
-            : stepping
+            : sprinting
+              ? SPRINT_FRAMES[Math.floor(wallNow / SPRINT_STRIDE_MS) % SPRINT_FRAMES.length]
+              : stepping
               ? ((Math.floor(wallNow / 160) % 2) as 0 | 1)
               : playing
                 ? playing.kind === "pool"
@@ -443,7 +454,9 @@ export class Avatar {
     this.sprite.texture = avatarTexture(this.info.look, frame);
     const bob = skating
       ? -BOARD_RISE
-      : walking
+      : sprinting
+        ? -(Math.floor(wallNow / SPRINT_STRIDE_MS) % 2 === 0 ? 1 : 0)
+        : walking
         ? Math.abs(Math.sin(wallNow / 90)) * -1.5
         : dancing && !sitting
           ? Math.sin(wallNow / 70) * 2

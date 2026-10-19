@@ -71,7 +71,7 @@ mod tests {
         assert_eq!(inst.avatars[&1].state, state::SKATING);
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::MoveTo { x: 20, y: 20 },
+            msg: ClientMsg::MoveTo { x: 20, y: 20, sprint: false },
         });
         assert_eq!(inst.avatars[&1].motion.as_ref().unwrap().speed_x10, SKATE_SPEED_X10);
         inst.flush();
@@ -98,7 +98,7 @@ mod tests {
         assert!(inst.avatars[&1].motion.is_none(), "hopping off stops you");
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::MoveTo { x: 4, y: 4 },
+            msg: ClientMsg::MoveTo { x: 4, y: 4, sprint: false },
         });
         assert_eq!(inst.avatars[&1].motion.as_ref().unwrap().speed_x10, WALK_SPEED_X10);
     }

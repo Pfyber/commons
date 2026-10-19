@@ -35,7 +35,7 @@ use commons_common::token::JoinClaims;
 use commons_protocol::{
     CELL_TILES, ClientMsg, EntityInfo, ServerMsg, Tile, emote, error_code, push_framed, state,
 };
-use commons_sim::{Grid, Motion, SKATE_SPEED_X10, TilePos, WALK_SPEED_X10, compress, find_path};
+use commons_sim::{Grid, Motion, SKATE_SPEED_X10, SPRINT_SPEED_X10, TilePos, WALK_SPEED_X10, compress, find_path};
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -179,13 +179,14 @@ impl Avatar {
     }
 
     fn info(&self, now: u32) -> EntityInfo {
-        let (speed_x10, t0, path) = match &self.motion {
+        let (speed_x10, t0, sprint_in, path) = match &self.motion {
             Some(m) if !m.is_done(now) => (
                 m.speed_x10,
                 m.t0,
+                m.sprint_in,
                 m.path.iter().map(|&(x, y)| Tile { x, y }).collect(),
             ),
-            _ => (0, 0, Vec::new()),
+            _ => (0, 0, 0, Vec::new()),
         };
         EntityInfo {
             id: self.id,
@@ -196,10 +197,25 @@ impl Avatar {
             state: self.state,
             speed_x10,
             t0,
+            sprint_in,
             path,
             mood: self.mood,
             away: self.away,
         }
+    }
+}
+
+/// The open park: the only place you can sprint.
+const OUTDOORS: &str = "founders_park";
+
+/// A sprint asked for, starting at `t0`: its speed, and when (ms after `t0`)
+/// it speeds up (0: from the start). Joining a walk in progress (`spliced`,
+/// whose stretch began in the past at `t0`), it keeps that walk's pace up to
+/// `now`, so there's no jump, and breaks into the sprint from there.
+fn sprint_profile(spliced: Option<&Motion>, t0: u32, now: u32) -> (u8, u16) {
+    match spliced {
+        Some(m) if !m.sprinting_at(t0) && now > t0 => (WALK_SPEED_X10, (now - t0).min(u16::MAX as u32) as u16),
+        _ => (SPRINT_SPEED_X10, 0),
     }
 }
 
@@ -708,7 +724,7 @@ impl Instance {
             a.interactions = (a.interactions + 1).min(MAX_INTERACTIONS_PER_REPORT);
         }
         match msg {
-            ClientMsg::MoveTo { x, y } => self.move_to(id, (x, y), now),
+            ClientMsg::MoveTo { x, y, sprint } => self.move_to(id, (x, y), sprint, now),
             ClientMsg::Emote { emote: e } => {
                 let a = self.avatars.get_mut(&id).unwrap();
                 if !(1..=emote::MAX).contains(&e) || !a.emote_rl.try_take(now as u64) {
@@ -772,7 +788,7 @@ impl Instance {
         }
     }
 
-    fn move_to(&mut self, id: u32, target: TilePos, now: u32) {
+    fn move_to(&mut self, id: u32, target: TilePos, sprint: bool, now: u32) {
         let a = self.avatars.get_mut(&id).unwrap();
         if !a.move_rl.try_take(now as u64) {
             return;
@@ -784,6 +800,7 @@ impl Instance {
             _ => {}
         }
         let grid = &self.grid;
+        let outdoors = self.zone.id == OUTDOORS;
         let a = self.avatars.get_mut(&id).unwrap();
         // Mid-walk, continue through the tile being walked into so the new path
         // joins the old one without a seam. Otherwise start shortly in the future
@@ -808,19 +825,24 @@ impl Instance {
         if full.len() < 2 {
             return;
         }
+        let (speed_x10, sprint_in) = if a.state == state::SKATING {
+            (SKATE_SPEED_X10, 0)
+        } else if sprint && outdoors {
+            sprint_profile(prefix.and(a.motion.as_ref()), t0, now)
+        } else {
+            (WALK_SPEED_X10, 0)
+        };
         let motion = Motion {
             path: compress(&full),
             t0,
-            speed_x10: if a.state == state::SKATING {
-                SKATE_SPEED_X10
-            } else {
-                WALK_SPEED_X10
-            },
+            speed_x10,
+            sprint_in,
         };
         let msg = ServerMsg::MoveStart {
             id,
             speed_x10: motion.speed_x10,
             t0: motion.t0,
+            sprint_in: motion.sprint_in,
             path: motion.path.iter().map(|&(x, y)| Tile { x, y }).collect(),
         };
         a.motion = Some(motion);
@@ -1278,7 +1300,7 @@ pub(crate) mod tests {
         for (i, t) in targets.iter().enumerate() {
             inst.handle(Cmd::Msg {
                 conn: i as u64 + 1,
-                msg: ClientMsg::MoveTo { x: t.0, y: t.1 },
+                msg: ClientMsg::MoveTo { x: t.0, y: t.1, sprint: false },
             });
         }
         // Simulate 25 seconds of ticks with a synthetic clock.
@@ -1387,7 +1409,7 @@ pub(crate) mod tests {
         inst.grid.set_blocked(20, 20, true);
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::MoveTo { x: 20, y: 20 },
+            msg: ClientMsg::MoveTo { x: 20, y: 20, sprint: false },
         });
         inst.flush();
         a.pump();

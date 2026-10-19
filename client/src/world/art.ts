@@ -1867,8 +1867,11 @@ export function lookParts(look: number) {
   };
 }
 
-/** 0, 1 walking; 2 sitting; 4 riding a skateboard; 3, 5, 6 pushing one; 7–12 the robot. */
-export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+/** 0, 1 walking; 2 sitting; 4 riding a skateboard; 3, 5, 6 pushing one; 7–12 the robot; 13–15 dozing; 16, 17 sprinting. */
+export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+/** Sprinting: a stride, legs passing, the other stride, passing again. */
+export const SPRINT_FRAMES: AvatarFrame[] = [16, 0, 17, 0];
+const DOZING = (f: AvatarFrame) => f >= 13 && f <= 15;
 /**
  * Standing asleep, eyes shut, the upper body slumped `slump` (0–2) pixels
  * on legs that stay put (see Avatar's dozing).
@@ -1926,6 +1929,9 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
   const hair = p.hairColor;
   // On a board the shadow is on the ground below it, drawn with the board.
   if (frame < 3 || frame in ROBOT_ARMS || frame >= 13) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
+  // Sprinting: a long stride, one knee up high (shorter leg) and the other
+  // stretched out wide behind.
+  const sprint = frame === 16 ? -1 : frame === 17 ? 1 : 0;
   // legs
   if (frame === 2) {
     px(ctx, o, 6, 27, 12, 5);
@@ -1941,6 +1947,12 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
     px(ctx, o, 13, 25 + c, 4, 7 - c);
     px(ctx, "#4a4a5a", 14, 25 + c, 2, 6 - c);
     ctx.translate(0, c);
+  } else if (sprint) {
+    const [upX, backX] = sprint < 0 ? [7, 15] : [13, 5];
+    px(ctx, o, upX, 25, 4, 5);
+    px(ctx, "#4a4a5a", upX + 1, 25, 2, 4);
+    px(ctx, o, backX, 25, 4, 7);
+    px(ctx, "#4a4a5a", backX + 1, 25, 2, 6);
   } else {
     px(ctx, o, frame === 1 ? 7 : 8, 25, 4, 7);
     px(ctx, o, frame === 1 ? 14 : 13, 25, 4, 7);
@@ -1949,7 +1961,7 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
   }
 
   // Dozing: everything above the legs sinks a pixel or two.
-  if (frame >= 13) ctx.translate(0, frame - 13);
+  if (DOZING(frame)) ctx.translate(0, frame - 13);
 
   // ---- behind the body: long hair, curls, buns, a ponytail, a backpack ----
   if (p.style === 1) {
@@ -1973,6 +1985,17 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
   if (p.accessory === 4) {
     px(ctx, o, 3, 15, 18, 10);
     px(ctx, "#a0703f", 4, 16, 16, 8);
+  }
+
+  // Sprinting, the arms swing opposite each other and the legs (the sprite
+  // faces +x, mirrored to face left): the one on the side whose knee is up
+  // swings back and low, behind the body (so it shows only past its back).
+  if (sprint) {
+    const ax = sprint < 0 ? 4 : 18;
+    const arm = p.outfit === 2 || p.outfit === 4 || p.outfit === 5 || p.outfit === 6 ? p.outfitDark : p.skinColor;
+    px(ctx, arm, ax, 18, 2, 2);
+    px(ctx, arm, ax - 2, 20, 3, 2);
+    px(ctx, p.skinColor, ax - 3, 21, 2, 2);
   }
 
   // ---- body and outfit ----
@@ -2066,6 +2089,16 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
       }
       continue;
     }
+    if (sprint) {
+      // The arm swinging forward (and up), in front of the body; the one
+      // swinging back was drawn behind it (see above).
+      if (dir === sprint) continue;
+      const arm = sleeves ? dark : p.skinColor;
+      px(ctx, arm, ax, 18, 2, 2);
+      px(ctx, arm, ax + 1, 19, 3, 2);
+      px(ctx, p.skinColor, ax + 3, 18, 2, 2);
+      continue;
+    }
     if (!out) {
       px(ctx, sleeves ? dark : p.skinColor, ax, 18, 2, 5);
       if (sleeves) px(ctx, p.skinColor, ax, 22, 2, 1);
@@ -2128,7 +2161,7 @@ export function avatarCanvas(look: number, frame: AvatarFrame): HTMLCanvasElemen
       px(ctx, hair, 17, 8, 1, 6);
       break;
   }
-  if (frame >= 13) {
+  if (DOZING(frame)) {
     // Asleep: eyes shut (little downturned lines), cheeks a touch rosier, mouth a small "o".
     px(ctx, o, 9, 11, 2, 1);
     px(ctx, o, 14, 11, 2, 1);

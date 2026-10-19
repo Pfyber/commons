@@ -376,8 +376,7 @@ mod tests {
             conn: 1,
             msg: ClientMsg::MoveTo {
                 x: start.0 + 3,
-                y: start.1,
-            },
+                y: start.1, sprint: false },
         });
         let t0 = inst.clock.now_ms();
         let mut kicked = None;

@@ -45,7 +45,7 @@ import { type ActionMenu, type AlbumPanel, type BagPanel, FishermanPanel, type M
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
-import { SKATE_SPEED_X10, type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
+import { SKATE_SPEED_X10, type TileXY, WALK_SPEED_X10, endT, splice, sprintProfile } from "./world/motion";
 import { compress, findPath } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
@@ -194,6 +194,8 @@ const AWAY_AFTER_MS = 60_000;
 /** Map objects that are game machines (the server numbers them in map order, as here). */
 const CABINET_KINDS = ["arcade_cabinet", "dance_machine", "pinball"];
 const KEY_RESEND_MS = 180;
+/** Two key presses or taps closer together than this ask for a sprint. */
+const SPRINT_ASK_MS = 350;
 
 const KEY_DIRS: Record<string, TileXY> = {
   ArrowUp: { x: 0, y: -1 }, KeyW: { x: 0, y: -1 },
@@ -212,6 +214,15 @@ export class Game {
   private lastKeySend = 0;
   /** Walks we've predicted and sent, oldest first, awaiting the server's echo. */
   private sentMoves: { x: number; y: number; at: number }[] = [];
+  /**
+   * Sprinting (outdoors): a direction key pressed twice in quick succession,
+   * a tile tapped twice, or tiles tapped one after another quickly. It lasts
+   * while the keys are held, or until the walk ends.
+   */
+  private sprint = false;
+  private sprintAt = 0;
+  private lastTapAt = 0;
+  private keyPressAt: Record<string, number> = {};
   private disposers: (() => void)[] = [];
   private furniture: Furniture;
   private games = new Map<number, GameStateMsg>();
@@ -869,7 +880,7 @@ export class Game {
       // On the second pad, beside yours (the server puts you on the first).
       const you = this.avatars.get(st.a);
       const x = d.floor.x + 2;
-      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0, away: false };
+      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false };
       this.danceBot = new Avatar(info, this.scene, this.labels, false, serverNow);
       this.danceBot.markNpc();
       if (you) this.danceBot.faceToward(you.pos.x);
@@ -1005,7 +1016,7 @@ export class Game {
           const dest = a.destination;
           if (end.x === dest.x && end.y === dest.y) break;
         }
-        a.setMotion({ path: m.path, t0: m.t0, speedX10: m.speedX10 }, now);
+        a.setMotion({ path: m.path, t0: m.t0, speedX10: m.speedX10, sprintIn: m.sprintIn }, now);
         break;
       }
       case "Snap":
@@ -1250,6 +1261,9 @@ export class Game {
     }
     const cur = self.currentMotion;
     const sp = cur ? splice(cur, now) : null;
+    const walkingOn = !!cur && now < endT(cur);
+    // A fresh walk from standing still is a walk again, unless it was just asked to be a sprint.
+    if (!walkingOn && performance.now() - this.sprintAt > SPRINT_ASK_MS) this.sprint = false;
     let start: TileXY;
     let t0 = now;
     if (sp) {
@@ -1264,12 +1278,18 @@ export class Game {
       return;
     }
     if (sp) full.unshift(sp.prev);
-    const speedX10 = self.state === SKATING ? SKATE_SPEED_X10 : WALK_SPEED_X10;
-    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10 }, now);
+    // Sprinting (the server works it out the same way).
+    const pace =
+      self.state === SKATING
+        ? { speedX10: SKATE_SPEED_X10, sprintIn: 0 }
+        : this.sprint && this.zoneId === "founders_park"
+          ? sprintProfile(sp ? cur : null, t0, now)
+          : { speedX10: WALK_SPEED_X10, sprintIn: 0 };
+    if (full.length >= 2) self.setMotion({ path: compress(full), t0, ...pace }, now);
     const wall = performance.now();
     this.sentMoves = this.sentMoves.filter((s) => wall - s.at < 3000);
     this.sentMoves.push({ x: t.x, y: t.y, at: wall });
-    this.socket.send({ t: "MoveTo", x: t.x, y: t.y });
+    this.socket.send({ t: "MoveTo", x: t.x, y: t.y, sprint: this.sprint });
     if (marker) this.scene.showTarget(t);
   }
 
@@ -1382,6 +1402,10 @@ export class Game {
       const table = this.furniture.tables.get(id);
       if (table) return this.watchTable(table.id);
       const target = nearestWalkable(this.scene.map, t.x, t.y, 2);
+      // Tapping twice, or tile after tile in quick succession: sprint there.
+      const wall = performance.now();
+      if (wall - this.lastTapAt < SPRINT_ASK_MS) this.askSprint();
+      this.lastTapAt = wall;
       if (target) this.moveTo(target, true);
     };
     stage.on("pointertap", tap);
@@ -1405,6 +1429,17 @@ export class Game {
       }
       if (KEY_DIRS[e.code]) {
         e.preventDefault();
+        // The same way twice in quick succession: sprint.
+        if (!e.repeat) {
+          const d = KEY_DIRS[e.code];
+          const way = `${d.x},${d.y}`;
+          const wall = performance.now();
+          if (wall - (this.keyPressAt[way] ?? -Infinity) < SPRINT_ASK_MS) {
+            this.askSprint();
+            this.lastKeyDir = ""; // re-plan the walk at once, at a run
+          }
+          this.keyPressAt[way] = wall;
+        }
         this.keys.add(e.code);
       }
     };
@@ -1930,6 +1965,12 @@ export class Game {
     this.socket?.send({ t: "ChatSay", text });
   }
 
+  /** A double tap or key press: sprint from here (outdoors, on foot). */
+  private askSprint() {
+    this.sprint = true;
+    this.sprintAt = performance.now();
+  }
+
   /** Keyboard walking: short segments ahead, re-sent while keys are held. */
   private keyboardMove(wallNow: number) {
     const self = this.self;
@@ -1941,6 +1982,7 @@ export class Game {
         const m = self.currentMotion;
         const sp = m ? splice(m, this.socket.clock.now()) : null;
         if (sp) this.moveTo(sp.next, false);
+        this.sprint = false;
       }
       this.lastKeyDir = "";
       return;
@@ -1965,8 +2007,13 @@ export class Game {
     const turned = dirKey !== this.lastKeyDir;
     const due = turned || remaining < steps / 2;
     if (!due || (!turned && wallNow - this.lastKeySend < KEY_RESEND_MS)) return;
-    // Plan from the tile we're heading into, so segments chain smoothly.
-    const from = { x: Math.round(self.pos.x + dx * 0.49), y: Math.round(self.pos.y + dy * 0.49) };
+    // Plan from exactly where the new stretch will start (the tile we're
+    // stepping into, as moveTo splices it), so the walk goes dead straight
+    // the way the keys point instead of cutting back toward another line.
+    const now = this.socket?.clock.now() ?? 0;
+    const cur = self.currentMotion;
+    const sp = cur ? splice(cur, now) : null;
+    const from = sp ? sp.next : cur && now <= cur.t0 ? cur.path[0] : self.destination;
     const target =
       stepTarget(this.scene.map, from, dx, dy, steps) ??
       (dx && dy ? stepTarget(this.scene.map, from, dx, 0, steps) ?? stepTarget(this.scene.map, from, 0, dy, steps) : null);

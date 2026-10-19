@@ -103,6 +103,7 @@ impl Other {
             path: e.path.iter().map(|t| (t.x, t.y)).collect(),
             t0: e.t0,
             speed_x10: e.speed_x10,
+            sprint_in: e.sprint_in,
         });
         Other {
             human: !e.name.starts_with("Bot "),
@@ -463,9 +464,9 @@ async fn bot_loop(
                         }
                         ServerMsg::CellLeave { ids, .. } => for id in ids { known.remove(&id); others.remove(&id); },
                         ServerMsg::Despawn { id } => { known.remove(&id); others.remove(&id); }
-                        ServerMsg::MoveStart { id, speed_x10, t0, path } if id != self_id => {
+                        ServerMsg::MoveStart { id, speed_x10, t0, sprint_in, path } if id != self_id => {
                             if let Some(o) = others.get_mut(&id) {
-                                o.motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10 });
+                                o.motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10, sprint_in });
                             }
                         }
                         ServerMsg::Snap { id, x, y } | ServerMsg::StateChange { id, x, y, .. } if id != self_id => {
@@ -493,8 +494,8 @@ async fn bot_loop(
                                 replies.push((Instant::now() + after, ClientMsg::Emote { emote: emote::WAVE }));
                             }
                         }
-                        ServerMsg::MoveStart { id, speed_x10, t0, path } if id == self_id => {
-                            motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10 });
+                        ServerMsg::MoveStart { id, speed_x10, t0, sprint_in, path } if id == self_id => {
+                            motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10, sprint_in });
                         }
                         ServerMsg::Pong { client_t, server_t } => {
                             let rtt = local_ms() - client_t as i64;
@@ -588,7 +589,7 @@ async fn bot_loop(
                         && let Some((_, next, _)) = m.splice(server_now)
                         && m.path.last() != Some(&next)
                     {
-                        tx.send(frame(&ClientMsg::MoveTo { x: next.0, y: next.1 })).await?;
+                        tx.send(frame(&ClientMsg::MoveTo { x: next.0, y: next.1, sprint: false })).await?;
                     }
                 }
                 let paused = now < paused_until;
@@ -620,7 +621,7 @@ async fn bot_loop(
                     let near: Vec<_> = world.fishing.iter().filter(|(stand, _)| cheb(*stand, me) <= 4).collect();
                     let pick = if angler && !near.is_empty() { near.choose(&mut rng).copied() } else { world.fishing.choose(&mut rng) };
                     if let Some(&(stand, water)) = pick {
-                        tx.send(frame(&ClientMsg::MoveTo { x: stand.0, y: stand.1 })).await?;
+                        tx.send(frame(&ClientMsg::MoveTo { x: stand.0, y: stand.1, sprint: false })).await?;
                         tx.send(frame(&ClientMsg::FishCast { x: water.0, y: water.1 })).await?;
                         fishing_until = Some(now + Duration::from_secs(60));
                     }
@@ -633,7 +634,7 @@ async fn bot_loop(
                     if let Some((&id, seat)) = pool.choose(&mut rng).copied()
                         && let Some((x, y)) = approach(grid, seat.tile)
                     {
-                        tx.send(frame(&ClientMsg::MoveTo { x, y })).await?;
+                        tx.send(frame(&ClientMsg::MoveTo { x, y, sprint: false })).await?;
                         tx.send(frame(&ClientMsg::Sit { seat: id })).await?;
                         next_move = now + Duration::from_secs(20);
                     }
@@ -643,7 +644,7 @@ async fn bot_loop(
                         _ => pick_target(grid, &mut rng, me, 12),
                     };
                     if let Some((x, y)) = target {
-                        tx.send(frame(&ClientMsg::MoveTo { x, y })).await?;
+                        tx.send(frame(&ClientMsg::MoveTo { x, y, sprint: false })).await?;
                     }
                     next_move = now + Duration::from_millis(rng.random_range(2000..8000));
                 }

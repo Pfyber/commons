@@ -226,6 +226,7 @@ pub fn sample_vectors() -> String {
         state: 0,
         speed_x10: 40,
         t0: 4_000_000_000,
+        sprint_in: 1500,
         path: vec![Tile { x: 95, y: 0 }, Tile { x: 90, y: 5 }],
         mood: 1,
             away: false,
@@ -237,7 +238,7 @@ pub fn sample_vectors() -> String {
             view_w: 30,
             view_h: 17,
         },
-        ClientMsg::MoveTo { x: 12, y: 65535 },
+        ClientMsg::MoveTo { x: 12, y: 65535, sprint: false },
         ClientMsg::Emote { emote: 7 },
         ClientMsg::ChatSay {
             text: "hello 👋".into(),
@@ -293,6 +294,7 @@ pub fn sample_vectors() -> String {
             id: 1,
             speed_x10: 40,
             t0: 9,
+            sprint_in: 0,
             path: vec![Tile { x: 1, y: 2 }],
         },
         ServerMsg::ChatBubble {

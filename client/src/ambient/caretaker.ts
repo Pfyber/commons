@@ -38,7 +38,7 @@ export class Caretaker {
   ) {
     this.spots = ROUNDS.map((s) => nearest(map, s)).filter((s): s is TileXY => s !== null);
     const at = this.spots[0] ?? { x: 0, y: 0 };
-    const info: EntityInfo = { id: CARETAKER_ID, name: "Caretaker 🌿", look: CARETAKER_LOOK, x: at.x, y: at.y, state: 0, speedX10: 0, t0: 0, path: [], mood: 0, away: false };
+    const info: EntityInfo = { id: CARETAKER_ID, name: "Caretaker 🌿", look: CARETAKER_LOOK, x: at.x, y: at.y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false };
     this.avatar = new Avatar(info, scene, labels, false, Date.now());
     this.avatar.markNpc();
   }

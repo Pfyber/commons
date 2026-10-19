@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 14;
+pub const PROTOCOL_VERSION: u16 = 16;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -37,6 +37,8 @@ records! {
         state: u8,
         speed_x10: u8,
         t0: u32,
+        // sprint_in: the walk breaks into a sprint this many ms after t0 (0: never).
+        sprint_in: u16,
         path: Vec<Tile>,
         mood: u8,
         // away: away from the keyboard (see `Away`), shown dozing on their feet.
@@ -48,7 +50,8 @@ message_enum! {
     /// Client → server.
     ClientMsg {
         1 Hello { join_token: String, version: u16, view_w: u8, view_h: u8 }
-        2 MoveTo { x: u16, y: u16 }
+        /// `sprint`: run there (outdoors; asked for by a double tap or double key press).
+        2 MoveTo { x: u16, y: u16, sprint: bool }
         3 Emote { emote: u8 }
         4 ChatSay { text: String }
         5 Ping { client_t: u32 }
@@ -133,7 +136,7 @@ message_enum! {
         5 Despawn { id: u32 }
         /// `path` holds corner waypoints only; the avatar walks straight
         /// lines between them, starting at `path[0]` at time `t0`.
-        6 MoveStart { id: u32, speed_x10: u8, t0: u32, path: Vec<Tile> }
+        6 MoveStart { id: u32, speed_x10: u8, t0: u32, sprint_in: u16, path: Vec<Tile> }
         7 Snap { id: u32, x: u16, y: u16 }
         8 EmoteShown { id: u32, emote: u8 }
         9 ChatBubble { id: u32, text: String }
@@ -493,6 +496,7 @@ mod tests {
             state: 0,
             speed_x10: 40,
             t0: 1234,
+            sprint_in: 0,
             path: vec![Tile { x: 3, y: 4 }, Tile { x: 9, y: 4 }],
             mood: 2,
             away: false,
@@ -518,6 +522,7 @@ mod tests {
                 id: 1,
                 speed_x10: 40,
                 t0: 5,
+                sprint_in: 300,
                 path: vec![Tile { x: 1, y: 1 }],
             },
             ServerMsg::Snap { id: 1, x: 2, y: 3 },
@@ -572,18 +577,20 @@ mod tests {
 
     #[test]
     fn move_start_fits_budget() {
-        // Spec §5.3: ≤ 24 bytes for a MoveStart with a short path.
+        // Spec §5.3: ≤ 24 bytes for a MoveStart with a short path, plus 2 for
+        // when it breaks into a sprint.
         let m = ServerMsg::MoveStart {
             id: 1,
             speed_x10: 40,
             t0: 1,
+            sprint_in: 0,
             path: vec![
                 Tile { x: 1, y: 1 },
                 Tile { x: 5, y: 1 },
                 Tile { x: 9, y: 5 },
             ],
         };
-        assert!(m.to_bytes().len() <= 24, "{} bytes", m.to_bytes().len());
+        assert!(m.to_bytes().len() <= 26, "{} bytes", m.to_bytes().len());
     }
 
     #[test]
