@@ -15,7 +15,13 @@ export const INSTRUMENTS = [
   { id: 0, name: "Bells", icon: "🔔" },
   { id: 1, name: "Bass", icon: "🎸" },
   { id: 2, name: "Drums", icon: "🥁" },
+  // From the mall's Music shop.
+  { id: 3, name: "Ukulele", icon: "🪕" },
+  { id: 4, name: "Kalimba", icon: "🎼" },
+  { id: 5, name: "Flute", icon: "🪈" },
 ];
+/** Everyone can play these; the rest need the instrument. */
+const FREE_INSTRUMENTS = 2;
 const DRUM_NAMES = ["Kick", "Snare", "Hat", "Open", "Clap", "Low tom", "High tom", "Shaker"];
 /** C major pentatonic, two octaves' worth of steps (semitones from C). */
 const SCALE = [0, 2, 4, 7, 9, 12, 14, 16];
@@ -65,6 +71,60 @@ export function playNote(instrument: number, pitch: number, when: number, vol: n
       o.start(when);
       o.stop(when + 1.5);
     }
+  } else if (instrument === 3) {
+    // Ukulele: two bright plucks a hair apart.
+    for (const [detune, delay] of [
+      [0, 0],
+      [4, 0.012],
+    ]) {
+      const o = a.createOscillator();
+      const f = a.createBiquadFilter();
+      const g = a.createGain();
+      o.type = "triangle";
+      o.frequency.value = freq(392) * 2 ** (detune / 1200);
+      f.type = "lowpass";
+      f.frequency.value = 2600;
+      g.gain.setValueAtTime(0.0001, when + delay);
+      g.gain.exponentialRampToValueAtTime(0.32 * vol, when + delay + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + delay + 0.55);
+      o.connect(f).connect(g).connect(out);
+      o.start(when + delay);
+      o.stop(when + delay + 0.6);
+    }
+  } else if (instrument === 4) {
+    // Kalimba: a soft sine with a quick, metallic overtone.
+    for (const [mult, peak, decay] of [
+      [1, 0.3, 1.1],
+      [5.4, 0.05, 0.15],
+    ]) {
+      const o = a.createOscillator();
+      const g = a.createGain();
+      o.type = "sine";
+      o.frequency.value = freq(523.25) * mult;
+      env(g, peak, decay);
+      o.connect(g).connect(out);
+      o.start(when);
+      o.stop(when + decay + 0.1);
+    }
+  } else if (instrument === 5) {
+    // Flute: a breathy sine that swells in, with a little vibrato.
+    const o = a.createOscillator();
+    const lfo = a.createOscillator();
+    const depth = a.createGain();
+    const g = a.createGain();
+    o.type = "sine";
+    o.frequency.value = freq(523.25);
+    lfo.frequency.value = 5.5;
+    depth.gain.value = 4;
+    lfo.connect(depth).connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(0.25 * vol, when + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.75);
+    o.connect(g).connect(out);
+    o.start(when);
+    lfo.start(when);
+    o.stop(when + 0.8);
+    lfo.stop(when + 0.8);
   } else if (instrument === 1) {
     // Bass: a filtered triangle two octaves down.
     const o = a.createOscillator();
@@ -120,6 +180,8 @@ export interface JamHost {
   send(instrument: number, pitch: number, beat: number): void;
   /** A little note above your own head. */
   sparkle(): void;
+  /** Instruments from the mall you own (their ids). */
+  owned(): Set<number>;
 }
 
 /** The pads, shown while you're at the bandstand. */
@@ -150,6 +212,7 @@ export class JamPanel {
 
   show() {
     if (this.open) return;
+    this.render();
     this.el.hidden = false;
     audio();
     window.addEventListener("keydown", this.keyHandler, true);
@@ -187,7 +250,8 @@ export class JamPanel {
     close.onclick = () => this.hide();
     head.append(close);
     const tabs = el("div", "jam-tabs");
-    for (const ins of INSTRUMENTS) {
+    const mine = this.host.owned();
+    for (const ins of INSTRUMENTS.filter((i) => i.id <= FREE_INSTRUMENTS || mine.has(i.id))) {
       const b = el("button", ins.id === this.instrument ? "on" : "", `${ins.icon} ${ins.name}`);
       b.onclick = () => {
         this.instrument = ins.id;

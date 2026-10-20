@@ -34,6 +34,11 @@ import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Homes } from "./homes";
 import type { Pets } from "./pets";
 import type { Rides } from "./rides";
+import type { Goods } from "./goods";
+import type { DecoratePanel } from "./ui/exterior";
+import { HouseFronts } from "./world/housefronts";
+import { CARDS, wrappedTexture } from "./world/goods";
+import { EMOTES } from "./world/avatars";
 import { rideSpeed } from "./world/vehicles";
 import { itemIconUrl } from "./world/items";
 import { PetLife, petTitle } from "./ambient/petlife";
@@ -74,6 +79,8 @@ export interface Ui {
   rent: Rent;
   pets: Pets;
   rides: Rides;
+  goods: Goods;
+  decorate: DecoratePanel;
   postOffice: PostOfficePanel;
   apartments: ApartmentsPanel;
   stall: StallPanel;
@@ -229,6 +236,9 @@ export class Game {
   private caretaker: Caretaker | null = null;
   private petLife: PetLife;
   private endingTest = false;
+  private houseFronts: HouseFronts | null = null;
+  /** Garden plots, watered or not, as last seen (to show a can being used). */
+  private wateredSeen = new Map<string, boolean>();
   private grove: Grove | null = null;
   private caretakerTalkAt = 0;
   private sky: Sky;
@@ -321,6 +331,11 @@ export class Game {
         .catch(() => {});
     }
     this.showRideButton();
+    this.showToys();
+    if (zoneId === "city") {
+      this.houseFronts = new HouseFronts(this.scene, map, ui.goods);
+      void ui.goods.loadHouses().catch(() => {});
+    }
     // In through your own front door: a pet out with you is home.
     if (zoneId === "home" && place.owner === ui.social.selfId && ui.pets.mine?.out) void this.petLife.bringHome().catch(() => {});
     this.sky = new Sky(app, this.scene, () => this.onShootingStar());
@@ -421,6 +436,7 @@ export class Game {
     if (homes.mine === lot) {
       const pet = this.ui.pets.mine;
       const actions: [string, () => void][] = [["Go inside", () => this.events.onTravel("home")]];
+      actions.push(["Decorate outside 🎨", () => this.near(this.ui.decorate, door, 6).show()]);
       if (pet?.out) actions.push([`Bring ${pet.name} home`, () => void this.petLife.bringHome().catch(() => {})]);
       else if (pet) actions.push([`Take ${pet.name} for a walk 🐾`, () => void this.petLife.takeOut().catch(() => {})]);
       menu.showWith("Your home", "", actions);
@@ -699,6 +715,72 @@ export class Game {
     return track >= 0 && path.slice(1).every((t) => map.ground[t.y * map.width + t.x] === track) ? speed : WALK_SPEED_X10;
   }
 
+  /** The toys button on the bar, if you own any. */
+  showToys() {
+    const toys = this.ui.goods.owned("toy");
+    this.hud.setToys(toys.length ? itemIconUrl(toys[0].key, toys[0].kind) : null);
+  }
+
+  /** Pick a toy to play with (everyone nearby sees). */
+  pickToy() {
+    const toys = this.ui.goods.owned("toy");
+    if (toys.length === 1) return this.emote(toys[0].meta.code ?? 0);
+    const at = this.self?.destination ?? { x: 0, y: 0 };
+    this.near(this.ui.menu, at, 6).showWith(
+      "Play",
+      "",
+      toys.map((it) => [`${EMOTES[it.meta.code ?? 0]?.icon ?? ""} ${it.name}`, () => this.emote(it.meta.code ?? 0)] as [string, () => void]),
+    );
+  }
+
+  /** What else the bag offers for an item: use a tool, play a toy, where things go. */
+  bagExtra(it: Item): HTMLElement | null {
+    const tip = (t: string) => {
+      const s = document.createElement("span");
+      s.className = "hint";
+      s.textContent = t;
+      return s;
+    };
+    const btn = (label: string, run: () => void) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "small";
+      b.textContent = label;
+      b.onclick = run;
+      return b;
+    };
+    switch (it.kind) {
+      case "tool": {
+        const tool = this.self?.info.tool ?? 0;
+        const code = it.meta.code ?? 0;
+        const using = it.meta.tool === "can" ? tool >> 4 === code : (tool & 0xf) === code;
+        return btn(using ? "Put away" : "Use", () =>
+          void this.ui.goods
+            .useTool(it, using)
+            .then(() => {
+              this.refreshLook();
+              this.ui.bag.hide();
+              this.hud.toast(using ? `Back to the plain ${it.meta.tool === "can" ? "watering can" : "rod"}.` : `${it.name}: in your hands when you ${it.meta.tool === "can" ? "water" : "fish"}.`, 3500);
+            })
+            .catch((e) => this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 3500)),
+        );
+      }
+      case "toy":
+        return btn("Play", () => {
+          this.ui.bag.hide();
+          this.emote(it.meta.code ?? 0);
+        });
+      case "instrument":
+        return tip("Play it at the bandstand");
+      case "wrap":
+      case "card":
+        return tip("Choose it when you give a gift");
+      case "exterior":
+        return tip("Put it up at your front door");
+    }
+    return null;
+  }
+
   /** The ride button: in the city, if you own something to ride. */
   showRideButton() {
     const rides = this.ui.rides;
@@ -920,6 +1002,18 @@ export class Game {
         break;
       case "PlotState": {
         const info = { plant: m.plant, stage: m.stage, watered: m.watered, owner: m.owner, stageLeftMs: m.stageLeftMs };
+        // Just watered: whoever's next to it is holding their can.
+        const key = `${m.x},${m.y}`;
+        if (m.watered && this.wateredSeen.get(key) === false) {
+          let best: Avatar | null = null;
+          let bd = 1.8;
+          for (const a of this.avatars.values()) {
+            const d = Math.hypot(a.pos.x - m.x, a.pos.y - m.y);
+            if (d < bd) [best, bd] = [a, d];
+          }
+          best?.showCan(performance.now());
+        }
+        this.wateredSeen.set(key, m.watered);
         this.props.setPlot(m.x, m.y, info);
         this.ui.plot.update(m.x, m.y, info);
         break;
@@ -965,10 +1059,10 @@ export class Game {
         const clothes = a.info.look !== m.look || a.info.style !== m.style;
         // Our own clothes are shown already; a pet coming along is news.
         if (m.id === this.selfId) {
-          a.info = { ...a.info, pet: m.pet, vehicle: m.vehicle };
+          a.info = { ...a.info, pet: m.pet, vehicle: m.vehicle, tool: m.tool };
           break;
         }
-        a.info = { ...a.info, look: m.look, style: m.style, pet: m.pet, vehicle: m.vehicle };
+        a.info = { ...a.info, look: m.look, style: m.style, pet: m.pet, vehicle: m.vehicle, tool: m.tool };
         if (clothes) a.flash("✨");
         // Someone took a pet out: know its name.
         if (m.pet && !this.ui.pets.ofName(a.info.name)?.out) void this.ui.pets.load().catch(() => {});
@@ -1018,6 +1112,7 @@ export class Game {
         serverNow: () => this.socket?.clock.now() ?? 0,
         send: (instrument, pitch, beat) => this.socket?.send({ t: "JamNote", instrument, pitch, beat }),
         sparkle: () => this.self?.flash("♪"),
+        owned: () => this.ui.goods.instruments(),
       });
       this.disposers.push(() => this.jam?.destroy());
     }
@@ -1222,7 +1317,7 @@ export class Game {
     return false;
   }
 
-  private gifts = new Map<string, { sprite: Sprite; tile: TileXY; id: string }>();
+  private gifts = new Map<string, { sprite: Sprite; tile: TileXY; id: string; card: number; note: string; from: string }>();
 
   /** Gifts waiting on your doorstep (spec §8.1). */
   private async loadGifts() {
@@ -1231,12 +1326,12 @@ export class Game {
     this.gifts.clear();
     gifts.slice(0, DOORSTEP.length).forEach((g, i) => {
       const tile = DOORSTEP[i];
-      const sprite = new Sprite(giftBoxTexture());
+      const sprite = new Sprite(g.wrap ? wrappedTexture(g.wrap) : giftBoxTexture());
       sprite.anchor.set(0.5, 1);
       sprite.position.set(tile.x * TILE + TILE / 2, tile.y * TILE + TILE - 2);
       sprite.zIndex = tile.y * TILE + TILE - 2;
       this.scene.sorted.addChild(sprite);
-      this.gifts.set(`${tile.x},${tile.y}`, { sprite, tile, id: g.id });
+      this.gifts.set(`${tile.x},${tile.y}`, { sprite, tile, id: g.id, card: g.card, note: g.note, from: g.from_name });
     });
     if (gifts.length) this.hud.toast(`${gifts.length === 1 ? "A gift is" : `${gifts.length} gifts are`} waiting on your doorstep 🎁`, 4000);
   }
@@ -1249,6 +1344,12 @@ export class Game {
       .then((r) => {
         const [item, qty] = r.applied.added[0] ?? [0, 0];
         this.hud.toast(`🎁 ${qty} ${this.ui.eco.name(item)} from ${r.from_name}`, 4000);
+        // A card with it: read it.
+        const card = CARDS[g.card];
+        if (card || g.note) {
+          const title = card ? `${card.icon} ${card.title} from ${g.from}` : `A note from ${g.from}`;
+          this.near(this.ui.menu, g.tile, 6).showWith(title, g.note ? `“${g.note}”` : "No words needed.", []);
+        }
         return this.ui.eco.load();
       })
       .catch((e) => this.hud.toast(e?.message ?? "That didn't work."))
@@ -1704,6 +1805,8 @@ export class Game {
     this.critters.destroy();
     this.caretaker?.destroy();
     this.petLife.destroy();
+    this.houseFronts?.destroy();
+    this.ui.decorate.hide();
     this.campfire?.destroy();
     this.sky.destroy();
     this.ui.offer.hide();

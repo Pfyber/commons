@@ -298,9 +298,13 @@ mod tests {
                 assert_eq!(distinct.len(), stock.len().min(dep.catalog.len()));
             }
         }
+        // Every shop is open now; a department with nothing in its catalog
+        // would sell nothing.
+        let mut empty = d.get("tools").unwrap().clone();
+        empty.catalog.clear();
         assert!(
-            d.get("tools").unwrap().stock_at(3).is_empty(),
-            "closed shops sell nothing"
+            empty.stock_at(3).is_empty(),
+            "nothing to sell, nothing on show"
         );
     }
 

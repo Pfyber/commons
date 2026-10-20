@@ -127,6 +127,10 @@ struct Avatar {
     /// ride), and what others see of it here (0: on foot).
     ride: u8,
     vehicle: u8,
+    /// The rod and watering can it uses (seen while fishing and watering).
+    tool: u8,
+    /// The instruments and toys it owns (bit per `code`): what it may play.
+    kit: u32,
     tile: TilePos,
     motion: Option<Motion>,
     cell: u16,
@@ -196,6 +200,7 @@ impl Avatar {
             style: self.style,
             pet: self.pet,
             vehicle: self.vehicle,
+            tool: self.tool,
             x: self.tile.0,
             y: self.tile.1,
             state: self.state,
@@ -591,6 +596,8 @@ impl Instance {
             pet: 0,
             ride: 0,
             vehicle: 0,
+            tool: 0,
+            kit: 0,
             tile,
             motion: None,
             cell,
@@ -692,7 +699,9 @@ impl Instance {
             ClientMsg::MoveTo { x, y } => self.move_to(id, (x, y), now),
             ClientMsg::Emote { emote: e } => {
                 let a = self.avatars.get_mut(&id).unwrap();
-                if !(1..=emote::MAX).contains(&e) || !a.emote_rl.try_take(now as u64) {
+                // Free emotes, or playing with a toy you own.
+                let toy = emote::TOYS.contains(&e) && a.kit & (1 << e) != 0;
+                if !((1..=emote::MAX).contains(&e) || toy) || !a.emote_rl.try_take(now as u64) {
                     return;
                 }
                 let cell = a.cell;

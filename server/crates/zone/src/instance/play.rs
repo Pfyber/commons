@@ -180,6 +180,9 @@ impl Instance {
         if instrument > instrument::MAX || pitch > 7 {
             return self.error(id, error_code::BAD_MESSAGE, "no such note");
         }
+        if instrument > instrument::FREE_MAX && a.kit & (1 << instrument) == 0 {
+            return self.error(id, error_code::NOT_ALLOWED, "you'd need that instrument");
+        }
         if near_object(&self.zone.map, "bandstand", tile, JAM_RANGE).is_none() {
             return self.error(id, error_code::TOO_FAR, "walk up to the bandstand to play");
         }

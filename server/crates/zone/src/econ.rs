@@ -67,6 +67,12 @@ pub struct SavedLook {
     /// What they're riding (`commons_sim::vehicles`), 0 on foot.
     #[serde(default)]
     pub vehicle: u8,
+    /// The rod (low four bits) and watering can they use.
+    #[serde(default)]
+    pub tool: u8,
+    /// The instruments and toys they own: bit `code` for each.
+    #[serde(default)]
+    pub kit: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -92,6 +92,7 @@ export interface EntityInfo {
   style: number;
   pet: number;
   vehicle: number;
+  tool: number;
   x: number;
   y: number;
   state: number;
@@ -108,6 +109,7 @@ export function encEntityInfo(w: Writer, v: EntityInfo) {
   w.u32(v.style);
   w.u16(v.pet);
   w.u8(v.vehicle);
+  w.u8(v.tool);
   w.u16(v.x);
   w.u16(v.y);
   w.u8(v.state);
@@ -125,6 +127,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
     style: r.u32(),
     pet: r.u16(),
     vehicle: r.u8(),
+    tool: r.u8(),
     x: r.u16(),
     y: r.u16(),
     state: r.u8(),
@@ -360,7 +363,7 @@ export type ServerMsg =
   | { t: "Offered"; from: number; kind: number }
   | { t: "Together"; a: number; b: number; kind: number }
   | { t: "LanternRise"; id: number; x: number; y: number; text: string }
-  | { t: "LookChanged"; id: number; look: number; style: number; pet: number; vehicle: number }
+  | { t: "LookChanged"; id: number; look: number; style: number; pet: number; vehicle: number; tool: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -534,6 +537,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.style);
       w.u16(m.pet);
       w.u8(m.vehicle);
+      w.u8(m.tool);
       break;
   }
   return w.finish();
@@ -620,7 +624,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "LanternRise", id: r.u32(), x: r.u16(), y: r.u16(), text: r.str() };
       break;
     case 26:
-      m = { t: "LookChanged", id: r.u32(), look: r.u32(), style: r.u32(), pet: r.u16(), vehicle: r.u8() };
+      m = { t: "LookChanged", id: r.u32(), look: r.u32(), style: r.u32(), pet: r.u16(), vehicle: r.u8(), tool: r.u8() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

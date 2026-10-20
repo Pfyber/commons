@@ -244,6 +244,77 @@ async fn gifts_move_items_and_earn_close_friendship() {
     );
 }
 
+#[tokio::test]
+async fn gifts_go_wrapped_with_a_card() {
+    let Some(s) = state().await else { return };
+    let (a, b) = (player(&s).await, player(&s).await);
+    befriend(&s, &a, &b).await;
+    // From the Gift Shop: one wrapping paper and one card.
+    let (wrap, card) = (
+        s.catalog.by_key("starry_wrap").unwrap().clone(),
+        s.catalog.by_key("birthday_card").unwrap().clone(),
+    );
+    commons_api::economy::apply_tx(
+        &s.db,
+        &s.catalog,
+        a.id,
+        &[
+            Op {
+                item: wrap.id,
+                delta: 1,
+            },
+            Op {
+                item: card.id,
+                delta: 1,
+            },
+        ],
+        "test",
+        &format!("{}:wrap", a.id),
+    )
+    .await
+    .unwrap();
+    let send = |key: &str, wrap: i32, card: i32| json!({ "to": b.id.to_string(), "item": 200, "qty": 1, "note": "Happy birthday!", "key": key, "wrap": wrap, "card": card });
+    // Not wrapping paper.
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/gift",
+        &a.token,
+        Some(send("w0", 200, 0)),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    let (st, r) = call(
+        &s,
+        "POST",
+        "/api/social/gift",
+        &a.token,
+        Some(send("w1", wrap.id, card.id)),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    // Used up: the next one goes plain.
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/gift",
+        &a.token,
+        Some(send("w2", wrap.id, 0)),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "no wrapping left");
+    let (_, gifts) = call(&s, "GET", "/api/social/gifts", &b.token, None).await;
+    let g = &gifts[0];
+    assert_eq!(
+        (g["wrap"].clone(), g["card"].clone(), g["note"].clone()),
+        (
+            wrap.meta["code"].clone(),
+            card.meta["code"].clone(),
+            json!("Happy birthday!")
+        )
+    );
+}
+
 /// A lot nobody lives on, picked at random so tests running at the same
 /// time don't reach for the same one.
 async fn free_lot(s: &State) -> String {

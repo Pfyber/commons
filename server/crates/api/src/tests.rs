@@ -1733,12 +1733,15 @@ mod mall_shop {
                     d.key,
                     c.item
                 );
-                // Only things to wear and pets are bound to whoever buys them.
+                // Only things to wear, ride, keep as a pet or put on a house
+                // are bound to whoever buys them (toys, tools and the gift
+                // shop's goods can be given).
                 assert_eq!(
                     item.account_bound(),
                     crate::cosmetics::is_cosmetic(&item.kind)
                         || crate::pets::is_pet(&item.kind)
                         || crate::vehicles::is_vehicle(&item.kind)
+                        || item.kind == "exterior"
                 );
             }
         }
@@ -1793,13 +1796,13 @@ mod mall_shop {
             .unwrap();
         assert_eq!(after[0].1, before[0].1 - price, "charged once");
         assert_eq!(after[1].1, before[1].1 + 1);
-        // Closed shops and empty displays sell nothing.
+        // Shops that don't exist and empty displays sell nothing.
         let (st, _) = call(
             &app,
             &auth,
             "POST",
             "/api/mall/buy",
-            json!({ "dept": "tools", "slot": 0, "key": "k2" }),
+            json!({ "dept": "nowhere", "slot": 0, "key": "k2" }),
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
@@ -2270,5 +2273,150 @@ mod mall_shop {
         assert_eq!(r["ride"].as_u64(), Some(0));
         let (_, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
         assert_eq!(r["vehicle"].as_u64(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn tools_toys_and_a_done_up_house() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = Router::new()
+            .nest("/api", mall::routes().merge(crate::goods::routes()))
+            .nest("/internal", crate::internal::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Maker");
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            p,
+            &[Op {
+                item: COIN,
+                delta: 2000,
+            }],
+            "test",
+            &format!("{p}:coins"),
+        )
+        .await
+        .unwrap();
+        let svc = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &ServiceClaims { svc: "zone".into() }, 60)
+        );
+        let (_, stock) = call(&app, &auth, "GET", "/api/mall/stock", json!({})).await;
+        let buy = |dept: &str, key: &str| {
+            let shelf = stock["departments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|d| d["key"] == dept)
+                .unwrap()["shelves"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|x| x["key"] == key)
+                .unwrap()
+                .clone();
+            json!({ "dept": dept, "slot": shelf["slot"], "key": format!("{key}-k") })
+        };
+        let item = |key: &str| s.catalog.by_key(key).unwrap().clone();
+        // A rod: not before it's bought.
+        let rod = item("carbon_rod");
+        let (st, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/me/tool",
+            json!({ "hand": "rod", "item": rod.id }),
+        )
+        .await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not_yours"))
+        );
+        for (dept, key) in [
+            ("tools", "carbon_rod"),
+            ("tools", "copper_can"),
+            ("toys", "kite"),
+            ("music", "ukulele"),
+            ("exterior", "picket_fence"),
+        ] {
+            let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", buy(dept, key)).await;
+            assert_eq!(st, StatusCode::OK, "{key}: {r}");
+        }
+        // Bought once.
+        let mut again = buy("toys", "kite");
+        again["key"] = json!("again");
+        let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", again).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("have_it"))
+        );
+        // Rod and can in use: the zone hears of both, and of the kite and ukulele.
+        let can = item("copper_can");
+        call(
+            &app,
+            &auth,
+            "POST",
+            "/api/me/tool",
+            json!({ "hand": "rod", "item": rod.id }),
+        )
+        .await;
+        let (_, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/me/tool",
+            json!({ "hand": "can", "item": can.id }),
+        )
+        .await;
+        assert_eq!(r["tool"].as_u64(), Some(2 | 1 << 4));
+        let (_, r) = call(&app, &svc, "GET", &format!("/internal/look/{p}"), json!({})).await;
+        assert_eq!(r["tool"].as_u64(), Some(2 | 1 << 4));
+        let kite = item("kite").meta["code"].as_u64().unwrap();
+        let uke = item("ukulele").meta["code"].as_u64().unwrap();
+        assert_eq!(r["kit"].as_u64(), Some(1 << kite | 1 << uke));
+        // The fence goes on a house: without one, nowhere.
+        let fence = item("picket_fence");
+        let put = json!({ "slot": "fence", "item": fence.id });
+        let (st, r) = call(&app, &auth, "POST", "/api/me/exterior", put.clone()).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("no_house"))
+        );
+        sqlx::query(
+            "INSERT INTO leases (kind, plot, player_id, tier, paid_until) VALUES ('home', $1, $2, 1, now() + interval '7 days')",
+        )
+        .bind(format!("test:{p}"))
+        .bind(p)
+        .execute(&s.db)
+        .await
+        .unwrap();
+        let (st, r) = call(
+            &app,
+            &auth,
+            "POST",
+            "/api/me/exterior",
+            json!({ "slot": "yard", "item": fence.id }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "a fence isn't yard decor: {r}");
+        let (st, r) = call(&app, &auth, "POST", "/api/me/exterior", put).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["house"]["looks"]["fence"], fence.meta["code"]);
+        let (_, r) = call(&app, &auth, "GET", "/api/exteriors", json!({})).await;
+        let mine = r["houses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|h| h["plot"] == format!("test:{p}"))
+            .cloned()
+            .unwrap();
+        assert_eq!(mine["looks"]["fence"], fence.meta["code"]);
+        for q in [
+            "DELETE FROM home_exterior WHERE owner = $1",
+            "DELETE FROM leases WHERE player_id = $1",
+        ] {
+            sqlx::query(q).bind(p).execute(&s.db).await.unwrap();
+        }
     }
 }

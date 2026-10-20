@@ -427,6 +427,11 @@ struct GiftReq {
     #[serde(default)]
     note: String,
     key: String,
+    /// Wrapping paper and a card to send it with (items; 0 or absent: none).
+    #[serde(default)]
+    wrap: i32,
+    #[serde(default)]
+    card: i32,
 }
 
 async fn gift(
@@ -450,6 +455,20 @@ async fn gift(
             "That's yours to keep: it can't be given.",
         ));
     }
+    // Wrapping and a card: they have to be wrapping paper and a card.
+    let extra = |item: i32, kind: &str| -> ApiResult<Option<(i32, i16)>> {
+        if item == 0 {
+            return Ok(None);
+        }
+        let it = state
+            .catalog
+            .get(item)
+            .filter(|i| i.kind == kind)
+            .ok_or_else(|| ApiError::bad_request("bad_request", "Invalid gift."))?;
+        Ok(Some((item, it.meta["code"].as_i64().unwrap_or(0) as i16)))
+    };
+    let wrap = extra(req.wrap, "wrap")?;
+    let card = extra(req.card, "card")?;
     let note = clean_chat(&req.note).unwrap_or_default();
     let key = format!("gift:{me}:{}", req.key);
     let applied = db::send_gift(
@@ -462,6 +481,8 @@ async fn gift(
             qty: req.qty,
             note: &note,
             key: &key,
+            wrap,
+            card,
         },
     )
     .await

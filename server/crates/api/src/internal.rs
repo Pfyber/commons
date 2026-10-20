@@ -383,7 +383,8 @@ pub struct HomeObject {
 }
 
 /// A player's saved look, what they wear from the mall, the pet out with
-/// them and what they're riding: the zone shows this, not what a client says (ownership was checked
+/// them, what they're riding, the tools they use and the instruments and
+/// toys they own: the zone shows this, not what a client says (ownership was checked
 /// when it was saved).
 async fn player_look(
     State(state): S,
@@ -396,16 +397,19 @@ async fn player_look(
         .player(&player)
         .await?
         .ok_or_else(|| ApiError::bad_request("bad_player", "no such player"))?;
-    let (pet, vehicle) = match uuid::Uuid::parse_str(&player) {
+    let (pet, vehicle, tool, kit) = match uuid::Uuid::parse_str(&player) {
         Ok(id) => (
             crate::pets::out_with(&state, id).await?,
             crate::vehicles::riding(&state, id).await?,
+            crate::goods::tool(&state, id).await?,
+            crate::goods::kit(&state, id).await?,
         ),
-        Err(_) => (0, 0),
+        Err(_) => (0, 0, 0, 0),
     };
-    Ok(Json(
-        serde_json::json!({ "look": p.look, "style": p.style, "pet": pet, "vehicle": vehicle }),
-    ))
+    Ok(Json(serde_json::json!({
+        "look": p.look, "style": p.style, "pet": pet, "vehicle": vehicle,
+        "tool": tool, "kit": kit,
+    })))
 }
 
 async fn home_objects(

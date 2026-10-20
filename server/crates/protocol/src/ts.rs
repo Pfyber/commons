@@ -224,6 +224,7 @@ pub fn sample_vectors() -> String {
         style: 0x0400_0201,
         pet: 0x0103,
         vehicle: 2,
+        tool: 0x12,
         x: 95,
         y: 0,
         state: 0,
@@ -373,6 +374,7 @@ pub fn sample_vectors() -> String {
             style: 0x0000_0300,
             pet: 2,
             vehicle: 1,
+            tool: 3,
         },
     ];
     let hex = |b: Vec<u8>| b.iter().map(|x| format!("{x:02x}")).collect::<String>();

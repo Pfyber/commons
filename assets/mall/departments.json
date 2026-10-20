@@ -13,7 +13,15 @@
         {"item": "birdbath", "price": 80}
       ]
     },
-    {"key": "tools", "name": "Tools", "type": "racks", "unit": [25, 2, 46, 18], "door": "s", "open": false},
+    {"key": "tools", "name": "Tools", "type": "shelves", "unit": [25, 2, 46, 18], "door": "s", "open": true, "slots": 5,
+      "catalog": [
+        {"item": "cherry_rod", "price": 80, "always": true},
+        {"item": "carbon_rod", "price": 120, "always": true},
+        {"item": "golden_rod", "price": 180, "limited": 3},
+        {"item": "copper_can", "price": 60, "always": true},
+        {"item": "floral_can", "price": 90, "always": true}
+      ]
+    },
     {"key": "furniture", "name": "Furniture", "type": "showroom", "unit": [48, 2, 69, 18], "door": "s", "open": true, "slots": 9,
       "catalog": [
         {"item": "wooden_chair", "price": 60},
@@ -32,7 +40,21 @@
         {"item": "grandfather_clock", "price": 250, "limited": 5}
       ]
     },
-    {"key": "exterior", "name": "Home Exterior", "type": "showroom", "unit": [71, 2, 93, 18], "door": "s", "open": false},
+    {"key": "exterior", "name": "Home Exterior", "type": "showroom", "unit": [71, 2, 93, 18], "door": "s", "open": true, "slots": 10,
+      "catalog": [
+        {"item": "sage_paint", "price": 80, "always": true},
+        {"item": "rose_paint", "price": 80},
+        {"item": "sky_paint", "price": 80},
+        {"item": "sunny_paint", "price": 80},
+        {"item": "picket_fence", "price": 70, "always": true},
+        {"item": "low_hedge", "price": 90},
+        {"item": "yard_gnome", "price": 50, "always": true},
+        {"item": "bird_bath", "price": 80},
+        {"item": "flower_arch", "price": 120, "limited": 4},
+        {"item": "blue_postbox", "price": 40, "always": true},
+        {"item": "cottage_postbox", "price": 60}
+      ]
+    },
     {"key": "clothing", "name": "Clothing", "type": "racks", "unit": [72, 23, 93, 39], "door": "w", "open": true, "try_on": "fitting_room", "slots": 8,
       "catalog": [
         {"item": "denim_jacket", "price": 60},
@@ -78,8 +100,32 @@
         {"item": "corgi", "price": 250, "limited": 2}
       ]
     },
-    {"key": "gifts", "name": "Gift Shop", "type": "shelves", "unit": [25, 61, 35, 77], "door": "n", "open": false},
-    {"key": "toys", "name": "Toys & Games", "type": "shelves", "unit": [60, 61, 70, 77], "door": "n", "open": false},
-    {"key": "music", "name": "Music", "type": "racks", "unit": [72, 61, 93, 77], "door": "n", "open": false}
+    {"key": "gifts", "name": "Gift Shop", "type": "shelves", "unit": [25, 61, 35, 77], "door": "n", "open": true, "slots": 8,
+      "catalog": [
+        {"item": "polka_wrap", "price": 5, "always": true},
+        {"item": "striped_wrap", "price": 5, "always": true},
+        {"item": "starry_wrap", "price": 8, "always": true},
+        {"item": "kraft_wrap", "price": 4, "always": true},
+        {"item": "thank_you_card", "price": 3, "always": true},
+        {"item": "birthday_card", "price": 3, "always": true},
+        {"item": "flower_card", "price": 4, "always": true},
+        {"item": "just_because_card", "price": 3, "always": true}
+      ]
+    },
+    {"key": "toys", "name": "Toys & Games", "type": "shelves", "unit": [60, 61, 70, 77], "door": "n", "open": true, "slots": 4,
+      "catalog": [
+        {"item": "bubble_wand", "price": 40, "always": true},
+        {"item": "kite", "price": 90, "always": true},
+        {"item": "yo_yo", "price": 30, "always": true},
+        {"item": "pinwheel", "price": 25, "always": true}
+      ]
+    },
+    {"key": "music", "name": "Music", "type": "shelves", "unit": [72, 61, 93, 77], "door": "n", "open": true, "slots": 3,
+      "catalog": [
+        {"item": "ukulele", "price": 120, "always": true},
+        {"item": "kalimba", "price": 100, "always": true},
+        {"item": "flute", "price": 110, "always": true}
+      ]
+    }
   ]
 }

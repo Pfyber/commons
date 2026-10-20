@@ -334,6 +334,10 @@ pub struct NewGift<'a> {
     pub qty: i32,
     pub note: &'a str,
     pub key: &'a str,
+    /// Wrapping paper and a card from the Gift Shop, used up sending it:
+    /// (item, code), or none.
+    pub wrap: Option<(i32, i16)>,
+    pub card: Option<(i32, i16)>,
 }
 
 /// Takes the item from the sender and leaves it on the recipient's doorstep.
@@ -344,28 +348,32 @@ pub async fn send_gift(
     g: &NewGift<'_>,
 ) -> Result<Applied, GiftError> {
     let mut tx = db.begin().await?;
-    let applied = apply(
-        &mut tx,
-        catalog,
-        g.from,
-        &[Op {
-            item: g.item,
-            delta: -g.qty,
-        }],
-        "gift_send",
-        g.key,
-    )
-    .await
-    .map_err(GiftError::Econ)?;
+    // The gift, and the wrapping and card it goes in.
+    let mut ops = vec![Op {
+        item: g.item,
+        delta: -g.qty,
+    }];
+    for (item, _) in [g.wrap, g.card].into_iter().flatten() {
+        match ops.iter_mut().find(|o| o.item == item) {
+            Some(o) => o.delta -= 1,
+            None => ops.push(Op { item, delta: -1 }),
+        }
+    }
+    let applied = apply(&mut tx, catalog, g.from, &ops, "gift_send", g.key)
+        .await
+        .map_err(GiftError::Econ)?;
     if !applied.duplicate {
         sqlx::query(
-            "INSERT INTO gifts (from_id, to_id, item_id, qty, note) VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO gifts (from_id, to_id, item_id, qty, note, wrap, card)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(g.from)
         .bind(g.to)
         .bind(g.item)
         .bind(g.qty)
         .bind(g.note)
+        .bind(g.wrap.map_or(0, |w| w.1))
+        .bind(g.card.map_or(0, |c| c.1))
         .execute(&mut *tx)
         .await?;
     }
@@ -381,11 +389,14 @@ pub struct Gift {
     pub item: i32,
     pub qty: i32,
     pub note: String,
+    /// The wrapping's and the card's codes (0: none).
+    pub wrap: i16,
+    pub card: i16,
 }
 
 pub async fn unopened_gifts(db: &PgPool, me: Uuid) -> sqlx::Result<Vec<Gift>> {
     let rows = sqlx::query(
-        "SELECT g.id, g.from_id, p.display_name, g.item_id, g.qty, g.note FROM gifts g
+        "SELECT g.id, g.from_id, p.display_name, g.item_id, g.qty, g.note, g.wrap, g.card FROM gifts g
          JOIN players p ON p.id = g.from_id WHERE g.to_id = $1 AND g.opened_at IS NULL ORDER BY g.sent_at",
     )
     .bind(me)
@@ -400,6 +411,8 @@ pub async fn unopened_gifts(db: &PgPool, me: Uuid) -> sqlx::Result<Vec<Gift>> {
             item: r.get("item_id"),
             qty: r.get("qty"),
             note: r.get("note"),
+            wrap: r.get("wrap"),
+            card: r.get("card"),
         })
         .collect())
 }

@@ -113,6 +113,12 @@ const ABOUT: Record<string, string> = {
   hat: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
   accessory: "To wear: once it's yours, put it on in any changing room. Yours to keep (it can't be sold on or given).",
   skin: "A full-body suit: you, as a whole new character. Yours to keep (it can't be sold on or given).",
+  tool: "Cosmetic: everyone sees it in your hands (a rod while you fish, a can while you water). Put it to use from your bag.",
+  instrument: "A new sound for the bandstand jam: pick it from the jam pads. Anything you play fits the beat.",
+  toy: "Play with it anywhere from the bar at the bottom: everyone nearby sees. You can give toys to friends, too.",
+  wrap: "Wrap a doorstep gift in it: choose it when you give a gift. Used up once the gift's sent.",
+  card: "Goes with a doorstep gift, with your note inside. Used up once the gift's sent.",
+  exterior: "For the outside of your house, for everyone passing to see. Put it up at your front door.",
   vehicle: "Faster anywhere outdoors in the city; you hop off at every door. Yours to keep. Try it on the test track first!",
   pet: "A friend for life. Pets live at your house and wait in the yard by your door. They'd love a walk every day: take them out, show them the city, bring them home.",
 };

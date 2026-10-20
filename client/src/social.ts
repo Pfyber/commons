@@ -43,6 +43,9 @@ export interface Gift {
   item: number;
   qty: number;
   note: string;
+  /** The wrapping's and the card's codes (0: none). */
+  wrap: number;
+  card: number;
 }
 
 export class Social {
@@ -221,8 +224,9 @@ export class Social {
     this.emit();
   }
 
-  async gift(to: string, item: number, qty: number, note: string) {
-    await this.auth.send("/api/social/gift", { to, item, qty, note, key: crypto.randomUUID() });
+  /** Leaves a gift on a friend's doorstep (in wrapping and with a card, if chosen: items, 0 for none). */
+  async gift(to: string, item: number, qty: number, note: string, wrap = 0, card = 0) {
+    await this.auth.send("/api/social/gift", { to, item, qty, note, wrap, card, key: crypto.randomUUID() });
   }
 
   async invite(id: string) {

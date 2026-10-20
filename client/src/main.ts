@@ -11,6 +11,8 @@ import type { CloseReason } from "./net/socket";
 import { Shop } from "./shop";
 import { Pets } from "./pets";
 import { Rides } from "./rides";
+import { Goods } from "./goods";
+import { DecoratePanel } from "./ui/exterior";
 import { Social } from "./social";
 import { Town } from "./town";
 import { Gov } from "./gov";
@@ -130,6 +132,7 @@ async function main() {
     onEmote: (id) => game?.emote(id),
     onSit: () => game?.toggleSit(),
     onRide: () => game?.toggleRide(),
+    onToys: () => game?.pickToy(),
     onBag: () => ui.bag.toggle(),
     onAlbum: () => ui.album.toggle(),
     onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
@@ -174,6 +177,7 @@ async function main() {
   const shop = new Shop(auth, eco);
   const pets = new Pets(auth);
   const rides = new Rides(auth, eco);
+  const goods = new Goods(auth, eco);
   const shopPanel = new ShopPanel(
     shop,
     eco,
@@ -210,6 +214,8 @@ async function main() {
     rent,
     pets,
     rides,
+    goods,
+    decorate: new DecoratePanel(goods, homes),
     postOffice,
     apartments,
     stall,
@@ -226,6 +232,7 @@ async function main() {
         void (game as Game | null)?.rideOn(rides.ride === item.meta.code ? null : item);
       },
       (item) => rides.ride === item.meta.code,
+      (item) => (game as Game | null)?.bagExtra(item) ?? null,
     ),
     album: new AlbumPanel(eco),
     market: new MarketPanel(eco),
@@ -281,7 +288,10 @@ async function main() {
   social.onChange(() => hud.setBadge(social.unreadCount));
   social.onToast = (t) => hud.toast(t, 4000);
   await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {}), pets.load().catch(() => {}), rides.load().catch(() => {})]);
-  eco.onChange(() => (game as Game | null)?.showRideButton());
+  eco.onChange(() => {
+    (game as Game | null)?.showRideButton();
+    (game as Game | null)?.showToys();
+  });
 
   let dest: Destination = { zone: "city" };
   let retry = 0;

@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 9;
+pub const PROTOCOL_VERSION: u16 = 10;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -27,7 +27,8 @@ records! {
     /// outfit, hat, accessory and skin codes, a byte each, 0 for none.
     /// `pet` is the pet out on a walk with them (v8): the pet's code, 0 for
     /// none. `vehicle` is what they're riding (v9; `commons_sim::vehicles`
-    /// codes), 0 when on foot.
+    /// codes), 0 when on foot. `tool` is the rod (low four bits) and watering
+    /// can (high four) they use (v10; 0: the plain ones).
     EntityInfo {
         id: u32,
         name: String,
@@ -35,6 +36,7 @@ records! {
         style: u32,
         pet: u16,
         vehicle: u8,
+        tool: u8,
         x: u16,
         y: u16,
         state: u8,
@@ -163,8 +165,9 @@ message_enum! {
         /// Someone nearby released a sky lantern from (x, y).
         25 LanternRise { id: u32, x: u16, y: u16, text: String }
         /// Avatar `id` changed its look (and what it wears from the mall),
-        /// took its pet out or home, or got on or off something to ride.
-        26 LookChanged { id: u32, look: u32, style: u32, pet: u16, vehicle: u8 }
+        /// took its pet out or home, got on or off something to ride, or
+        /// picked up another rod or watering can.
+        26 LookChanged { id: u32, look: u32, style: u32, pet: u16, vehicle: u8, tool: u8 }
     }
 }
 
@@ -177,7 +180,14 @@ pub mod emote {
     pub const SLEEP: u8 = 5;
     pub const CHEER: u8 = 6;
     pub const HEART: u8 = 7;
+    /// Free to everyone.
     pub const MAX: u8 = HEART;
+    /// Playing with a toy from the mall (only with the toy: its `code`).
+    pub const BUBBLES: u8 = 8;
+    pub const KITE: u8 = 9;
+    pub const YO_YO: u8 = 10;
+    pub const PINWHEEL: u8 = 11;
+    pub const TOYS: std::ops::RangeInclusive<u8> = BUBBLES..=PINWHEEL;
 }
 
 /// Looks reserved for non-player characters (the Caretaker).
@@ -248,7 +258,12 @@ pub mod instrument {
     pub const BELLS: u8 = 0;
     pub const BASS: u8 = 1;
     pub const DRUMS: u8 = 2;
-    pub const MAX: u8 = DRUMS;
+    /// Everyone can play these; the rest need the instrument (its `code`).
+    pub const FREE_MAX: u8 = DRUMS;
+    pub const UKULELE: u8 = 3;
+    pub const KALIMBA: u8 = 4;
+    pub const FLUTE: u8 = 5;
+    pub const MAX: u8 = FLUTE;
 }
 
 /// Easel canvases are `EASEL_SIZE`² cells; colours index a shared palette of
@@ -299,6 +314,7 @@ mod tests {
             style: 0x0102_0304,
             pet: 0x0201,
             vehicle: 3,
+            tool: 0x21,
             x: 3,
             y: 4,
             state: 0,

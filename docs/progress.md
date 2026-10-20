@@ -879,8 +879,54 @@ ride button outside, riding at bike speed, another player seeing it and
 keeping up while following, and getting off at the mall door. The
 earlier steps pass again, and 500 bots pass the perf gate.
 
-Next: M7, the last shops (Tools, Music, Gift Shop, Toys & Games, Home
-exterior).
+## Mall M7 · The last shops: done (2026-10-17)
+
+Every storefront in the mall is open now (migration 0016).
+
+- **Tools:** a cherrywood, carbon or (limited) golden rod and a copper or
+  floral watering can. They're cosmetic, with no effect on catches or growth.
+  Put one to use from the bag; everyone sees the rod in your hands while you
+  fish and the can when you water (the client spots who was standing at a
+  plot that just got watered). Protocol v10: `EntityInfo.tool` and
+  `LookChanged.tool`.
+- **Music:** a ukulele, a kalimba and a flute, each a new sound at the
+  bandstand jam. The pads show the instruments you own; the zone only plays
+  notes on instruments you own.
+- **Toys & Games:** a bubble wand, a kite, a yo-yo and a pinwheel. A toys
+  button on the bar (and Play in the bag) plays with one, and everyone
+  nearby sees it. The zone checks you own the toy. Toys can be given to
+  friends.
+- **Gift Shop:** four wrapping papers and four cards. When you leave a
+  doorstep gift you can wrap it and add a card. Both are used up, the box
+  waits on the doorstep in that paper, and opening it shows the card with
+  your note.
+- **Home Exterior:** paint (sage, rose, sky, sunny), a picket fence or low
+  hedge, a gnome, a bird bath or (limited) a flower arch for the yard, and
+  blue or cottage postboxes. "Decorate outside" at your front door puts them
+  up. Paint recolours the house; the postbox changes; the fence runs along
+  the garden with a gap for the path. Everyone passing sees it, and it moves
+  with you if you move house.
+- **Bought once:** tools, instruments, toys and exterior pieces (like
+  clothes and vehicles); wrapping and cards are bought by the piece.
+- **Behind it:** the zone gets your tools and kit (a bit per instrument or
+  toy owned) from `/internal/look`. `home_exterior` keeps each resident's
+  house look; gifts keep the wrapping and card used.
+
+Checked: zone tests (no kite, nothing to fly; with one, everyone sees it;
+a new rod is seen by everyone); API tests (no tool you haven't bought,
+bought once, rod and can in use and the kit reach the zone, no house no
+fence, a fence isn't yard decor, everyone sees the done-up house); social
+test (a gift wrapped with a card uses both up and arrives with them). In
+the browser: buying in every new shop, using a rod and can from the bag
+(another player sees them), flying a kite from the toys button (seen by
+another player), the ukulele at the bandstand (only for its owner),
+painting the house and putting up the fence, gnome and blue postbox (seen
+by another player), and a wrapped birthday gift arriving on a doorstep and
+opening to its card. The earlier steps pass again, and 500 bots pass the
+perf gate.
+
+Next: M8, polish (shopkeepers, music and lighting per department, a
+crowded-mall bot test).
 
 ## Next: M5 · Crowds
 

@@ -99,7 +99,7 @@ come from a layout file for its type, not from code.
 | **C3** ✓ | Home blocks per the layout, doors into instanced interiors, yards, courtyards, the post office. | Lots assigned free for now. |
 | **C4** ✓ | Renting: tiers, leases, recurring rent, grace, release to storage, upgrade/downgrade; market stalls and apartments. | Nothing is lost on release. |
 | **C5** | Tram and two metro lines: a 3–5 s ride or a tap on the station map; "Go home" at every station. | Same connection; the ride hides loading. |
-| **C6** | **One zone actor per block** in one process: neighbour subscriptions, seamless handoff, sleeping zones, protocol v10 (city clock, process-unique entity ids). | The single-zone build stays as fallback until this passes the bot tests. |
+| **C6** | **One zone actor per block** in one process: neighbour subscriptions, seamless handoff, sleeping zones, protocol v11 (city clock, process-unique entity ids). | The single-zone build stays as fallback until this passes the bot tests. |
 | **C7** | Sharding: NATS (one subject per zone), the orchestrator's block→process map, a gateway holding each player's socket. | |
 | **C8** | Instancing only for crowded blocks, chosen on approach, friends kept together, never bounced. | |
 | **C9** | Clubs. | |

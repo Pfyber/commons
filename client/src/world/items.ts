@@ -6,6 +6,7 @@ import { Texture } from "pixi.js";
 import { PALETTE, avatarCanvas, styleFor, toTexture } from "./art";
 import { petCanvas, petTexture } from "./pets";
 import { vehicleCanvas, vehicleTexture } from "./vehicles";
+import { drawGoodsIcon } from "./goods";
 import { disc, oval, polygon } from "./pixeldraw";
 
 type Draw = (ctx: CanvasRenderingContext2D) => void;
@@ -50,6 +51,8 @@ function plantOf(key: string) {
 
 /** Things to wear: their code by item key (set from the catalogue). */
 export const COSMETIC_CODES = new Map<string, number>();
+/** Every item's meta by key (set from the catalogue), for drawing. */
+export const ITEM_META = new Map<string, { code?: number; tool?: string; slot?: string }>();
 const WEARABLE = new Set(["outfit", "hat", "accessory", "skin"]);
 /** The look mannequins (and bag icons) show things to wear on. */
 const MANNEQUIN_LOOK = 0x0b_00_04_70;
@@ -66,6 +69,7 @@ function wearing(key: string, kind: string): HTMLCanvasElement {
 
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
+  if (drawGoodsIcon(ctx, kind, ITEM_META.get(key) ?? {})) return;
   if (kind === "vehicle") {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(vehicleCanvas(COSMETIC_CODES.get(key) ?? 3), 0, 0, 32, 24, 0, 2, 16, 12);

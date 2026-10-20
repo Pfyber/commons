@@ -129,40 +129,57 @@ export class Scene {
     for (const p of this.placed) {
       const near = p.x1 >= tx0 && p.x0 < tx1 && p.y1 >= ty0 && p.y0 < ty1;
       if (near && !p.sprite) {
-        const { texture, overhang, left } = objectTexture(p.o);
-        const s = new Sprite(texture);
-        s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
-        s.zIndex = (p.o.y + p.o.h) * TILE - 1;
-        this.sorted.addChild(s);
-        p.sprite = s;
-        if (p.o.item) {
-          // Furniture stands on the floor; small goods sit on the shelf.
-          const it = new Sprite(itemTexture(p.o.item, p.o.itemKind ?? ""));
-          it.anchor.set(0.5, 1);
-          const onShelf = p.o.kind === "shelf";
-          it.scale.set(onShelf && p.o.itemKind === "furniture" ? 0.75 : 1);
-          it.position.set(p.o.x * TILE + TILE / 2, p.o.y * TILE + (onShelf ? 2 : TILE - 2));
-          // A pet waits in the middle of its pen.
-          if (p.o.kind === "pet_pen") it.position.set((p.o.x + p.o.w / 2) * TILE, (p.o.y + p.o.h) * TILE - 14);
-          it.zIndex = s.zIndex + 0.5;
-          this.sorted.addChild(it);
-          p.extras.push(it);
-          if (p.o.isNew) {
-            const tag = new Sprite(newTagTexture());
-            tag.anchor.set(0.5, 1);
-            tag.position.set(p.o.x * TILE + TILE / 2 + 8, it.position.y - it.height + 4);
-            tag.zIndex = s.zIndex + 0.6;
-            this.sorted.addChild(tag);
-            p.extras.push(tag);
-          }
-        }
+        this.show(p);
       } else if (!near && p.sprite) {
-        p.sprite.destroy({ texture: true, textureSource: true });
-        p.sprite = null;
-        for (const e of p.extras) e.destroy();
-        p.extras = [];
+        this.hide(p);
       }
     }
+  }
+
+  /** Draws a placed object (and what's on show on it). */
+  private show(p: (typeof this.placed)[number]) {
+    const { texture, overhang, left } = objectTexture(p.o);
+    const s = new Sprite(texture);
+    s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
+    s.zIndex = (p.o.y + p.o.h) * TILE - 1;
+    this.sorted.addChild(s);
+    p.sprite = s;
+    if (p.o.item) {
+      // Furniture stands on the floor; small goods sit on the shelf.
+      const it = new Sprite(itemTexture(p.o.item, p.o.itemKind ?? ""));
+      it.anchor.set(0.5, 1);
+      const onShelf = p.o.kind === "shelf";
+      it.scale.set(onShelf && p.o.itemKind === "furniture" ? 0.75 : 1);
+      it.position.set(p.o.x * TILE + TILE / 2, p.o.y * TILE + (onShelf ? 2 : TILE - 2));
+      // A pet waits in the middle of its pen.
+      if (p.o.kind === "pet_pen") it.position.set((p.o.x + p.o.w / 2) * TILE, (p.o.y + p.o.h) * TILE - 14);
+      it.zIndex = s.zIndex + 0.5;
+      this.sorted.addChild(it);
+      p.extras.push(it);
+      if (p.o.isNew) {
+        const tag = new Sprite(newTagTexture());
+        tag.anchor.set(0.5, 1);
+        tag.position.set(p.o.x * TILE + TILE / 2 + 8, it.position.y - it.height + 4);
+        tag.zIndex = s.zIndex + 0.6;
+        this.sorted.addChild(tag);
+        p.extras.push(tag);
+      }
+    }
+  }
+
+  private hide(p: (typeof this.placed)[number]) {
+    p.sprite?.destroy({ texture: true, textureSource: true });
+    p.sprite = null;
+    for (const e of p.extras) e.destroy();
+    p.extras = [];
+  }
+
+  /** Draws `o` again (it changed: a house done up, a new postbox). */
+  redraw(o: MapObject) {
+    const p = this.placed.find((q) => q.o === o);
+    if (!p?.sprite) return;
+    this.hide(p);
+    this.show(p);
   }
 
   private load(cx: number, cy: number) {

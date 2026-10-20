@@ -9,6 +9,7 @@ import type { Scene } from "./scene";
 import { moodIcon } from "../activities/together";
 import { Follower, type PetSprite } from "./pets";
 import { RIDE_POSE, vehicleTexture } from "./vehicles";
+import { heldCanTexture, heldRodTexture } from "./goods";
 
 export const EMOTES: Record<number, { icon: string; label: string }> = {
   1: { icon: "👋", label: "Wave" },
@@ -18,7 +19,14 @@ export const EMOTES: Record<number, { icon: string; label: string }> = {
   5: { icon: "💤", label: "Sleep" },
   6: { icon: "🎉", label: "Cheer" },
   7: { icon: "❤️", label: "Heart" },
+  // Playing with toys from the mall.
+  8: { icon: "🫧", label: "Blow bubbles" },
+  9: { icon: "🪁", label: "Fly a kite" },
+  10: { icon: "🪀", label: "Yo-yo" },
+  11: { icon: "🌀", label: "Pinwheel" },
 };
+/** The emotes everyone has (the rest are toys). */
+export const FREE_EMOTES = 7;
 
 const BUBBLE_MS = 6000;
 const EMOTE_MS = 2200;
@@ -50,6 +58,9 @@ export class Avatar {
   private follower: Follower | null = null;
   /** What we're riding, drawn under us. */
   private wheels: Sprite | null = null;
+  /** The rod in our hands while fishing, the can while watering. */
+  private held: Sprite | null = null;
+  private canUntil = 0;
 
   constructor(
     public info: EntityInfo,
@@ -228,6 +239,7 @@ export class Avatar {
     this.sprite.scale.x = this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
     this.updateWheels(ride ? this.info.vehicle : 0, feetX, feetY, walking, wallNow);
+    this.updateHeld(feetX, feetY, wallNow);
     this.updatePet({ x, y }, wallNow);
 
     // DOM label above the head.
@@ -275,6 +287,33 @@ export class Avatar {
     w.zIndex = feetY + 0.6;
   }
 
+  /** Watering a plant: the can shows for a moment. */
+  showCan(now: number) {
+    this.canUntil = now + 1400;
+  }
+
+  private updateHeld(feetX: number, feetY: number, now: number) {
+    const fishing = this.state === 2;
+    const watering = now < this.canUntil;
+    if (!fishing && !watering) {
+      if (this.held) this.held.visible = false;
+      return;
+    }
+    const tool = this.info.tool ?? 0;
+    const tex = fishing ? heldRodTexture(tool & 0xf) : heldCanTexture(tool >> 4);
+    if (!this.held) {
+      this.held = new Sprite(tex);
+      this.held.anchor.set(0, 1);
+      this.scene.sorted.addChild(this.held);
+    }
+    const h = this.held;
+    h.texture = tex;
+    h.visible = true;
+    h.scale.x = this.facing;
+    h.position.set(Math.round(feetX + this.facing * 3), Math.round(feetY - (fishing ? 10 : 8)));
+    h.zIndex = feetY + 0.7;
+  }
+
   /** The pet with us (if any), keeping up. */
   get pet(): PetSprite | null {
     return this.follower?.pet ?? null;
@@ -297,6 +336,7 @@ export class Avatar {
   destroy() {
     this.follower?.destroy();
     this.wheels?.destroy();
+    this.held?.destroy();
     this.sprite.destroy();
     this.label.remove();
   }

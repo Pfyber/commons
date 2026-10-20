@@ -172,6 +172,26 @@ export class FriendsPanel extends Panel {
     note.placeholder = "Add a note (optional)";
     note.maxLength = 140;
     note.addEventListener("keydown", (e) => e.stopPropagation());
+    // Wrapping and a card from the Gift Shop, if you have some.
+    const choose = (kind: string, none: string) => {
+      const pick = el("select", "gift-extra");
+      const o = el("option", "", none);
+      o.value = "0";
+      pick.append(o);
+      for (const it of this.eco.ofKind(kind).filter((i) => this.eco.qty(i.id) > 0)) {
+        const opt = el("option", "", `${it.name} (have ${this.eco.qty(it.id)})`);
+        opt.value = String(it.id);
+        pick.append(opt);
+      }
+      return pick;
+    };
+    const wrap = choose("wrap", "No wrapping");
+    const card = choose("card", "No card");
+    if (wrap.options.length > 1 || card.options.length > 1) {
+      const extras = el("div", "stall-form");
+      extras.append(wrap, card);
+      this.body.append(extras);
+    }
     // Account-bound things (what you wear from the mall) are yours to keep.
     const giftable = [...this.eco.items.values()].filter((i) => this.eco.qty(i.id) > 0 && !i.meta.account_bound);
     if (!giftable.length) this.body.append(el("p", "empty", "Your bag is empty."));
@@ -184,7 +204,7 @@ export class FriendsPanel extends Panel {
         el("span", "name", `${qty > 1 ? `${qty} ` : ""}${it.name} (have ${this.eco.qty(it.id)})`),
         button("Give", () =>
           this.act(async () => {
-            await this.social.gift(f.id, it.id, qty, note.value);
+            await this.social.gift(f.id, it.id, qty, note.value, Number(wrap.value), Number(card.value));
             await this.eco.load();
             return `Sent to ${f.name}'s doorstep 🎁`;
           }), "small primary-sm"),

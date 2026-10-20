@@ -1,7 +1,7 @@
 // Minimal HUD (spec §16): place name, chat, emote bar, toasts. Large touch
 // targets, nothing persistent beyond what's needed.
 
-import { EMOTES } from "../world/avatars";
+import { EMOTES, FREE_EMOTES } from "../world/avatars";
 import { EMOTE_ICONS, iconUrl, pxIcon } from "./icons";
 import { isTyping } from "./panels";
 
@@ -13,6 +13,8 @@ export interface HudHandlers {
   onEmote(id: number): void;
   onSit(): void;
   onRide(): void;
+  /** The toys button: pick a toy to play with. */
+  onToys(): void;
   onBag(): void;
   onAlbum(): void;
   onFriends(): void;
@@ -32,6 +34,7 @@ export class Hud {
   private toastEl: HTMLDivElement;
   private sitBtn: HTMLButtonElement;
   private rideBtn: HTMLButtonElement;
+  private toysEl: HTMLButtonElement;
   private coinsEl: HTMLDivElement;
   private badgeEl!: HTMLSpanElement;
   private toastTimer = 0;
@@ -128,8 +131,16 @@ export class Hud {
     this.rideBtn.hidden = true;
     this.rideBtn.onclick = () => h.onRide();
     bar.appendChild(this.rideBtn);
+    this.toysEl = document.createElement("button");
+    this.toysEl.type = "button";
+    this.toysEl.className = "toys-btn";
+    this.toysEl.title = "Play with a toy";
+    this.toysEl.setAttribute("aria-label", this.toysEl.title);
+    this.toysEl.hidden = true;
+    this.toysEl.onclick = () => h.onToys();
+    bar.appendChild(this.toysEl);
     this.setSitting(false);
-    for (const [id, e] of Object.entries(EMOTES)) {
+    for (const [id, e] of Object.entries(EMOTES).filter(([id]) => Number(id) <= FREE_EMOTES)) {
       const b = document.createElement("button");
       b.type = "button";
       b.append(pxIcon(EMOTE_ICONS[Number(id)] ?? "heart"));
@@ -138,6 +149,19 @@ export class Hud {
       b.onclick = () => h.onEmote(Number(id));
       bar.appendChild(b);
     }
+  }
+
+  /** The toys button (your toys, to play with): its icon, or null to hide it. */
+  setToys(icon: string | null) {
+    this.toysEl.hidden = icon === null;
+    if (icon === null) return;
+    const img = document.createElement("img");
+    img.className = "px-icon";
+    img.alt = "";
+    img.width = 24;
+    img.height = 24;
+    img.src = icon;
+    this.toysEl.replaceChildren(img);
   }
 
   /** The ride button: what you'd ride (its icon), and whether you're on it; null hides it. */

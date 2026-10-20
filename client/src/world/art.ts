@@ -2,6 +2,7 @@
 // soft outlines). Drawn once into canvases and turned into nearest-filtered
 // textures; replaced by real atlases from assets/ when they exist.
 
+import { FACADES, POSTBOX } from "./goods";
 import { Texture } from "pixi.js";
 import type { MapObject } from "./map";
 import { disc, oval, polygon } from "./pixeldraw";
@@ -928,9 +929,10 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       overhang = 22;
       px(ctx, "rgba(0,0,0,0.15)", 8, h + 16, 16, 5);
       px(ctx, P.outline, 14, 14, 4, h + 6);
+      const [body, lid] = POSTBOX[o.style ?? 0] ?? POSTBOX[0];
       px(ctx, P.outline, 7, 2, 18, 16);
-      px(ctx, "#c8553d", 8, 3, 16, 14);
-      px(ctx, "#e07a5f", 8, 3, 16, 3);
+      px(ctx, body, 8, 3, 16, 14);
+      px(ctx, lid, 8, 3, 16, 3);
       px(ctx, P.outline, 11, 8, 10, 2);
       px(ctx, "#f6c343", 24, 6, 3, 6);
       break;
@@ -1005,8 +1007,10 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       // A small house from above: a hipped roof with a chimney over the
       // front wall, two windows and a door (homes open in a later step).
       const look = hash(o.x, o.y, 73);
-      const walls = ["#f1e4cc", "#e8d6c4", "#dfe6e8", "#efe2b8", "#e2dbec"][look % 5];
-      const roofs = ["#b5544a", "#4f6d8a", "#5d8a4e", "#8a5d8a", "#c27a3c", "#7a6a5a"][(look >>> 4) % 6];
+      // Painted by its resident, or as built.
+      const painted = o.style ? FACADES[o.style] : undefined;
+      const walls = painted?.[0] ?? ["#f1e4cc", "#e8d6c4", "#dfe6e8", "#efe2b8", "#e2dbec"][look % 5];
+      const roofs = painted?.[1] ?? ["#b5544a", "#4f6d8a", "#5d8a4e", "#8a5d8a", "#c27a3c", "#7a6a5a"][(look >>> 4) % 6];
       [c, ctx] = makeCanvas(w, h + 32);
       overhang = 32;
       const H = h + 32;

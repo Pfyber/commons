@@ -79,6 +79,7 @@ impl Instance {
                 if let Ok(l) = saved
                     && inst.avatars.get(&id).is_some_and(|a| a.player_id == player)
                 {
+                    inst.equip(id, l.tool, l.kit);
                     inst.wear(id, l.look, l.style, l.pet, l.vehicle);
                 }
             },
@@ -108,18 +109,34 @@ impl Instance {
         a.style = style;
         a.pet = pet;
         a.vehicle = vehicle;
+        self.look_changed(id);
+    }
+
+    /// The tools avatar `id` uses and the kit it owns, from the API.
+    pub(super) fn equip(&mut self, id: u32, tool: u8, kit: u32) {
+        let Some(a) = self.avatars.get_mut(&id) else {
+            return;
+        };
+        a.kit = kit;
+        if a.tool != tool {
+            a.tool = tool;
+            self.look_changed(id);
+        }
+    }
+
+    /// Everyone nearby sees avatar `id` as it is now.
+    fn look_changed(&mut self, id: u32) {
+        let a = &self.avatars[&id];
+        let msg = ServerMsg::LookChanged {
+            id,
+            look: a.look,
+            style: a.style,
+            pet: a.pet,
+            vehicle: a.vehicle,
+            tool: a.tool,
+        };
         let cell = a.cell;
-        self.broadcast(
-            cell,
-            &ServerMsg::LookChanged {
-                id,
-                look,
-                style,
-                pet,
-                vehicle,
-            },
-            None,
-        );
+        self.broadcast(cell, &msg, None);
     }
 
     pub(super) fn set_mood(&mut self, id: u32, m: u8, now: u32) {
@@ -381,7 +398,8 @@ mod tests {
                 look: 0x8100_00ff,
                 style: 0,
                 pet: 0,
-                vehicle: 0
+                vehicle: 0,
+                tool: 0
             }
         )));
         assert_eq!(inst.avatars[&1].info(inst.clock.now_ms()).look, 0x8100_00ff);
@@ -608,5 +626,55 @@ mod tests {
             walk_speed(&mut inst, 2, 2, (pos.0, pos.1 + 6), &mut a),
             WALK_SPEED_X10
         );
+    }
+
+    #[test]
+    fn toys_and_tools_from_the_mall() {
+        use commons_protocol::emote;
+        let mut inst = instance_for(Arc::new(ZoneDef::new("test".into(), map(32, 32), None)));
+        let mut a = connect(&mut inst, 1, "a", (20, 12));
+        let mut b = connect(&mut inst, 2, "b", (20, 12));
+        let kite = |inst: &mut Instance| {
+            inst.handle(Cmd::Msg {
+                conn: 1,
+                msg: ClientMsg::Emote { emote: emote::KITE },
+            });
+            inst.flush();
+        };
+        let kites = |b: &mut Client| {
+            b.pump();
+            b.log
+                .iter()
+                .filter(|m| {
+                    matches!(
+                        m,
+                        ServerMsg::EmoteShown {
+                            id: 1,
+                            emote: emote::KITE
+                        }
+                    )
+                })
+                .count()
+        };
+        // No kite: nothing to fly.
+        kite(&mut inst);
+        assert_eq!(kites(&mut b), 0);
+        inst.equip(1, 0, 1 << emote::KITE);
+        kite(&mut inst);
+        assert_eq!(kites(&mut b), 1);
+        // A golden rod: everyone sees it.
+        inst.equip(1, 0x23, 1 << emote::KITE);
+        inst.flush();
+        b.pump();
+        assert!(b.log.iter().any(|m| matches!(
+            m,
+            ServerMsg::LookChanged {
+                id: 1,
+                tool: 0x23,
+                ..
+            }
+        )));
+        a.pump();
+        assert_eq!(inst.avatars[&1].info(0).tool, 0x23);
     }
 }
