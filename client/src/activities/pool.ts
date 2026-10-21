@@ -376,6 +376,8 @@ export class PoolPanel extends Panel {
   private orient = new Map<number, Orient>();
   /** When the game on the table last finished (the result waits a moment). */
   private endedAt = 0;
+  /** What the last shot did (who potted what, whose shot now), under the table. */
+  private note = "";
 
   private knock: Hit = (kind, speed, x) => {
     if (kind === "pocket") return sfx.pocket(x);
@@ -556,6 +558,7 @@ export class PoolPanel extends Panel {
 
   private apply(s: State) {
     if (this.state.status === PLAYING && s.status !== PLAYING) this.endedAt = performance.now();
+    this.note = s.shot === this.state.shot + 1 && s.status === PLAYING ? this.shotNote(this.state, s) : s.shot !== this.state.shot ? "" : this.note;
     // A new shot to line up: whatever aim we saw belongs to the last one.
     if (s.turn !== this.state.turn || s.shot !== this.state.shot) this.theirAim = null;
     // A fresh rack: numbers up again.
@@ -625,6 +628,21 @@ export class PoolPanel extends Panel {
     }
   }
 
+  /** "You potted the 3 (own), the 12 (opponent's): turn passes." */
+  private shotNote(before: State, after: State): string {
+    const shooter = before.turn === 0 ? before.a : before.b;
+    const still = new Set(after.balls.map((b) => b.n));
+    const potted = before.balls.map((b) => b.n).filter((n) => n !== 0 && !still.has(n));
+    const groupOf = (n: number) => (n >= 1 && n <= 7 ? SOLIDS : n >= 9 ? 3 - SOLIDS : 0);
+    const mine = !after.groups ? 0 : (before.turn === 0) === (after.groups === SOLIDS) ? SOLIDS : 3 - SOLIDS;
+    const name = this.who(shooter);
+    const next = after.turn === before.turn ? (name === "You" ? "shoot again" : "shoots again") : "turn passes";
+    if (!potted.length) return "";
+    const whose = (n: number) => (!mine || !groupOf(n) ? "" : groupOf(n) === mine ? " (own)" : " (opponent's)");
+    const list = potted.map((n) => `the ${n}${whose(n)}`).join(", ");
+    return `${name} potted ${list}: ${next}.`;
+  }
+
   private who(id: number) {
     return id === this.selfId() ? "You" : id === BOT ? "Pool shark 🦈" : this.nameOf(id);
   }
@@ -661,6 +679,7 @@ export class PoolPanel extends Panel {
     const table = el("div", "pool-table");
     table.append(this.canvas, this.meter);
     this.body.append(line, table, status);
+    if (this.note && s.status === PLAYING && !this.rolling) this.body.append(el("p", "pool-note", this.note));
 
     const row = el("div", "pool-actions");
     const inGame = s.a === me || s.b === me;
@@ -872,18 +891,24 @@ export class PoolPanel extends Panel {
     ctx.fillStyle = "#e9d4a8";
     ctx.textBaseline = "middle";
     if (!s.groups) {
-      row(down.filter((n) => n !== 8), RIM + r, 1);
+      // Open table: nobody's balls yet, so they sit in the middle, under neither player.
+      const open = down.filter((n) => n !== 8);
+      ctx.textAlign = "left";
+      ctx.fillText("Open table", 8, y);
+      row(open, cw / 2 - ((open.length - 1) * gap) / 2, 1);
     } else {
+      // Each player's side shows their own group: theirs, whoever potted them.
       const aSolids = s.groups === SOLIDS;
       const solids = down.filter((n) => n < 8);
       const stripes = down.filter((n) => n > 8);
       const [left, right] = aSolids ? [solids, stripes] : [stripes, solids];
+      const label = (id: number, solidsSide: boolean) => `${this.who(id)} · ${solidsSide ? "solids" : "stripes"}`;
       ctx.textAlign = "left";
-      ctx.fillText(this.who(s.a), 8, y);
-      row(left, 8 + ctx.measureText(this.who(s.a)).width + r + 6, 1);
+      ctx.fillText(label(s.a, aSolids), 8, y);
+      row(left, 8 + ctx.measureText(label(s.a, aSolids)).width + r + 6, 1);
       ctx.textAlign = "right";
-      ctx.fillText(this.who(s.b), cw - 8, y);
-      row(right, cw - 8 - ctx.measureText(this.who(s.b)).width - r - 6, -1);
+      ctx.fillText(label(s.b, !aSolids), cw - 8, y);
+      row(right, cw - 8 - ctx.measureText(label(s.b, !aSolids)).width - r - 6, -1);
     }
     if (down.includes(8)) drawBall(ctx, 8, cw / 2, y, r);
   }

@@ -69,6 +69,7 @@ export class ZoneSocket {
         version: PROTOCOL_VERSION,
         viewW: Math.min(255, view.w),
         viewH: Math.min(255, view.h),
+        device: deviceId(),
       });
       this.ping();
       this.pingTimer = window.setInterval(() => this.ping(), PING_EVERY_MS);
@@ -111,4 +112,24 @@ export class ZoneSocket {
     window.clearInterval(this.pingTimer);
     this.ws.close();
   }
+}
+
+/**
+ * A random number this browser keeps (one per page if storage is off): the
+ * zone tells a second tab of yours, which takes over, from someone else
+ * signing in under your name, who is turned away.
+ */
+let device = 0;
+function deviceId(): number {
+  if (device) return device;
+  try {
+    device = Number(localStorage.getItem("commons.device")) || 0;
+    if (!device) {
+      device = (Math.random() * 0xffff_ffff) >>> 0 || 1;
+      localStorage.setItem("commons.device", String(device));
+    }
+  } catch {
+    device = device || (Math.random() * 0xffff_ffff) >>> 0 || 1;
+  }
+  return device;
 }

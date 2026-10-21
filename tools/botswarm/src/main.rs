@@ -394,6 +394,7 @@ async fn bot_loop(
         version: PROTOCOL_VERSION,
         view_w: args.view_w,
         view_h: args.view_h,
+        device: rand::random(),
     }))
     .await?;
     report.connected = true;

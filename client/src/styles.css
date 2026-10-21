@@ -3203,3 +3203,11 @@ body.woozy #stage canvas {
   60% { transform: translateX(calc(-50% - 5px)); }
   80% { transform: translateX(calc(-50% + 3px)); }
 }
+
+/* What the last pool shot did. */
+.pool-note {
+  margin: 2px 0 0;
+  font-size: 12px;
+  opacity: 0.8;
+  text-align: center;
+}

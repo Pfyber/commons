@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 18;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -153,7 +153,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
 }
 
 export type ClientMsg =
-  | { t: "Hello"; joinToken: string; version: number; viewW: number; viewH: number }
+  | { t: "Hello"; joinToken: string; version: number; viewW: number; viewH: number; device: number }
   | { t: "MoveTo"; x: number; y: number; sprint: boolean }
   | { t: "Emote"; emote: number }
   | { t: "ChatSay"; text: string }
@@ -185,6 +185,7 @@ export type ClientMsg =
   | { t: "PoolAim"; angle: number; pull: number }
   | { t: "Away"; away: boolean }
   | { t: "FishHit" }
+  | { t: "Going"; zone: string; arrive: string }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -196,6 +197,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u16(m.version);
       w.u8(m.viewW);
       w.u8(m.viewH);
+      w.u32(m.device);
       break;
     case "MoveTo":
       w.u8(2);
@@ -338,6 +340,11 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
     case "FishHit":
       w.u8(32);
       break;
+    case "Going":
+      w.u8(33);
+      w.str(m.zone);
+      w.str(m.arrive);
+      break;
   }
   return w.finish();
 }
@@ -348,7 +355,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
   const tag = r.u8();
   switch (tag) {
     case 1:
-      m = { t: "Hello", joinToken: r.str(), version: r.u16(), viewW: r.u8(), viewH: r.u8() };
+      m = { t: "Hello", joinToken: r.str(), version: r.u16(), viewW: r.u8(), viewH: r.u8(), device: r.u32() };
       break;
     case 2:
       m = { t: "MoveTo", x: r.u16(), y: r.u16(), sprint: r.bool() };
@@ -443,6 +450,9 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 32:
       m = { t: "FishHit" };
       break;
+    case 33:
+      m = { t: "Going", zone: r.str(), arrive: r.str() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -484,6 +494,7 @@ export type ServerMsg =
   | { t: "ArcadeState"; cab: number; kind: number; a: number; b: number; status: number; turn: number; t0: number; data: number[] }
   | { t: "PoolAim"; by: number; angle: number; pull: number }
   | { t: "AwayChanged"; id: number; away: boolean }
+  | { t: "Went"; id: number; zone: string; arrive: string }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -710,6 +721,12 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.id);
       w.bool(m.away);
       break;
+    case "Went":
+      w.u8(34);
+      w.u32(m.id);
+      w.str(m.zone);
+      w.str(m.arrive);
+      break;
   }
   return w.finish();
 }
@@ -817,6 +834,9 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 33:
       m = { t: "AwayChanged", id: r.u32(), away: r.bool() };
+      break;
+    case 34:
+      m = { t: "Went", id: r.u32(), zone: r.str(), arrive: r.str() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

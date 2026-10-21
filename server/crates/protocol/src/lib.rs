@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 16;
+pub const PROTOCOL_VERSION: u16 = 18;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -49,7 +49,9 @@ records! {
 message_enum! {
     /// Client → server.
     ClientMsg {
-        1 Hello { join_token: String, version: u16, view_w: u8, view_h: u8 }
+        /// `device`: a random number this browser keeps, telling a second tab
+        /// of yours (which takes over) from someone else using your name.
+        1 Hello { join_token: String, version: u16, view_w: u8, view_h: u8, device: u32 }
         /// `sprint`: run there (outdoors; asked for by a double tap or double key press).
         2 MoveTo { x: u16, y: u16, sprint: bool }
         3 Emote { emote: u8 }
@@ -121,6 +123,9 @@ message_enum! {
         31 Away { away: bool }
         /// A smack at your fish flopping on the bank (`fish_event::FLOP`).
         32 FishHit {}
+        // Going through a door to `zone` (arriving by `arrive`, a building or ""),
+        // so whoever follows you comes along.
+        33 Going { zone: String, arrive: String }
     }
 }
 
@@ -225,6 +230,8 @@ message_enum! {
         32 PoolAim { by: u32, angle: u16, pull: u16 }
         /// Avatar `id` went away from the keyboard, or came back (as `Away`).
         33 AwayChanged { id: u32, away: bool }
+        // Avatar `id` went through a door to `zone` (as `Going`): their followers come after them.
+        34 Went { id: u32, zone: String, arrive: String }
     }
 }
 
@@ -407,6 +414,8 @@ pub mod error_code {
     pub const NOT_ALLOWED: u16 = 12;
     /// A backing service (economy) is unavailable; try again shortly.
     pub const UNAVAILABLE: u16 = 13;
+    /// Someone else is already playing under this name (from another device).
+    pub const NAME_TAKEN: u16 = 14;
 }
 
 /// `PlotAction.action`.

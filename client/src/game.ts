@@ -45,7 +45,7 @@ import { type ActionMenu, type AlbumPanel, type BagPanel, FishermanPanel, type M
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, stepTarget, walkable } from "./world/map";
-import { SKATE_SPEED_X10, type TileXY, WALK_SPEED_X10, endT, splice, sprintProfile } from "./world/motion";
+import { SKATE_SPEED_X10, type TileXY, WALK_SPEED_X10, endT, splice, sprintProfile, sprintingAt } from "./world/motion";
 import { compress, findPath } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
@@ -194,6 +194,16 @@ const AWAY_AFTER_MS = 60_000;
 /** Map objects that are game machines (the server numbers them in map order, as here). */
 const CABINET_KINDS = ["arcade_cabinet", "dance_machine", "pinball"];
 const KEY_RESEND_MS = 180;
+/**
+ * Following through doors: each zone is a new Game, so this is kept here. The
+ * person we followed in (to find again inside), and the people who followed
+ * us in (to let follow on without asking again).
+ */
+const carried = { leader: null as { name: string; until: number } | null, followers: new Map<string, number>() };
+/** How long after going through a door the two find each other again. */
+const CARRY_MS = 20_000;
+/** Further behind than this (tiles), a follower runs to catch up. */
+const FOLLOW_CATCH_UP = 5;
 /** Two key presses or taps closer together than this ask for a sprint. */
 const SPRINT_ASK_MS = 350;
 
@@ -587,7 +597,7 @@ export class Game {
     const self = this.self;
     if (!self) return;
     if (cheb(self.destination, door) <= 1 && !self.moving) {
-      this.events.onTravel(zone);
+      this.goTo(zone);
       return;
     }
     const spot = nearestWalkable(this.scene.map, door.x, door.y, 2);
@@ -607,7 +617,7 @@ export class Game {
     }
     if (self.moving) return;
     this.entering = null;
-    this.events.onTravel(e.zone);
+    this.goTo(e.zone);
   }
 
   /** The Caretaker says something now and then when you're close by. */
@@ -641,6 +651,31 @@ export class Game {
   }
 
   // ---- following -------------------------------------------------------------
+
+  /** Through a door to `zone`: anyone following us is told, so they come too. */
+  private goTo(zone: string, arrive?: string) {
+    const until = performance.now() + CARRY_MS;
+    for (const id of this.followers) {
+      const name = this.avatars.get(id)?.info.name;
+      if (name) carried.followers.set(name, until);
+    }
+    if (this.followers.size) this.socket?.send({ t: "Going", zone, arrive: arrive ?? "" });
+    this.events.onTravel(zone, arrive);
+  }
+
+  /** Who we followed in through a door: once they're here too, follow on. */
+  private findLeader() {
+    const l = carried.leader;
+    if (!l || this.following !== null) return;
+    if (performance.now() > l.until) {
+      carried.leader = null;
+      return;
+    }
+    const them = [...this.avatars.values()].find((a) => a.info.id !== this.selfId && a.info.name === l.name);
+    if (!them) return;
+    carried.leader = null;
+    this.askToFollow(them.info.id, l.name, true);
+  }
 
   /** Friends: start right away (their client accepts). Others: they're asked. */
   private askToFollow(id: number, name: string, friend: boolean) {
@@ -711,6 +746,18 @@ export class Game {
       return;
     }
     const goal = them.destination;
+    // Keep up: run when they run, or when we've fallen behind.
+    const now = this.socket?.clock.now() ?? 0;
+    const motion = them.currentMotion;
+    const run = (!!motion && them.moving && sprintingAt(motion, now)) || Math.hypot(them.pos.x - self.pos.x, them.pos.y - self.pos.y) > FOLLOW_CATCH_UP;
+    if (run !== this.sprint) {
+      this.sprint = run;
+      this.sprintAt = performance.now();
+      // Already on our way: change pace now, toward the same spot.
+      if (self.moving) this.moveTo(self.destination, false);
+    } else if (run) {
+      this.sprintAt = performance.now();
+    }
     if (them.state === SITTING && !them.moving) {
       // Already sitting beside them: stay put.
       if (self.state === SITTING && cheb(self.destination, goal) <= 1) return;
@@ -1110,8 +1157,11 @@ export class Game {
           this.followEnded(m.from, from.info.name);
           break;
         }
-        // Friends may follow you without asking.
-        if (m.kind === FOLLOW && this.ui.social.friendByName(from.info.name)) {
+        // Friends may follow you without asking, and so may whoever just
+        // followed you in through a door.
+        const cameAlong = (carried.followers.get(from.info.name) ?? 0) > performance.now();
+        if (m.kind === FOLLOW && (cameAlong || this.ui.social.friendByName(from.info.name))) {
+          carried.followers.delete(from.info.name);
           this.socket?.send({ t: "Accept", from: m.from, kind: m.kind });
           break;
         }
@@ -1122,6 +1172,17 @@ export class Game {
       case "Together":
         this.together(m.a, m.b, m.kind);
         break;
+      case "Went": {
+        // The one we follow went through a door: after them.
+        if (m.id !== this.following) break;
+        const name = this.avatars.get(m.id)?.info.name;
+        this.stopFollowing(false);
+        if (!name) break;
+        carried.leader = { name, until: performance.now() + CARRY_MS };
+        this.hud.toast(`👣 After ${name}…`, 2500);
+        this.goTo(m.zone, m.arrive || undefined);
+        break;
+      }
       case "Rps":
         this.onRps(m);
         break;
@@ -1604,7 +1665,7 @@ export class Game {
       return true;
     }
     if (obj?.kind === "shop_exit") {
-      this.events.onTravel("founders_park", "clothes_shop");
+      this.goTo("founders_park", "clothes_shop");
       return true;
     }
     if (obj?.kind === "clothes_rack") {
@@ -1623,7 +1684,7 @@ export class Game {
       return true;
     }
     if (obj?.kind === "bar_exit") {
-      this.events.onTravel("founders_park", "bar");
+      this.goTo("founders_park", "bar");
       return true;
     }
     if (obj && (obj.kind === "bar_counter" || obj.kind === "bottle_shelf")) {
@@ -1647,7 +1708,7 @@ export class Game {
       return true;
     }
     if (obj?.kind === "arcade_exit") {
-      this.events.onTravel("founders_park", "arcade_hall");
+      this.goTo("founders_park", "arcade_hall");
       return true;
     }
     if (obj?.kind === "dance_floor" && this.arcade && this.dance) {
@@ -1738,11 +1799,11 @@ export class Game {
       return true;
     }
     if (obj?.kind === "homes_gate") {
-      this.events.onTravel("home");
+      this.goTo("home");
       return true;
     }
     if (obj?.kind === "park_gate") {
-      this.events.onTravel("founders_park");
+      this.goTo("founders_park");
       return true;
     }
     const ground = groundAt(map, t.x, t.y);
@@ -2071,6 +2132,9 @@ export class Game {
     if (this.following !== null && wallNow > this.followCheckAt) {
       this.followCheckAt = wallNow + 350;
       this.followStep();
+    } else if (carried.leader && wallNow > this.followCheckAt) {
+      this.followCheckAt = wallNow + 350;
+      this.findLeader();
     }
     if (this.campfire) {
       const at = this.campfire.at;

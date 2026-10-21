@@ -19,7 +19,7 @@ import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
 import { Hud } from "./ui/hud";
-import { signIn } from "./ui/login";
+import { LOGIN_NOTICE, signIn } from "./ui/login";
 import { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
 import { FriendsPanel, NotificationsPanel } from "./ui/social";
 import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
@@ -35,6 +35,7 @@ import "./styles.css";
 const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl, shop: shopUrl, bar: barUrl, arcade: arcadeUrl };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
+const ERR_NAME_TAKEN = 14;
 
 const overlay = document.getElementById("overlay")!;
 
@@ -263,6 +264,16 @@ async function main() {
         label: "Play here instead",
         run: () => void enter(),
       });
+    } else if (reason?.code === ERR_NAME_TAKEN) {
+      // Someone's already playing under this name: back to the login, to pick another.
+      const name = auth.player?.display_name ?? "That name";
+      auth.signOut();
+      try {
+        sessionStorage.setItem(LOGIN_NOTICE, `${name} is already playing right now. Pick another name to play as someone else.`);
+      } catch {
+        // storage unavailable: the login screen just won't say why
+      }
+      location.reload();
     } else if (reason?.code === ERR_VERSION) {
       showOverlay("Commons was updated", "Reload to get the latest version.", { label: "Reload", run: () => location.reload() });
     } else {

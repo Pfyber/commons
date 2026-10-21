@@ -734,6 +734,14 @@ impl Instance {
                 self.broadcast(cell, &ServerMsg::EmoteShown { id, emote: e }, None);
             }
             ClientMsg::ChatSay { text } => self.chat(id, &text, now),
+            ClientMsg::Going { zone, arrive } => {
+                // Nobody follows you home (homes are private), and names stay short.
+                if zone == "home" || zone.len() > 32 || arrive.len() > 32 {
+                    return;
+                }
+                let cell = self.avatars[&id].cell;
+                self.broadcast(cell, &ServerMsg::Went { id, zone, arrive }, Some(id));
+            }
             ClientMsg::Away { away } => {
                 let a = self.avatars.get_mut(&id).unwrap();
                 if a.away == away {

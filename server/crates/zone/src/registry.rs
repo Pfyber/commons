@@ -62,9 +62,41 @@ pub struct Registry {
     pub social: Option<Arc<SocialClient>>,
     zones: HashMap<String, Arc<ZoneDef>>,
     instances: Mutex<HashMap<InstanceKey, InstanceHandle>>,
+    /// Who is playing, from which device, on how many connections (see `claim`).
+    online: Mutex<HashMap<String, (u32, u32)>>,
 }
 
 impl Registry {
+    /// A connection for `player` from `device`: false if they're already
+    /// playing from another device (someone else under their name; until real
+    /// logins, a name is all it takes). The same device, another tab or the
+    /// next zone, takes over as before. Pair with `release`.
+    pub fn claim(&self, player: &str, device: u32) -> bool {
+        let mut online = self.online.lock().unwrap();
+        match online.get_mut(player) {
+            Some((d, n)) if *n > 0 && *d != device => false,
+            Some((d, n)) => {
+                *d = device;
+                *n += 1;
+                true
+            }
+            None => {
+                online.insert(player.to_string(), (device, 1));
+                true
+            }
+        }
+    }
+
+    pub fn release(&self, player: &str) {
+        let mut online = self.online.lock().unwrap();
+        if let Some((_, n)) = online.get_mut(player) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                online.remove(player);
+            }
+        }
+    }
+
     /// Loads every `*.json` map in `dir`; the file stem is the zone id.
     pub fn load(
         dir: &str,
@@ -101,6 +133,7 @@ impl Registry {
             social,
             zones,
             instances: Mutex::new(HashMap::new()),
+            online: Mutex::new(HashMap::new()),
         })
     }
 

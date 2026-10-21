@@ -411,12 +411,14 @@ impl Game {
             let g = group_of(first);
             self.groups = if p == 0 { g } else { 3 - g };
         }
+        // You play on only if you potted one of yours and none of theirs.
         let mine = self.group(p);
         let potted_own = shot
             .pocketed
             .iter()
             .any(|&n| group_of(n) != 0 && (mine == 0 || group_of(n) == mine));
-        if foul || !potted_own {
+        let potted_theirs = mine != 0 && shot.pocketed.iter().any(|&n| group_of(n) == 3 - mine);
+        if foul || !potted_own || potted_theirs {
             self.turn = 1 - p;
         }
         if scratch {
@@ -425,19 +427,29 @@ impl Game {
         shot
     }
 
-    /// The cue ball back on the head spot (or the nearest free place behind it).
+    /// The cue ball back on the head spot, or the nearest free place to it
+    /// (searching outward a ball's width at a time, never off the cloth).
     fn respot_cue(&mut self) {
-        let (mut x, y) = HEAD_SPOT;
-        while self
-            .balls
-            .iter()
-            .skip(1)
-            .any(|b| b.on && (b.x - x) * (b.x - x) + (b.y - y) * (b.y - y) < 4.0 * R * R)
-        {
-            x -= R * 2.0;
+        let free = |x: f64, y: f64| {
+            !self.balls.iter().skip(1).any(|b| b.on && (b.x - x) * (b.x - x) + (b.y - y) * (b.y - y) < (2.0 * R + 1.0) * (2.0 * R + 1.0))
+        };
+        let step = 2.0 * R + 2.0;
+        let mut spot = HEAD_SPOT;
+        'search: for ring in 0..20 {
+            for dx in -ring..=ring {
+                for dy in -ring..=ring {
+                    if dx.max(-dx).max(dy.max(-dy)) != ring {
+                        continue;
+                    }
+                    let (x, y) = (HEAD_SPOT.0 + dx as f64 * step, HEAD_SPOT.1 + dy as f64 * step);
+                    if (R..=W - R).contains(&x) && (R..=H - R).contains(&y) && free(x, y) {
+                        spot = (x, y);
+                        break 'search;
+                    }
+                }
+            }
         }
-        let cue = &mut self.balls[0];
-        *cue = ball(0, x.max(R), y);
+        self.balls[0] = ball(0, spot.0, spot.1);
     }
 
     /// The bot's shot: tries cutting each ball it may play into each pocket
@@ -568,6 +580,84 @@ mod tests {
         assert_eq!(g.group(0), SOLIDS);
         assert_eq!(g.group(1), STRIPES);
         assert_eq!(g.turn, 0, "potting your own keeps the table");
+    }
+
+    #[test]
+    fn potting_one_of_theirs_too_passes_the_turn() {
+        // The 3 (ours) to play, the 12 (theirs) on the lip of the top-right
+        // corner: find a shot that sinks both, cleanly.
+        let setup = || {
+            let mut g = Game::new();
+            g.balls = vec![ball(0, 500.0, 250.0), ball(3, 700.0, 250.0), ball(12, 975.0, 25.0), ball(8, 200.0, 450.0), ball(5, 100.0, 60.0), ball(13, 150.0, 300.0)];
+            g.groups = SOLIDS;
+            g
+        };
+        let both = (0..1440).find_map(|i| {
+            let a = i as f64 / 1440.0 * std::f64::consts::TAU;
+            let (vx, vy) = ((a.cos() * 1500.0) as i32, (a.sin() * 1500.0) as i32);
+            let mut g = setup();
+            let shot = g.shoot(vx, vy);
+            (shot.first_hit == Some(3) && shot.pocketed.contains(&3) && shot.pocketed.contains(&12) && !shot.pocketed.contains(&0) && !shot.pocketed.contains(&8))
+                .then_some((g, shot))
+        });
+        let (g, shot) = both.expect("some shot sinks both");
+        assert_eq!(g.turn, 1, "one of theirs went down too: their shot ({shot:?})");
+        // Ours alone keeps the table.
+        let alone = (0..1440).find_map(|i| {
+            let a = i as f64 / 1440.0 * std::f64::consts::TAU;
+            let (vx, vy) = ((a.cos() * 1500.0) as i32, (a.sin() * 1500.0) as i32);
+            let mut g = setup();
+            let shot = g.shoot(vx, vy);
+            (shot.first_hit == Some(3) && shot.pocketed == vec![3]).then_some(g)
+        });
+        assert_eq!(alone.expect("some shot sinks just the 3").turn, 0);
+    }
+
+    #[test]
+    fn groups_stick_and_turns_follow_the_rules_over_whole_games() {
+        // Bots play a few hundred games; after every shot the rules hold.
+        for seed in 0..3u32 {
+            let mut g = Game::new();
+            let mut rng = seed.wrapping_mul(2_654_435_761);
+            for _ in 0..80 {
+                if g.status != PLAYING {
+                    break;
+                }
+                rng ^= rng << 13;
+                rng ^= rng >> 17;
+                rng ^= rng << 5;
+                let wobble = (rng % 1000) as f64 / 1000.0 * 0.2 - 0.1;
+                let (p, groups, cleared) = (g.turn, g.groups, g.cleared(g.turn));
+                let mine = g.group(p);
+                let (vx, vy) = g.ai_shot(wobble);
+                let shot = g.shoot(vx, vy);
+                if groups != 0 {
+                    assert_eq!(g.groups, groups, "groups never change once settled");
+                }
+                if g.status != PLAYING {
+                    if shot.pocketed.contains(&8) {
+                        let won = (g.status == A_WON) == (p == 0);
+                        if won {
+                            assert!(cleared, "the 8 only wins once your group is cleared");
+                        }
+                    }
+                    continue;
+                }
+                let mine_now = g.group(p);
+                let own = shot.pocketed.iter().any(|&n| group_of(n) != 0 && (mine_now == 0 || group_of(n) == mine_now));
+                let theirs = mine_now != 0 && shot.pocketed.iter().any(|&n| group_of(n) == 3 - mine_now);
+                let scratch = shot.pocketed.contains(&0);
+                if g.turn == p {
+                    assert!(own && !theirs && !scratch, "kept the table only for a clean pot of yours: {shot:?} (group {mine})");
+                }
+                assert!(g.balls[0].on, "the cue ball is always back on the table");
+                let cue = g.balls[0];
+                for b in g.balls.iter().skip(1).filter(|b| b.on && scratch) {
+                    let d2 = (b.x - cue.x).powi(2) + (b.y - cue.y).powi(2);
+                    assert!(d2 >= 4.0 * R * R - 1.0, "the cue ball isn't respotted on top of a ball");
+                }
+            }
+        }
     }
 
     #[test]

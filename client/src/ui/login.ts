@@ -27,6 +27,19 @@ function message(e: unknown): string {
   return e instanceof ApiError ? e.message : "Something went wrong. Please try again.";
 }
 
+/** A note for the next login screen (why you're back at it), kept across a reload. */
+export const LOGIN_NOTICE = "commons.loginNotice";
+
+function takeNotice(): string {
+  try {
+    const n = sessionStorage.getItem(LOGIN_NOTICE) ?? "";
+    sessionStorage.removeItem(LOGIN_NOTICE);
+    return n;
+  } catch {
+    return "";
+  }
+}
+
 const header = () => [
   el("h1", {}, "Commons"),
   el("p", { className: "tagline" }, "A calm park-town. No feed, no ads. The people here decide what comes next."),
@@ -41,6 +54,7 @@ export function signIn(root: HTMLElement, auth: Auth): Promise<void> {
       resolve();
     };
 
+    const notice = takeNotice();
     const params = new URLSearchParams(location.search);
     const loginToken = params.get("login");
     if (loginToken) {
@@ -67,7 +81,9 @@ export function signIn(root: HTMLElement, auth: Auth): Promise<void> {
           submit.disabled = false;
         }
       };
-      const parts: Node[] = [...header(), form];
+      const parts: Node[] = [...header()];
+      if (notice) parts.push(el("p", { className: "error", role: "alert" }, notice));
+      parts.push(form);
       if (import.meta.env.DEV) parts.push(devLogin());
       card(root, ...parts);
       email.focus();
