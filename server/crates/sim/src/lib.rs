@@ -7,6 +7,8 @@ pub mod garden;
 pub mod map;
 pub mod motion;
 pub mod path;
+pub mod arena;
+pub mod bowling;
 pub mod pool;
 
 pub use map::{Grid, MapFile};

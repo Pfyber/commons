@@ -668,3 +668,79 @@ if (typeof document !== "undefined") {
     }
   });
 }
+
+// ---- bowling -----------------------------------------------------------------
+
+/** A bowling ball down the lane: a low rolling rumble, louder the harder it goes. */
+export function bowlRoll(ms: number, power: number, vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  const len = ms / 1000;
+  burst(t, len, (0.05 + 0.07 * power) * vol, "lowpass", 180, 320, 1.5);
+  tone(t, len, 0.05 * vol, "sine", 55, 75);
+}
+
+/** The ball meets the pins: a wooden crash, bigger the more go down. */
+export function pinsCrash(n: number, vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  const k = Math.min(1, n / 10);
+  burst(t, 0.12, (0.25 + 0.35 * k) * vol, "bandpass", 1400, 900, 1.2);
+  for (let i = 0; i < Math.min(8, n); i++) burst(t + 0.03 + i * 0.035, 0.07, 0.12 * vol, "bandpass", 1800 + ((i * 397) % 900), 1200, 3);
+  tone(t, 0.25, 0.08 * vol, "triangle", 220, 120);
+}
+
+/** A strike: the alley's jingle. */
+export function strikeCheer(vol = 1) {
+  if (muted) return;
+  const t = at(150);
+  [523, 659, 784, 1046, 784, 1046].forEach((hz, i) => tone(t + i * 0.08, i === 5 ? 0.4 : 0.1, 0.07 * vol, "square", hz));
+}
+
+// ---- the arena ---------------------------------------------------------------
+
+/** A sword swung through the air: a quick whoosh, higher for a high swing. */
+export function swordSwing(height: number, vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.18, 0.12 * vol, "bandpass", 900 + height * 500, 2600 + height * 600, 2);
+}
+
+/** Steel on flesh (well, padding): a dull thud and a grunt. */
+export function swordHit(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.09, 0.4 * vol, "lowpass", 900, 300);
+  tone(t, 0.12, 0.14 * vol, "square", 180, 90);
+}
+
+/** Blades meeting: a bright ringing clang. */
+export function swordClang(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.05, 0.35 * vol, "highpass", 3000);
+  for (const hz of [1870, 2490, 3320]) tone(t, 0.5, 0.05 * vol, "triangle", hz, hz * 0.99);
+}
+
+/** A parry: a sharp ping off the shield. */
+export function swordParry(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 0.04, 0.3 * vol, "bandpass", 2400, 2400, 3);
+  tone(t, 0.3, 0.08 * vol, "sine", 1568, 1480);
+}
+
+/** Dizzy: a wobbling, falling whistle. */
+export function dizzy(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  for (let i = 0; i < 3; i++) tone(t + i * 0.12, 0.12, 0.06 * vol, "sine", 900 - i * 120, 700 - i * 120);
+}
+
+/** The crowd roars (a win, a knockout). */
+export function crowdRoar(vol = 1) {
+  if (muted) return;
+  const t = at(0);
+  burst(t, 1.4, 0.16 * vol, "bandpass", 500, 900, 0.7);
+  burst(t + 0.1, 1.2, 0.1 * vol, "bandpass", 1300, 1700, 0.8);
+}

@@ -33,6 +33,31 @@ export function button(label: string, run: () => void, cls = ""): HTMLButtonElem
   return b;
 }
 
+/** When each two-tap button (by key) stops waiting for its second tap. */
+const armedUntil = new Map<string, number>();
+
+/**
+ * A button for something you can't take back (leaving a game, resigning):
+ * the first tap asks (`ask`), a second within 3 seconds does it. Keyed, so
+ * a panel redrawn in between still remembers the first tap.
+ */
+export function confirmButton(key: string, label: string, ask: string, run: () => void, cls = "subtle"): HTMLButtonElement {
+  const armed = () => performance.now() < (armedUntil.get(key) ?? 0);
+  const b = button(armed() ? ask : label, () => {
+    if (armed()) {
+      armedUntil.delete(key);
+      run();
+      return;
+    }
+    armedUntil.set(key, performance.now() + 3000);
+    b.textContent = ask;
+    window.setTimeout(() => {
+      if (b.isConnected && !armed()) b.textContent = label;
+    }, 3050);
+  }, cls);
+  return b;
+}
+
 /** Whether a key event belongs to a text field, so game keys must leave it alone. */
 export function isTyping(e: Event): boolean {
   const t = e.target as HTMLElement | null;
@@ -244,6 +269,7 @@ const KIND_ORDER: [string, string][] = [
   ["furniture", "Furniture"],
   ["ticket", "Arcade tickets"],
   ["tool", "Gear"],
+  ["crate", "Lucky finds"],
 ];
 
 export class BagPanel extends Panel {
@@ -252,6 +278,7 @@ export class BagPanel extends Panel {
   constructor(
     private eco: Economy,
     private onPlace: (item: Item) => void,
+    private onOpen: (item: Item) => void = () => {},
   ) {
     super("Bag", "bag");
     eco.onChange(() => this.open && this.render());
@@ -275,6 +302,15 @@ export class BagPanel extends Panel {
         cell.append(icon(it), el("span", "qty", `${this.eco.qty(it.id)}`), el("span", "name", it.name));
         if (kind === "furniture" && this.placeable) cell.append(button("Place", () => this.onPlace(it), "small"));
         if (kind === "seed") cell.append(el("span", "hint", "Tap a garden plot"));
+        if (kind === "crate") {
+          // One crate per tap: held off a moment so a double tap can't ask twice.
+          const open = button("Open", () => {
+            open.disabled = true;
+            this.onOpen(it);
+            window.setTimeout(() => (open.disabled = false), 1500);
+          }, "small");
+          cell.append(open);
+        }
         grid.append(cell);
       }
       this.body.append(grid);
@@ -385,6 +421,7 @@ export class FishermanPanel extends Panel {
     private eco: Economy,
     private onSold: (coins: number, best: Item) => void,
     private onRod: () => void,
+    private onLure: () => void = () => {},
   ) {
     super("🎣 The Fisherman", "fisherman");
     eco.onChange(() => this.open && !this.busy && this.render());
@@ -428,6 +465,20 @@ export class FishermanPanel extends Panel {
     this.render();
   }
 
+  private async buyLure() {
+    if (this.busy) return;
+    this.busy = true;
+    this.err.textContent = "";
+    try {
+      await this.eco.buy(LURE_ITEM, 1);
+      this.onLure();
+    } catch (e) {
+      this.err.textContent = e instanceof ApiError ? e.message : "He shook his head. Try again?";
+    }
+    this.busy = false;
+    this.render();
+  }
+
   render() {
     this.body.replaceChildren();
     const all = this.fish();
@@ -447,7 +498,7 @@ export class FishermanPanel extends Panel {
       const price = rod.meta.buy ?? 0;
       const card = el("div", `fisher-rod${owned ? " owned" : ""}`);
       const text = el("div", "fisher-rod-text");
-      text.append(el("b", "", `🎣 ${rod.name}`), el("small", "", "Fish bite 25% sooner · a slower needle · one more swing to catch it"));
+      text.append(el("b", "", `🎣 ${rod.name} · $${price}`), el("small", "", "Fish bite 25% sooner · a slower needle · one more swing to catch it"));
       card.append(icon(rod), text);
       if (owned) card.append(el("span", "fisher-rod-owned", "✓ Yours"));
       else {
@@ -455,6 +506,23 @@ export class FishermanPanel extends Panel {
         buy.disabled = this.busy || this.eco.coins < price;
         card.append(buy);
       }
+      this.body.append(card);
+    }
+    // …and glimmer lures, as many as you like.
+    const lure = this.eco.items.get(LURE_ITEM);
+    if (lure) {
+      const have = this.eco.qty(LURE_ITEM);
+      const price = lure.meta.buy ?? 0;
+      const card = el("div", "fisher-rod fisher-lure");
+      const text = el("div", "fisher-rod-text");
+      text.append(
+        el("b", "", `✨ ${lure.name} · $${price}${have ? ` · you have ${have}` : ""}`),
+        el("small", "", "Throw it in the water: for 5 minutes, rarer fish bite in the circle round it, for anyone fishing there"),
+      );
+      card.append(icon(lure), text);
+      const buy = button(`Buy · $${price}`, () => this.buyLure(), "primary");
+      buy.disabled = this.busy || this.eco.coins < price;
+      card.append(buy);
       this.body.append(card);
     }
     // The tiers, as a key.
@@ -556,6 +624,8 @@ export class PlotMenu extends Panel {
  */
 /** The upgraded rod (item): the needle's pace, and the most it adds to the reel window (the server allows a little more). */
 export const ROD_ITEM = 112;
+/** The fisherman's glimmer lure (server `fishing::LURE_ITEM`). */
+export const LURE_ITEM = 117;
 const ROD_PACE = 0.85;
 const ROD_EXTRA_MAX_MS = 3000;
 
@@ -587,14 +657,21 @@ export class ReelGame {
     if (isTyping(e)) return;
     if (e.code === "Space" || e.code === "Enter") {
       e.preventDefault();
-      this.hit();
+      // A held key repeats: those aren't taps (they'd hit wherever the needle happens to be).
+      if (!e.repeat) this.hit();
     }
   };
 
   constructor() {
     const bar = el("div", "bar");
     bar.append(this.sweet, this.needle);
-    const btn = button("Reel in!", () => this.hit(), "primary");
+    // Counted the moment it's pressed (a click comes on release, a beat late).
+    const btn = button("Reel in!", () => {}, "primary");
+    btn.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      this.hit();
+    });
     this.el.append(this.title, bar, btn);
     this.el.hidden = true;
     document.body.appendChild(this.el);

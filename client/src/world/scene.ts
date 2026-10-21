@@ -35,6 +35,8 @@ function loadZoom(): number {
 
 export class Scene {
   readonly world = new Container();
+  /** The baked ground chunks (bottom of the world). */
+  readonly ground = new Container();
   /** Props and avatars, sorted by their foot position. */
   readonly sorted = new Container();
   private marker = new Graphics();
@@ -58,7 +60,7 @@ export class Scene {
     readonly map: ZoneMap,
   ) {
     this.sorted.sortableChildren = true;
-    const ground = new Container();
+    const ground = this.ground;
     this.world.addChild(ground, this.marker, this.sorted);
     app.stage.addChild(this.world);
 
@@ -88,7 +90,7 @@ export class Scene {
     }
 
     for (const o of map.objects) {
-      if (o.kind === "grove_slot" || o.kind === "nook") continue; // drawn elsewhere, or invisible
+      if (o.kind === "grove_slot" || o.kind === "nook" || o.kind === "arena") continue; // drawn elsewhere, or invisible (the arena is its walls)
       const { texture, overhang } = objectTexture(o);
       const s = new Sprite(texture);
       s.position.set(o.x * TILE, o.y * TILE - overhang);
@@ -208,6 +210,15 @@ export class Scene {
       x: Math.floor((sx - this.world.position.x) / this.scale / TILE),
       y: Math.floor((sy - this.world.position.y) / this.scale / TILE),
     };
+  }
+
+  /**
+   * Puts `c` flat on the ground: just above it, under everything standing
+   * on it. (The world sorts by depth, so a fixed index can end up under
+   * the ground: always go by where the ground actually is.)
+   */
+  onGround(c: Container) {
+    this.world.addChildAt(c, this.world.getChildIndex(this.ground) + 1);
   }
 
   /** Screen position of a world point given in tile units (tile centre = +0.5). */

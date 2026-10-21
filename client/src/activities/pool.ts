@@ -5,7 +5,7 @@
 
 import type { PoolBall } from "../net/protocol.gen";
 import * as sfx from "../ambient/sfx";
-import { ChoiceModal, Panel, button, el } from "../ui/panels";
+import { ChoiceModal, Panel, button, confirmButton, el } from "../ui/panels";
 
 export const W = 1000;
 export const H = 500;
@@ -684,7 +684,7 @@ export class PoolPanel extends Panel {
     const row = el("div", "pool-actions");
     const inGame = s.a === me || s.b === me;
     if (s.status === PLAYING && inGame) {
-      row.append(button("Leave game", () => this.send({ t: "PoolLeave" }), "subtle"));
+      row.append(confirmButton("pool-leave", "Leave game", "Tap again to leave (you forfeit)", () => this.send({ t: "PoolLeave" })));
     } else if (s.status === WAITING && s.a === me) {
       row.append(
         button("Play the pool shark (AI bot) instead 🦈", () => this.send({ t: "PoolJoin", vsBot: true }), "primary"),

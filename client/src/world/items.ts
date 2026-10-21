@@ -39,6 +39,34 @@ function plantOf(key: string) {
 
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
+  if (key === "lucky_crate") {
+    // A golden "?" block: dark rim, a bright top and right edge, rivets in
+    // the corners, and a shaded question mark (its dot the bottom rivet).
+    const rim = "#2b1d0c";
+    const dark = "#765b00";
+    const shade = "#c9a524";
+    px(ctx, rim, 1, 0, 14, 16);
+    px(ctx, rim, 0, 1, 16, 14);
+    px(ctx, "#ffcf0a", 1, 1, 14, 14);
+    px(ctx, "#fff06a", 1, 1, 14, 1);
+    px(ctx, "#fff06a", 14, 1, 1, 14);
+    for (const [x, y] of [[2, 2], [12, 2], [2, 13], [12, 13], [7, 13]]) {
+      px(ctx, dark, x, y, 1, 1);
+      px(ctx, shade, x + 1, y, 1, 1);
+    }
+    // The question mark.
+    px(ctx, dark, 5, 3, 5, 1);
+    px(ctx, dark, 4, 4, 2, 3);
+    px(ctx, dark, 9, 4, 2, 3);
+    px(ctx, dark, 8, 7, 2, 1);
+    px(ctx, dark, 7, 8, 2, 4);
+    px(ctx, shade, 10, 3, 1, 1);
+    px(ctx, shade, 6, 4, 1, 1);
+    px(ctx, shade, 11, 4, 1, 3);
+    px(ctx, shade, 10, 7, 1, 1);
+    px(ctx, shade, 9, 8, 1, 4);
+    return;
+  }
   if (key === "arcade_ticket") {
     // A pink ticket with a notch and a star.
     px(ctx, O, 1, 4, 14, 9);
@@ -64,6 +92,22 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     px(ctx, "#e8e8f0", 14, 3, 1, 8);
     px(ctx, O, 13, 11, 3, 3);
     px(ctx, "#e8566b", 14, 12, 1, 1);
+    return;
+  }
+  if (key === "fish_lure") {
+    // A shiny spoon lure: a gold teardrop with a blue eye, a hook and a sparkle.
+    px(ctx, O, 5, 2, 6, 10);
+    px(ctx, O, 4, 4, 8, 6);
+    px(ctx, "#f6c343", 5, 4, 6, 6);
+    px(ctx, "#f6c343", 6, 3, 4, 8);
+    px(ctx, "#fff3c4", 6, 4, 2, 3);
+    px(ctx, "#4fa8ff", 8, 7, 2, 2);
+    px(ctx, "#c8c8dc", 7, 0, 2, 2);
+    px(ctx, "#c8c8dc", 8, 12, 1, 3);
+    px(ctx, "#c8c8dc", 9, 14, 2, 1);
+    px(ctx, "#c8c8dc", 11, 12, 1, 2);
+    px(ctx, "#ffffff", 13, 2, 1, 3);
+    px(ctx, "#ffffff", 12, 3, 3, 1);
     return;
   }
   if (key === "treasure_chest") {

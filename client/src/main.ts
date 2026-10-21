@@ -4,6 +4,7 @@ import homeUrl from "../../assets/maps/home.json?url";
 import shopUrl from "../../assets/maps/shop.json?url";
 import barUrl from "../../assets/maps/bar.json?url";
 import arcadeUrl from "../../assets/maps/arcade.json?url";
+import bowlingUrl from "../../assets/maps/bowling.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { ApiError, Auth, type Destination } from "./net/api";
@@ -30,12 +31,23 @@ import "@fontsource/pixelify-sans/400.css";
 import "@fontsource/pixelify-sans/500.css";
 import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
+import silkscreen400 from "@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2?url";
+import silkscreen700 from "@fontsource/silkscreen/files/silkscreen-latin-700-normal.woff2?url";
 import "./styles.css";
 
-const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl, shop: shopUrl, bar: barUrl, arcade: arcadeUrl };
+const MAP_URLS: Record<string, string> = { founders_park: parkUrl, home: homeUrl, shop: shopUrl, bar: barUrl, arcade: arcadeUrl, bowling: bowlingUrl };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
 const ERR_NAME_TAKEN = 14;
+
+// Numbers and $ (prices, coins, counts) in Silkscreen: its blocky digits read
+// clearly at small sizes, where Pixelify's 5 looks like an S. Only those
+// characters come from it ("Commons Digits" leads the UI font, see styles.css).
+for (const [url, weight] of [[silkscreen400, "400"], [silkscreen700, "700"]]) {
+  const face = new FontFace("Commons Digits", `url(${url}) format("woff2")`, { weight, unicodeRange: "U+0024, U+0030-0039" });
+  document.fonts.add(face);
+  void face.load().catch(() => {});
+}
 
 const overlay = document.getElementById("overlay")!;
 
@@ -140,10 +152,14 @@ async function main() {
   const ui: Ui = {
     eco,
     hud,
-    bag: new BagPanel(eco, (item) => {
-      ui.bag.hide();
-      place.show(item);
-    }),
+    bag: new BagPanel(
+      eco,
+      (item) => {
+        ui.bag.hide();
+        place.show(item);
+      },
+      () => game?.openCrate(),
+    ),
     album: new AlbumPanel(eco),
     market: new MarketPanel(eco),
     plot: new PlotMenu(eco, (x, y, action, item) => game?.plotAction(x, y, action, item)),

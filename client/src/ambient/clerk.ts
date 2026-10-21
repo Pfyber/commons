@@ -15,6 +15,7 @@ export const CLERK_ID = 0xfffffff2;
 export const BARTENDER_ID = 0xfffffff4;
 export const ATTENDANT_ID = 0xfffffff6;
 export const FISHERMAN_ID = 0xfffffff7;
+export const SHOE_GUY_ID = 0xfffffff9;
 const LEG_MS = 9000;
 const SPEED_X10 = 10;
 /** A waistcoat, glasses and a ponytail. */
@@ -79,6 +80,21 @@ export const FISHERMAN: Keeper = {
     "Catfish and moonfish only come out after dark.",
     "Legendary ones thrash about. Wait for the needle to swing back through.",
     "I've seen a mythical dragonfish once. Pink as a sunset.",
+  ],
+};
+
+/** A striped bowling shirt, a cap worn backwards-ish and headphones round his neck: the alley's shoe man. */
+export const SHOE_GUY: Keeper = {
+  id: SHOE_GUY_ID,
+  name: "Shoe rental 👟",
+  look: encodeLook({ hue: 350, skin: 2, hair: 2, hat: 2, hatHue: 350, style: 0, accessory: 6, outfit: 2 }),
+  hellos: ["Welcome to Commons Lanes! Shoes are on me.", "Hey there! What size? …I'm kidding, they all fit.", "Grab some shoes and pick a lane!"],
+  tips: [
+    "Stop the line dead centre and the pins go flying.",
+    "Hit the power bar near the top for a strike. Too soft and they just wobble.",
+    "Three strikes in a row? That's a turkey. Gobble gobble.",
+    "Five frames a game, scored like the real thing. Strikes count your next two balls!",
+    "The bowling bot's good, but it wobbles a little. You can take it.",
   ],
 };
 

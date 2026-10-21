@@ -8,7 +8,7 @@ use super::Instance;
 use commons_protocol::{ServerMsg, error_code, state};
 
 /// Zones that are indoors: no skating in the shop, the bar or the arcade.
-const INDOOR_ZONES: &[&str] = &["shop", "bar", "arcade"];
+const INDOOR_ZONES: &[&str] = &["shop", "bar", "arcade", "bowling"];
 
 impl Instance {
     pub(super) fn skate(&mut self, id: u32, on: bool, now: u32) {

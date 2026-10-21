@@ -205,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         secret: config::secret(),
         zone_server_url: config::env_str("ZONE_PUBLIC_URL", "ws://localhost:8082/ws"),
-        zones: config::env_str("COMMONS_ZONES", "founders_park,home,shop,bar,arcade")
+        zones: config::env_str("COMMONS_ZONES", "founders_park,home,shop,bar,arcade,bowling")
             .split(',')
             .map(|s| s.trim().to_string())
             .collect(),

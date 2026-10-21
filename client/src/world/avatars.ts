@@ -3,7 +3,7 @@
 
 import { Graphics, Sprite } from "pixi.js";
 import type { EntityInfo } from "../net/protocol.gen";
-import { type AvatarFrame, PUSH_CROUCH, SPRINT_FRAMES, dozeFrame, SKIN_COLORS, TILE, avatarTexture } from "./art";
+import { type AvatarFrame, BOWL_BACK, BOWL_HOLD, BOWL_PICKUP, BOWL_RELEASE, PUSH_CROUCH, SPRINT_FRAMES, dozeFrame, SKIN_COLORS, TILE, avatarTexture } from "./art";
 import { decodeLook } from "./look";
 import { type Motion, type TileXY, headingAt, posAt, sprintingAt } from "./motion";
 import type { Scene } from "./scene";
@@ -70,6 +70,16 @@ const HUB: [number, number][] = [
  * front foot, the push, a hold at full stretch, a quick lift, and the foot
  * coming back to the board.
  */
+/** What they're playing, for their pose: at a cabinet, the pool table, a bowling lane (waiting, or up with the ball). */
+export type PlayKind = "arcade" | "pool" | "bowl" | "bowl-up";
+/** A bowling throw: each pose until this many ms in. The ball leaves the hand at `BOWL_RELEASE_MS`. */
+const BOWL_THROW: [number, AvatarFrame][] = [
+  [300, BOWL_PICKUP],
+  [600, BOWL_HOLD],
+  [850, BOWL_BACK],
+  [1300, BOWL_RELEASE],
+];
+export const BOWL_RELEASE_MS = 850;
 /** Sprinting: each step of the run cycle (a frame); up a pixel on the strides. */
 const SPRINT_STRIDE_MS = 115;
 /** A hug and a high five: how long, and how close (px) the two come. */
@@ -124,7 +134,15 @@ export class Avatar {
   /** Away from the keyboard, and since when (they doze off); in a game, and where. */
   private away = false;
   private dozeAt = 0;
-  private playing: { x: number; y: number; kind: "arcade" | "pool" } | null = null;
+  private playing: { x: number; y: number; kind: PlayKind } | null = null;
+  /**
+   * Fighting in the arena: where they stand (tiles; the fight moves them, not
+   * walking), which way they face, their pose (null: standing or walking),
+   * whether they're stepping, and whether they've just been hit (a red flash).
+   */
+  private arena: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number } | null = null;
+  /** Bowling: when they began to throw (pick up, swing back, let go), 0 if not. */
+  private bowlAt = 0;
   private snore: HTMLDivElement | null = null;
   private npc = false;
   private nameEl: HTMLSpanElement;
@@ -164,6 +182,8 @@ export class Avatar {
   private wheelAt: { x: number; y: number } | null = null;
   private fishing: { castAt: number; biteAt: number } | null = null;
   private reelAt = -Infinity;
+  /** A fish out on the bank, still on our line, until then: the rod stays up, tugging. */
+  private hookedUntil = 0;
   /** World position and depth of the rod's tip once the line is out, for drawing the line. */
   rodTip: { x: number; y: number; z: number } | null = null;
 
@@ -226,8 +246,22 @@ export class Avatar {
    * In a game at a machine or table at (x, y) (tiles): they face it and look
    * busy: pressing buttons at a cabinet, cue in hand at the pool table.
    */
-  setPlaying(at: { x: number; y: number; kind: "arcade" | "pool" } | null) {
+  setPlaying(at: { x: number; y: number; kind: PlayKind } | null) {
     this.playing = at;
+  }
+
+  /** In the arena's fight (or out of it, with null). */
+  setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number } | null) {
+    this.arena = a;
+    if (a) {
+      this.motion = null;
+      this.pos = { x: a.x, y: a.y };
+    } else this.sprite.tint = 0xffffff;
+  }
+
+  /** Bowls a ball: crouches for it, swings it back and lets it go down the lane. */
+  bowl(wallNow: number) {
+    this.bowlAt = wallNow;
   }
 
   /** Shows a founder's leaf by the name (title: "Founder #n"). */
@@ -278,6 +312,11 @@ export class Avatar {
   /** FishEvent BITE: the rod tip tugs. */
   bite(now: number) {
     if (this.fishing) this.fishing.biteAt = now;
+  }
+
+  /** A fish still on the line for `ms` from now (0: off it). */
+  hook(ms: number) {
+    this.hookedUntil = ms ? performance.now() + ms : 0;
   }
 
   /** Caught or got away: flick the rod up, then put it away. */
@@ -378,8 +417,16 @@ export class Avatar {
       y += this.blend.y * f;
     }
     if (heading && Math.abs(heading.x) > 0.1) this.facing = heading.x > 0 ? 1 : -1;
+    const fighting = this.arena;
+    if (fighting) {
+      x = fighting.x;
+      y = fighting.y;
+      this.pos = { x, y };
+      this.facing = fighting.facing;
+      this.sprite.tint = fighting.hurt ? 0xff8080 : 0xffffff;
+    }
 
-    const walking = heading !== null;
+    const walking = heading !== null || !!fighting?.walking;
     const sitting = this.state === 1 && !walking;
     const skating = this.state === SKATING;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;
@@ -430,7 +477,13 @@ export class Avatar {
     const playing = this.playing && !busy ? this.playing : null;
     if (playing && Math.abs(playing.x - x) > 0.3) this.facing = playing.x > x ? 1 : -1;
     this.showSnore(dozing);
-    const frame: AvatarFrame = actFrame !== null
+    // Bowling a ball: down for it, up with it, back, and away.
+    const bt = this.bowlAt ? wallNow - this.bowlAt : -1;
+    if (bt > BOWL_THROW[BOWL_THROW.length - 1][0]) this.bowlAt = 0;
+    const bowlFrame = bt >= 0 && !walking ? (BOWL_THROW.find(([until]) => bt < until)?.[1] ?? null) : null;
+    const frame: AvatarFrame = fighting?.frame != null
+      ? fighting.frame
+      : actFrame !== null
       ? actFrame
       : dozing
         ? dozeFrame(this.slump(wallNow))
@@ -444,8 +497,14 @@ export class Avatar {
               ? SPRINT_FRAMES[Math.floor(wallNow / SPRINT_STRIDE_MS) % SPRINT_FRAMES.length]
               : stepping
               ? ((Math.floor(wallNow / 160) % 2) as 0 | 1)
+              : bowlFrame !== null
+                ? bowlFrame
               : playing
-                ? playing.kind === "pool"
+                ? playing.kind === "bowl-up"
+                  ? BOWL_HOLD
+                  : playing.kind === "bowl"
+                    ? 0
+                  : playing.kind === "pool"
                   ? 8
                   : Math.floor(wallNow / 140) % 3 === 0
                     ? 12
@@ -469,11 +528,12 @@ export class Avatar {
     // Woozy: a slow sway, a stagger from side to side while walking, a tilt.
     const woozy = wallNow < this.woozyUntil && !sitting;
     const sway = woozy ? Math.sin(wallNow / 420) * 2.5 + (walking ? Math.sin(wallNow / 140) * 3 : 0) : 0;
-    this.sprite.rotation = woozy ? Math.sin(wallNow / 560) * 0.1 : 0;
+    // In the arena a leap tips them (round their feet) and lifts them off the sand.
+    this.sprite.rotation = fighting?.lean ? fighting.lean : woozy ? Math.sin(wallNow / 560) * 0.1 : 0;
     // Asleep on their feet, in whole pixels only (no tilting or stretching):
     // a slow breath sinks them a pixel and back; every few seconds they sag
     // a pixel lower still, then jerk awake a pixel up for a blink, and settle.
-    this.sprite.position.set(Math.round(feetX + sway), Math.round(feetY + bob));
+    this.sprite.position.set(Math.round(feetX + sway), Math.round(feetY + bob - (fighting?.lift ?? 0)));
     // The robot turns on the beat: every four beats it faces the other way.
     this.sprite.scale.x = robot && Math.floor(beat / 4) % 2 === 1 ? -this.facing : this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
@@ -604,12 +664,14 @@ export class Avatar {
     const g = this.rod.clear();
     this.rodTip = null;
     const reeling = now - this.reelAt < REEL_FLICK_MS;
-    if (!reeling && (this.state !== FISHING || walking)) return;
+    const hooked = now < this.hookedUntil;
+    if (!reeling && !hooked && (this.state !== FISHING || walking)) return;
     // Angle above the horizontal, pointing the way we face.
     let a: number;
     const f = this.fishing;
     const swing = f ? Math.min(1, (now - f.castAt) / CAST_SWING_MS) : 1;
-    if (reeling) a = 35 + 60 * Math.sin(((now - this.reelAt) / REEL_FLICK_MS) * (Math.PI / 2));
+    if (hooked && !reeling) a = 52 + Math.sin(now / 70) * 5; // held up, the fish tugging at it
+    else if (reeling) a = 35 + 60 * Math.sin(((now - this.reelAt) / REEL_FLICK_MS) * (Math.PI / 2));
     else if (swing < 1) a = 120 - 85 * (1 - (1 - swing) ** 3); // from over the shoulder to out front
     else if (f && f.biteAt && now - f.biteAt < BITE_TUG_MS) a = 22 + Math.sin(now / 45) * 6;
     else a = 35 + Math.sin(now / 800) * 2;
@@ -627,7 +689,7 @@ export class Avatar {
     g.moveTo(bx, by).lineTo(hx + cos * 3, hy - sin * 3).stroke({ width: 2.5, color: 0x3b2a1e });
     g.rect(Math.round(hx) - 1, Math.round(hy), 2, 2).fill(0x9aa0a6); // the reel
     this.rod.zIndex = this.sprite.zIndex + 0.1;
-    if (!reeling && swing >= 1) this.rodTip = { x: tx, y: ty, z: this.rod.zIndex };
+    if ((hooked || !reeling) && swing >= 1) this.rodTip = { x: tx, y: ty, z: this.rod.zIndex };
   }
 
   /** Screen box of the name tag (measured once), for decluttering overlapping names. */

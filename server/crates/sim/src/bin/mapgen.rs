@@ -68,6 +68,8 @@ const DECOR: &[&str] = &[
     "wood_wall",
     // The arcade's walls, striped with neon.
     "neon_wall",
+    // The gladiator arena's sandstone walls.
+    "arena_wall",
 ];
 
 fn g(name: &str) -> u8 {
@@ -758,6 +760,56 @@ fn park() -> MapFile {
         b.decor(x, ay + ah, "none");
     }
 
+    // The bowling alley on the lawn just south-east of the plaza, close to
+    // where everyone arrives: a retro alley with a big pin on its sign, its
+    // door facing south onto a path across to the one down from the plaza.
+    let (lx, ly, lw, lh) = (56u16, 61u16, 6u16, 4u16);
+    assert!(
+        (lx..lx + lw).all(|x| (ly..ly + lh).all(|y| b.free(x, y))),
+        "room for the bowling alley"
+    );
+    b.object("bowling_alley", lx, ly, lw, lh, Some("Bowling"), true);
+    let ldoor = lx + lw / 2;
+    b.rect(55, ly + lh, ldoor - 55 + 1, 1, "path");
+    for x in 55..=ldoor {
+        b.decor(x, ly + lh, "none");
+    }
+
+    // The gladiator arena, on the lawn below the town plaza: a great walled
+    // ring you walk right into. Sandstone walls with a gate north (onto the
+    // plaza) and south; a band of stone round the inside for the crowd to
+    // stand on; and the sand in the middle, where the fighters face off
+    // along the middle row. Out in the open: anyone passing sees the fight.
+    let (ax, ay, aw, ah) = (60u16, 68u16, 22u16, 15u16);
+    for y in ay..ay + ah {
+        for x in ax..ax + aw {
+            b.decor(x, y, "none");
+        }
+    }
+    b.rect(ax, ay, aw, ah, "stones");
+    b.rect(ax + 2, ay + 2, aw - 4, ah - 4, "sand");
+    let gate = ax + aw / 2 - 1;
+    for x in ax..ax + aw {
+        if x != gate && x != gate + 1 {
+            b.decor(x, ay, "arena_wall");
+            b.decor(x, ay + ah - 1, "arena_wall");
+        }
+    }
+    for y in ay..ay + ah {
+        b.decor(ax, y, "arena_wall");
+        b.decor(ax + aw - 1, y, "arena_wall");
+    }
+    // The ring itself (invisible: it marks where the fight is), and the
+    // sign by the north gate where you step up to fight.
+    b.object("arena", ax, ay, aw, ah, Some("Arena"), false);
+    b.object("arena_sign", gate + 3, ay - 2, 2, 1, Some("Arena"), true);
+    // A path from the plaza to the north gate.
+    b.rect(gate, 66, 2, ay - 66, "path");
+    for y in 66..ay {
+        b.decor(gate, y, "none");
+        b.decor(gate + 1, y, "none");
+    }
+
     // The grove south of the path keeps its trees, a row further back so
     // their crowns don't hide the path (trees aren't planted by paths later on).
     for x in [29u16, 30, 32, 33] {
@@ -1229,6 +1281,41 @@ fn arcade() -> MapFile {
     b.finish("Arcade", (12, 13))
 }
 
+/// Inside the bowling alley: a dim, carpeted hall with four lanes along the
+/// back (pins at the far end, a scoreboard screen over each), benches at the
+/// foot of each lane, and the shoe counter on the right with its racks of
+/// rental shoes behind. The door leads back out to the park.
+fn bowling() -> MapFile {
+    let (w, h) = (24u16, 16u16);
+    let mut b = Builder::new(w, h);
+    b.rect(0, 0, w, h, "arcade_carpet");
+    for x in 0..w {
+        b.decor(x, 0, "neon_wall");
+        if !(11..=12).contains(&x) {
+            b.decor(x, h - 1, "neon_wall");
+        }
+    }
+    for y in 0..h {
+        b.decor(0, y, "neon_wall");
+        b.decor(w - 1, y, "neon_wall");
+    }
+    // The lanes, a step apart; their order is their number in BowlJoin.
+    for i in 0..4u16 {
+        let x = 2 + i * 4;
+        let name = format!("Lane {}", i + 1);
+        b.object("bowling_lane", x, 2, 3, 9, Some(&name), true);
+        // Somewhere to sit at the foot of it.
+        b.decor(x, 13, "stool");
+        b.decor(x + 2, 13, "stool");
+    }
+    // The shoe counter, its racks against the wall behind.
+    b.object("shoe_rack", 18, 1, 5, 1, Some("Shoes"), true);
+    b.object("shoe_counter", 18, 4, 5, 1, Some("Shoe rental"), true);
+    b.decor(22, 8, "lantern");
+    b.object("bowling_exit", 11, h - 1, 2, 1, Some("To the park"), true);
+    b.finish("Bowling", (11, 13))
+}
+
 fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
     let json = serde_json::to_string(map).unwrap();
     // Validate before writing.
@@ -1246,5 +1333,6 @@ fn main() -> std::io::Result<()> {
     write("home", &home())?;
     write("shop", &shop())?;
     write("bar", &bar())?;
-    write("arcade", &arcade())
+    write("arcade", &arcade())?;
+    write("bowling", &bowling())
 }

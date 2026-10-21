@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 18;
+pub const PROTOCOL_VERSION: u16 = 24;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -24,6 +24,12 @@ records! {
     /// A pool ball still on the table (`n`: 0 cue, 1–7 solids, 8, 9–15
     /// stripes) at whole table units.
     PoolBall { n: u8, x: u16, y: u16 }
+
+    /// A gladiator in the arena (see `commons_sim::arena`): where (floor
+    /// units ×10), facing (0 left, 1 right), health and stamina, the swing
+    /// under way (`commons_sim::arena::act`) and since when, whether they're
+    /// blocking, and until when they're staggered (zone times, ms).
+    ArenaFighter { x: u16, facing: u8, hp: u8, stamina: u8, act: u8, act_at: u32, blocking: bool, flinch_until: u32 }
 
     /// Everything a client needs to render another avatar, including any
     /// walk in progress so it can be simulated locally, and what it signals
@@ -126,6 +132,24 @@ message_enum! {
         // Going through a door to `zone` (arriving by `arrive`, a building or ""),
         // so whoever follows you comes along.
         33 Going { zone: String, arrive: String }
+        /// Throw one of your glimmer lures into the water at (`x`, `y`).
+        34 ThrowLure { x: u16, y: u16 }
+        /// Step up to bowling lane `lane` (0-based, in map order): take on the
+        /// bot, or wait for someone (or join whoever is waiting).
+        35 BowlJoin { lane: u8, vs_bot: bool }
+        36 BowlLeave { lane: u8 }
+        /// Bowl: where the ball meets the pins (`aim` 0–2000, 1000 the
+        /// middle) and how hard (`power` 0–1000).
+        37 BowlRoll { lane: u8, aim: u16, power: u16 }
+        /// The arena: fight the bot, or wait for (or take on) a player.
+        38 ArenaJoin { vs_bot: bool }
+        39 ArenaLeave {}
+        /// Walking on the sand: 0 still, 1 left, 2 right.
+        40 ArenaMove { dir: u8 }
+        /// A swing, or holding or letting go of a block (`commons_sim::arena::input`).
+        41 ArenaAct { act: u8 }
+        /// Open a lucky crate from your bag.
+        42 OpenCrate {}
     }
 }
 
@@ -232,6 +256,29 @@ message_enum! {
         33 AwayChanged { id: u32, away: bool }
         // Avatar `id` went through a door to `zone` (as `Going`): their followers come after them.
         34 Went { id: u32, zone: String, arrive: String }
+        /// A glimmer lure in the water at (`x`, `y`) until instance time `ends`:
+        /// lines cast into the circle round it bite rarer fish.
+        35 LureShown { x: u16, y: u16, ends: u32 }
+        /// How a bowling lane stands (`bowl::*` status): who's playing, whose
+        /// frame and ball, the pins up, and every roll so far (pins each).
+        36 BowlState { lane: u8, a: u32, b: u32, status: u8, turn: u8, frame: u8, ball: u8, standing: u16, shot: u32, rolls_a: Vec<u8>, rolls_b: Vec<u8> }
+        /// A roll: the ball goes down the lane to `aim` at `power` (as
+        /// `BowlRoll`) and the pins in `knocked` (a mask) fall; the next
+        /// `BowlState` follows.
+        37 BowlRolled { lane: u8, by: u32, aim: u16, power: u16, knocked: u16, shot: u32 }
+        /// How the arena stands (`arena::*` status): the two fighters, and
+        /// the zone's clock (`now`) and when time's up. Sent every tick of a match.
+        38 ArenaState { a: u32, b: u32, status: u8, now: u32, ends: u32, fighters: Vec<ArenaFighter> }
+        /// Something happened in the fight (`arena::event`): by whom (a
+        /// player id), how much it hurt, and where (floor units ×10).
+        39 ArenaEvent { kind: u8, by: u32, dmg: u8, x: u16 }
+        /// A lucky crate sits at (`x`, `y`) till instance time `moves` (then it
+        /// turns up somewhere else): walk up to it to pick it up.
+        40 LuckyShown { x: u16, y: u16, moves: u32 }
+        /// Avatar `id` picked up the lucky crate at (`x`, `y`) (it's gone).
+        41 LuckyFound { id: u32, x: u16, y: u16 }
+        /// Your lucky crate held `coins`.
+        42 LuckyOpened { coins: u16 }
     }
 }
 
@@ -289,6 +336,34 @@ pub mod drink {
 }
 
 /// The bar's pool table (`PoolState`); the game itself is `commons_sim::pool`.
+/// The bowling alley's lanes (`BowlState`); the game itself is `commons_sim::bowling`.
+/// The gladiator arena (`ArenaState`); the fight itself is `commons_sim::arena`.
+pub mod arena {
+    /// `ArenaState.status`, as `pool::*`, and a draw.
+    pub const EMPTY: u8 = 0;
+    pub const WAITING: u8 = 4;
+    pub const PLAYING: u8 = 1;
+    pub const A_WON: u8 = 2;
+    pub const B_WON: u8 = 3;
+    pub const DRAW: u8 = 5;
+    /// The arena's bot, as a player id.
+    pub const BOT: u32 = 0xffff_fffa;
+}
+
+pub mod bowl {
+    /// `BowlState.status`: as `pool::*`, and a tie.
+    pub const EMPTY: u8 = 0;
+    pub const WAITING: u8 = 4;
+    pub const PLAYING: u8 = 1;
+    pub const A_WON: u8 = 2;
+    pub const B_WON: u8 = 3;
+    pub const DRAW: u8 = 5;
+    /// The alley's bot, as a player id.
+    pub const BOT: u32 = 0xffff_fff8;
+    /// `BowlRoll.aim`: the middle of the lane.
+    pub const AIM_MIDDLE: u16 = 1000;
+}
+
 pub mod pool {
     /// `PoolState.status`: nobody at the table, one player waiting for an
     /// opponent, a game on, or won.
