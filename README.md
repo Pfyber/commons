@@ -19,8 +19,9 @@ psql -U postgres -c "CREATE ROLE commons LOGIN PASSWORD 'commons'"   -c "CREATE 
 
 ```sh
 cd client && npm install && cd ..
-node scripts/dev.mjs            # api :8080, orchestrator :8081, zone :8082, social :8083, web :5173, 20 bots
+node scripts/dev.mjs            # api :8080, orchestrator :8081, zone :8082, social :8083, voice :7880, web :5173, 20 bots
 node scripts/dev.mjs --bots 50  # more bots (--bots 0 for none)
+node scripts/dev.mjs --no-voice # without the LiveKit voice server (no phone calls)
 ```
 
 Open http://localhost:5173 and use **Dev quick login** with any name, or the
@@ -64,8 +65,10 @@ the same one. The API stocks the Library itself from Gutenberg's catalogue
 copy, `--reshelve` to file new arrivals).
 Buy a Mobile Phone at the mall's Tools & Gadgets shop to call friends who
 have one (📱 at the top); anyone on a call can ring more friends in. Voice
-goes through a LiveKit server: run `livekit-server --dev` alongside the
-stack (calls for under-16s are built but off: `COMMONS_VOICE_MINORS`).
+goes through a LiveKit server, which `scripts/dev.mjs` starts for you (it
+uses `livekit-server` from your PATH, or fetches the official release into
+`tools/livekit/` the first time). Calls for under-16s are built but off
+(`COMMONS_VOICE_MINORS`).
 Testing on a dev server: a wish at the wishing well (south-west of the
 park) grants 10,000 coins, every time; real servers don't have it.
 🔊 or M toggles sound;
