@@ -1,7 +1,8 @@
 // Phone calls (ADR 0013; server: crates/social/src/calls.rs). Friends with a
 // phone ring each other through the social gateway; the voices go through
 // LiveKit, one room per call. Anyone in a call can ring another friend in;
-// answering while you're in another call moves you over.
+// answering while you're in another call moves you over. Whoever started
+// the call (its host) can remove people; every call goes in the call log.
 
 import { type Participant, type RemoteTrack, Room, RoomEvent, Track } from "livekit-client";
 import type { Auth } from "./net/api";
@@ -47,6 +48,25 @@ interface Pass {
   url: string;
   token: string;
   members?: Member[];
+  host?: string | null;
+}
+
+/** A line of the call log. */
+export interface LogLine {
+  direction: "out" | "in";
+  status: "talked" | "unanswered" | "missed" | "declined" | "removed" | string;
+  people: Member[];
+  /** Unix seconds. */
+  at: number;
+  /** How long (null: still on). */
+  secs: number | null;
+}
+
+/** "3 min", "45 s", "1 h 5 min". */
+export function callLength(secs: number): string {
+  if (secs < 60) return `${secs} s`;
+  const m = Math.round(secs / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
 type Push = { t: string; [k: string]: unknown };
@@ -94,6 +114,10 @@ export class Calls {
   /** The call you're in (null: none). */
   call: string | null = null;
   members: Member[] = [];
+  /** Who started the call (or took over): they can remove people. */
+  host: string | null = null;
+  /** The call just left (news about it can arrive after LiveKit cut us off). */
+  private lastCall: string | null = null;
   /** A call ringing you. */
   ringing: Ringing | null = null;
   muted = false;
@@ -113,9 +137,24 @@ export class Calls {
 
   constructor(
     private auth: Auth,
-    social: Social,
+    private social: Social,
   ) {
     social.onPush((m) => this.receive(m));
+  }
+
+  /** Whether you're the host of your call. */
+  get hosting(): boolean {
+    return this.live && this.host === this.social.selfId;
+  }
+
+  /** The host removes someone from the call. */
+  async remove(id: string): Promise<void> {
+    await this.auth.send("/api/social/call/remove", { id });
+  }
+
+  /** Your call log, newest first. */
+  log(): Promise<LogLine[]> {
+    return this.auth.get<{ calls: LogLine[] }>("/api/social/call/log").then((r) => r.calls);
   }
 
   onChange(f: () => void): () => void {
@@ -180,6 +219,7 @@ export class Calls {
 
   private async join(p: Pass) {
     if (p.members) this.members = p.members;
+    if (p.host !== undefined) this.host = p.host;
     if (this.call === p.call && this.room) {
       this.emit();
       return;
@@ -230,8 +270,10 @@ export class Calls {
     const room = this.room;
     this.room = null;
     const was = this.call !== null;
+    if (this.call) this.lastCall = this.call;
     this.call = null;
     this.members = [];
+    this.host = null;
     this.speaking.clear();
     for (const els of this.audio.values()) for (const el of els) el.remove();
     this.audio.clear();
@@ -259,7 +301,14 @@ export class Calls {
       case "call":
         if (m.call === this.call) {
           this.members = m.members as Member[];
+          this.host = (m.host as string | null) ?? null;
           this.emit();
+        }
+        break;
+      case "call_removed":
+        if (m.call === this.call || m.call === this.lastCall) {
+          this.onToast(`📞 ${m.by_name as string} removed you from the call.`);
+          void this.disconnect();
         }
         break;
       case "call_declined":

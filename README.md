@@ -66,6 +66,8 @@ Buy a Mobile Phone at the mall's Tools & Gadgets shop to call friends who
 have one (📱 at the top); anyone on a call can ring more friends in. Voice
 goes through a LiveKit server: run `livekit-server --dev` alongside the
 stack (calls for under-16s are built but off: `COMMONS_VOICE_MINORS`).
+Testing on a dev server: a wish at the wishing well (south-west of the
+park) grants 10,000 coins, every time; real servers don't have it.
 🔊 or M toggles sound;
 `?weather=rain` (clear, cloudy, rain, mist) previews the weather.
 

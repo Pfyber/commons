@@ -942,12 +942,89 @@ async fn friends_with_phones_call_and_group_up_but_not_under_16s_yet() {
     .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
 
-    // Hanging up: A leaves, B and C carry on; B leaves, C's alone: over.
-    call(&s, "POST", "/api/social/call/leave", &a.token, None).await;
-    let (_, now) = call(&s, "GET", "/api/social/call", &c.token, None).await;
-    assert_eq!(now["members"].as_array().unwrap().len(), 2);
-    call(&s, "POST", "/api/social/call/leave", &b.token, None).await;
-    assert!(pushed(&mut c_rx, "call_ended").is_some());
+    // Only the host (A, who started it) removes people.
+    let remove = |by: &P, who: &P| {
+        let s = s.clone();
+        let (tok, id) = (by.token.clone(), who.id.to_string());
+        async move {
+            call(
+                &s,
+                "POST",
+                "/api/social/call/remove",
+                &tok,
+                Some(json!({ "id": id })),
+            )
+            .await
+        }
+    };
+    let (st, r) = remove(&b, &c).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("not_host"))
+    );
+    let (st, r) = remove(&a, &c).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert!(pushed(&mut c_rx, "call_removed").is_some(), "C's told");
     let (_, now) = call(&s, "GET", "/api/social/call", &c.token, None).await;
     assert!(now["call"].is_null());
+    let (_, now) = call(&s, "GET", "/api/social/call", &b.token, None).await;
+    assert_eq!(now["members"].as_array().unwrap().len(), 2);
+    assert_eq!(now["host"], a.id.to_string());
+
+    // Hanging up: A leaves, B's alone: over.
+    call(&s, "POST", "/api/social/call/leave", &a.token, None).await;
+    assert!(pushed(&mut b_rx, "call_ended").is_some());
+    let (_, now) = call(&s, "GET", "/api/social/call", &b.token, None).await;
+    assert!(now["call"].is_null());
+
+    // B declines a second call from A.
+    let (_, r) = ring(&a, &b).await;
+    let second = r["call"].as_str().unwrap().to_string();
+    call(
+        &s,
+        "POST",
+        "/api/social/call/answer",
+        &b.token,
+        Some(json!({ "call": second, "accept": false })),
+    )
+    .await;
+
+    // The call log, newest first.
+    let log = |p: &P| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move { call(&s, "GET", "/api/social/call/log", &tok, None).await.1["calls"].clone() }
+    };
+    let names = |line: &Value| -> Vec<String> {
+        line["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let al = log(&a).await;
+    assert_eq!(al[0]["status"], "unanswered", "B declined: {al}");
+    assert_eq!(names(&al[0]), vec![b.name.clone()]);
+    assert_eq!(
+        (al[1]["direction"].as_str(), al[1]["status"].as_str()),
+        (Some("out"), Some("talked"))
+    );
+    let mut on = names(&al[1]);
+    on.sort();
+    let mut want = vec![b.name.clone(), c.name.clone()];
+    want.sort();
+    assert_eq!(on, want, "everyone who was on it");
+    assert!(al[1]["secs"].is_number());
+    let bl = log(&b).await;
+    assert_eq!(
+        (bl[0]["direction"].as_str(), bl[0]["status"].as_str()),
+        (Some("in"), Some("declined"))
+    );
+    assert_eq!(
+        (bl[1]["direction"].as_str(), bl[1]["status"].as_str()),
+        (Some("in"), Some("talked"))
+    );
+    let cl = log(&c).await;
+    assert_eq!(cl[0]["status"], "removed");
 }

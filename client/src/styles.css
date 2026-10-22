@@ -3793,3 +3793,13 @@ body.woozy #stage canvas {
 .label .name .calling {
   margin-left: 3px;
 }
+
+.call-log .dir {
+  width: 18px;
+  font-weight: 700;
+  color: var(--leaf-dark);
+}
+
+.call-log .dir.bad {
+  color: var(--danger);
+}

@@ -6,9 +6,14 @@
 //! call, and hands out short-lived passes to the call's room. The age rules
 //! (`commons_common::voice`) are checked against everyone in the call.
 //!
+//! Whoever starts a call is its host and can remove people from it (the
+//! room service cuts them off in LiveKit too); if the host leaves, whoever's
+//! been on longest takes over. Every call goes in each person's call log
+//! (`call_log`, 90 days).
+//!
 //! Pushed on the social socket: `call_ring` (someone's ringing you),
-//! `call` (who's in your call now), `call_declined`, `call_unanswered` and
-//! `call_ended`.
+//! `call` (who's in your call now, and its host), `call_declined`,
+//! `call_unanswered`, `call_missed`, `call_removed` and `call_ended`.
 
 use crate::State as SocialState;
 use crate::db;
@@ -41,6 +46,11 @@ struct Call {
     members: Vec<Uuid>,
     /// Ringing: who, rung by whom, since when.
     ringing: HashMap<Uuid, (Uuid, Instant)>,
+    /// Who started it, or took over when they left: may remove people.
+    host: Uuid,
+    /// Everyone who's been on it, and everyone rung into it (for the log).
+    seen: Vec<Uuid>,
+    rung: Vec<Uuid>,
 }
 
 #[derive(Default)]
@@ -55,6 +65,8 @@ pub enum CallError {
     Full,
     AlreadyIn,
     NotRinging,
+    NotHost,
+    NotIn,
 }
 
 /// What changed when someone left: the call, who's still in it, and
@@ -64,6 +76,9 @@ pub struct Left {
     pub call: Uuid,
     pub members: Vec<Uuid>,
     pub ended: bool,
+    /// Who was ever on the call, and who was rung (for the log).
+    pub seen: Vec<Uuid>,
+    pub rung: Vec<Uuid>,
 }
 
 /// Who's in which call (in memory, like presence).
@@ -81,6 +96,10 @@ impl Calls {
             .get(&call)
             .map(|c| c.members.clone())
             .unwrap_or_default()
+    }
+
+    pub fn host(&self, call: Uuid) -> Option<Uuid> {
+        self.0.lock().unwrap().calls.get(&call).map(|c| c.host)
     }
 
     /// Everyone in the call and everyone being rung into it.
@@ -104,6 +123,9 @@ impl Calls {
             Call {
                 members: vec![p],
                 ringing: HashMap::new(),
+                host: p,
+                seen: vec![p],
+                rung: vec![],
             },
         );
         h.of.insert(p, id);
@@ -121,6 +143,9 @@ impl Calls {
             return Err(CallError::Full);
         }
         c.ringing.insert(who, (by, now));
+        if !c.rung.contains(&who) {
+            c.rung.push(who);
+        }
         Ok(())
     }
 
@@ -147,6 +172,9 @@ impl Calls {
         if !c.members.contains(&who) {
             c.members.push(who);
         }
+        if !c.seen.contains(&who) {
+            c.seen.push(who);
+        }
         h.of.insert(who, call);
         Ok(left)
     }
@@ -169,19 +197,54 @@ impl Calls {
         c.members.retain(|m| *m != p);
         // Rings they started into this call stop too.
         c.ringing.retain(|_, (by, _)| *by != p);
+        // The host leaving: whoever's been on longest takes over.
+        if c.host == p
+            && let Some(&next) = c.members.first()
+        {
+            c.host = next;
+        }
         if let Some(end) = Self::end_if_alone(&mut h, call) {
             return Some(end);
         }
-        let members = h
-            .calls
-            .get(&call)
-            .map(|c| c.members.clone())
-            .unwrap_or_default();
+        let c = h.calls.get(&call)?;
         Some(Left {
             call,
-            members,
+            members: c.members.clone(),
             ended: false,
+            seen: c.seen.clone(),
+            rung: c.rung.clone(),
         })
+    }
+
+    /// The host `by` removes `who` from `call` (or stops ringing them).
+    pub fn remove(&self, call: Uuid, by: Uuid, who: Uuid) -> Result<Left, CallError> {
+        {
+            let mut h = self.0.lock().unwrap();
+            let c = h.calls.get_mut(&call).ok_or(CallError::NotIn)?;
+            if c.host != by || !c.members.contains(&by) {
+                return Err(CallError::NotHost);
+            }
+            if who == by {
+                return Err(CallError::NotIn);
+            }
+            if c.ringing.remove(&who).is_some() {
+                if let Some(end) = Self::end_if_alone(&mut h, call) {
+                    return Ok(end);
+                }
+                let c = h.calls.get(&call).ok_or(CallError::NotIn)?;
+                return Ok(Left {
+                    call,
+                    members: c.members.clone(),
+                    ended: false,
+                    seen: c.seen.clone(),
+                    rung: c.rung.clone(),
+                });
+            }
+            if !c.members.contains(&who) {
+                return Err(CallError::NotIn);
+            }
+        }
+        self.leave(who).ok_or(CallError::NotIn)
     }
 
     /// A call down to one person with nobody being rung is over.
@@ -198,6 +261,8 @@ impl Calls {
             call,
             members: c.members,
             ended: true,
+            seen: c.seen,
+            rung: c.rung,
         })
     }
 
@@ -296,14 +361,30 @@ async fn announce(state: &SocialState, call: Uuid) {
     let Ok(list) = names(state, &members).await else {
         return;
     };
-    let msg = json!({ "t": "call", "call": call.to_string(), "members": list });
+    let host = state.calls.host(call).map(|h| h.to_string());
+    let msg = json!({ "t": "call", "call": call.to_string(), "members": list, "host": host });
     for m in members {
         state.hub.send(m, &msg);
     }
 }
 
+/// Someone's off a call (hung up, moved to another, went offline, was
+/// removed: `leaver`, with how it ended for them): their log line closes,
+/// and everyone's if the call's over; the rest hear who's left.
+pub async fn finish(state: &SocialState, left: Left, leaver: Option<(Uuid, Option<&str>)>) {
+    if let Some((who, status)) = leaver {
+        log_end(state, who, &left, status).await;
+    }
+    if left.ended {
+        for &m in &left.members {
+            log_end(state, m, &left, None).await;
+        }
+    }
+    after_leave(state, left).await;
+}
+
 /// After someone left: tell the rest who's left, or that the call's over.
-pub async fn after_leave(state: &SocialState, left: Left) {
+async fn after_leave(state: &SocialState, left: Left) {
     if left.ended {
         for m in left.members {
             state.hub.send(
@@ -336,6 +417,101 @@ fn pass(state: &SocialState, call: Uuid, me: Uuid, name: &str) -> ApiResult<Valu
     Ok(json!({ "call": call.to_string(), "url": lk.url, "token": token }))
 }
 
+// ---- the call log -------------------------------------------------------------------
+
+/// Starts (or rewrites) `player`'s line for `call`; `ended` closes it at once
+/// (a missed or declined call).
+async fn log_open(
+    state: &SocialState,
+    player: Uuid,
+    call: Uuid,
+    direction: &str,
+    status: &str,
+    people: &[Uuid],
+    ended: bool,
+) {
+    let people = names(state, people).await.unwrap_or_default();
+    let r = sqlx::query(
+        "INSERT INTO call_log (player_id, call_id, direction, status, people, ended_at)
+         VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN now() END)
+         ON CONFLICT (player_id, call_id) DO UPDATE SET direction = EXCLUDED.direction,
+             status = EXCLUDED.status, people = EXCLUDED.people, ended_at = EXCLUDED.ended_at",
+    )
+    .bind(player)
+    .bind(call)
+    .bind(direction)
+    .bind(status)
+    .bind(Value::from(people))
+    .bind(ended)
+    .execute(&state.db)
+    .await;
+    if let Err(e) = r {
+        tracing::error!(error = %e, "writing the call log failed");
+    }
+}
+
+/// Someone answered: the callers' "unanswered" lines become calls.
+async fn log_talked(state: &SocialState, call: Uuid, members: &[Uuid]) {
+    let r = sqlx::query(
+        "UPDATE call_log SET status = 'talked'
+         WHERE call_id = $1 AND player_id = ANY($2) AND status = 'unanswered'",
+    )
+    .bind(call)
+    .bind(members)
+    .execute(&state.db)
+    .await;
+    if let Err(e) = r {
+        tracing::error!(error = %e, "writing the call log failed");
+    }
+}
+
+/// Closes `player`'s line for the call: who was on it with them (or, if
+/// nobody picked up, who they rang), and how it ended if that's news.
+async fn log_end(state: &SocialState, player: Uuid, left: &Left, status: Option<&str>) {
+    let mut people: Vec<Uuid> = left.seen.iter().copied().filter(|p| *p != player).collect();
+    if people.is_empty() {
+        people = left.rung.iter().copied().filter(|p| *p != player).collect();
+    }
+    let people = names(state, &people).await.unwrap_or_default();
+    let r = sqlx::query(
+        "UPDATE call_log SET ended_at = now(), people = $3, status = COALESCE($4, status)
+         WHERE player_id = $1 AND call_id = $2 AND ended_at IS NULL",
+    )
+    .bind(player)
+    .bind(left.call)
+    .bind(Value::from(people))
+    .bind(status)
+    .execute(&state.db)
+    .await;
+    if let Err(e) = r {
+        tracing::error!(error = %e, "writing the call log failed");
+    }
+}
+
+/// Asks LiveKit to cut `who` off `call`'s room (best effort: they may not
+/// have connected yet).
+async fn kick(state: &SocialState, call: Uuid, who: Uuid) {
+    let Some(lk) = &state.livekit else { return };
+    let room = format!("call-{call}");
+    let res = reqwest::Client::new()
+        .post(format!(
+            "{}/twirp/livekit.RoomService/RemoveParticipant",
+            lk.http_url()
+        ))
+        .bearer_auth(lk.admin_token(&room, commons_common::now_unix()))
+        .json(&json!({ "room": room, "identity": who.to_string() }))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await;
+    match res {
+        Ok(r) if r.status().is_success() => {}
+        Ok(r) => {
+            tracing::info!(status = %r.status(), "livekit: removing someone who wasn't connected")
+        }
+        Err(e) => tracing::warn!(error = %e, "livekit: couldn't remove someone from a call"),
+    }
+}
+
 // ---- routes ---------------------------------------------------------------------------
 
 pub fn routes() -> Router<Arc<SocialState>> {
@@ -345,6 +521,8 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/call/ring", post(ring))
         .route("/call/answer", post(answer))
         .route("/call/leave", post(leave))
+        .route("/call/remove", post(remove))
+        .route("/call/log", get(log))
         .route("/call/settings", post(settings))
 }
 
@@ -356,6 +534,7 @@ async fn current(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> 
     };
     let mut out = pass(&state, call, me, &claims.name)?;
     out["members"] = json!(names(&state, &state.calls.members(call)).await?);
+    out["host"] = json!(state.calls.host(call).map(|h| h.to_string()));
     Ok(Json(out))
 }
 
@@ -466,6 +645,7 @@ async fn ring(
             "Give it a moment before calling again.",
         ));
     }
+    let fresh = state.calls.call_of(me).is_none();
     let call = state.calls.open(me);
     match state.calls.ring(call, to, me, Instant::now()) {
         Ok(()) => {}
@@ -492,8 +672,12 @@ async fn ring(
             "from_id": me.to_string(), "from_name": claims.name, "members": members,
         }),
     );
+    if fresh {
+        log_open(&state, me, call, "out", "unanswered", &[to], false).await;
+    }
     let mut out = pass(&state, call, me, &claims.name)?;
     out["members"] = json!(members);
+    out["host"] = json!(state.calls.host(call).map(|h| h.to_string()));
     Ok(Json(out))
 }
 
@@ -514,12 +698,13 @@ async fn answer(
     let gone = || ApiError::new(StatusCode::GONE, "gone", "That call has ended.");
     if !req.accept {
         let (by, ended) = state.calls.decline(call, me).ok_or_else(gone)?;
+        log_open(&state, me, call, "in", "declined", &[by], true).await;
         state.hub.send(
             by,
             &json!({ "t": "call_declined", "call": call.to_string(), "name": claims.name }),
         );
         if let Some(end) = ended {
-            after_leave(&state, end).await;
+            finish(&state, end, None).await;
         }
         return Ok(Json(json!({ "call": null })));
     }
@@ -527,17 +712,22 @@ async fn answer(
     let with = state.calls.members(call);
     if let Err(e) = may_join(&state, me, &with).await {
         if let Some((_, Some(end))) = state.calls.decline(call, me) {
-            after_leave(&state, end).await;
+            finish(&state, end, None).await;
         }
         return Err(e);
     }
     let left = state.calls.answer(call, me).map_err(|_| gone())?;
     if let Some(left) = left {
-        after_leave(&state, left).await;
+        finish(&state, left, Some((me, None))).await;
     }
+    let members = state.calls.members(call);
+    let others: Vec<Uuid> = members.iter().copied().filter(|m| *m != me).collect();
+    log_open(&state, me, call, "in", "talked", &others, false).await;
+    log_talked(&state, call, &members).await;
     announce(&state, call).await;
     let mut out = pass(&state, call, me, &claims.name)?;
-    out["members"] = json!(names(&state, &state.calls.members(call)).await?);
+    out["members"] = json!(names(&state, &members).await?);
+    out["host"] = json!(state.calls.host(call).map(|h| h.to_string()));
     Ok(Json(out))
 }
 
@@ -545,9 +735,71 @@ async fn answer(
 async fn leave(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let (me, _) = me(&state, &headers)?;
     if let Some(left) = state.calls.leave(me) {
-        after_leave(&state, left).await;
+        finish(&state, left, Some((me, None))).await;
     }
     Ok(Json(json!({ "call": null })))
+}
+
+#[derive(Deserialize)]
+struct RemoveReq {
+    id: String,
+}
+
+/// The host removes someone from the call (or stops ringing them).
+async fn remove(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<RemoveReq>,
+) -> ApiResult<Json<Value>> {
+    let (me, claims) = me(&state, &headers)?;
+    let who = uuid(&req.id)?;
+    let call = state
+        .calls
+        .call_of(me)
+        .ok_or_else(|| ApiError::bad_request("no_call", "You're not on a call."))?;
+    let left = state.calls.remove(call, me, who).map_err(|e| match e {
+        CallError::NotHost => refuse(
+            "not_host",
+            "Only whoever started the call can remove people.",
+        ),
+        _ => ApiError::bad_request("not_in", "They're not on this call."),
+    })?;
+    kick(&state, call, who).await;
+    state.hub.send(
+        who,
+        &json!({ "t": "call_removed", "call": call.to_string(), "by_name": claims.name }),
+    );
+    finish(&state, left, Some((who, Some("removed")))).await;
+    Ok(Json(json!({ "removed": who.to_string() })))
+}
+
+/// Your call log: the last 30 calls, newest first (kept 90 days).
+async fn log(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
+    let (me, _) = me(&state, &headers)?;
+    sqlx::query(
+        "DELETE FROM call_log WHERE player_id = $1 AND started_at < now() - interval '90 days'",
+    )
+    .bind(me)
+    .execute(&state.db)
+    .await
+    .map_err(db_err)?;
+    type Row = (String, String, Value, i64, Option<i32>);
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT direction, status, people, extract(epoch FROM started_at)::bigint,
+                extract(epoch FROM ended_at - started_at)::int
+         FROM call_log WHERE player_id = $1 ORDER BY started_at DESC LIMIT 30",
+    )
+    .bind(me)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?;
+    let calls: Vec<_> = rows
+        .into_iter()
+        .map(|(direction, status, people, at, secs)| {
+            json!({ "direction": direction, "status": status, "people": people, "at": at, "secs": secs })
+        })
+        .collect();
+    Ok(Json(json!({ "calls": calls })))
 }
 
 #[derive(Deserialize)]
@@ -575,7 +827,7 @@ async fn settings(
     if !req.voice_ok
         && let Some(left) = state.calls.leave(me)
     {
-        after_leave(&state, left).await;
+        finish(&state, left, Some((me, None))).await;
     }
     Ok(Json(json!({ "voice_ok": req.voice_ok })))
 }
@@ -588,6 +840,7 @@ pub fn spawn_ring_timeouts(state: Arc<SocialState>) {
             tick.tick().await;
             let (gone, ended) = state.calls.expire(Instant::now());
             for (call, who, by) in gone {
+                log_open(&state, who, call, "in", "missed", &[by], true).await;
                 let name = names(&state, &[who])
                     .await
                     .ok()
@@ -603,7 +856,7 @@ pub fn spawn_ring_timeouts(state: Arc<SocialState>) {
                 );
             }
             for end in ended {
-                after_leave(&state, end).await;
+                finish(&state, end, None).await;
             }
         }
     });
@@ -636,14 +889,8 @@ mod tests {
         calls.answer(cd, d).unwrap();
         calls.ring(ab, d, b, now).unwrap();
         let left = calls.answer(ab, d).unwrap().unwrap();
-        assert_eq!(
-            left,
-            Left {
-                call: cd,
-                members: vec![c],
-                ended: true
-            }
-        );
+        assert!(left.call == cd && left.ended && left.members == vec![c]);
+        assert_eq!(left.seen, vec![c, d]);
         assert_eq!(calls.call_of(c), None);
         assert_eq!(calls.members(ab), vec![a, b, d]);
         // Answering something that isn't ringing you does nothing.
@@ -653,6 +900,37 @@ mod tests {
         let end = calls.leave(b).unwrap();
         assert!(end.ended && end.members == vec![d]);
         assert_eq!(calls.call_of(d), None);
+    }
+
+    #[test]
+    fn the_host_removes_people_and_hands_over_on_leaving() {
+        let calls = Calls::default();
+        let [a, b, c] = [0; 3].map(|_| Uuid::new_v4());
+        let now = Instant::now();
+        let call = calls.open(a);
+        for p in [b, c] {
+            calls.ring(call, p, a, now).unwrap();
+            calls.answer(call, p).unwrap();
+        }
+        assert_eq!(calls.host(call), Some(a));
+        // Only the host removes, and not themselves.
+        assert_eq!(calls.remove(call, b, c).err(), Some(CallError::NotHost));
+        assert_eq!(calls.remove(call, a, a).err(), Some(CallError::NotIn));
+        let left = calls.remove(call, a, c).unwrap();
+        assert!(!left.ended && left.members == vec![a, b]);
+        assert_eq!(calls.call_of(c), None);
+        // The host leaves: B takes over, alone, so it's over.
+        let end = calls.leave(a).unwrap();
+        assert!(end.ended);
+        // Removing someone still being rung just stops the ringing.
+        let call = calls.open(a);
+        calls.ring(call, b, a, now).unwrap();
+        calls.ring(call, c, a, now).unwrap();
+        calls.answer(call, b).unwrap();
+        let left = calls.remove(call, a, c).unwrap();
+        assert!(!left.ended && calls.everyone(call).len() == 2);
+        calls.leave(a);
+        assert_eq!(calls.host(call), None, "B alone: over");
     }
 
     #[test]

@@ -456,6 +456,7 @@ dependencies = [
  "commons-common",
  "commons-sim",
  "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",

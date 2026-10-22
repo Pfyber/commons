@@ -90,12 +90,32 @@ impl LiveKit {
         })
     }
 
+    /// LiveKit's HTTP API (the room service), from the URL clients use.
+    pub fn http_url(&self) -> String {
+        if let Some(rest) = self.url.strip_prefix("wss://") {
+            format!("https://{rest}")
+        } else if let Some(rest) = self.url.strip_prefix("ws://") {
+            format!("http://{rest}")
+        } else {
+            self.url.clone()
+        }
+    }
+
+    /// A short pass for the room service, to manage `room` (remove someone).
+    pub fn admin_token(&self, room: &str, now: u64) -> String {
+        self.sign(json!({
+            "iss": self.key,
+            "nbf": now.saturating_sub(10),
+            "exp": now + 60,
+            "video": { "room": room, "roomAdmin": true },
+        }))
+    }
+
     /// A pass into `room` as `identity` (shown as `name`): it may talk and
     /// listen, nothing else. Good for `ttl_secs` to connect; LiveKit keeps
     /// the connection once made.
     pub fn token(&self, room: &str, identity: &str, name: &str, now: u64, ttl_secs: u64) -> String {
-        let header = json!({ "alg": "HS256", "typ": "JWT" });
-        let claims = json!({
+        self.sign(json!({
             "iss": self.key,
             "sub": identity,
             "name": name,
@@ -109,7 +129,12 @@ impl LiveKit {
                 "canPublishData": false,
                 "canPublishSources": ["microphone"],
             },
-        });
+        }))
+    }
+
+    /// An HS256 JWT of `claims`, signed with the API secret.
+    fn sign(&self, claims: serde_json::Value) -> String {
+        let header = json!({ "alg": "HS256", "typ": "JWT" });
         let body = format!(
             "{}.{}",
             URL_SAFE_NO_PAD.encode(header.to_string()),
@@ -172,6 +197,16 @@ mod tests {
         assert_eq!(claims["exp"], 1_000_120);
         assert_eq!(claims["video"]["room"], "call-1");
         assert_eq!(claims["video"]["roomJoin"], true);
+        let admin = lk.admin_token("call-1", 1_000_000);
+        let a: serde_json::Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(admin.split('.').nth(1).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(a["video"]["roomAdmin"], true);
+        assert_eq!(a["video"]["room"], "call-1");
+        assert_eq!(lk.http_url(), "http://x");
         let mut mac = Hmac::<Sha256>::new_from_slice(b"secret").unwrap();
         mac.update(format!("{}.{}", parts[0], parts[1]).as_bytes());
         assert!(

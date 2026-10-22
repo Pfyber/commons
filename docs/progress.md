@@ -1149,6 +1149,28 @@ hearing each other, Bo sees Ada's phone at her ear; Bo rings Cy in, a
 call of three, the talking indicator; mute; Bo hangs up, Ada and Cy carry
 on; Ada hangs up and Cy's told it's over.
 
+## Phone calls V2: removing people, a call log; coins from the well (2026-10-22)
+
+- **Removing someone:** whoever started a call is its host (shown on the
+  call; if they leave, whoever's been on longest takes over) and can remove
+  anyone else, or stop ringing them. The gateway also asks LiveKit's room
+  service to cut them off (an admin pass for that room only), so it holds
+  whatever their client does; they're told who removed them.
+- **Call log** (migration 0030): a line per person per call: out or in,
+  talked / no answer / missed / declined / removed, everyone who was on it
+  (or who you rang), how long. The phone's Recent tab, with a call-back
+  button for one-to-one calls. Kept 90 days; never what was said.
+- **Testing:** on a dev server (`COMMONS_DEV`), a wish at the wishing well
+  grants 10,000 coins each time (`/api/dev/well`); elsewhere it's a 404.
+
+Checked: social 14 (only the host removes, handing over, removing a ring,
+the log for all three sides and a declined call), common (the admin pass),
+API 45 (the well: twice on dev, not at all on a real server), clippy clean,
+client 84. In the browser with LiveKit: a call of three, Bo (not the host)
+has no Remove buttons, Ada removes Cy, LiveKit's rooms drop to two and Cy
+is told; the Recent tab for Ada ("↗ Bo, Cy · 5 s") and Cy ("removed"); a
+click on the well takes coins from 100 to 10,100.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

@@ -53,6 +53,20 @@ export class Economy {
 
   constructor(private auth: Auth) {}
 
+  /**
+   * Testing: a wish at the wishing well grants 10,000 coins (dev servers
+   * only; elsewhere there's no such thing). Whether it did.
+   */
+  async devWish(): Promise<boolean> {
+    try {
+      await this.auth.send("/api/dev/well", {});
+    } catch {
+      return false;
+    }
+    await this.load();
+    return true;
+  }
+
   async load() {
     const [cat, inv] = await Promise.all([
       this.auth.get<{ items: Item[] }>("/api/catalog"),

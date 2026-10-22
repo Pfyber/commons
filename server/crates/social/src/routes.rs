@@ -202,7 +202,7 @@ async fn session(socket: WebSocket, state: Arc<SocialState>, player: Uuid) {
         broadcast_presence(&state, player).await;
         // Gone offline: off any call.
         if let Some(left) = state.calls.leave(player) {
-            crate::calls::after_leave(&state, left).await;
+            crate::calls::finish(&state, left, Some((player, None))).await;
         }
     }
 }

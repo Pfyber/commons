@@ -2949,3 +2949,75 @@ Footer",
         reshelve(&s.db).await.unwrap();
     }
 }
+
+// ---- testing helpers (dev mode only) ----------------------------------------------
+
+mod devtools {
+    use super::*;
+    use axum::Router;
+
+    #[tokio::test]
+    async fn the_well_grants_coins_only_on_dev_servers() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let p = player(&s).await;
+        let claims = token::AccessClaims {
+            sub: p.to_string(),
+            name: "Wisher".into(),
+            look: 1,
+            style: 0,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        let auth = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        );
+        let wish = |s: Arc<AppState>| {
+            let auth = auth.clone();
+            async move {
+                let app: Router = Router::new()
+                    .nest("/api", crate::devtools::routes())
+                    .with_state(s);
+                let req = Request::builder()
+                    .method("POST")
+                    .uri("/api/dev/well")
+                    .header("authorization", auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            }
+        };
+        let coins = || {
+            let db = db.clone();
+            async move {
+                sqlx::query_scalar::<_, i32>(
+                    "SELECT qty FROM inventory WHERE player_id = $1 AND item_id = 1",
+                )
+                .bind(p)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+            }
+        };
+        let before = coins().await;
+        assert_eq!(wish(s.clone()).await, StatusCode::OK);
+        assert_eq!(wish(s.clone()).await, StatusCode::OK, "every wish counts");
+        assert_eq!(coins().await, before + 2 * crate::devtools::WELL_COINS);
+        // A real server: no such thing.
+        let real = Arc::new(AppState {
+            secret: s.secret.clone(),
+            dev: false,
+            client_url: String::new(),
+            store: store::Store::new(db.clone()),
+            db: db.clone(),
+            catalog: s.catalog.clone(),
+            stage_ms: 1000,
+            mailer: None,
+        });
+        assert_eq!(wish(real).await, StatusCode::NOT_FOUND);
+        assert_eq!(coins().await, before + 2 * crate::devtools::WELL_COINS);
+    }
+}

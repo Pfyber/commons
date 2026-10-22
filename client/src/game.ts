@@ -2192,6 +2192,10 @@ export class Game {
       }
       const extra = obj.kind === "well" ? ` ${WISHES[Math.floor(Math.random() * WISHES.length)]}` : "";
       this.discover(obj.kind, DISCOVERIES[obj.kind] + extra);
+      // Testing (dev servers only): the well grants 10,000 coins.
+      if (obj.kind === "well") {
+        void ui.eco.devWish().then((ok) => ok && this.hud.toast("🪙 The well grants you 10,000 coins (testing).", 4000));
+      }
       return true;
     }
     if (obj && ["bandstand", "easels", "arcade"].includes(obj.kind)) {

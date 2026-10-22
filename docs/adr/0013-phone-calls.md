@@ -32,7 +32,12 @@ party. `livekit-server --dev` runs it locally (`LIVEKIT_URL`,
 - Up to eight in a call (counting those being rung).
 - A phone rings for 30 seconds, then gives up; ringing is rate-limited.
 - Going offline hangs you up. A call down to one person ends.
-- Nothing is recorded.
+- Whoever started a call is its host and can remove people (the gateway
+  asks LiveKit's room service to cut them off, so it holds even if their
+  client doesn't play along). If the host leaves, whoever's been on
+  longest takes over.
+- Nothing is recorded. The call log keeps who called whom, how it went
+  and how long it lasted, for 90 days; never what was said.
 
 ## Under 16
 
@@ -57,5 +62,5 @@ and privacy commitments.
 | Step | What |
 |---|---|
 | **V1** ✓ | The phone; ringing, answering, declining; group calls and moving between calls; mute; the phone at your ear; the under-16 rules, off. |
-| V2 | Removing someone from a call server-side (LiveKit's room API), a call log, and "who's calling" on the city map's friends. |
+| **V2** ✓ | The host (whoever started the call; whoever's been on longest, if they leave) removes people, cut off in LiveKit too through its room service; a call log (90 days). |
 | V3 | Optional: voices of people standing near you in the world (proximity voice). |
