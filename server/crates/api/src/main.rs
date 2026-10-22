@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     gov::spawn_ticker(state.db.clone());
+    commons_api::stocking::spawn(state.db.clone());
     let app = Router::new()
         .nest(
             "/api",

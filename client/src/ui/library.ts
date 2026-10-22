@@ -256,7 +256,8 @@ export class CataloguePanel extends Panel {
     void this.lib
       .wings()
       .then((w) => {
-        this.counts = `${w.total.toLocaleString()} books in eight wings.`;
+        // A new library stocks itself from Gutenberg in a minute or so.
+        this.counts = w.total ? `${w.total.toLocaleString()} books in eight wings.` : "The books are still being unpacked: come back in a minute.";
         this.wingCounts = new Map(w.wings.map((x) => [x.key, x.count]));
         if (w.arrivals) this.wingCounts.set(NEW, w.arrivals);
         if (this.open) this.render();

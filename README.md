@@ -55,9 +55,10 @@ every language, each one a spine on a shelf: ask at the catalogue desk
 ("Show me" walks you to it), or browse the eight wings, shelved like a
 real library. Tap "Read" on a book's card to read it, a page at a time; it
 opens where you left off, and the catalogue lists what you've been
-reading. The Library starts empty; fill it with
-`cargo run --bin library-import` (downloads Gutenberg's catalogue, about
-20 MB; `--csv <file>` to use a copy, `--reshelve` to file new arrivals).
+reading. The API stocks the Library itself from Gutenberg's catalogue
+(about 20 MB) when it starts with none, and looks for new books weekly;
+`cargo run --bin library-import` does it by hand (`--csv <file>` to use a
+copy, `--reshelve` to file new arrivals).
 🔊 or M toggles sound;
 `?weather=rain` (clear, cloudy, rain, mist) previews the weather.
 
@@ -131,6 +132,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |
 | `LIBRARY_CATALOG_URL` / `LIBRARY_CONTACT` | Gutenberg's `pg_catalog.csv` / (none) | library-import: where to fetch, and a contact for its User-Agent (api too) |
+| `LIBRARY_AUTO_STOCK` | `true` | api: stock the Library from Gutenberg when it's empty, and weekly |
 | `LIBRARY_TEXT_URL` | `https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt` | api: where book texts come from (a mirror, if the library gets busy) |
 | `LIBRARY_FETCH_PAUSE_MS` | `1500` | api: the pause between fetching books from Gutenberg |
 | `COMMONS_API_INTERNAL_URL` | `http://127.0.0.1:8080` | zone (economy calls) |

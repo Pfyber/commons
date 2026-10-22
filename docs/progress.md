@@ -1073,6 +1073,19 @@ Continue reading at the catalogue, and the reader at phone width.
 Next: L3, reading together (what someone's reading on their name tag,
 reading nooks).
 
+## Library: stocked by itself (2026-10-22)
+
+The books weren't showing in a fresh game: only the test database had
+been filled. Now the API stocks the Library itself (`api/src/stocking.rs`):
+when it starts with no books it downloads Gutenberg's catalogue and files
+every book into the wings, then looks for new ones weekly (new arrivals go
+to the hall's case; failures retry in an hour; `LIBRARY_AUTO_STOCK=false`
+turns it off). `library-import` shares the same code. The catalogue desk
+says the books are still being unpacked while it happens.
+
+Checked: an empty database stocked to all 78,383 books, shelved in their
+eight wings, 16 s after the API started; the main database is stocked.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,
