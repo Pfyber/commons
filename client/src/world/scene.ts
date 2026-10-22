@@ -66,9 +66,10 @@ interface Range {
 
 export class Scene {
   readonly world = new Container();
+  /** The baked ground chunks (bottom of the world). */
+  readonly ground = new Container();
   /** Props and avatars, sorted by their foot position. */
   readonly sorted = new Container();
-  private ground = new Container();
   private marker = new Graphics();
   private markerUntil = 0;
   scale = 2;
@@ -104,7 +105,7 @@ export class Scene {
     this.rows = Math.ceil(map.height / CHUNK);
     this.placed = map.objects
       // Drawn elsewhere, or invisible.
-      .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot")
+      .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot" && o.kind !== "arena")
       .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, extras: [] }));
     this.resize();
   }
@@ -364,6 +365,15 @@ export class Scene {
       x: Math.floor((sx - this.world.position.x) / this.scale / TILE),
       y: Math.floor((sy - this.world.position.y) / this.scale / TILE),
     };
+  }
+
+  /**
+   * Puts `c` flat on the ground: just above it, under everything standing
+   * on it. (The world sorts by depth, so a fixed index can end up under
+   * the ground: always go by where the ground actually is.)
+   */
+  onGround(c: Container) {
+    this.world.addChildAt(c, this.world.getChildIndex(this.ground) + 1);
   }
 
   /** Screen position of a world point given in tile units (tile centre = +0.5). */

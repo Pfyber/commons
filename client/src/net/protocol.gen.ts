@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 25;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -105,6 +105,41 @@ export function decPoolBall(r: Reader): PoolBall {
   };
 }
 
+export interface ArenaFighter {
+  x: number;
+  facing: number;
+  hp: number;
+  stamina: number;
+  act: number;
+  actAt: number;
+  blocking: boolean;
+  flinchUntil: number;
+}
+
+export function encArenaFighter(w: Writer, v: ArenaFighter) {
+  w.u16(v.x);
+  w.u8(v.facing);
+  w.u8(v.hp);
+  w.u8(v.stamina);
+  w.u8(v.act);
+  w.u32(v.actAt);
+  w.bool(v.blocking);
+  w.u32(v.flinchUntil);
+}
+
+export function decArenaFighter(r: Reader): ArenaFighter {
+  return {
+    x: r.u16(),
+    facing: r.u8(),
+    hp: r.u8(),
+    stamina: r.u8(),
+    act: r.u8(),
+    actAt: r.u32(),
+    blocking: r.bool(),
+    flinchUntil: r.u32(),
+  };
+}
+
 export interface EntityInfo {
   id: number;
   name: string;
@@ -171,7 +206,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
 }
 
 export type ClientMsg =
-  | { t: "Hello"; joinToken: string; version: number; viewW: number; viewH: number }
+  | { t: "Hello"; joinToken: string; version: number; viewW: number; viewH: number; device: number }
   | { t: "MoveTo"; x: number; y: number; sprint: boolean }
   | { t: "Emote"; emote: number }
   | { t: "ChatSay"; text: string }
@@ -204,6 +239,16 @@ export type ClientMsg =
   | { t: "FishHit" }
   | { t: "Reading"; book: number }
   | { t: "Calling"; on: boolean }
+  | { t: "Going"; zone: string; arrive: string }
+  | { t: "ThrowLure"; x: number; y: number }
+  | { t: "BowlJoin"; lane: number; vsBot: boolean }
+  | { t: "BowlLeave"; lane: number }
+  | { t: "BowlRoll"; lane: number; aim: number; power: number }
+  | { t: "ArenaJoin"; vsBot: boolean }
+  | { t: "ArenaLeave" }
+  | { t: "ArenaMove"; dir: number }
+  | { t: "ArenaAct"; act: number }
+  | { t: "OpenCrate" }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -215,6 +260,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u16(m.version);
       w.u8(m.viewW);
       w.u8(m.viewH);
+      w.u32(m.device);
       break;
     case "MoveTo":
       w.u8(2);
@@ -361,6 +407,49 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(34);
       w.bool(m.on);
       break;
+    case "Going":
+      w.u8(35);
+      w.str(m.zone);
+      w.str(m.arrive);
+      break;
+    case "ThrowLure":
+      w.u8(36);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
+    case "BowlJoin":
+      w.u8(37);
+      w.u8(m.lane);
+      w.bool(m.vsBot);
+      break;
+    case "BowlLeave":
+      w.u8(38);
+      w.u8(m.lane);
+      break;
+    case "BowlRoll":
+      w.u8(39);
+      w.u8(m.lane);
+      w.u16(m.aim);
+      w.u16(m.power);
+      break;
+    case "ArenaJoin":
+      w.u8(40);
+      w.bool(m.vsBot);
+      break;
+    case "ArenaLeave":
+      w.u8(41);
+      break;
+    case "ArenaMove":
+      w.u8(42);
+      w.u8(m.dir);
+      break;
+    case "ArenaAct":
+      w.u8(43);
+      w.u8(m.act);
+      break;
+    case "OpenCrate":
+      w.u8(44);
+      break;
   }
   return w.finish();
 }
@@ -371,7 +460,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
   const tag = r.u8();
   switch (tag) {
     case 1:
-      m = { t: "Hello", joinToken: r.str(), version: r.u16(), viewW: r.u8(), viewH: r.u8() };
+      m = { t: "Hello", joinToken: r.str(), version: r.u16(), viewW: r.u8(), viewH: r.u8(), device: r.u32() };
       break;
     case 2:
       m = { t: "MoveTo", x: r.u16(), y: r.u16(), sprint: r.bool() };
@@ -469,6 +558,36 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 34:
       m = { t: "Calling", on: r.bool() };
       break;
+    case 35:
+      m = { t: "Going", zone: r.str(), arrive: r.str() };
+      break;
+    case 36:
+      m = { t: "ThrowLure", x: r.u16(), y: r.u16() };
+      break;
+    case 37:
+      m = { t: "BowlJoin", lane: r.u8(), vsBot: r.bool() };
+      break;
+    case 38:
+      m = { t: "BowlLeave", lane: r.u8() };
+      break;
+    case 39:
+      m = { t: "BowlRoll", lane: r.u8(), aim: r.u16(), power: r.u16() };
+      break;
+    case 40:
+      m = { t: "ArenaJoin", vsBot: r.bool() };
+      break;
+    case 41:
+      m = { t: "ArenaLeave" };
+      break;
+    case 42:
+      m = { t: "ArenaMove", dir: r.u8() };
+      break;
+    case 43:
+      m = { t: "ArenaAct", act: r.u8() };
+      break;
+    case 44:
+      m = { t: "OpenCrate" };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -512,6 +631,15 @@ export type ServerMsg =
   | { t: "AwayChanged"; id: number; away: boolean }
   | { t: "ReadingShown"; id: number; book: number }
   | { t: "CallingShown"; id: number; on: boolean }
+  | { t: "Went"; id: number; zone: string; arrive: string }
+  | { t: "LureShown"; x: number; y: number; ends: number }
+  | { t: "BowlState"; lane: number; a: number; b: number; status: number; turn: number; frame: number; ball: number; standing: number; shot: number; rollsA: number[]; rollsB: number[] }
+  | { t: "BowlRolled"; lane: number; by: number; aim: number; power: number; knocked: number; shot: number }
+  | { t: "ArenaState"; a: number; b: number; status: number; now: number; ends: number; fighters: ArenaFighter[] }
+  | { t: "ArenaEvent"; kind: number; by: number; dmg: number; x: number }
+  | { t: "LuckyShown"; x: number; y: number; moves: number }
+  | { t: "LuckyFound"; id: number; x: number; y: number }
+  | { t: "LuckyOpened"; coins: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -752,6 +880,73 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.id);
       w.bool(m.on);
       break;
+    case "Went":
+      w.u8(36);
+      w.u32(m.id);
+      w.str(m.zone);
+      w.str(m.arrive);
+      break;
+    case "LureShown":
+      w.u8(37);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.ends);
+      break;
+    case "BowlState":
+      w.u8(38);
+      w.u8(m.lane);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.status);
+      w.u8(m.turn);
+      w.u8(m.frame);
+      w.u8(m.ball);
+      w.u16(m.standing);
+      w.u32(m.shot);
+      w.vec(m.rollsA, (x) => w.u8(x));
+      w.vec(m.rollsB, (x) => w.u8(x));
+      break;
+    case "BowlRolled":
+      w.u8(39);
+      w.u8(m.lane);
+      w.u32(m.by);
+      w.u16(m.aim);
+      w.u16(m.power);
+      w.u16(m.knocked);
+      w.u32(m.shot);
+      break;
+    case "ArenaState":
+      w.u8(40);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.status);
+      w.u32(m.now);
+      w.u32(m.ends);
+      w.vec(m.fighters, (x) => encArenaFighter(w, x));
+      break;
+    case "ArenaEvent":
+      w.u8(41);
+      w.u8(m.kind);
+      w.u32(m.by);
+      w.u8(m.dmg);
+      w.u16(m.x);
+      break;
+    case "LuckyShown":
+      w.u8(42);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.moves);
+      break;
+    case "LuckyFound":
+      w.u8(43);
+      w.u32(m.id);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
+    case "LuckyOpened":
+      w.u8(44);
+      w.u16(m.coins);
+      break;
   }
   return w.finish();
 }
@@ -865,6 +1060,33 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 35:
       m = { t: "CallingShown", id: r.u32(), on: r.bool() };
+      break;
+    case 36:
+      m = { t: "Went", id: r.u32(), zone: r.str(), arrive: r.str() };
+      break;
+    case 37:
+      m = { t: "LureShown", x: r.u16(), y: r.u16(), ends: r.u32() };
+      break;
+    case 38:
+      m = { t: "BowlState", lane: r.u8(), a: r.u32(), b: r.u32(), status: r.u8(), turn: r.u8(), frame: r.u8(), ball: r.u8(), standing: r.u16(), shot: r.u32(), rollsA: r.vec(() => r.u8()), rollsB: r.vec(() => r.u8()) };
+      break;
+    case 39:
+      m = { t: "BowlRolled", lane: r.u8(), by: r.u32(), aim: r.u16(), power: r.u16(), knocked: r.u16(), shot: r.u32() };
+      break;
+    case 40:
+      m = { t: "ArenaState", a: r.u32(), b: r.u32(), status: r.u8(), now: r.u32(), ends: r.u32(), fighters: r.vec(() => decArenaFighter(r)) };
+      break;
+    case 41:
+      m = { t: "ArenaEvent", kind: r.u8(), by: r.u32(), dmg: r.u8(), x: r.u16() };
+      break;
+    case 42:
+      m = { t: "LuckyShown", x: r.u16(), y: r.u16(), moves: r.u32() };
+      break;
+    case 43:
+      m = { t: "LuckyFound", id: r.u32(), x: r.u16(), y: r.u16() };
+      break;
+    case 44:
+      m = { t: "LuckyOpened", coins: r.u16() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

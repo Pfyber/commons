@@ -52,12 +52,25 @@ async fn read_hello(socket: &mut WebSocket) -> Option<ClientMsg> {
     ClientMsg::decode(first).ok()
 }
 
+/// Gives the player's claim back when the session ends, however it ends.
+struct Claim<'a> {
+    registry: &'a Registry,
+    player: String,
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.registry.release(&self.player);
+    }
+}
+
 pub async fn session(mut socket: WebSocket, registry: Arc<Registry>) {
     let Some(ClientMsg::Hello {
         join_token,
         version,
         view_w,
         view_h,
+        device,
     }) = read_hello(&mut socket).await
     else {
         return reject(&mut socket, error_code::BAD_MESSAGE, "expected Hello").await;
@@ -77,6 +90,18 @@ pub async fn session(mut socket: WebSocket, registry: Arc<Registry>) {
     let Some(instance) = registry.instance(&claims.zone, claims.instance, claims.owner.clone())
     else {
         return reject(&mut socket, error_code::UNKNOWN_ZONE, "unknown zone").await;
+    };
+    if !registry.claim(&claims.sub, device) {
+        return reject(
+            &mut socket,
+            error_code::NAME_TAKEN,
+            "someone is already playing under this name",
+        )
+        .await;
+    }
+    let _claim = Claim {
+        registry: &registry,
+        player: claims.sub.clone(),
     };
 
     let conn: ConnId = NEXT_CONN.fetch_add(1, Ordering::Relaxed);

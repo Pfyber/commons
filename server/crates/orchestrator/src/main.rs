@@ -69,11 +69,11 @@ struct Located {
 }
 
 /// Public buildings with a door onto the city (a `door:<name>` spot there).
-const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade", "library", "club_hall"];
+const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade", "library", "club_hall", "bowling"];
 
 /// Zones served unless `COMMONS_ZONES` says otherwise: the city, homes, the
 /// public buildings, and the Library's hall and wings (ADR 0012).
-const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom";
+const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling";
 
 #[derive(Deserialize)]
 struct Lot {

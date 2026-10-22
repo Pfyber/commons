@@ -52,12 +52,11 @@ export class Props {
     if (!p) {
       const wet = new Sprite(wetSoilTexture());
       wet.position.set(x * TILE, y * TILE);
-      wet.zIndex = -1;
       const plant = new Sprite();
       plant.anchor.set(0.5, 1);
       plant.position.set(x * TILE + TILE / 2, y * TILE + TILE);
       plant.zIndex = y * TILE + TILE - 6;
-      this.scene.world.addChildAt(wet, 1);
+      this.scene.onGround(wet);
       this.scene.sorted.addChild(plant);
       p = { plant, wet, info };
       this.plots.set(key, p);

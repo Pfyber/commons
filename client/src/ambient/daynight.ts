@@ -1,8 +1,9 @@
 // Day/night lighting tied to the player's local time (spec §7.1). A
 // full-screen multiply tint darkens the world; lamps and lit windows add warm
-// light back in as it gets dark. `?hour=21.5` overrides the clock for testing.
+// light back in on top of it as it gets dark, and a colour grade keeps it all
+// rich (most of all at golden hour). `?hour=21.5` overrides the clock for testing.
 
-import { type Application, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { type Application, ColorMatrixFilter, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { TILE } from "../world/art";
 import type { ZoneMap } from "../world/map";
 import type { Scene } from "../world/scene";
@@ -19,8 +20,9 @@ const KEYS: Key[] = [
   { h: 5, tint: [92, 104, 168], dark: 1 },
   { h: 6.5, tint: [255, 196, 170], dark: 0.35 },
   { h: 8, tint: [255, 255, 255], dark: 0 },
-  { h: 17, tint: [255, 255, 255], dark: 0 },
-  { h: 18.5, tint: [255, 214, 170], dark: 0.2 },
+  { h: 16.5, tint: [255, 255, 255], dark: 0 },
+  { h: 17.6, tint: [255, 238, 205], dark: 0 },
+  { h: 18.5, tint: [255, 208, 160], dark: 0.2 },
   { h: 20, tint: [196, 150, 170], dark: 0.6 },
   { h: 21.5, tint: [92, 104, 168], dark: 1 },
   { h: 24, tint: [92, 104, 168], dark: 1 },
@@ -37,14 +39,76 @@ export function lightAt(hour: number): { tint: number; dark: number } {
   return { tint: (c[0] << 16) | (c[1] << 8) | c[2], dark: a.dark + (b.dark - a.dark) * f };
 }
 
+interface Grade {
+  h: number;
+  /** Extra saturation (0 = as drawn). */
+  sat: number;
+  /** Extra contrast (0 = as drawn). */
+  con: number;
+}
+
+// The colour grade over the day: always a touch richer than drawn, glowing
+// most at golden hour (around sunrise and sunset), and kept colourful at
+// night so the dark isn't just grey.
+const GRADES: Grade[] = [
+  { h: 0, sat: 0.2, con: 0.08 },
+  { h: 5, sat: 0.2, con: 0.08 },
+  { h: 6.8, sat: 0.3, con: 0.1 },
+  { h: 8.5, sat: 0.15, con: 0.06 },
+  { h: 16, sat: 0.15, con: 0.06 },
+  { h: 18, sat: 0.32, con: 0.11 },
+  { h: 19.5, sat: 0.26, con: 0.1 },
+  { h: 21.5, sat: 0.2, con: 0.08 },
+  { h: 24, sat: 0.2, con: 0.08 },
+];
+
+export function gradeAt(hour: number): { sat: number; con: number } {
+  const h = ((hour % 24) + 24) % 24;
+  let i = 0;
+  while (GRADES[i + 1].h < h) i++;
+  const a = GRADES[i];
+  const b = GRADES[i + 1];
+  const f = (h - a.h) / (b.h - a.h || 1);
+  return { sat: a.sat + (b.sat - a.sat) * f, con: a.con + (b.con - a.con) * f };
+}
+
+/** A street lamp's head: a small, hot yellow-white core. */
+function bulbTexture(): Texture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,230,170,1)");
+  g.addColorStop(0.18, "rgba(255,214,120,0.85)");
+  g.addColorStop(0.5, "rgba(255,170,60,0.25)");
+  g.addColorStop(1, "rgba(255,150,40,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  return Texture.from(c);
+}
+
+/** The warm pool a lamp throws on the ground around its foot. */
+function poolTexture(): Texture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,196,100,0.6)");
+  g.addColorStop(0.55, "rgba(255,160,60,0.22)");
+  g.addColorStop(1, "rgba(255,140,40,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  return Texture.from(c);
+}
+
 function glowTexture(): Texture {
   const c = document.createElement("canvas");
   c.width = c.height = 64;
   const ctx = c.getContext("2d")!;
   const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, "rgba(255,226,150,0.9)");
-  g.addColorStop(0.4, "rgba(255,200,120,0.35)");
-  g.addColorStop(1, "rgba(255,200,120,0)");
+  g.addColorStop(0, "rgba(255,206,110,0.8)");
+  g.addColorStop(0.4, "rgba(255,170,70,0.3)");
+  g.addColorStop(1, "rgba(255,160,60,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
   return Texture.from(c);
@@ -78,7 +142,12 @@ const CABINET_NEON: Record<string, number> = {
 
 export class DayNight {
   private shade = new Graphics();
+  /** Warm lights, over the night shade (so they stay yellow, not blued). */
   private lights = new Container();
+  /** Each lamp's light, for a faint flicker. */
+  private flicker: { s: Sprite; base: number; phase: number }[] = [];
+  private grade = new ColorMatrixFilter();
+  private graded = { sat: -1, con: -1 };
   /** The arcade: neon glows drawn over the dimmed room, pulsing gently. */
   private neon: Container | null = null;
   private override: number | null;
@@ -100,26 +169,50 @@ export class DayNight {
     this.shade.blendMode = "multiply";
     app.stage.addChild(this.shade);
     this.lights.blendMode = "add";
-    scene.world.addChild(this.lights);
+    app.stage.addChild(this.lights);
+    // The whole picture, richer and punchier (see `gradeAt`).
+    app.stage.filters = [this.grade];
+    app.stage.filterArea = app.screen;
 
     if (neon) this.addNeon(app, map);
     const tex = glowTexture();
     this.glow = tex;
-    const lamps = new Set(["lamp", "lantern"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
-    map.decor.forEach((d, i) => {
-      if (!lamps.has(d)) return;
-      const s = new Sprite(tex);
+    const bulb = bulbTexture();
+    const pool = poolTexture();
+    const lamp = map.decor_legend.indexOf("lamp");
+    const lantern = map.decor_legend.indexOf("lantern");
+    const add = (t: Texture, x: number, y: number, sx: number, sy: number, alpha: number) => {
+      const s = new Sprite(t);
       s.anchor.set(0.5);
-      s.scale.set(2.2);
-      s.position.set((i % map.width) * TILE + TILE / 2, Math.floor(i / map.width) * TILE - 6);
+      s.scale.set(sx, sy);
+      s.position.set(x, y);
+      s.alpha = alpha;
       this.lights.addChild(s);
+      this.flicker.push({ s, base: alpha, phase: (x * 0.37 + y * 0.11) % 6.28 });
+    };
+    map.decor.forEach((d, i) => {
+      if (d !== lamp && d !== lantern) return;
+      const x = (i % map.width) * TILE + TILE / 2;
+      const foot = Math.floor(i / map.width) * TILE + TILE - 2;
+      if (d === lamp) {
+        // A street lamp: a small warm bulb up top, and its light spread wide
+        // and soft over the ground around it (lighting the place up, rather
+        // than one blown-out spot).
+        add(tex, x, foot - 20, 4.2, 3.6, 0.16);
+        add(pool, x, foot - 6, 5.2, 3.2, 0.62);
+        add(bulb, x, foot - 38, 0.45, 0.45, 0.8);
+      } else {
+        // A garden lantern: smaller and more orange.
+        add(pool, x, foot - 2, 2.2, 1.4, 0.7);
+        add(bulb, x, foot - 32, 0.5, 0.5, 0.9);
+      }
     });
     for (const o of map.objects) {
       if (!["town_hall", "clothes_shop", "bar", "arcade_hall", "fountain", "campfire", "lantern_stand"].includes(o.kind)) continue;
       const s = new Sprite(tex);
       s.anchor.set(0.5);
       s.scale.set(o.kind === "town_hall" ? 4 : o.kind === "clothes_shop" || o.kind === "bar" || o.kind === "arcade_hall" ? 3 : o.kind === "campfire" ? 3.2 : 1.6);
-      s.alpha = 0.7;
+      s.alpha = o.kind === "campfire" || o.kind === "lantern_stand" ? 0.8 : 0.28;
       s.position.set((o.x + o.w / 2) * TILE, (o.y + o.h / 2) * TILE);
       this.lights.addChild(s);
     }
@@ -158,6 +251,9 @@ export class DayNight {
   }
 
   destroy() {
+    this.app.stage.filters = [];
+    this.app.stage.removeChild(this.lights);
+    this.lights.destroy({ children: true });
     if (this.neon) {
       this.app.stage.removeChild(this.neon);
       this.neon.destroy({ children: true });
@@ -172,8 +268,21 @@ export class DayNight {
     return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
   }
 
+  /** Sets the colour grade (only when it has moved enough to notice). */
+  private setGrade(sat: number, con: number) {
+    if (Math.abs(sat - this.graded.sat) < 0.004 && Math.abs(con - this.graded.con) < 0.004) return;
+    this.graded = { sat, con };
+    this.grade.reset();
+    this.grade.saturate(sat, true);
+    this.grade.contrast(con, true);
+  }
+
   update() {
+    // The lights sit over the shade, so they ride along with the camera.
+    this.lights.position.copyFrom(this.scene.world.position);
+    this.lights.scale.copyFrom(this.scene.world.scale);
     if (this.neon) {
+      this.setGrade(0.2, 0.08);
       // A dim violet room; the neon glows ride with the camera and breathe.
       const { width, height } = this.app.screen;
       this.shade.clear().rect(0, 0, width, height).fill(0xa49cc4);
@@ -187,17 +296,26 @@ export class DayNight {
       return;
     }
     if (this.indoors) {
+      this.setGrade(0.12, 0.05);
       this.dark = 0;
       this.shade.clear();
       this.lights.visible = false;
       return;
     }
-    const { tint, dark } = lightAt(this.hour());
+    const hour = this.hour();
+    const { tint, dark } = lightAt(hour);
+    const { sat, con } = gradeAt(hour);
+    this.setGrade(sat, con);
     this.dark = dark;
     const { width, height } = this.app.screen;
     this.shade.clear();
     if (tint !== 0xffffff) this.shade.rect(0, 0, width, height).fill(tint);
-    this.lights.alpha = Math.min(1, dark * 1.2);
+    this.lights.alpha = Math.min(1, dark * 1.15);
     this.lights.visible = dark > 0.05;
+    if (this.lights.visible) {
+      // A slow, faint flicker, each lamp in its own time.
+      const t = performance.now() / 1000;
+      for (const f of this.flicker) f.s.alpha = f.base * (0.94 + 0.06 * Math.sin(t * 2.3 + f.phase) * Math.sin(t * 0.7 + f.phase * 2));
+    }
   }
 }

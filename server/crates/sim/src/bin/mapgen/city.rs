@@ -166,6 +166,7 @@ pub fn city() -> MapFile {
             "club_lot" => club_lot(&mut k),
             "home" => homes(&mut k, id),
             "fairground" => fairground(&mut k),
+            "arena" => arena(&mut k),
             _ => landmark(&mut k, &t.key, &t.name),
         }
         // Every block names itself on its south sidewalk.
@@ -663,6 +664,46 @@ fn fairground(k: &mut Blk) {
     k.scatter(37, 20, N - 3, N - 3, 6, &["tree", "bush"]);
 }
 
+/// The gladiator arena: a great walled ring you walk right into, out in the
+/// open so anyone passing sees the fight. Sandstone walls with a gate north
+/// and south; a paved band round the inside for the crowd to stand on;
+/// and the sand in the middle, where the fighters face off along the middle
+/// row. The sign by the north gate is where you step up to fight.
+fn arena(k: &mut Blk) {
+    k.lawn();
+    let (ax, ay, aw, ah) = (13u16, 14u16, 22u16, 15u16);
+    k.rect(ax, ay, aw, ah, "plaza");
+    k.rect(ax + 2, ay + 2, aw - 4, ah - 4, "sand");
+    let gate = ax + aw / 2 - 1;
+    for x in ax..ax + aw {
+        if x != gate && x != gate + 1 {
+            k.decor(x, ay, "arena_wall");
+            k.decor(x, ay + ah - 1, "arena_wall");
+        }
+    }
+    for y in ay..ay + ah {
+        k.decor(ax, y, "arena_wall");
+        k.decor(ax + aw - 1, y, "arena_wall");
+    }
+    // The ring itself (invisible: it marks where the fight is).
+    k.marker("arena", ax, ay, aw, ah, Some("Arena"));
+    k.object("arena_sign", gate + 3, ay - 2, 2, 1, "Arena");
+    k.spot("arena", gate, ay - 1);
+    // Paths in at both gates.
+    k.rect(gate, 2, 2, ay - 2, "path");
+    k.rect(gate, ay + ah, 2, N - 2 - (ay + ah), "path");
+    k.object(
+        "signpost",
+        gate + 3,
+        ay + ah + 1,
+        1,
+        1,
+        "Arena: step up at the sign by the north gate to fight the bot or another player",
+    );
+    k.scatter(3, 3, ax - 1, N - 3, 6, &["tree", "bush"]);
+    k.scatter(ax + aw + 1, 3, N - 3, N - 3, 6, &["tree", "bush"]);
+}
+
 /// A fenced lot waiting for a club.
 fn club_lot(k: &mut Blk) {
     k.lawn();
@@ -763,6 +804,11 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             k.spot("door:club_hall", 24, 18);
             k.spot("club_hall", 24, 19);
         }
+        "bowling" => {
+            k.object("bowling_alley", 16, 9, 16, 9, "Bowling");
+            k.spot("door:bowling", 24, 18);
+            k.spot("bowling", 24, 19);
+        }
         "library" => {
             k.object("library", 13, 7, 22, 11, "Library");
             k.spot("door:library", 24, 18);
@@ -789,6 +835,7 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
                 .to_string()
         }
         "casino" => "Casino: opening soon. Play money only, never real money".to_string(),
+        "bowling" => "Bowling: four lanes inside; rent shoes at the counter".to_string(),
         "club_hall" => {
             "Club Hall: found a club, rent its room, and meet up with your members".to_string()
         }

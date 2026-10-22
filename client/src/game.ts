@@ -8,10 +8,12 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
-import { ATTENDANT, BARTENDER, Clerk, FISHERMAN, LIBRARIAN } from "./ambient/clerk";
+import { ATTENDANT, BARTENDER, Clerk, FISHERMAN, LIBRARIAN, SHOE_GUY } from "./ambient/clerk";
 import { ArcadePanel, BEAT_MS, BOT as ARCADE_BOT, PLAYING as ARCADE_PLAYING } from "./activities/arcade";
 import { PrizePanel } from "./ui/prizes";
 import { PoolPanel } from "./activities/pool";
+import { BOT as BOWL_BOT, BowlingPanel, scoreSoFar } from "./activities/bowling";
+import { ArenaShow } from "./activities/arena";
 import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
 import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
@@ -25,7 +27,7 @@ import { Weather } from "./ambient/weather";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
 import { DayNight } from "./ambient/daynight";
-import type { Economy, Item } from "./economy";
+import { COIN, type Economy, type Item } from "./economy";
 import type { ServerMsg } from "./net/protocol.gen";
 import type { Social } from "./social";
 import type { Gov } from "./gov";
@@ -39,6 +41,10 @@ import { Grove } from "./world/grove";
 import { tier } from "./ui/rarity";
 import { CatchShows } from "./world/catchfx";
 import { FlopShows } from "./world/flopfx";
+import { LuckyCrate } from "./world/luckyfx";
+import { LureShows } from "./world/lurefx";
+import { LaneBalls } from "./world/bowlfx";
+import { BOWL_RELEASE_MS, type PlayKind } from "./world/avatars";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Homes } from "./homes";
 import type { Pets } from "./pets";
@@ -57,11 +63,11 @@ import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
-import { type ActionMenu, type AlbumPanel, type BagPanel, FishermanPanel, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
+import { type ActionMenu, type AlbumPanel, type BagPanel, FishermanPanel, LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
-import { type TileXY, WALK_SPEED_X10, endT, splice, sprintProfile } from "./world/motion";
+import { type TileXY, WALK_SPEED_X10, endT, splice, sprintProfile, sprintingAt } from "./world/motion";
 import { compress, route } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
@@ -241,8 +247,20 @@ const AWAY_AFTER_MS = 60_000;
 /** Map objects that are game machines (the server numbers them in map order, as here). */
 const CABINET_KINDS = ["arcade_cabinet", "dance_machine", "pinball"];
 const KEY_RESEND_MS = 180;
+/**
+ * Following through doors: each zone is a new Game, so this is kept here. The
+ * person we followed in (to find again inside), and the people who followed
+ * us in (to let follow on without asking again).
+ */
+const carried = { leader: null as { name: string; until: number } | null, followers: new Map<string, number>() };
+/** How long after going through a door the two find each other again. */
+const CARRY_MS = 20_000;
+/** Further behind than this (tiles), a follower runs to catch up. */
+const FOLLOW_CATCH_UP = 5;
 /** Two key presses or taps closer together than this ask for a sprint. */
 const SPRINT_ASK_MS = 350;
+/** Two taps on the water closer together than this: a double tap. */
+const DOUBLE_TAP_MS = 400;
 
 const KEY_DIRS: Record<string, TileXY> = {
   ArrowUp: { x: 0, y: -1 }, KeyW: { x: 0, y: -1 },
@@ -272,6 +290,10 @@ export class Game {
   private sprintAt = 0;
   private lastTapAt = 0;
   private keyPressAt: Record<string, number> = {};
+  /** The last tap on the water (a second one quickly after offers a lure). */
+  private waterTap: { t: TileXY; at: number } | null = null;
+  /** Where we stood when the lure's menu came up (walking off closes it). */
+  private lureMenuFrom: TileXY | null = null;
   private disposers: (() => void)[] = [];
   private furniture: Furniture;
   private games = new Map<number, GameStateMsg>();
@@ -302,14 +324,30 @@ export class Game {
   private rpsPicker = new RpsPicker((pick) => this.socket?.send({ t: "RpsPick", pick }));
   /** The bar's pool table, where the map has one. */
   private pool: PoolPanel | null = null;
+  /** The bowling alley's lanes. */
+  private bowling: BowlingPanel | null = null;
+  /** The gladiator arena out in the park. */
+  private arena: ArenaShow | null = null;
+  /** Shoes from the alley's counter (just for fun: the shoe man remembers). */
+  private rentedShoes = false;
+  /** When we last reminded a bowler they can't walk off mid-game. */
+  private bowlNagAt = 0;
   /** The arcade's cabinets and its prize counter, where the map has them. */
   private arcade: ArcadePanel | null = null;
   /** When who's playing at which table was last worked out. */
   private playingCheckAt = 0;
   /** Fish just landed, held up above their anglers. */
   private catches: CatchShows;
+  /** A catch just announced (and what it brings in): the plain "+1 …" for it would only cover it up. */
+  private richToast: { item: number; text: string; until: number } | null = null;
+  /** The lucky crate sitting somewhere in the park, if any. */
+  private lucky: LuckyCrate;
   /** Rare fish flopping on the bank, to be hit; and where each angler's line went in. */
   private flops: FlopShows;
+  /** Glimmer lures in the water. */
+  private lures: LureShows;
+  /** Bowling balls rolling up the alley's lanes. */
+  private laneBalls: LaneBalls;
   private castAt = new Map<number, TileXY>();
   /** The fisherman on the pier, who buys your catch. */
   private fisherman: FishermanPanel | null = null;
@@ -367,10 +405,11 @@ export class Game {
       this.scene.sorted.addChild(this.screen.sprite);
     }
     // Indoors (the mall, the bar, the arcade, the library): the lights are
-    // on, no weather, no birds, no wheels, no sprinting; the arcade is lit by neon.
-    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club");
+    // on, no weather, no birds, no wheels, no sprinting; the arcade and the
+    // bowling alley are lit by neon.
+    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club") || zoneId === "bowling";
     this.ambient = new Ambient(this.scene, map, indoors);
-    this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade");
+    this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade" || zoneId === "bowling");
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     if (zoneId === "city") {
       ui.town
@@ -381,7 +420,10 @@ export class Game {
     this.setupCorners(map);
     this.weather = new Weather(app, this.scene, map, indoors);
     this.catches = new CatchShows(this.scene);
+    this.lucky = new LuckyCrate(this.scene);
     this.flops = new FlopShows(this.scene);
+    this.lures = new LureShows(this.scene, map);
+    this.laneBalls = new LaneBalls(this.scene);
     this.critters = new Critters(app, this.scene, map);
     if (zoneId === "city") {
       this.cat = new Cat(map);
@@ -435,6 +477,9 @@ export class Game {
       }, () => {
         this.clerk?.say("She's a beauty. Fish'll practically jump onto that hook!");
         this.hud.toast("🎣 You bought the Angler's Rod! Fish bite sooner and you get an extra swing.", 4500);
+      }, () => {
+        this.clerk?.say("Toss that in where you fish. They can't resist the shine!");
+        this.hud.toast("✨ A Glimmer Lure! Tap the water and choose to throw it in.", 4500);
       });
     }
     const bar = map.objects.find((o) => o.kind === "bar_counter");
@@ -492,6 +537,28 @@ export class Game {
         this.dance = { cab: cabinets.indexOf(machine), floor, lights, board };
       }
     }
+    if (map.objects.some((o) => o.kind === "bowling_lane")) {
+      this.bowling = new BowlingPanel(
+        () => this.selfId,
+        (id) => this.avatars.get(id)?.info.name ?? "someone",
+        (m) => this.socket?.send(m),
+      );
+    }
+    const ring = map.objects.find((o) => o.kind === "arena");
+    if (ring) {
+      this.arena = new ArenaShow(
+        this.scene,
+        ring,
+        labels,
+        () => this.selfId,
+        (id) => this.avatars.get(id),
+        (id) => this.avatars.get(id)?.info.name ?? "someone",
+        () => this.socket?.clock.now() ?? 0,
+        (m) => this.socket?.send(m),
+      );
+    }
+    const shoes = map.objects.find((o) => o.kind === "shoe_counter");
+    if (shoes) this.clerk = new Clerk(map, shoes, this.scene, labels, SHOE_GUY);
     if (map.objects.some((o) => o.kind === "pool_table")) {
       this.pool = new PoolPanel(
         () => this.selfId,
@@ -608,7 +675,7 @@ export class Game {
     const menu = this.near(this.ui.menu, door, 6);
     if (homes.mine === lot) {
       const pet = this.ui.pets.mine;
-      const actions: [string, () => void][] = [["Go inside", () => this.events.onTravel("home")]];
+      const actions: [string, () => void][] = [["Go inside", () => this.goTo("home")]];
       actions.push(["Decorate outside 🎨", () => this.near(this.ui.decorate, door, 6).show()]);
       if (pet?.out) actions.push([`Bring ${pet.name} home`, () => void this.petLife.bringHome().catch(() => {})]);
       else if (pet) actions.push([`Take ${pet.name} for a walk 🐾`, () => void this.petLife.takeOut().catch(() => {})]);
@@ -689,10 +756,10 @@ export class Game {
         this.enter(front, HALL);
         return true;
       case "library_exit":
-        this.events.onTravel("city");
+        this.goTo("city");
         return true;
       case "wing_exit":
-        this.events.onTravel(HALL);
+        this.goTo(HALL);
         return true;
       case "wing_door":
         if (obj.label) this.enter({ x: obj.x + 1, y: obj.y + 1 }, obj.label);
@@ -739,10 +806,10 @@ export class Game {
         this.enter(front, "club_hall");
         return true;
       case "clubhall_exit":
-        this.events.onTravel("city");
+        this.goTo("city");
         return true;
       case "clubroom_exit":
-        this.events.onTravel("club_hall");
+        this.goTo("club_hall");
         return true;
       case "club_desk":
         walkUp();
@@ -798,7 +865,7 @@ export class Game {
     lib.showing = { ...at, id, title };
     if (zone !== this.zoneId) {
       // Through the hall's door for that wing (the hall's own, from a wing).
-      this.events.onTravel(zone);
+      this.goTo(zone);
       return;
     }
     this.libraryArrived();
@@ -851,7 +918,7 @@ export class Game {
    * busy at it (and doesn't doze off, however long they think).
    */
   private markPlayers() {
-    const at = new Map<number, { x: number; y: number; kind: "arcade" | "pool" }>();
+    const at = new Map<number, { x: number; y: number; kind: PlayKind }>();
     const map = this.scene.map;
     if (this.arcade) {
       map.objects
@@ -864,7 +931,84 @@ export class Game {
     }
     const table = map.objects.find((o) => o.kind === "pool_table");
     if (table && this.pool) for (const id of this.pool.players) at.set(id, { x: table.x + table.w / 2 - 0.5, y: table.y + table.h / 2, kind: "pool" });
+    // Bowlers stand at the foot of their lane, facing up it.
+    if (this.bowling) {
+      map.objects
+        .filter((o) => o.kind === "bowling_lane")
+        .forEach((o, lane) => {
+          const up = this.bowling?.upOn(lane) ?? 0;
+          for (const id of this.bowling?.players(lane) ?? []) at.set(id, { x: o.x + o.w / 2 - 0.5, y: o.y, kind: id === up ? "bowl-up" : "bowl" });
+        });
+    }
     for (const [id, a] of this.avatars) a.setPlaying(at.get(id) ?? null);
+  }
+
+  /** The lines on a lane's screen: its name when it's free; else who's bowling and their scores, the one up in yellow. */
+  private laneBoard(m: Extract<ServerMsg, { t: "BowlState" }>, name: string): { text: string; color: string }[] {
+    const who = (id: number) => (id === BOWL_BOT ? "Bot" : (this.avatars.get(id)?.info.name ?? "Bowler"));
+    const total = scoreSoFar;
+    if (m.status === 0) return [{ text: name, color: "#3fe0ff" }];
+    if (m.status === 4) return [{ text: who(m.a), color: "#3fe0ff" }, { text: "waiting...", color: "#ff9a4f" }];
+    const playing = m.status === 1;
+    const winner = m.status === 2 ? 0 : m.status === 3 ? 1 : -1;
+    return [
+      [0, m.a, m.rollsA],
+      [1, m.b, m.rollsB],
+    ].map(([p, id, rolls]) => ({
+      text: `${winner === p ? "! " : ""}${who(id as number)} ${total(rolls as number[])}`,
+      color: (playing && m.turn === p) || winner === p ? "#ffe14f" : "#3fe0ff",
+    }));
+  }
+
+  /** Whether we're bowling in a game on one of the lanes now. */
+  private bowlingNow(): boolean {
+    if (!this.bowling) return false;
+    const lanes = this.scene.map.objects.filter((o) => o.kind === "bowling_lane").length;
+    for (let i = 0; i < lanes; i++) if (this.bowling.players(i).includes(this.selfId)) return true;
+    return false;
+  }
+
+  /** Whether someone else is standing on tile `t`, or on their way to it. */
+  private occupied(t: TileXY): boolean {
+    for (const a of this.avatars.values()) {
+      if (a.info.id === this.selfId) continue;
+      const d = a.destination;
+      if (d.x === t.x && d.y === t.y) return true;
+      if (!a.moving && Math.round(a.pos.x) === t.x && Math.round(a.pos.y) === t.y) return true;
+    }
+    return false;
+  }
+
+  /** A free tile right next to `t`, the one nearest us (null if it's hemmed in). */
+  private besideOf(t: TileXY): TileXY | null {
+    const self = this.self;
+    if (!self) return null;
+    let best: TileXY | null = null;
+    let bestD = Infinity;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const c = { x: t.x + dx, y: t.y + dy };
+        if (!walkable(this.scene.map, c.x, c.y) || this.occupied(c)) continue;
+        // Nearest us; straight sides before corners when it's a tie.
+        const d = Math.hypot(c.x - self.pos.x, c.y - self.pos.y) + (dx && dy ? 0.01 : 0);
+        if (d < bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** The shoe man on which lanes are free. */
+  private freeLaneHint(): string {
+    const lanes = this.scene.map.objects.filter((o) => o.kind === "bowling_lane");
+    const free = lanes.map((o, i) => [o, this.bowling?.statusOf(i) ?? 0] as const).filter(([, st]) => st !== 1);
+    if (!free.length) return "All lanes are busy! Grab a seat and watch a frame or two.";
+    const waiting = free.find(([, st]) => st === 4);
+    if (waiting) return `Someone's waiting for a partner on ${waiting[0].label}! Go say hi.`;
+    return `${free.map(([o]) => o.label).join(", ")} ${free.length === 1 ? "is" : "are"} free. Take your pick!`;
   }
 
   /** Walk up to the fisherman and see what he'll give for your catch. */
@@ -918,7 +1062,7 @@ export class Game {
     const self = this.self;
     if (!self) return;
     if (cheb(self.destination, door) <= 1 && !self.moving) {
-      this.events.onTravel(zone);
+      this.goTo(zone);
       return;
     }
     const spot = nearestWalkable(this.scene.map, door.x, door.y, 2);
@@ -938,7 +1082,7 @@ export class Game {
     }
     if (self.moving) return;
     this.entering = null;
-    this.events.onTravel(e.zone);
+    this.goTo(e.zone);
   }
 
   /** The Caretaker says something now and then when you're close by. */
@@ -972,6 +1116,31 @@ export class Game {
   }
 
   // ---- following -------------------------------------------------------------
+
+  /** Through a door to `zone`: anyone following us is told, so they come too. */
+  private goTo(zone: string, arrive?: string) {
+    const until = performance.now() + CARRY_MS;
+    for (const id of this.followers) {
+      const name = this.avatars.get(id)?.info.name;
+      if (name) carried.followers.set(name, until);
+    }
+    if (this.followers.size) this.socket?.send({ t: "Going", zone, arrive: arrive ?? "" });
+    this.events.onTravel(zone);
+  }
+
+  /** Who we followed in through a door: once they're here too, follow on. */
+  private findLeader() {
+    const l = carried.leader;
+    if (!l || this.following !== null) return;
+    if (performance.now() > l.until) {
+      carried.leader = null;
+      return;
+    }
+    const them = [...this.avatars.values()].find((a) => a.info.id !== this.selfId && a.info.name === l.name);
+    if (!them) return;
+    carried.leader = null;
+    this.askToFollow(them.info.id, l.name, true);
+  }
 
   /** Friends: start right away (their client accepts). Others: they're asked. */
   private askToFollow(id: number, name: string, friend: boolean) {
@@ -1043,6 +1212,18 @@ export class Game {
       return;
     }
     const goal = them.destination;
+    // Keep up: run when they run, or when we've fallen behind.
+    const now = this.socket?.clock.now() ?? 0;
+    const motion = them.currentMotion;
+    const run = (!!motion && them.moving && sprintingAt(motion, now)) || Math.hypot(them.pos.x - self.pos.x, them.pos.y - self.pos.y) > FOLLOW_CATCH_UP;
+    if (run !== this.sprint) {
+      this.sprint = run;
+      this.sprintAt = performance.now();
+      // Already on our way: change pace now, toward the same spot.
+      if (self.moving) this.moveTo(self.destination, false);
+    } else if (run) {
+      this.sprintAt = performance.now();
+    }
     if (them.state === SITTING && !them.moving) {
       // Already sitting beside them: stay put.
       if (self.state === SITTING && cheb(self.destination, goal) <= 1) return;
@@ -1492,6 +1673,10 @@ export class Game {
   private remove(id: number) {
     if (id === this.selfId) return;
     if (this.followers.delete(id)) this.showFollowers();
+    // Their bobber and any fish of theirs on the bank go with them (or they
+    // stay in the pond for good, whatever happens out of sight).
+    this.props.reelIn(id);
+    this.flops.remove(id);
     this.avatars.get(id)?.destroy();
     this.avatars.delete(id);
   }
@@ -1585,6 +1770,44 @@ export class Game {
       case "ScreenState":
         this.screen?.setState(m);
         break;
+      case "LureShown":
+        this.lures.show({ x: m.x, y: m.y }, m.ends);
+        break;
+      case "LuckyShown":
+        this.lucky.show({ x: m.x, y: m.y }, m.moves);
+        break;
+      case "LuckyFound": {
+        this.lucky.hide();
+        const isSelf = m.id === this.selfId;
+        const finder = m.id;
+        // Up it goes, over the finder's head, in legendary style, for all to see.
+        this.catches.start(
+          { x: m.x, y: m.y },
+          () => {
+            const a = this.avatars.get(finder);
+            return a ? { x: a.pos.x * TILE + TILE / 2, y: a.pos.y * TILE + TILE - 4 - 34 } : null;
+          },
+          "lucky_crate",
+          "Lucky Crate",
+          4,
+          "crate",
+          "Legendary\nLucky Crate Found!",
+        );
+        sfx.landed(isSelf ? 1 : 0.4, 4);
+        if (isSelf) {
+          const flash = document.createElement("div");
+          flash.className = "catch-flash tier-4";
+          flash.style.setProperty("--tier", tier(4).color);
+          document.body.appendChild(flash);
+          window.setTimeout(() => flash.remove(), 2600);
+          this.hud.toast("🍀 Legendary Lucky Crate found! Open it from your bag.", 5000);
+        }
+        break;
+      }
+      case "LuckyOpened":
+        sfx.landed(1, 3);
+        this.hud.toast(`🍀 You open the Lucky Crate… $${m.coins} coins inside!`, 4500);
+        break;
       case "FishEvent":
         this.onFish(m);
         break;
@@ -1611,7 +1834,11 @@ export class Game {
         break;
       case "Granted":
         this.ui.eco.setTotal(m.item, m.total, m.first);
-        if (m.added > 0) {
+        if (m.added > 0 && this.richToast && this.richToast.item === m.item && performance.now() < this.richToast.until) {
+          // Already announced: just add the album news to it, if any.
+          if (m.first) this.hud.toast(`${this.richToast.text} · new in your album!`, 5000);
+          this.richToast = null;
+        } else if (m.added > 0) {
           const name = this.ui.eco.name(m.item);
           this.hud.toast(`+${m.added} ${name}${m.first ? " · new in your album!" : ""}`, 3500);
         }
@@ -1663,8 +1890,11 @@ export class Game {
           this.followEnded(m.from, from.info.name);
           break;
         }
-        // Friends may follow you without asking.
-        if (m.kind === FOLLOW && this.ui.social.friendByName(from.info.name)) {
+        // Friends may follow you without asking, and so may whoever just
+        // followed you in through a door.
+        const cameAlong = (carried.followers.get(from.info.name) ?? 0) > performance.now();
+        if (m.kind === FOLLOW && (cameAlong || this.ui.social.friendByName(from.info.name))) {
+          carried.followers.delete(from.info.name);
           this.socket?.send({ t: "Accept", from: m.from, kind: m.kind });
           break;
         }
@@ -1675,12 +1905,48 @@ export class Game {
       case "Together":
         this.together(m.a, m.b, m.kind);
         break;
+      case "Went": {
+        // The one we follow went through a door: after them.
+        if (m.id !== this.following) break;
+        const name = this.avatars.get(m.id)?.info.name;
+        this.stopFollowing(false);
+        if (!name) break;
+        carried.leader = { name, until: performance.now() + CARRY_MS };
+        this.hud.toast(`👣 After ${name}…`, 2500);
+        this.goTo(m.zone, m.arrive || undefined);
+        break;
+      }
       case "Rps":
         this.onRps(m);
         break;
       case "Woozy":
         this.onWoozy(m.id, m.ms);
         break;
+      case "BowlState": {
+        this.bowling?.onState(m);
+        // The pins on the lane in the alley, as they stand.
+        const lane = this.scene.map.objects.filter((o) => o.kind === "bowling_lane")[m.lane];
+        if (lane) {
+          this.laneBalls.setStanding(lane, m.status === 1 ? m.standing : 0x3ff);
+          this.laneBalls.setBoard(lane, this.laneBoard(m, lane.label ?? `Lane ${m.lane + 1}`));
+        }
+        break;
+      }
+      case "ArenaState":
+        this.arena?.onState(m);
+        break;
+      case "ArenaEvent":
+        this.arena?.onEvent(m);
+        break;
+      case "BowlRolled": {
+        this.bowling?.onRolled(m);
+        // The bowler picks up a ball, swings and lets go; it rolls up the lane.
+        const wall = performance.now();
+        this.avatars.get(m.by)?.bowl(wall);
+        const lane = this.scene.map.objects.filter((o) => o.kind === "bowling_lane")[m.lane];
+        if (lane) this.laneBalls.roll(lane, (m.aim - 1000) / 1000, m.knocked, wall + BOWL_RELEASE_MS, m.power / 1000);
+        break;
+      }
       case "PoolState":
         this.pool?.onState(m);
         break;
@@ -1802,6 +2068,15 @@ export class Game {
   private moveTo(t: TileXY, marker: boolean) {
     const self = this.self;
     if (!this.socket || !self) return;
+    // Mid-game at a bowling lane (or mid-fight in the arena) you stay put until you leave it.
+    if (this.bowlingNow() || this.arena?.players.includes(this.selfId)) {
+      const wall = performance.now();
+      if (wall - this.bowlNagAt > 2500) {
+        this.bowlNagAt = wall;
+        this.hud.toast(this.bowlingNow() ? "🎳 You're in a game! Tap your lane and press 'Leave game' to walk away." : "⚔️ You're mid-fight! Yield in the arena window to walk away.", 3000);
+      }
+      return;
+    }
     // A little woozy: now and then you end up a step off where you meant.
     if (self.woozy && Math.random() < 0.5) {
       const off = { x: t.x + Math.round(Math.random() * 2 - 1), y: t.y + Math.round(Math.random() * 2 - 1) };
@@ -1935,6 +2210,8 @@ export class Game {
     const tap = (e: FederatedPointerEvent) => {
       // A pinch isn't a tap.
       if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
+      // Tapping anywhere else puts the lure back in the bag: its menu and highlight go.
+      this.closeLureMenu();
       // Your fish flopping on the bank: hit it.
       const wx = (e.global.x - this.scene.world.position.x) / this.scene.scale;
       const wy = (e.global.y - this.scene.world.position.y) / this.scene.scale;
@@ -1958,7 +2235,9 @@ export class Game {
       if (seat) return this.sitAt(seat.id);
       const table = this.furniture.tables.get(id);
       if (table) return this.watchTable(table.id);
-      const target = nearestWalkable(this.scene.map, t.x, t.y, 2);
+      // Someone already there: stand beside them instead, on the free side nearest us.
+      const spot = nearestWalkable(this.scene.map, t.x, t.y, 2);
+      const target = spot && this.occupied(spot) ? (this.besideOf(spot) ?? spot) : spot;
       // Tapping twice, or tile after tile in quick succession: sprint there.
       const wall = performance.now();
       if (wall - this.lastTapAt < SPRINT_ASK_MS) this.askSprint();
@@ -2127,7 +2406,8 @@ export class Game {
       return true;
     }
     // Map objects: the drawn art reaches a couple of tiles above the footprint.
-    const obj = map.objects.find((o) => !MARKERS.has(o.kind) && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - (LOW_REACH.has(o.kind) ? 1 : 2) && t.y < o.y + o.h);
+    // (Not the arena's ring: you walk about inside it; its sign is what you tap.)
+    const obj = map.objects.find((o) => !MARKERS.has(o.kind) && o.kind !== "arena" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - (LOW_REACH.has(o.kind) ? 1 : 2) && t.y < o.y + o.h);
     if (obj?.kind === "market_cart") {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
@@ -2168,7 +2448,7 @@ export class Game {
       return true;
     }
     if (obj?.kind === "bar_exit") {
-      this.events.onTravel("city");
+      this.goTo("city");
       return true;
     }
     if (obj && (obj.kind === "bar_counter" || obj.kind === "bottle_shelf")) {
@@ -2191,10 +2471,65 @@ export class Game {
       this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "arcade");
       return true;
     }
+    // The arena's sign by the gate: fight the bot, fight a player, or watch.
+    if (obj?.kind === "arena_sign" && this.arena) {
+      const front = { x: obj.x, y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 3) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.arena.openSign();
+      return true;
+    }
+    // The bowling alley: in through the doors; inside, the lanes and the shoe counter.
+    if (obj?.kind === "bowling_alley") {
+      this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "bowling");
+      return true;
+    }
+    if (obj?.kind === "bowling_exit") {
+      if (this.bowlingNow()) {
+        this.hud.toast("🎳 Finish (or leave) your game first: tap your lane and press 'Leave game'.", 3000);
+        return true;
+      }
+      this.goTo("city");
+      return true;
+    }
+    if (obj?.kind === "bowling_lane" && this.bowling) {
+      const lane = map.objects.filter((o) => o.kind === "bowling_lane").indexOf(obj);
+      // Step up to the foot of the lane.
+      const foot = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, foot) > 1) {
+        const spot = nearestWalkable(map, foot.x, foot.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(this.bowling, foot, 5).openLane(lane, obj.label ?? `Lane ${lane + 1}`);
+      return true;
+    }
+    if (obj && (obj.kind === "shoe_counter" || obj.kind === "shoe_rack")) {
+      const counter = map.objects.find((o) => o.kind === "shoe_counter") ?? obj;
+      const front = { x: counter.x + Math.floor(counter.w / 2), y: counter.y + counter.h };
+      if (cheb(self.destination, front) > 2) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.clerk?.chat();
+      this.near(ui.menu, front, 5).showWith("Shoe rental 👟", "Commons Lanes", [
+        [
+          "👟 Rent some bowling shoes",
+          () => {
+            this.clerk?.say(this.rentedShoes ? "Those still fit? Good, good." : "Here you go, size 'just right'. Have fun out there!");
+            this.rentedShoes = true;
+            this.hud.toast("👟 Bowling shoes on! Tap a lane to bowl.", 3000);
+          },
+        ],
+        ["🎳 Which lane's free?", () => this.clerk?.say(this.freeLaneHint())],
+      ]);
+      return true;
+    }
     if (obj && this.tapLibrary(obj)) return true;
     if (obj && this.tapClubs(obj)) return true;
     if (obj?.kind === "arcade_exit") {
-      this.events.onTravel("city");
+      this.goTo("city");
       return true;
     }
     if (obj?.kind === "dance_floor" && this.arcade && this.dance) {
@@ -2293,11 +2628,11 @@ export class Game {
     }
     // The mall: in by the Market Hall's door, out the same way.
     if (obj?.kind === "mall_entrance") {
-      this.events.onTravel("mall");
+      this.goTo("mall");
       return true;
     }
     if (obj?.kind === "mall_exit") {
-      this.events.onTravel("city");
+      this.goTo("city");
       return true;
     }
     if (obj?.kind === "mall_directory") {
@@ -2356,15 +2691,28 @@ export class Game {
       return true;
     }
     if (obj?.kind === "homes_gate") {
-      this.events.onTravel("home");
+      this.goTo("home");
       return true;
     }
     if (obj?.kind === "city_gate") {
-      this.events.onTravel("city");
+      this.goTo("city");
       return true;
     }
     const ground = groundAt(map, t.x, t.y);
     if (ground === "water") {
+      // Tapped twice, with a glimmer lure in the bag: throw one in here?
+      const wall = performance.now();
+      const twice = !!this.waterTap && wall - this.waterTap.at < DOUBLE_TAP_MS && cheb(this.waterTap.t, t) <= 1;
+      this.waterTap = twice ? null : { t, at: wall };
+      const lures = ui.eco.qty(LURE_ITEM);
+      if (twice && lures > 0) {
+        this.lures.previewAt(t);
+        this.lureMenuFrom = this.self ? { ...this.self.destination } : null;
+        this.near(ui.menu, t, 6).showWith("✨ Glimmer Lure", this.lures.covers(t, this.socket?.clock.now() ?? 0) ? "This water's already lured: rarer fish bite here." : "Rarer fish bite round it for 5 minutes, for anyone fishing there.", [
+          [`✨ Throw one in here (${lures} left)`, () => this.throwLure(t)],
+        ]);
+        return true;
+      }
       this.fish(t);
       return true;
     }
@@ -2386,6 +2734,28 @@ export class Game {
       this.moveTo(spot, true);
     }
     this.socket.send({ t: "FishCast", x: target.x, y: target.y });
+  }
+
+  /** Closes the glimmer lure's menu and its highlight, if they're up. */
+  private closeLureMenu() {
+    if (!this.lures.previewing) return;
+    this.lures.endPreview();
+    this.lureMenuFrom = null;
+    if (this.ui.menu.open) this.ui.menu.hide();
+  }
+
+  /** Throws a glimmer lure into the water at `target`, walking up to the shore first if need be. */
+  private throwLure(target: TileXY) {
+    const self = this.self;
+    if (!self || !this.socket) return;
+    if (cheb(self.destination, target) > CAST_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
+      const spot = this.castSpot(target, self.destination);
+      if (!spot) return this.hud.toast("Find a spot on the shore.");
+      this.moveTo(spot, true);
+    }
+    self.faceToward(target.x);
+    sfx.splash(0.6, 250);
+    this.socket.send({ t: "ThrowLure", x: target.x, y: target.y });
   }
 
   /** The walkable tile within casting range of `target` nearest to `from`. */
@@ -2436,6 +2806,8 @@ export class Game {
         // Rare: 3 hits; epic: 4; legendary and mythical: 5 (the server's flop_toughness).
         const need = [3, 3, 3, 4, 5, 5][fish?.rarity ?? 2] ?? 5;
         this.flops.start(m.id, water, { x: m.x, y: m.y }, fish?.key ?? "minnow", fish?.rarity ?? 2, FLOP_MS, isSelf, need);
+        // It stays on the line (rod up) till it lands or gets away.
+        this.avatars.get(m.id)?.hook(FLOP_MS + 1500);
         sfx.flop(vol);
         if (isSelf) {
           this.ui.reel.stop();
@@ -2449,6 +2821,7 @@ export class Game {
         break;
       case FISH.CAUGHT: {
         this.flops.remove(m.id);
+        this.avatars.get(m.id)?.hook(0);
         this.props.reelIn(m.id);
         this.avatars.get(m.id)?.reelIn(performance.now());
         const caught = this.ui.eco.items.get(m.item);
@@ -2480,8 +2853,12 @@ export class Game {
         if (isSelf) {
           this.ui.reel.stop();
           this.taskMaybeDone();
-          if (m.item === TREASURE_ITEM) this.hud.toast("💰 A treasure chest! You prise it open: +50 coins!", 5000);
-          else this.hud.toast(`${sparkle} ${t.name} catch: ${this.ui.eco.name(m.item)}! (worth ${caught?.meta.sell ?? 0} coins to the fisherman)`, (caught?.rarity ?? 0) >= 3 ? 5000 : 3000);
+          const text =
+            m.item === TREASURE_ITEM
+              ? "💰 A treasure chest! You prise it open: +50 coins!"
+              : `${sparkle} ${t.name} catch: ${this.ui.eco.name(m.item)}! (worth ${caught?.meta.sell ?? 0} coins to the fisherman)`;
+          this.hud.toast(text, m.item === TREASURE_ITEM || (caught?.rarity ?? 0) >= 3 ? 5000 : 3000);
+          this.richToast = { item: m.item === TREASURE_ITEM ? COIN : m.item, text, until: performance.now() + 4000 };
         }
         break;
       }
@@ -2491,6 +2868,7 @@ export class Game {
           this.flops.escape(m.id);
           sfx.splash(vol, 450);
         }
+        this.avatars.get(m.id)?.hook(0);
         this.props.reelIn(m.id);
         this.avatars.get(m.id)?.reelIn(performance.now());
         if (isSelf) {
@@ -2513,6 +2891,11 @@ export class Game {
   }
 
   /** Garden action from the plot menu: walk next to the plot, then act. */
+  /** Opens a lucky crate from the bag. */
+  openCrate() {
+    this.socket?.send({ t: "OpenCrate" });
+  }
+
   plotAction(x: number, y: number, action: number, item: number) {
     const self = this.self;
     if (!self || !this.socket) return;
@@ -2634,6 +3017,8 @@ export class Game {
     const wallNow = performance.now();
     const serverNow = this.socket?.clock.now() ?? 0;
     this.keyboardMove(wallNow);
+    // The arena first: it places the fighters, so they're drawn (and the camera follows) where their gear is.
+    this.arena?.update(serverNow, wallNow);
 
     // Move the camera first so every label is placed against this frame's view.
     const self = this.self;
@@ -2682,6 +3067,9 @@ export class Game {
     if (this.following !== null && wallNow > this.followCheckAt) {
       this.followCheckAt = wallNow + 350;
       this.followStep();
+    } else if (carried.leader && wallNow > this.followCheckAt) {
+      this.followCheckAt = wallNow + 350;
+      this.findLeader();
     }
     if (this.campfire) {
       const at = this.campfire.at;
@@ -2699,7 +3087,17 @@ export class Game {
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
     this.catches.update(wallNow);
-    this.flops.update(wallNow);
+    this.flops.update(wallNow, (id) => this.avatars.get(id)?.rodTip ?? null);
+    // The lure's preview goes once its menu does (thrown, or closed), and
+    // both go as soon as we walk off somewhere (keys, or a walk elsewhere).
+    if (this.lures.previewing) {
+      const from = this.lureMenuFrom;
+      const walked = !!self && !!from && (this.keys.size > 0 || self.destination.x !== from.x || self.destination.y !== from.y);
+      if (!this.ui.menu.open || walked) this.closeLureMenu();
+    }
+    this.lures.update(serverNow, wallNow);
+    this.lucky.update(serverNow, wallNow);
+    this.laneBalls.update(wallNow);
     if (wallNow > this.playingCheckAt) {
       this.playingCheckAt = wallNow + 300;
       this.markPlayers();
@@ -2741,10 +3139,15 @@ export class Game {
     this.ui.catalogue.hide();
     this.rpsPicker.destroy();
     this.pool?.destroy();
+    this.bowling?.destroy();
+    this.arena?.destroy();
     this.arcade?.destroy();
     this.fisherman?.destroy();
     this.catches.destroy();
     this.flops.destroy();
+    this.lures.destroy();
+    this.lucky.destroy();
+    this.laneBalls.destroy();
     this.danceBot?.destroy();
     this.prizes?.destroy();
     document.body.classList.remove("woozy");

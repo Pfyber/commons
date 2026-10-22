@@ -90,6 +90,8 @@ const DECOR: &[&str] = &[
     "cushion",
     // A library chair seen from behind (sitting facing north, at a table).
     "chair_n",
+    // The gladiator arena's sandstone walls.
+    "arena_wall",
 ];
 
 fn g(name: &str) -> u8 {
@@ -474,6 +476,7 @@ fn main() -> std::io::Result<()> {
     write("mall", &mall::mall())?;
     write("bar", &leisure::bar())?;
     write("arcade", &leisure::arcade())?;
+    write("bowling", &leisure::bowling())?;
     write("library", &library::hall())?;
     write("club_hall", &clubs::lobby())?;
     write("clubroom", &clubs::room())?;

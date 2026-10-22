@@ -1,6 +1,6 @@
 {
   "client": [
-    { "t": "Hello", "hex": "010b006162632e6465662e67686901001e11" },
+    { "t": "Hello", "hex": "010b006162632e6465662e67686901001e11efbeadde" },
     { "t": "MoveTo", "hex": "020c00ffff00" },
     { "t": "Emote", "hex": "0307" },
     { "t": "ChatSay", "hex": "040a0068656c6c6f20f09f918b" },

@@ -40,7 +40,7 @@ export class CatchShows {
    * A fish (`key`) of `rarity` caught at `water`, landing above wherever
    * `head` says the angler's head is.
    */
-  start(water: TileXY, head: () => { x: number; y: number } | null, key: string, name: string, rarity: number, kind = "fish") {
+  start(water: TileXY, head: () => { x: number; y: number } | null, key: string, name: string, rarity: number, kind = "fish", title?: string) {
     const t = tier(rarity);
     const color = Number.parseInt(t.color.slice(1), 16);
     const root = new Container();
@@ -51,7 +51,7 @@ export class CatchShows {
     fish.anchor.set(0.5);
     fish.texture.source.scaleMode = "nearest";
     const label = new Text({
-      text: `${name}\n${t.name}`,
+      text: title ?? `${name}\n${t.name}`,
       style: { fontFamily: "ui-rounded, system-ui, sans-serif", fontSize: 11, fontWeight: "bold", fill: color, align: "center", stroke: { color: 0x1a1020, width: 4 }, lineHeight: 12 },
     });
     label.anchor.set(0.5, 1);

@@ -8,7 +8,7 @@
 // each player's screen from a shared seed, smooth at full frame rate, and
 // report scores to the server, which keeps them honest and calls the result.
 
-import { ChoiceModal, Panel, button, el } from "../ui/panels";
+import { ChoiceModal, Panel, button, confirmButton, el, isTyping } from "../ui/panels";
 import * as snd from "./arcade-sfx";
 import { BUMPERS, BALL_R as PIN_BALL_R, FLIPPERS, FLIP_BASE_R, FLIP_BOTTOM, FLIP_LEN, FLIP_TIP_R, FLIP_TOP, HOLE_HALF, PH, PINBALL, PW, type Press, RAILS, RAIL_R, carry, unpack } from "./pinball";
 import { BEAT_MS, DANCE_BEATS, danceHalf, danceNotes, rng } from "./arcade-shared";
@@ -212,6 +212,7 @@ export class ArcadePanel extends Panel {
     this.canvas.addEventListener("pointerdown", (e) => this.pointer(e, true));
     this.canvas.addEventListener("pointerleave", () => (this.hover = null));
     window.addEventListener("pointerup", this.onPointerUp);
+    window.addEventListener("blur", this.onBlur);
     window.addEventListener("keydown", this.onKey, true);
     window.addEventListener("keyup", this.onKeyUp, true);
   }
@@ -301,6 +302,7 @@ export class ArcadePanel extends Panel {
     window.removeEventListener("keydown", this.onKey, true);
     window.removeEventListener("keyup", this.onKeyUp, true);
     window.removeEventListener("pointerup", this.onPointerUp);
+    window.removeEventListener("blur", this.onBlur);
     this.music.stop();
     this.choice.destroy();
     super.destroy();
@@ -309,7 +311,7 @@ export class ArcadePanel extends Panel {
   /** Keys for the real-time games, kept from walking you about meanwhile. */
   private onKey = (e: KeyboardEvent) => {
     const s = this.state;
-    if (!this.open || !s || s.status !== PLAYING || this.side() < 0) return;
+    if (!this.open || !s || s.status !== PLAYING || this.side() < 0 || isTyping(e)) return;
     const k = keyName(e);
     if (!k) return;
     const handled = this.keyDown(s, k, e.repeat);
@@ -326,6 +328,17 @@ export class ArcadePanel extends Panel {
     const s = this.state;
     if (s?.kind === TANKS && this.open) this.sendTankKeys();
     if (s?.kind === PINBALL && this.open) this.sendFlips();
+  };
+
+  /** The window lost focus (alt-tab…): let go of everything held, or a tank drives on and flippers stay up. */
+  private onBlur = () => {
+    this.keys.clear();
+    this.mouseFlip = false;
+    this.touchFlips.clear();
+    const s = this.state;
+    if (!this.open || !s || s.status !== PLAYING || this.side() < 0) return;
+    if (s.kind === TANKS) this.sendTankKeys();
+    if (s.kind === PINBALL) this.sendFlips();
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -676,7 +689,14 @@ export class ArcadePanel extends Panel {
       // Buttons for touch screens.
       const pad = el("div", "arcade-pad");
       for (const [label, dir] of [["←", 3], ["↑", 0], ["↓", 2], ["→", 1]] as [string, number][]) {
-        pad.append(button(label, () => this.input(dir), "small"));
+        // Turned the moment a finger lands: the panel redraws every tick, and
+        // a click (press and release on the same button) could get lost between.
+        const b = button(label, () => {}, "small");
+        b.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          this.input(dir);
+        });
+        pad.append(b);
       }
       this.body.append(pad);
     }
@@ -721,7 +741,7 @@ export class ArcadePanel extends Panel {
     const row = el("div", "arcade-actions");
     const inGame = s.a === me || s.b === me;
     if (s.status === PLAYING && inGame) {
-      row.append(button("Leave game", () => this.send({ t: "ArcadeLeave", cab: this.cab }), "subtle"));
+      row.append(confirmButton(`arcade-leave-${this.cab}`, "Leave game", "Tap again to leave (you forfeit)", () => this.send({ t: "ArcadeLeave", cab: this.cab })));
     } else if (s.status === WAITING && s.a === me) {
       row.append(
         button("Play the AI bot instead 🤖", () => this.send({ t: "ArcadeJoin", cab: this.cab, vsBot: true }), "primary"),

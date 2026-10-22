@@ -1236,6 +1236,43 @@ Checked:
   - A post on the board.
   - Down the stairs to the hall, and out at the Club Hall's door.
 
+## Merge: bowling, the arena, lucky crates and lures (2026-10-22)
+
+From the fork (mancro5/commons): "Fishing 3.5 + Bowling" and "Lucky
+Block, New Lamp+Lighting+Fixes".
+
+- **What came in:**
+  - The bowling alley: four lanes against the bot or a player, and the
+    shoe counter.
+  - The gladiator arena, out in the open.
+  - Lucky crates that turn up around the city, to pick up and open from
+    the bag.
+  - The fisherman's glimmer lure, which draws rarer fish.
+  - Followers now come through doors with whoever they follow.
+  - New lighting, a digits font, and other fixes.
+- **Fitted to the city:**
+  - The fork placed these in the old park. Here, the bowling alley has
+    its own block next to the Arcade (`bowling`, with its door), and the
+    arena has the block south of the Town Hall (`arena`).
+  - Two of the eight club lots became these blocks, so six remain.
+  - The arena's inner band is paved, not stepping stones.
+- **Renumbered:**
+  - Protocol messages: ours first, then the fork's; protocol v25.
+  - The fork's migrations are now 0032 (lure) and 0033 (lucky crate).
+    0017 and 0018 were taken here.
+- Every door now goes through the fork's `goTo`, so followers come along
+  everywhere (the Library, the Club Hall, the mall). `main.ts` still
+  works out where you come out.
+
+Checked: all server tests (API 45, sim 49, social 16, zone 58 with the
+fork's bowling and arena tests), clippy and fmt clean, client 88. In the
+browser:
+- Into the bowling alley, open a lane's game, and back out at its door.
+- The arena's sign offers fight the bot, fight a player, or spectate.
+- A lucky crate is out in the city.
+- The clubs run still passes.
+- No errors.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

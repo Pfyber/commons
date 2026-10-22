@@ -9,8 +9,8 @@
     ["home", "orchard",   "club_hall", "theater",    "club_lot", "woods",    "home"],
     ["home", "club_lot",  "museum",    "park",       "cafe",     "club_lot", "home"],
     ["home", "gallery",   "library",   "market",     "cinema",   "casino",   "home"],
-    ["home", "club_lot",  "town_hall", "pond",       "arcade",   "club_lot", "home"],
-    ["home", "meadow",    "club_lot",  "fairground", "club_lot", "lake",     "home"],
+    ["home", "club_lot",  "town_hall", "pond",       "arcade",   "bowling",  "home"],
+    ["home", "meadow",    "arena",     "fairground", "club_lot", "lake",     "home"],
     ["home", "home",      "home",      "home",       "home",     "home",     "home"]
   ],
   "tram": {

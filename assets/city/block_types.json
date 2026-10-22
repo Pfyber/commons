@@ -22,6 +22,8 @@
     { "key": "casino", "name": "Casino", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
     { "key": "club_hall", "name": "Club Hall", "category": "club", "enabled": true, "swappable": false, "rentable": ["club_room"], "instanced": false },
     { "key": "club_lot", "name": "Club lot", "category": "club", "enabled": true, "swappable": false, "rentable": ["club_lot"], "instanced": false },
+    { "key": "bowling", "name": "Bowling", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "arena", "name": "Arena", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
 
     { "key": "home", "name": "Homes", "category": "home", "enabled": true, "swappable": false, "rentable": ["home"], "instanced": false },
 

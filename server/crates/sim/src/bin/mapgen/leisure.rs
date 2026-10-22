@@ -1,7 +1,8 @@
-//! The arcade and the bar (from the arcade and bar merge): their own small
-//! zones behind doors in the city, the arcade in the Arcade block and the
-//! bar, The Mossy Mug, in the Café block. Leaving, you come out of the same
-//! door (`door:arcade`, `door:bar`).
+//! The arcade, the bar and the bowling alley (from the merges with the
+//! fork): their own small zones behind doors in the city, the arcade in the
+//! Arcade block, the bar, The Mossy Mug, in the Café block and the alley in
+//! the Bowling block. Leaving, you come out of the same door (`door:arcade`,
+//! `door:bar`, `door:bowling`).
 
 use super::Builder;
 use commons_sim::map::MapFile;
@@ -102,4 +103,39 @@ pub fn arcade() -> MapFile {
     b.object("prize_counter", 15, 13, 6, 1, Some("Prizes"), true);
     b.object("arcade_exit", 12, h - 1, 2, 1, Some("To the city"), true);
     b.finish("Arcade", (12, 13))
+}
+
+/// Inside the bowling alley: a dim, carpeted hall with four lanes along the
+/// back (pins at the far end, a scoreboard screen over each), benches at the
+/// foot of each lane, and the shoe counter on the right with its racks of
+/// rental shoes behind. The door leads back out to the city.
+pub fn bowling() -> MapFile {
+    let (w, h) = (24u16, 16u16);
+    let mut b = Builder::new(w, h);
+    b.rect(0, 0, w, h, "arcade_carpet");
+    for x in 0..w {
+        b.decor(x, 0, "neon_wall");
+        if !(11..=12).contains(&x) {
+            b.decor(x, h - 1, "neon_wall");
+        }
+    }
+    for y in 0..h {
+        b.decor(0, y, "neon_wall");
+        b.decor(w - 1, y, "neon_wall");
+    }
+    // The lanes, a step apart; their order is their number in BowlJoin.
+    for i in 0..4u16 {
+        let x = 2 + i * 4;
+        let name = format!("Lane {}", i + 1);
+        b.object("bowling_lane", x, 2, 3, 9, Some(&name), true);
+        // Somewhere to sit at the foot of it.
+        b.decor(x, 13, "stool");
+        b.decor(x + 2, 13, "stool");
+    }
+    // The shoe counter, its racks against the wall behind.
+    b.object("shoe_rack", 18, 1, 5, 1, Some("Shoes"), true);
+    b.object("shoe_counter", 18, 4, 5, 1, Some("Shoe rental"), true);
+    b.decor(22, 8, "lantern");
+    b.object("bowling_exit", 11, h - 1, 2, 1, Some("To the city"), true);
+    b.finish("Bowling", (11, 13))
 }

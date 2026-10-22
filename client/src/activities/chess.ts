@@ -3,6 +3,7 @@
 
 import type { ServerMsg } from "../net/protocol.gen";
 import { iconUrl } from "../ui/icons";
+import { confirmButton } from "../ui/panels";
 
 export type GameStateMsg = Extract<ServerMsg, { t: "GameState" }>;
 
@@ -159,7 +160,10 @@ export class ChessPanel {
     }
 
     this.actionsEl.innerHTML = "";
-    if (side && s.status === STATUS.PLAYING) this.actionsEl.append(this.button("Resign", () => this.h.move(this.table, "resign")));
+    // Two taps, so a slip of the finger doesn't throw the game away.
+    if (side && s.status === STATUS.PLAYING) {
+      this.actionsEl.append(confirmButton(`chess-resign-${this.table}`, "Resign", "Tap again to resign", () => this.h.move(this.table, "resign"), ""));
+    }
     if (side && s.status >= STATUS.WHITE_WON) this.actionsEl.append(this.button("Rematch", () => this.h.move(this.table, "new")));
     // Sitting alone: the Park Elder will take the other side.
     if (side && s.status === STATUS.WAITING && (!s.white || !s.black)) {

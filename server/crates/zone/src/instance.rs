@@ -10,11 +10,14 @@
 //! Spawn/Despawn (an avatar crossing into or out of the watched area).
 
 mod arcade;
+mod arena;
 mod bar;
+mod bowling;
 mod fishing;
 mod garden;
 mod hangout;
 mod home;
+mod lucky;
 mod pool;
 mod rps;
 mod together;
@@ -96,6 +99,11 @@ enum Pending {
         y: u16,
         action: u8,
         item: u32,
+    },
+    /// Throw a glimmer lure here on arrival.
+    Lure {
+        x: u16,
+        y: u16,
     },
     Cast {
         x: u16,
@@ -271,6 +279,14 @@ pub struct Instance {
     rps: Vec<rps::RpsMatch>,
     /// The bar's pool table, where the map has one.
     pool: Option<pool::Table>,
+    /// Glimmer lures in the water (see `fishing::Lure`).
+    lures: Vec<fishing::Lure>,
+    /// The lucky crate (outdoors only).
+    lucky: lucky::Lucky,
+    /// The bowling alley's lanes, in map order.
+    lanes: Vec<bowling::Lane>,
+    /// The gladiator arena, if the map has one.
+    arena: Option<arena::Arena>,
     /// The arcade's cabinets, in map order.
     cabinets: Vec<arcade::Cabinet>,
     /// The pitch's ball, if the zone has a pitch.
@@ -325,6 +341,19 @@ impl Instance {
             .iter()
             .find(|o| o.kind == "pool_table")
             .map(|o| pool::Table::new((o.x, o.y)));
+        let arena_obj = zone
+            .map
+            .objects
+            .iter()
+            .find(|o| o.kind == "arena")
+            .map(arena::Arena::new);
+        let lanes = zone
+            .map
+            .objects
+            .iter()
+            .filter(|o| o.kind == "bowling_lane")
+            .map(|o| bowling::Lane::new((o.x, o.y)))
+            .collect();
         let cabinets = zone
             .map
             .objects
@@ -368,6 +397,10 @@ impl Instance {
             follows: HashMap::new(),
             rps: Vec::new(),
             pool,
+            lures: Vec::new(),
+            lucky: lucky::Lucky::new(),
+            lanes,
+            arena: arena_obj,
             cabinets,
             ball,
             activity_left: Vec::new(),
@@ -504,8 +537,11 @@ impl Instance {
             self.fish_tick(now);
             self.rps_tick(now);
             self.pool_tick(now);
+            self.bowl_tick(now);
+            self.arena_tick(now);
             self.arcade_tick(now);
             self.garden_tick(now);
+            self.lucky_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
             self.stats.record_tick(elapsed);
@@ -727,6 +763,10 @@ impl Instance {
             self.send_to(id, &msg);
         }
         self.pool_hello(id);
+        self.lure_hello(id);
+        self.lucky_hello(id);
+        self.bowl_hello(id);
+        self.arena_hello(id);
         self.arcade_hello(id);
         self.stats
             .population
@@ -739,6 +779,8 @@ impl Instance {
         self.stop_fishing(id, false);
         self.rps_leave(id);
         self.pool_leave(id);
+        self.bowl_leave_all(id);
+        self.arena_leave(id);
         self.arcade_leave(id, None);
         let Some(a) = self.avatars.remove(&id) else {
             return;
@@ -792,6 +834,14 @@ impl Instance {
                 self.broadcast(cell, &ServerMsg::EmoteShown { id, emote: e }, None);
             }
             ClientMsg::ChatSay { text } => self.chat(id, &text, now),
+            ClientMsg::Going { zone, arrive } => {
+                // Nobody follows you home (homes are private), and names stay short.
+                if zone == "home" || zone.len() > 32 || arrive.len() > 32 {
+                    return;
+                }
+                let cell = self.avatars[&id].cell;
+                self.broadcast(cell, &ServerMsg::Went { id, zone, arrive }, Some(id));
+            }
             ClientMsg::Away { away } => {
                 let a = self.avatars.get_mut(&id).unwrap();
                 if a.away == away {
@@ -836,6 +886,15 @@ impl Instance {
             ClientMsg::FishCast { x, y } => self.fish_cast(id, (x, y), now),
             ClientMsg::FishReel { quality } => self.fish_reel(id, quality, now),
             ClientMsg::FishHit {} => self.fish_hit(id, now),
+            ClientMsg::ThrowLure { x, y } => self.throw_lure(id, (x, y), now),
+            ClientMsg::OpenCrate {} => self.open_crate(id, now),
+            ClientMsg::BowlJoin { lane, vs_bot } => self.bowl_join(id, lane, vs_bot, now),
+            ClientMsg::BowlLeave { lane } => self.bowl_leave(id, lane),
+            ClientMsg::BowlRoll { lane, aim, power } => self.bowl_roll(id, lane, aim, power, now),
+            ClientMsg::ArenaJoin { vs_bot } => self.arena_join(id, vs_bot, now),
+            ClientMsg::ArenaLeave {} => self.arena_leave(id),
+            ClientMsg::ArenaMove { dir } => self.arena_move(id, dir),
+            ClientMsg::ArenaAct { act } => self.arena_act(id, act, now),
             ClientMsg::PlotAction { x, y, action, item } => {
                 self.plot_action(id, (x, y), action, item, now)
             }
@@ -866,6 +925,10 @@ impl Instance {
     }
 
     fn move_to(&mut self, id: u32, target: TilePos, sprint: bool, now: u32) {
+        // Fighting in the arena: the fight moves you, nothing else.
+        if self.arena_fighting(id) {
+            return;
+        }
         let a = self.avatars.get_mut(&id).unwrap();
         if !a.move_rl.try_take(now as u64) {
             return;
@@ -1031,6 +1094,7 @@ impl Instance {
                         self.do_plot_action(id, (x, y), action, item)
                     }
                     Pending::Cast { x, y } => self.do_cast(id, (x, y), now),
+                    Pending::Lure { x, y } => self.do_throw_lure(id, (x, y), now),
                 }
             }
         }
@@ -1046,6 +1110,7 @@ impl Instance {
             self.change_cell(id, old_cell, new_cell, now);
         }
         self.update_subs(id, now);
+        self.lucky_near(id, now);
     }
 
     fn change_cell(&mut self, id: u32, old: u16, new: u16, now: u32) {

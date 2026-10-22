@@ -2,6 +2,8 @@
 //! the client. Everything here must give identical results on every platform:
 //! integer costs, fixed neighbour order, explicit tie-breaking.
 
+pub mod arena;
+pub mod bowling;
 pub mod city;
 pub mod furniture;
 pub mod garden;

@@ -243,6 +243,7 @@ pub fn sample_vectors() -> String {
             version: 1,
             view_w: 30,
             view_h: 17,
+            device: 0xdead_beef,
         },
         ClientMsg::MoveTo {
             x: 12,

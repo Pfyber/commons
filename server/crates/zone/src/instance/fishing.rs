@@ -36,6 +36,31 @@ const DOUBLE_HIT_MS: u32 = 2_000;
 /** Treasure: a chest instead of a fish, opened on the spot for coins. */
 pub(crate) const TREASURE_ITEM: u32 = 113;
 const TREASURE_COINS: i32 = 50;
+/// The fisherman's glimmer lure (an item, used up when thrown): for five
+/// minutes, lines cast into the circle of water round it (a 5×5 circle:
+/// within √5 tiles of its centre) bite rare-and-up fish this many times as often
+/// (a gentle nudge: it was 3×, too generous for the economy).
+pub(crate) const LURE_ITEM: u32 = 117;
+const LURE_MS: u32 = 5 * 60_000;
+const LURE_R2: i32 = 5;
+const LURE_LUCK: f64 = 1.6;
+/// Nothing below uncommon bites at a lure.
+const LURE_LEAST: i16 = 1;
+/// Lures are thrown this far (Chebyshev tiles) from where you stand.
+const LURE_RANGE: i32 = 5;
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Lure {
+    at: TilePos,
+    until: u32,
+}
+
+impl Lure {
+    fn covers(&self, t: TilePos) -> bool {
+        let (dx, dy) = (t.0 as i32 - self.at.0 as i32, t.1 as i32 - self.at.1 as i32);
+        dx * dx + dy * dy <= LURE_R2
+    }
+}
 const COIN: u32 = 1;
 
 #[derive(Debug, Clone)]
@@ -81,11 +106,15 @@ fn chebyshev(a: TilePos, b: TilePos) -> i32 {
 }
 
 /// Picks what bites, by each fish's odds (`weight`: common ones often,
-/// mythical ones seldom); night-only fish appear only at night.
-pub(crate) fn roll_fish(fish: &[FishInfo], night: bool, roll: f64) -> Option<u32> {
+/// mythical ones seldom); night-only fish appear only at night. `luck`
+/// (a lure, above 1) multiplies the odds of rare-and-up ones, and keeps
+/// the commons away altogether: uncommon at the least.
+pub(crate) fn roll_fish(fish: &[FishInfo], night: bool, luck: f64, roll: f64) -> Option<u32> {
     let weight = |f: &FishInfo| -> f64 {
-        if f.night && !night {
+        if (f.night && !night) || (luck > 1.0 && f.rarity < LURE_LEAST) {
             0.0
+        } else if f.rarity >= FLOP_FROM {
+            f.weight as f64 * luck
         } else {
             f.weight as f64
         }
@@ -111,6 +140,87 @@ fn is_night() -> bool {
 }
 
 impl Instance {
+    /// `id` throws a glimmer lure into the water at `target` (it's used up).
+    pub(super) fn throw_lure(&mut self, id: u32, target: TilePos, now: u32) {
+        // Walking up to the shore: thrown on arrival.
+        if self.moving(id, now) {
+            self.avatars.get_mut(&id).unwrap().pending = Some(Pending::Lure {
+                x: target.0,
+                y: target.1,
+            });
+            return;
+        }
+        self.do_throw_lure(id, target, now);
+    }
+
+    pub(super) fn do_throw_lure(&mut self, id: u32, target: TilePos, now: u32) {
+        if !self.is_water(target) {
+            return self.error(id, error_code::BAD_MESSAGE, "throw it into the water");
+        }
+        let a = &self.avatars[&id];
+        if chebyshev(a.tile, target) > LURE_RANGE {
+            return self.error(id, error_code::TOO_FAR, "walk closer to the water");
+        }
+        let Some(econ) = self.economy.clone() else {
+            return self.error(id, error_code::UNAVAILABLE, "the fish aren't biting yet");
+        };
+        let player = a.player_id.clone();
+        let key = self.next_key("lure");
+        self.spawn_call(
+            async move { econ.grant(&player, LURE_ITEM, -1, "lure", &key).await },
+            move |inst, r| match r {
+                Ok(applied) => {
+                    if inst.avatars.contains_key(&id) {
+                        inst.send_granted(id, &applied);
+                    }
+                    inst.lures.retain(|l| l.until > now);
+                    let lure = Lure {
+                        at: target,
+                        until: now + LURE_MS,
+                    };
+                    inst.lures.push(lure);
+                    // Everyone in the park hears of it, not just those looking at
+                    // that bit of the pond: whoever wanders over later sees it too.
+                    let bytes = ServerMsg::LureShown {
+                        x: target.0,
+                        y: target.1,
+                        ends: lure.until,
+                    }
+                    .to_bytes();
+                    for a in inst.avatars.values_mut() {
+                        a.send(&bytes);
+                    }
+                }
+                Err(CallError::Rejected(_)) => inst.error(
+                    id,
+                    error_code::NOT_ALLOWED,
+                    "you don't have a lure: the fisherman sells them",
+                ),
+                Err(CallError::Unavailable) => inst.error(
+                    id,
+                    error_code::UNAVAILABLE,
+                    "couldn't throw it just now, try again",
+                ),
+            },
+        );
+    }
+
+    /// A newcomer sees the lures already in the water.
+    pub(super) fn lure_hello(&mut self, id: u32) {
+        let now = self.clock.now_ms();
+        self.lures.retain(|l| l.until > now);
+        for l in self.lures.clone() {
+            self.send_to(
+                id,
+                &ServerMsg::LureShown {
+                    x: l.at.0,
+                    y: l.at.1,
+                    ends: l.until,
+                },
+            );
+        }
+    }
+
     fn is_water(&self, t: TilePos) -> bool {
         let m = &self.zone.map;
         if t.0 >= m.width || t.1 >= m.height {
@@ -442,9 +552,15 @@ impl Instance {
                 s.biting = true;
                 // What's on the hook: the angler sees how rare (and so how hard) it is.
                 let catalog = self.economy.as_ref().and_then(|e| e.catalog());
+                let target = s.target;
+                let luck = if self.lures.iter().any(|l| l.until > now && l.covers(target)) {
+                    LURE_LUCK
+                } else {
+                    1.0
+                };
                 s.fish = catalog
                     .as_ref()
-                    .and_then(|c| roll_fish(&c.fish, is_night(), rand::rng().random()));
+                    .and_then(|c| roll_fish(&c.fish, is_night(), luck, rand::rng().random()));
                 // A rare one may get a second swing at it.
                 let rarity = catalog.as_ref().and_then(|c| {
                     s.fish
@@ -485,11 +601,11 @@ mod tests {
         let fish = ZoneCatalog::for_tests().fish;
         // Moonfish (106) is night-only.
         for i in 0..100 {
-            assert_ne!(roll_fish(&fish, false, i as f64 / 100.0), Some(106));
+            assert_ne!(roll_fish(&fish, false, 1.0, i as f64 / 100.0), Some(106));
         }
         let count = |id: u32| {
             (0..1000)
-                .filter(|i| roll_fish(&fish, true, *i as f64 / 1000.0) == Some(id))
+                .filter(|i| roll_fish(&fish, true, 1.0, *i as f64 / 1000.0) == Some(id))
                 .count()
         };
         assert!(
@@ -497,6 +613,41 @@ mod tests {
             "common minnows, fewer boots, a rare koi"
         );
         assert!(count(105) > 0, "but koi do bite");
+    }
+
+    #[test]
+    fn a_lure_draws_the_rarer_fish_to_its_circle() {
+        let fish = ZoneCatalog::for_tests().fish;
+        let rare = |luck: f64| {
+            (0..10_000)
+                .filter_map(|i| roll_fish(&fish, true, luck, i as f64 / 10_000.0))
+                .filter(|id| fish.iter().any(|f| f.id == *id && f.rarity >= FLOP_FROM))
+                .count()
+        };
+        assert!(
+            rare(LURE_LUCK) > 2 * rare(1.0),
+            "rare fish come far more often to a lure"
+        );
+        for i in 0..1000 {
+            let id = roll_fish(&fish, true, LURE_LUCK, i as f64 / 1000.0).expect("something bites");
+            let f = fish.iter().find(|f| f.id == id).unwrap();
+            assert!(
+                f.rarity >= LURE_LEAST,
+                "never a common fish at a lure: {}",
+                f.id
+            );
+        }
+        // A 5×5 circle: 21 tiles round its centre, not the corners.
+        let l = Lure {
+            at: (10, 10),
+            until: 1,
+        };
+        let n = (5..=15)
+            .flat_map(|x| (5..=15).map(move |y| (x, y)))
+            .filter(|&t| l.covers(t))
+            .count();
+        assert_eq!(n, 21);
+        assert!(l.covers((12, 11)) && !l.covers((12, 12)));
     }
 
     #[test]
@@ -528,7 +679,9 @@ mod tests {
         });
         inst.fish_tick(now + BITE_MAX_MS + 1);
         assert!(inst.avatars[&1].fish.as_ref().unwrap().biting);
-        inst.fish_tick(now + BITE_MAX_MS + WINDOW_MS + GRACE_MS + 2);
+        inst.fish_tick(
+            now + BITE_MAX_MS + WINDOW_MS + SECOND_CHANCE_MS + DOUBLE_HIT_MS + GRACE_MS + 2,
+        );
         assert!(inst.avatars[&1].fish.is_none());
         inst.flush();
         a.pump();

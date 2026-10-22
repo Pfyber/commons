@@ -536,7 +536,8 @@ mod tests {
         assert_eq!(c.block_type(c.spawn_block).key, "market");
         let count = |k: &str| c.blocks().filter(|(_, t)| t.key == k).count();
         assert_eq!(count("home"), 24, "the whole outer ring");
-        assert_eq!(count("club_lot") + count("club_hall"), 8);
+        // Two of the first eight club lots became the bowling alley and the arena.
+        assert_eq!(count("club_lot") + count("club_hall"), 6);
         for k in [
             "park",
             "pond",
@@ -560,6 +561,8 @@ mod tests {
             "fairground",
             "gallery",
             "casino",
+            "bowling",
+            "arena",
         ] {
             let (b, _) = c.blocks().find(|(_, t)| t.key == k).unwrap();
             assert_eq!(c.ring(b), 2, "{k} is in ring 2");

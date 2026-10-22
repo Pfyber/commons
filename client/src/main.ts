@@ -15,6 +15,7 @@ import libArtsUrl from "../../assets/maps/library_arts.json?url";
 import libReferenceUrl from "../../assets/maps/library_reference.json?url";
 import clubHallUrl from "../../assets/maps/club_hall.json?url";
 import clubRoomUrl from "../../assets/maps/clubroom.json?url";
+import bowlingUrl from "../../assets/maps/bowling.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { Homes } from "./homes";
@@ -47,7 +48,7 @@ import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
 import { Hud } from "./ui/hud";
-import { signIn } from "./ui/login";
+import { LOGIN_NOTICE, signIn } from "./ui/login";
 import { ActionMenu, AlbumPanel, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
 import { FriendsPanel, NotificationsPanel } from "./ui/social";
 import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
@@ -58,6 +59,8 @@ import "@fontsource/pixelify-sans/400.css";
 import "@fontsource/pixelify-sans/500.css";
 import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
+import silkscreen400 from "@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2?url";
+import silkscreen700 from "@fontsource/silkscreen/files/silkscreen-latin-700-normal.woff2?url";
 import "./styles.css";
 
 const MAP_URLS: Record<string, string> = {
@@ -77,9 +80,20 @@ const MAP_URLS: Record<string, string> = {
   library_reference: libReferenceUrl,
   club_hall: clubHallUrl,
   clubroom: clubRoomUrl,
+  bowling: bowlingUrl,
 };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
+const ERR_NAME_TAKEN = 14;
+
+// Numbers and $ (prices, coins, counts) in Silkscreen: its blocky digits read
+// clearly at small sizes, where Pixelify's 5 looks like an S. Only those
+// characters come from it ("Commons Digits" leads the UI font, see styles.css).
+for (const [url, weight] of [[silkscreen400, "400"], [silkscreen700, "700"]]) {
+  const face = new FontFace("Commons Digits", `url(${url}) format("woff2")`, { weight, unicodeRange: "U+0024, U+0030-0039" });
+  document.fonts.add(face);
+  void face.load().catch(() => {});
+}
 
 const overlay = document.getElementById("overlay")!;
 
@@ -311,6 +325,7 @@ async function main() {
       },
       (item) => rides.ride === item.meta.code,
       (item) => (game as Game | null)?.bagExtra(item) ?? null,
+      () => (game as Game | null)?.openCrate(),
     ),
     album: new AlbumPanel(eco),
     market: new MarketPanel(eco),
@@ -440,7 +455,7 @@ async function main() {
           // library). Out of a library wing, you're back at its door in the hall.
           onTravel: (z) => {
             const from = game as Game | null;
-            const place = from && ["mall", "bar", "arcade", HALL, "club_hall"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
+            const place = from && ["mall", "bar", "arcade", HALL, "club_hall", "bowling"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
             const arrive =
               (z === HALL && from && wingOfZone(from.zoneId)) || (z === "club_hall" && from?.zoneId === "clubroom")
                 ? `place:${from.zoneId}`
@@ -499,6 +514,16 @@ async function main() {
         label: "Play here instead",
         run: () => void enter(),
       });
+    } else if (reason?.code === ERR_NAME_TAKEN) {
+      // Someone's already playing under this name: back to the login, to pick another.
+      const name = auth.player?.display_name ?? "That name";
+      auth.signOut();
+      try {
+        sessionStorage.setItem(LOGIN_NOTICE, `${name} is already playing right now. Pick another name to play as someone else.`);
+      } catch {
+        // storage unavailable: the login screen just won't say why
+      }
+      location.reload();
     } else if (reason?.code === ERR_VERSION) {
       showOverlay("Commons was updated", "Reload to get the latest version.", { label: "Reload", run: () => location.reload() });
     } else {

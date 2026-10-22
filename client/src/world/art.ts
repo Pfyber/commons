@@ -471,6 +471,36 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       }
       break;
     }
+    case "arena_wall": {
+      // The arena's sandstone wall: big blocks in courses, a capstone on top,
+      // and now and then an arch window or a torch.
+      [c, ctx] = makeCanvas(32, 48);
+      px(ctx, P.outline, 0, 4, 32, 44);
+      const stone = ["#d8b47a", "#c9a46a", "#ccA86e"];
+      for (let row = 0; row < 5; row++) {
+        const y = 8 + row * 7;
+        const off = row % 2 ? 0 : 8;
+        for (let x = -off; x < 32; x += 16) {
+          px(ctx, stone[(row + v + (x > 8 ? 1 : 0)) % 3], Math.max(0, x), y, Math.min(15, 32 - Math.max(0, x)), 6);
+          px(ctx, "rgba(255,255,255,0.15)", Math.max(0, x), y, Math.min(15, 32 - Math.max(0, x)), 1);
+        }
+      }
+      px(ctx, "#a8834e", 0, 42, 32, 6);
+      px(ctx, "#e8c98a", 0, 2, 32, 6);
+      px(ctx, P.outline, 0, 0, 32, 2);
+      px(ctx, "#b8935e", 0, 7, 32, 1);
+      if (v === 1) {
+        px(ctx, "#3a2410", 11, 16, 10, 18);
+        px(ctx, "#3a2410", 13, 14, 6, 2);
+      }
+      if (v === 2) {
+        px(ctx, P.outline, 14, 14, 4, 12);
+        px(ctx, "#6e4b30", 15, 16, 2, 10);
+        px(ctx, "#ff9a4f", 14, 10, 4, 5);
+        px(ctx, "#ffe14f", 15, 11, 2, 3);
+      }
+      break;
+    }
     case "neon_wall": {
       // A dark wall with a thin, dim trim along it.
       [c, ctx] = makeCanvas(32, 48);
@@ -588,12 +618,36 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       break;
     }
     case "lamp": {
+      // An old street lamp: a pointed roof, a glass lantern with two dark
+      // bars, a collar, and a slim post with rings down to its foot.
       [c, ctx] = makeCanvas(32, 56);
-      circle(ctx, "rgba(255,227,154,0.25)", 16, 10, 12);
-      px(ctx, P.outline, 15, 12, 3, 42);
-      px(ctx, P.outline, 11, 52, 11, 3);
-      px(ctx, P.outline, 11, 4, 11, 10);
-      px(ctx, P.lampGlow, 12, 5, 9, 8);
+      const dark = "#17110a";
+      const iron = "#2a2116";
+      const L = 9; // left edge of the 14-wide head
+      // Roof, stepping out from its tip to the brim.
+      px(ctx, iron, L + 6, 2, 2, 2);
+      for (let r = 0; r < 5; r++) px(ctx, iron, L + 5 - r, 4 + r, 4 + r * 2, 1);
+      px(ctx, dark, L, 9, 14, 3);
+      // The glass, paler at the top, warmer low down where the flame is.
+      px(ctx, dark, L + 2, 12, 10, 8);
+      px(ctx, "#cfd0a6", L + 3, 12, 8, 5);
+      px(ctx, "#bdbd86", L + 3, 17, 8, 3);
+      px(ctx, "#c9bb7a", L + 5, 16, 4, 4);
+      px(ctx, dark, L + 4, 12, 1, 9);
+      px(ctx, dark, L + 9, 12, 1, 9);
+      // It narrows into the collar.
+      px(ctx, dark, L + 3, 20, 8, 1);
+      px(ctx, "#bdbd86", L + 5, 20, 1, 1);
+      px(ctx, "#bdbd86", L + 8, 20, 1, 1);
+      px(ctx, iron, L + 4, 21, 6, 1);
+      // The post, with a crossbar under the head and rings lower down.
+      px(ctx, iron, L + 6, 22, 2, 32);
+      px(ctx, dark, L + 4, 23, 6, 1);
+      px(ctx, dark, L + 5, 24, 4, 1);
+      px(ctx, dark, L + 5, 41, 4, 1);
+      px(ctx, iron, L + 5, 43, 4, 4);
+      px(ctx, dark, L + 5, 49, 4, 1);
+      px(ctx, dark, L + 4, 53, 6, 2);
       break;
     }
     case "cafe_table": {
@@ -803,6 +857,15 @@ function label(ctx: CanvasRenderingContext2D, text: string, cx: number, y: numbe
   ctx.textBaseline = "middle";
   ctx.fillStyle = color;
   ctx.fillText(text, cx, y);
+}
+
+/**
+ * Where pin (`row`, `k`) stands on a lane `w` px wide, from above: px from
+ * the lane's left edge and from its top tile's top (row 0 the head pin,
+ * nearest the bowler; k left to right).
+ */
+export function lanePinSpot(w: number, row: number, k: number): { x: number; y: number } {
+  return { x: Math.round(w / 2 + (k - row / 2) * 13), y: 38 - row * 11 };
 }
 
 /** Texture for a map object plus how far it extends above its footprint. */
@@ -1990,6 +2053,154 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, "#3fe0ff", 0, top + h - 6, w, 2);
       break;
     }
+    case "arena_sign": {
+      // A painted board on two posts by the gate: crossed swords and ARENA.
+      [c, ctx] = makeCanvas(w, h + 26);
+      overhang = 26;
+      const top = 26;
+      px(ctx, "rgba(0,0,0,0.2)", 6, top + h - 6, w - 12, 5);
+      px(ctx, P.outline, 10, top - 6, 4, h + 2);
+      px(ctx, P.outline, w - 14, top - 6, 4, h + 2);
+      px(ctx, "#6e4b30", 11, top - 6, 2, h + 1);
+      px(ctx, "#6e4b30", w - 13, top - 6, 2, h + 1);
+      px(ctx, P.outline, 2, top - 26, w - 4, 22);
+      px(ctx, "#c9a46a", 3, top - 25, w - 6, 20);
+      px(ctx, "#8a5a2a", 3, top - 25, w - 6, 2);
+      label(ctx, "ARENA", w / 2, top - 11, "#5a2a12", 9);
+      // crossed swords
+      for (let k = 0; k < 9; k++) {
+        px(ctx, "#d8dce8", w / 2 - 6 + k, top - 22 + Math.floor(k / 2), 1, 1);
+        px(ctx, "#d8dce8", w / 2 + 2 - k, top - 22 + Math.floor(k / 2), 1, 1);
+      }
+      px(ctx, "#c99a2a", w / 2 - 6, top - 23, 2, 2);
+      px(ctx, "#c99a2a", w / 2 + 4, top - 23, 2, 2);
+      break;
+    }
+    case "bowling_alley": {
+      // Commons Lanes: a retro alley, teal and cream, a big red-necked pin
+      // standing on the roof beside its sign, glass doors and a window onto
+      // the lanes.
+      [c, ctx] = makeCanvas(w, h + 28);
+      overhang = 28;
+      const top = 28;
+      px(ctx, "rgba(0,0,0,0.25)", 4, top + h - 8, w - 8, 8);
+      // the building
+      px(ctx, P.outline, 4, top - 10, w - 8, h + 4);
+      px(ctx, "#2f8f8a", 6, top - 8, w - 12, h);
+      px(ctx, "#f4e9cf", 6, top + h - 30, w - 12, 24);
+      for (let x = 6; x < w - 6; x += 12) px(ctx, "#e8566b", x, top + h - 30, 6, 3);
+      // the sign
+      px(ctx, P.outline, 18, top - 22, w - 52, 22);
+      px(ctx, "#1a1030", 20, top - 20, w - 56, 18);
+      label(ctx, "BOWLING", 18 + (w - 52) / 2, top - 11, "#ffe14f", 12);
+      // the big pin on the roof
+      const pxr = w - 26;
+      px(ctx, P.outline, pxr - 7, top - 28, 14, 32);
+      px(ctx, "#f4f1e8", pxr - 5, top - 26, 10, 28);
+      px(ctx, P.outline, pxr - 7, top - 14, 2, 4);
+      px(ctx, P.outline, pxr + 5, top - 14, 2, 4);
+      px(ctx, "#f4f1e8", pxr - 3, top - 14, 6, 4);
+      px(ctx, "#e8566b", pxr - 5, top - 20, 10, 3);
+      px(ctx, "#ffffff", pxr - 3, top - 24, 2, 4);
+      // a window onto the lanes: boards running back, little pins at the end
+      px(ctx, P.outline, 12, top + 4, 54, 34);
+      px(ctx, "#cf9b58", 14, top + 6, 50, 30);
+      for (let x = 18; x < 64; x += 12) px(ctx, "#2a2046", x, top + 6, 2, 30);
+      for (let x = 20; x < 62; x += 6) px(ctx, "#ffffff", x, top + 8, 3, 4);
+      px(ctx, "rgba(255,255,255,0.18)", 16, top + 8, 6, 26);
+      // glass doors
+      const dx = w / 2 - 4;
+      px(ctx, P.outline, dx, top + h - 50, 40, 44);
+      px(ctx, "rgba(160,230,255,0.75)", dx + 3, top + h - 47, 16, 41);
+      px(ctx, "rgba(160,230,255,0.75)", dx + 21, top + h - 47, 16, 41);
+      px(ctx, "#ffffff", dx + 5, top + h - 44, 2, 16);
+      px(ctx, "#ffe14f", dx + 16, top + h - 26, 2, 4);
+      px(ctx, "#ffe14f", dx + 22, top + h - 26, 2, 4);
+      break;
+    }
+    case "bowling_lane": {
+      // A lane seen from above: maple boards between dark gutters, the
+      // arrows, the foul line at the near end and the pins racked at the far
+      // end, under the lane's scoreboard screen on the back wall.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "#0f0a1c", 0, top - 8, w, h + 8);
+      px(ctx, "#2a2046", 4, top - 6, 14, h + 6);
+      px(ctx, "#2a2046", w - 18, top - 6, 14, h + 6);
+      for (let x = 18; x < w - 18; x += 6) px(ctx, (x / 6) % 2 ? "#d9a866" : "#cf9b58", x, top - 6, 6, h + 6);
+      px(ctx, "rgba(255,255,255,0.1)", 18, top - 6, w - 36, h + 6);
+      // the pin deck (the pins on it are live: world/bowlfx.ts, as they stand in the game)
+      px(ctx, "rgba(0,0,0,0.15)", 18, top - 6, w - 36, 52);
+      for (let row = 0; row < 4; row++) {
+        for (let k = 0; k <= row; k++) {
+          const p = lanePinSpot(w, row, k);
+          px(ctx, "rgba(0,0,0,0.18)", p.x - 3, top + p.y + 2, 6, 2);
+        }
+      }
+      const mid = w / 2;
+      // the arrows, and the foul line
+      for (const k of [-2, -1, 0, 1, 2]) px(ctx, "#8a5a2a", Math.round(mid + k * 11) - 2, top + h - 80 + Math.abs(k) * 6, 4, 6);
+      px(ctx, "#c8303a", 18, top + h - 6, w - 36, 3);
+      // the ball return at the side of the approach
+      px(ctx, P.outline, w - 16, top + h - 30, 14, 26);
+      px(ctx, "#4f4b6a", w - 14, top + h - 28, 10, 22);
+      px(ctx, "#3f7ed0", w - 13, top + h - 26, 8, 8);
+      px(ctx, "#e8566b", w - 13, top + h - 16, 8, 8);
+      // the scoreboard screen, hung on the back wall
+      px(ctx, "#0f0a1c", 6, 0, w - 12, 30);
+      px(ctx, "#1a1030", 8, 2, w - 16, 26);
+      px(ctx, "rgba(63,224,255,0.25)", 10, 4, w - 20, 22);
+      label(ctx, (o.label ?? "LANE").toUpperCase(), w / 2, 15, "#3fe0ff", 8);
+      break;
+    }
+    case "shoe_rack": {
+      // Cubbies of rental shoes on the wall: red, blue and green pairs.
+      [c, ctx] = makeCanvas(w, h + 32);
+      overhang = 32;
+      const top = 32;
+      px(ctx, P.outline, 0, top - 32, w, h + 30);
+      px(ctx, "#8a5a2a", 2, top - 30, w - 4, h + 26);
+      const cols = ["#e8566b", "#3f7ed0", "#5fd07a", "#f6c343"];
+      for (let row = 0; row < 3; row++) {
+        for (let x = 6; x < w - 12; x += 16) {
+          const y = top - 26 + row * 18;
+          px(ctx, "#5a3a1a", x - 2, y - 2, 16, 16);
+          const col = cols[(x / 16 + row) % cols.length | 0];
+          px(ctx, col, x, y + 5, 5, 6);
+          px(ctx, col, x + 7, y + 5, 5, 6);
+          px(ctx, "#f4f1e8", x, y + 9, 5, 2);
+          px(ctx, "#f4f1e8", x + 7, y + 9, 5, 2);
+        }
+      }
+      break;
+    }
+    case "shoe_counter": {
+      // The rental counter: a long desk with a SHOES sign and a pair on top.
+      [c, ctx] = makeCanvas(w, h + 30);
+      overhang = 30;
+      const top = 30;
+      px(ctx, "#0f0a1c", w / 2 - 34, top - 30, 68, 16);
+      px(ctx, "#1a1030", w / 2 - 32, top - 28, 64, 12);
+      label(ctx, "SHOES", w / 2, top - 22, "#ff9a4f", 9);
+      px(ctx, P.outline, 0, top - 12, w, h + 10);
+      px(ctx, "#2f8f8a", 2, top - 10, w - 4, h + 6);
+      px(ctx, "#f4e9cf", 2, top - 10, w - 4, 6);
+      for (let x = 6; x < w - 6; x += 14) px(ctx, "#e8566b", x, top + h - 8, 7, 3);
+      px(ctx, "#e8566b", 20, top - 16, 8, 6);
+      px(ctx, "#3f7ed0", 30, top - 16, 8, 6);
+      px(ctx, "#f4f1e8", 20, top - 12, 18, 2);
+      break;
+    }
+    case "bowling_exit": {
+      [c, ctx] = makeCanvas(w, h + 16);
+      overhang = 16;
+      px(ctx, "#0f0a1c", 0, 0, w, h + 16);
+      px(ctx, "#2f5a3a", 3, 3, w - 6, h + 10);
+      px(ctx, "#2f8f8a", 6, h + 6, w - 12, 8);
+      label(ctx, "EXIT", w / 2, h / 2 + 6, "#5fe08a", 7);
+      break;
+    }
     case "arcade_exit": {
       [c, ctx] = makeCanvas(w, h + 16);
       overhang = 16;
@@ -2258,7 +2469,20 @@ export function lookParts(look: number) {
 }
 
 /** 0, 1 walking; 2 sitting; 4 riding a skateboard; 3, 5, 6 pushing one; 7–12 the robot; 13–15 dozing; 16, 17 sprinting. */
-export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23;
+/** The arena: 22 the sword arm raised to strike (knees bent), 23 on guard to parry (arms up in front). The sword itself is drawn over them. */
+export const SWORD_RAISE: AvatarFrame = 22;
+export const SWORD_GUARD: AvatarFrame = 23;
+/**
+ * Bowling: 18 holds the ball in both hands; 19 the backswing (knees bent, the
+ * ball up high); 20 the release (a lunge, the arm low and forward, the ball
+ * gone); 21 crouching to pick a ball up off the return.
+ */
+export const BOWL_HOLD: AvatarFrame = 18;
+export const BOWL_BACK: AvatarFrame = 19;
+export const BOWL_RELEASE: AvatarFrame = 20;
+export const BOWL_PICKUP: AvatarFrame = 21;
+const BOWL_BALL = "#3f5fd0";
 /** Sprinting: a stride, legs passing, the other stride, passing again. */
 export const SPRINT_FRAMES: AvatarFrame[] = [16, 0, 17, 0];
 const DOZING = (f: AvatarFrame) => f >= 13 && f <= 15;
@@ -2363,6 +2587,21 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
     px(ctx, o, 13, 25 + c, 4, 7 - c);
     px(ctx, "#4a4a5a", 14, 25 + c, 2, 6 - c);
     ctx.translate(0, c);
+  } else if (frame === BOWL_BACK || frame === BOWL_PICKUP || frame === SWORD_RAISE) {
+    // Knees bent: both legs shorter, the body lower.
+    const c = frame === BOWL_PICKUP ? 3 : frame === SWORD_RAISE ? 1 : 2;
+    px(ctx, o, 7, 25 + c, 4, 7 - c);
+    px(ctx, o, 13, 25 + c, 4, 7 - c);
+    px(ctx, "#4a4a5a", 8, 25 + c, 2, 6 - c);
+    px(ctx, "#4a4a5a", 14, 25 + c, 2, 6 - c);
+    ctx.translate(0, c);
+  } else if (frame === BOWL_RELEASE) {
+    // The lunge: the left leg forward and bent, the right stretched out behind.
+    px(ctx, o, 5, 27, 5, 5);
+    px(ctx, "#4a4a5a", 6, 27, 3, 4);
+    px(ctx, o, 15, 25, 4, 7);
+    px(ctx, "#4a4a5a", 16, 25, 2, 6);
+    ctx.translate(0, 2);
   } else if (sprint) {
     const [upX, backX] = sprint < 0 ? [7, 15] : [13, 5];
     px(ctx, o, upX, 25, 4, 5);
@@ -2519,6 +2758,38 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
       }
       continue;
     }
+    if (frame >= BOWL_HOLD && frame <= SWORD_GUARD) {
+      const arm = sleeves ? dark : p.skinColor;
+      const right = dir > 0;
+      if (frame === BOWL_HOLD || frame === SWORD_GUARD) {
+        // Both forearms in to the ball held at the waist.
+        px(ctx, arm, ax, 18, 2, 3);
+        px(ctx, arm, right ? ax - 3 : ax + 1, 21, 4, 2);
+        px(ctx, p.skinColor, right ? ax - 4 : ax + 4, 21, 2, 2);
+      } else if (frame === BOWL_BACK || frame === SWORD_RAISE) {
+        // The bowling arm up beside the head with the ball; the other out for balance.
+        if (right) px(ctx, arm, ax + 1, 11, 2, 9);
+        else {
+          px(ctx, arm, ax - 2, 18, 4, 2);
+          px(ctx, p.skinColor, ax - 3, 18, 1, 2);
+        }
+      } else if (frame === BOWL_RELEASE) {
+        // The bowling arm swung through, low and forward; the other back.
+        if (right) {
+          px(ctx, arm, ax, 18, 2, 6);
+          px(ctx, arm, ax - 1, 23, 2, 3);
+          px(ctx, p.skinColor, ax - 1, 26, 2, 1);
+        } else {
+          px(ctx, arm, ax - 2, 17, 4, 2);
+          px(ctx, p.skinColor, ax - 3, 16, 2, 2);
+        }
+      } else {
+        // Crouched: the bowling hand down at the ball, the other on the knee.
+        if (right) px(ctx, arm, ax, 18, 2, 8);
+        else px(ctx, arm, ax, 18, 2, 5);
+      }
+      continue;
+    }
     if (sprint) {
       // The arm swinging forward (and up), in front of the body; the one
       // swinging back was drawn behind it (see above).
@@ -2542,6 +2813,17 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
   if (p.accessory === 4) {
     px(ctx, "#6e4b30", 7, 16, 2, 7);
     px(ctx, "#6e4b30", 15, 16, 2, 7);
+  }
+  // The bowling ball: at the waist, up by the shoulder, or down by the feet.
+  const ball = frame === BOWL_HOLD ? [9, 19] : frame === BOWL_BACK ? [18, 5] : frame === BOWL_PICKUP ? [16, 24] : null;
+  if (ball) {
+    const [bx, by] = ball;
+    px(ctx, o, bx, by + 1, 7, 5);
+    px(ctx, o, bx + 1, by, 5, 7);
+    px(ctx, BOWL_BALL, bx + 1, by + 1, 5, 5);
+    px(ctx, "#8fa8ff", bx + 2, by + 2, 1, 1);
+    px(ctx, o, bx + 3, by + 3, 1, 1);
+    px(ctx, o, bx + 4, by + 2, 1, 1);
   }
 
   // ---- head ----
