@@ -13,13 +13,14 @@
         {"item": "birdbath", "price": 80}
       ]
     },
-    {"key": "tools", "name": "Tools", "type": "shelves", "unit": [25, 2, 46, 18], "door": "s", "open": true, "slots": 5,
+    {"key": "tools", "name": "Tools & Gadgets", "type": "shelves", "unit": [25, 2, 46, 18], "door": "s", "open": true, "slots": 6,
       "catalog": [
         {"item": "cherry_rod", "price": 80, "always": true},
         {"item": "carbon_rod", "price": 120, "always": true},
         {"item": "golden_rod", "price": 180, "limited": 3},
         {"item": "copper_can", "price": 60, "always": true},
-        {"item": "floral_can", "price": 90, "always": true}
+        {"item": "floral_can", "price": 90, "always": true},
+        {"item": "phone", "price": 250, "always": true}
       ]
     },
     {"key": "furniture", "name": "Furniture", "type": "showroom", "unit": [48, 2, 69, 18], "door": "s", "open": true, "slots": 9,

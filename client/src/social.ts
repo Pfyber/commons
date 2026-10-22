@@ -63,6 +63,13 @@ export class Social {
   private listeners = new Set<() => void>();
   /** Called for live events worth a toast. */
   onToast: (text: string) => void = () => {};
+  /** Other pushes (phone calls: `call_ring`, `call`, …), for whoever handles them. */
+  private pushListeners = new Set<(m: { t: string; [k: string]: unknown }) => void>();
+
+  onPush(f: (m: { t: string; [k: string]: unknown }) => void): () => void {
+    this.pushListeners.add(f);
+    return () => this.pushListeners.delete(f);
+  }
   onDm: (from: string, m: Dm) => void = () => {};
 
   constructor(
@@ -155,6 +162,8 @@ export class Social {
         this.emit();
         break;
       }
+      default:
+        for (const f of this.pushListeners) f(m);
     }
   }
 

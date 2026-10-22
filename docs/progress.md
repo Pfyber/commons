@@ -1115,6 +1115,40 @@ reading; Bo, who didn't borrow, has it put back at the door; Ada's 📚
 list shows page 1 of 349 and due in 21 days; bringing it back clears
 the button.
 
+## Phone calls V1: done (2026-10-22)
+
+ADR 0013. Buy a Mobile Phone (250 coins, Tools & Gadgets, now six
+displays) and call your friends who have one; ring more friends into a
+call, up to eight; answering while in a call moves you over.
+
+- **Social gateway** (`calls.rs`): ringing (30 s, rate-limited), answer
+  and decline, group calls, hanging up (and going offline), all checked
+  against friendship, blocks and the age rules for everyone in the call.
+  Pushes `call_ring`, `call`, `call_declined`, `call_unanswered`,
+  `call_missed`, `call_ended`.
+- **Voice through LiveKit**, self-hosted: a room per call; the gateway
+  signs a two-minute pass for that room, talk-and-listen only
+  (`commons_common::voice::LiveKit`).
+- **Under-16s: built and off.** `COMMONS_VOICE_MINORS=false`: no phone
+  sold to them, no calls to or from them. When on: under-16s only with
+  under-16s, each switching calls on (`players.voice_ok`, migration 0029).
+- **Client**: `livekit-client`; a 📱 HUD button once you own a phone (lit
+  during a call), the phone panel (contacts with why someone can't be
+  called, the call's members with who's talking, mute, add someone, hang
+  up), an incoming-call card with a soft ringtone, the phone at your ear
+  and 📞 by your name for everyone to see (protocol v19). Back on your
+  call after a reload.
+
+Checked: server tests (common: the age rules and the signed pass; social
+13 with a call test: no phone, offline, ringing, answering, a third
+joining, the under-16 refusals, hanging up to the end; API 44 with
+"phones are for 16 and over for now"; zone 55 with the phone shown),
+clippy clean, client 84. In the browser with a real LiveKit server and
+three players (fake microphones): Ada calls Bo, both connected and
+hearing each other, Bo sees Ada's phone at her ear; Bo rings Cy in, a
+call of three, the talking indicator; mute; Bo hangs up, Ada and Cy carry
+on; Ada hangs up and Cy's told it's over.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

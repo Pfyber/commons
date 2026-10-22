@@ -334,6 +334,19 @@ mod tests {
             msg: ClientMsg::Reading { book: u32::MAX },
         });
         assert_eq!(inst.avatars[&1].reading, 0, "no such book: closed");
+        // On the phone, likewise.
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::Calling { on: true },
+        });
+        inst.flush();
+        b.pump();
+        assert!(
+            b.log
+                .iter()
+                .any(|m| matches!(m, ServerMsg::CallingShown { id: 1, on: true }))
+        );
+        assert!(inst.avatars[&1].info(0).calling);
     }
 
     #[test]

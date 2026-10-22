@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 18;
+pub const PROTOCOL_VERSION: u16 = 19;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -54,6 +54,8 @@ records! {
         away: bool,
         // reading: the library book open in their hands (v18; 0: none).
         reading: u32,
+        // calling: on a phone call, phone at their ear (v19).
+        calling: bool,
     }
 }
 
@@ -133,6 +135,8 @@ message_enum! {
         /// You opened a library book (its Gutenberg number), or closed it (0).
         /// Others see it in your hands and can open the same one.
         33 Reading { book: u32 }
+        /// You're on a phone call (true) or hung up; others see the phone at your ear.
+        34 Calling { on: bool }
     }
 }
 
@@ -241,6 +245,8 @@ message_enum! {
         33 AwayChanged { id: u32, away: bool }
         /// Avatar `id` opened library book `book`, or closed it (0).
         34 ReadingShown { id: u32, book: u32 }
+        /// Avatar `id` is on a phone call, or hung up.
+        35 CallingShown { id: u32, on: bool }
     }
 }
 
@@ -530,6 +536,7 @@ mod tests {
             mood: 2,
             away: false,
             reading: 1342,
+            calling: true,
         };
         let msgs = vec![
             ServerMsg::Welcome {

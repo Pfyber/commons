@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fontsource/pixelify-sans": "^5.3.0",
+    "livekit-client": "^2.23.0",
     "pixi.js": "^8.22.0"
   },
   "devDependencies": {

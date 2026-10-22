@@ -33,13 +33,17 @@ struct P {
 }
 
 async fn player(s: &State) -> P {
+    player_born(s, 1990).await
+}
+
+async fn player_born(s: &State, birth_year: i32) -> P {
     let name = format!("s{}", &Uuid::new_v4().simple().to_string()[..12]);
     let catalog = s.catalog.clone();
     let p = Store::new(s.db.clone())
         .create_player(
             &format!("{name}@test.local"),
             &name,
-            1990,
+            birth_year,
             1,
             move |conn, id| {
                 Box::pin(async move {
@@ -69,7 +73,7 @@ async fn player(s: &State) -> P {
         look: 1,
         style: 0,
         tier: TrustTier::Visitor,
-        minor: false,
+        minor: birth_year > 2000,
         muted_until: 0,
     };
     P {
@@ -789,4 +793,161 @@ async fn stalls_sell_from_one_bag_to_another() {
     let (_, notes) = call(&s, "GET", "/api/social/notifications", &a.token, None).await;
     assert!(notes.to_string().contains("stall_sale"), "{notes}");
     move_out(&s, &[&a, &b]).await;
+}
+
+// ---- phone calls -------------------------------------------------------------------
+
+async fn give_phone(s: &State, p: &P) {
+    sqlx::query(
+        "INSERT INTO inventory (player_id, item_id, qty) VALUES ($1, $2, 1)
+         ON CONFLICT (player_id, item_id) DO UPDATE SET qty = 1",
+    )
+    .bind(p.id)
+    .bind(crate::calls::PHONE)
+    .execute(&s.db)
+    .await
+    .unwrap();
+}
+
+/// Online, with a socket we can read pushes from.
+fn online(s: &State, p: &P) -> tokio::sync::mpsc::Receiver<String> {
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
+    s.hub.connect(p.id, tx);
+    rx
+}
+
+fn pushed(rx: &mut tokio::sync::mpsc::Receiver<String>, t: &str) -> Option<Value> {
+    while let Ok(m) = rx.try_recv() {
+        let v: Value = serde_json::from_str(&m).unwrap();
+        if v["t"] == t {
+            return Some(v);
+        }
+    }
+    None
+}
+
+#[tokio::test]
+async fn friends_with_phones_call_and_group_up_but_not_under_16s_yet() {
+    let Some(s) = state().await else { return };
+    let (a, b, c) = (player(&s).await, player(&s).await, player(&s).await);
+    let kid = player_born(&s, 2016).await;
+    befriend(&s, &a, &b).await;
+    befriend(&s, &a, &c).await;
+    befriend(&s, &a, &kid).await;
+    let ring = |who: &P, to: &P| {
+        let s = s.clone();
+        let (tok, id) = (who.token.clone(), to.id.to_string());
+        async move {
+            call(
+                &s,
+                "POST",
+                "/api/social/call/ring",
+                &tok,
+                Some(json!({ "id": id })),
+            )
+            .await
+        }
+    };
+
+    // No phone, no calls; they need one too, and to be around.
+    let (st, r) = ring(&a, &b).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("no_phone"))
+    );
+    give_phone(&s, &a).await;
+    let (_, r) = ring(&a, &b).await;
+    assert_eq!(r["error"], "no_phone", "they need one too");
+    give_phone(&s, &b).await;
+    let (_, r) = ring(&a, &b).await;
+    assert_eq!(r["error"], "offline");
+    let _a_rx = online(&s, &a);
+    let mut a_rx = online(&s, &a);
+    let mut b_rx = online(&s, &b);
+
+    // A rings B: a pass to the call's room, and B's phone rings.
+    let (st, r) = ring(&a, &b).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let room = r["call"].as_str().unwrap().to_string();
+    assert!(r["token"].as_str().unwrap().split('.').count() == 3);
+    assert!(r["url"].as_str().unwrap().starts_with("ws"));
+    let rang = pushed(&mut b_rx, "call_ring").expect("B's phone rings");
+    assert_eq!(rang["from_name"], a.name.as_str());
+    let (st, r) = call(
+        &s,
+        "POST",
+        "/api/social/call/answer",
+        &b.token,
+        Some(json!({ "call": room, "accept": true })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["members"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        pushed(&mut a_rx, "call").unwrap()["members"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // B rings C into it: a group call.
+    give_phone(&s, &c).await;
+    let mut c_rx = online(&s, &c);
+    befriend(&s, &b, &c).await;
+    let (st, r) = ring(&b, &c).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["call"], room.as_str(), "into the same call");
+    assert!(pushed(&mut c_rx, "call_ring").is_some());
+    call(
+        &s,
+        "POST",
+        "/api/social/call/answer",
+        &c.token,
+        Some(json!({ "call": room, "accept": true })),
+    )
+    .await;
+    let (_, now) = call(&s, "GET", "/api/social/call", &a.token, None).await;
+    assert_eq!(now["members"].as_array().unwrap().len(), 3);
+
+    // Under 16: not callable while calls for them are off, and they can't
+    // switch them on yet.
+    give_phone(&s, &kid).await;
+    let _kid_rx = online(&s, &kid);
+    let (st, r) = ring(&a, &kid).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("age"))
+    );
+    assert!(r["message"].as_str().unwrap().contains("under-16s"));
+    let (_, contacts) = call(&s, "GET", "/api/social/call/contacts", &a.token, None).await;
+    let k = contacts["friends"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["id"] == kid.id.to_string())
+        .unwrap()
+        .clone();
+    assert_eq!(k["callable"], false);
+    let (_, mine) = call(&s, "GET", "/api/social/call/contacts", &kid.token, None).await;
+    assert_eq!(mine["can_call"], false);
+    assert_eq!(mine["switch"], false, "no switch until calls open to them");
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/call/settings",
+        &kid.token,
+        Some(json!({ "voice_ok": true })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+
+    // Hanging up: A leaves, B and C carry on; B leaves, C's alone: over.
+    call(&s, "POST", "/api/social/call/leave", &a.token, None).await;
+    let (_, now) = call(&s, "GET", "/api/social/call", &c.token, None).await;
+    assert_eq!(now["members"].as_array().unwrap().len(), 2);
+    call(&s, "POST", "/api/social/call/leave", &b.token, None).await;
+    assert!(pushed(&mut c_rx, "call_ended").is_some());
+    let (_, now) = call(&s, "GET", "/api/social/call", &c.token, None).await;
+    assert!(now["call"].is_null());
 }

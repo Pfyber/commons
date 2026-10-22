@@ -1876,15 +1876,17 @@ mod mall_shop {
                     d.key,
                     c.item
                 );
-                // Only things to wear, ride, keep as a pet or put on a house
-                // are bound to whoever buys them (toys, tools and the gift
-                // shop's goods can be given).
+                // Only things to wear, ride, keep as a pet, put on a house or
+                // call with (a phone isn't a gift: it goes with the age rules
+                // of whoever buys it) are bound to whoever buys them (toys,
+                // tools and the gift shop's goods can be given).
                 assert_eq!(
                     item.account_bound(),
                     crate::cosmetics::is_cosmetic(&item.kind)
                         || crate::pets::is_pet(&item.kind)
                         || crate::vehicles::is_vehicle(&item.kind)
                         || item.kind == "exterior"
+                        || item.kind == "gadget"
                 );
             }
         }
@@ -1897,6 +1899,76 @@ mod mall_shop {
                 assert!(!PLAYER_MADE.contains(&item.kind.as_str()));
             }
         }
+    }
+
+    #[tokio::test]
+    async fn phones_are_for_16_and_over_for_now() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = app(s.clone());
+        let p = player(&s).await;
+        let (st, stock) = call(
+            &app,
+            &bearer_for(&s, p, "Teen"),
+            "GET",
+            "/api/mall/stock",
+            json!({}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let tools = stock["departments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["key"] == "tools")
+            .unwrap()
+            .clone();
+        let phone = s.catalog.by_key("phone").unwrap().id as i64;
+        let slot = tools["shelves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|sh| sh["item"] == phone)
+            .expect("the phone is on a Tools & Gadgets shelf")["slot"]
+            .clone();
+        let claims = token::AccessClaims {
+            sub: p.to_string(),
+            name: "Teen".into(),
+            look: 1,
+            style: 0,
+            tier: token::TrustTier::Newcomer,
+            minor: true,
+            muted_until: 0,
+        };
+        let teen = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        );
+        let (st, r) = call(
+            &app,
+            &teen,
+            "POST",
+            "/api/mall/buy",
+            json!({ "dept": "tools", "slot": slot, "key": "ph1" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{r}");
+        assert_eq!(r["error"], "not_yet");
+        // Adults can.
+        sqlx::query("UPDATE inventory SET qty = qty + 1000 WHERE player_id = $1 AND item_id = 1")
+            .bind(p)
+            .execute(&s.db)
+            .await
+            .unwrap();
+        let (st, r) = call(
+            &app,
+            &bearer_for(&s, p, "Grown"),
+            "POST",
+            "/api/mall/buy",
+            json!({ "dept": "tools", "slot": slot, "key": "ph2" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
     }
 
     #[tokio::test]

@@ -26,6 +26,8 @@ export interface HudHandlers {
   onMap(): void;
   /** Your borrowed library books. */
   onBooks(): void;
+  /** The phone: call friends, or the call you're in. */
+  onPhone(): void;
 }
 
 export class Hud {
@@ -45,6 +47,7 @@ export class Hud {
   private moodBtn!: HTMLButtonElement;
   private chatPlaceholder = "";
   private booksBtn!: HTMLButtonElement;
+  private phoneBtn!: HTMLButtonElement;
 
   constructor(root: HTMLElement, h: HudHandlers) {
     root.innerHTML = `
@@ -57,6 +60,7 @@ export class Hud {
           <button type="button" class="pill btn album-btn" title="Album (L)" aria-label="Album"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("book")}" /></button>
           <button type="button" class="pill btn friends-btn" title="Friends (F)" aria-label="Friends"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("friends")}" /></button>
           <button type="button" class="pill btn notes-btn" title="Notifications (N)" aria-label="Notifications"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bell")}" /><span class="badge-count" hidden></span></button>
+          <button type="button" class="pill btn phone-btn" title="Phone" aria-label="Phone" hidden><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("phone")}" /></button>
           <button type="button" class="pill btn books-btn" title="Your library books" aria-label="Your library books" hidden><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("books")}" /><span class="badge-count"></span></button>
           <button type="button" class="pill btn sound-btn" title="Sound (M)" aria-label="Sound"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("sound")}" /></button>
           <div class="pill nearby" title="People in view"></div>
@@ -89,6 +93,8 @@ export class Hud {
     root.querySelector<HTMLButtonElement>(".notes-btn")!.onclick = () => h.onNotifications();
     this.booksBtn = root.querySelector<HTMLButtonElement>(".books-btn")!;
     this.booksBtn.onclick = () => h.onBooks();
+    this.phoneBtn = root.querySelector<HTMLButtonElement>(".phone-btn")!;
+    this.phoneBtn.onclick = () => h.onPhone();
     this.badgeEl = root.querySelector(".badge-count")!;
     const soundBtn = root.querySelector<HTMLButtonElement>(".sound-btn")!;
     const sound = () => this.setMuted(h.onSound());
@@ -231,6 +237,12 @@ export class Hud {
   }
 
   /** The Caretaker's tasks chip under the place name; null hides it. */
+  /** The phone button: shown once you own a phone; lit while you're on a call. */
+  setPhone(owned: boolean, live: boolean) {
+    this.phoneBtn.hidden = !owned;
+    this.phoneBtn.classList.toggle("live", live);
+  }
+
   /** The books button, with how many you have out (hidden with none). */
   setBooks(n: number) {
     this.booksBtn.hidden = n === 0;

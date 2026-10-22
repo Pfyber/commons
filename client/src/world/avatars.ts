@@ -174,6 +174,9 @@ export class Avatar {
   /** The library book open in our hands (its Gutenberg number; 0: none). */
   reading = 0;
   private book = new Graphics();
+  /** On a phone call: the phone held to the ear. */
+  calling = false;
+  private phone = new Graphics();
   private pumpAt = -Infinity;
   /** A beer at the bar: wobbly until then (wall clock). */
   private woozyUntil = 0;
@@ -212,7 +215,7 @@ export class Avatar {
     this.stack.appendChild(this.nameEl);
     this.label.appendChild(this.stack);
     labels.appendChild(this.label);
-    scene.sorted.addChild(this.sprite, this.rod, this.board, this.hand, this.book);
+    scene.sorted.addChild(this.sprite, this.rod, this.board, this.hand, this.book, this.phone);
     this.apply(info, now);
   }
 
@@ -252,6 +255,24 @@ export class Avatar {
    */
   setPlaying(at: { x: number; y: number; kind: "arcade" | "pool" } | null) {
     this.playing = at;
+  }
+
+  /** On a phone call (CallingShown): the phone at their ear, and 📞 by the name. */
+  setCalling(on: boolean) {
+    this.calling = on;
+    let mark = this.nameEl.querySelector<HTMLSpanElement>(".calling");
+    if (!on) {
+      mark?.remove();
+      this.nameW = 0;
+      return;
+    }
+    if (!mark) {
+      mark = document.createElement("span");
+      mark.className = "calling";
+      mark.textContent = "📞";
+      this.nameEl.appendChild(mark);
+      this.nameW = 0;
+    }
   }
 
   /** A library book open in their hands (ReadingShown; 0: closed), and 📖 by the name. */
@@ -297,6 +318,7 @@ export class Avatar {
     this.setMood(info.mood);
     this.setAway(info.away);
     this.setReading(info.reading);
+    this.setCalling(info.calling);
     if (info.path.length > 0) this.setMotion({ path: info.path, t0: info.t0, speedX10: info.speedX10, sprintIn: info.sprintIn }, now);
     else this.snap({ x: info.x, y: info.y });
   }
@@ -534,6 +556,7 @@ export class Avatar {
     this.drawRod(feetX, feetY + bob, walking, wallNow);
     this.drawFist(feetX, Math.round(feetY + bob), wallNow);
     this.drawBook(feetX, Math.round(feetY + bob));
+    this.drawPhone(feetX, Math.round(feetY + bob));
     this.updateWheels(ride ? vehicle : 0, feetX, feetY, walking, wallNow);
     this.updateCan(feetX, feetY, wallNow);
     this.updatePet({ x, y }, wallNow);
@@ -655,6 +678,17 @@ export class Avatar {
     g.rect(x + 8, y + 4, 2, 1).fill(0xb8ab8e);
     g.rect(x + 5, y, 2, 7).fill(0x3b3a2e);
     this.book.zIndex = this.sprite.zIndex + 0.15;
+  }
+
+  /** The phone held up to the ear on the side we face, while on a call. */
+  private drawPhone(feetX: number, spriteBottom: number) {
+    const g = this.phone.clear();
+    if (!this.calling) return;
+    const x = Math.round(feetX) + (this.facing > 0 ? 4 : -7);
+    const y = spriteBottom - 30;
+    g.rect(x, y, 3, 7).fill(0x3b3a2e);
+    g.rect(x + 1, y + 1, 1, 4).fill(0x8fd0e8);
+    this.phone.zIndex = this.sprite.zIndex + 0.16;
   }
 
   /** The pumping fist, in whole pixels at the end of the front arm. */
@@ -821,6 +855,7 @@ export class Avatar {
     this.board.destroy();
     this.hand.destroy();
     this.book.destroy();
+    this.phone.destroy();
     this.label.remove();
   }
 }

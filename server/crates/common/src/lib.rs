@@ -5,6 +5,7 @@ pub mod filter;
 pub mod ratelimit;
 pub mod telemetry;
 pub mod token;
+pub mod voice;
 
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()

@@ -64,6 +64,21 @@ export const ICONS: Record<string, string[]> = {
     ".oGwwwwwwwo.",
     "..ooooooooo.",
   ],
+  // A mobile phone with a lit screen.
+  phone: [
+    "....oooo....",
+    "...okkkko...",
+    "...obbbbo...",
+    "...obwbbo...",
+    "...obbbbo...",
+    "...obbbbo...",
+    "...obbbbo...",
+    "...ogggbo...",
+    "...obbbbo...",
+    "...okkkko...",
+    "...okook....",
+    "....oooo....",
+  ],
   // Library books on a shelf: your borrowed books.
   books: [
     "............",

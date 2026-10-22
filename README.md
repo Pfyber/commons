@@ -62,6 +62,10 @@ the same one. The API stocks the Library itself from Gutenberg's catalogue
 (about 20 MB) when it starts with none, and looks for new books weekly;
 `cargo run --bin library-import` does it by hand (`--csv <file>` to use a
 copy, `--reshelve` to file new arrivals).
+Buy a Mobile Phone at the mall's Tools & Gadgets shop to call friends who
+have one (📱 at the top); anyone on a call can ring more friends in. Voice
+goes through a LiveKit server: run `livekit-server --dev` alongside the
+stack (calls for under-16s are built but off: `COMMONS_VOICE_MINORS`).
 🔊 or M toggles sound;
 `?weather=rain` (clear, cloudy, rain, mist) previews the weather.
 
@@ -135,6 +139,8 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |
 | `LIBRARY_CATALOG_URL` / `LIBRARY_CONTACT` | Gutenberg's `pg_catalog.csv` / (none) | library-import: where to fetch, and a contact for its User-Agent (api too) |
+| `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | `ws://localhost:7880` / `devkey` / `secret` | social: the voice server for phone calls (empty URL: no calls) |
+| `COMMONS_VOICE_MINORS` | `false` | api, social: phone calls for under-16s (under-16s with under-16s only, each switching calls on) |
 | `LIBRARY_AUTO_STOCK` | `true` | api: stock the Library from Gutenberg when it's empty, and weekly |
 | `LIBRARY_TEXT_URL` | `https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt` | api: where book texts come from (a mirror, if the library gets busy) |
 | `LIBRARY_FETCH_PAUSE_MS` | `1500` | api: the pause between fetching books from Gutenberg |

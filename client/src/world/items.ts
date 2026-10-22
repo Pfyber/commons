@@ -60,6 +60,16 @@ function wearing(key: string, kind: string): HTMLCanvasElement {
 
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
+  if (kind === "gadget") {
+    // The Mobile Phone: a slim handset, a lit screen with a call bubble.
+    px(ctx, O, 4, 1, 8, 14);
+    px(ctx, "#4a4f5a", 5, 2, 6, 12);
+    px(ctx, "#8fd0e8", 5, 3, 6, 8);
+    px(ctx, "#ffffff", 6, 4, 3, 2);
+    px(ctx, "#6cc070", 6, 8, 4, 2);
+    px(ctx, "#d9d4c6", 7, 12, 2, 1);
+    return;
+  }
   if (key === "arcade_ticket") {
     // A pink ticket with a notch and a star.
     px(ctx, O, 1, 4, 14, 9);

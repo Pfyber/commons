@@ -28,7 +28,7 @@ use uuid::Uuid;
 type S = State<Arc<AppState>>;
 
 /// Item kinds bought once and kept (a second one would do nothing).
-pub const ONCE: &[&str] = &["tool", "instrument", "toy", "exterior"];
+pub const ONCE: &[&str] = &["tool", "instrument", "toy", "exterior", "gadget"];
 
 /// Exterior slots.
 pub const SLOTS: &[&str] = &["facade", "fence", "yard", "postbox"];

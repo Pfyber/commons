@@ -57,7 +57,8 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/stalls/claim", post(crate::stalls::claim))
         .route("/stalls/put", post(crate::stalls::put))
         .route("/stalls/take", post(crate::stalls::take))
-        .route("/stalls/buy", post(crate::stalls::buy));
+        .route("/stalls/buy", post(crate::stalls::buy))
+        .merge(crate::calls::routes());
     let internal = Router::new()
         .route("/presence", post(presence))
         .route("/locate", get(locate))
@@ -199,6 +200,10 @@ async fn session(socket: WebSocket, state: Arc<SocialState>, player: Uuid) {
     }
     if state.hub.disconnect(player, conn) {
         broadcast_presence(&state, player).await;
+        // Gone offline: off any call.
+        if let Some(left) = state.calls.leave(player) {
+            crate::calls::after_leave(&state, left).await;
+        }
     }
 }
 
@@ -716,6 +721,18 @@ impl SocialState {
         limits
             .entry(player)
             .or_insert_with(|| Bucket::new(5.0, 0.5))
+            .try_take(now)
+    }
+}
+
+impl SocialState {
+    /// Per-player rate limit on ringing people (`calls::ring_bucket`).
+    pub(crate) fn ring_allowed(&self, player: Uuid) -> bool {
+        let mut limits = self.ring_limits.lock().unwrap();
+        let now = self.started.elapsed().as_millis() as u64;
+        limits
+            .entry(player)
+            .or_insert_with(crate::calls::ring_bucket)
             .try_take(now)
     }
 }

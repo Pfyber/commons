@@ -3693,3 +3693,103 @@ body.woozy #stage canvas {
 .label .name .reading {
   margin-left: 3px;
 }
+
+/* ---- phone calls (ADR 0013) ----------------------------------------------------- */
+
+.panel.phone {
+  width: min(380px, calc(100vw - 24px));
+}
+
+.call-members .talk {
+  width: 20px;
+  opacity: 0.5;
+}
+
+.call-members .talk.on {
+  opacity: 1;
+}
+
+.call-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.panel button.small.hang-up {
+  background: var(--danger);
+  color: #fff;
+}
+
+.voice-switch {
+  cursor: pointer;
+}
+
+.phone-btn.live {
+  box-shadow: 0 0 0 3px #6cc070;
+  animation: phone-live 1.6s ease-in-out infinite;
+}
+
+@keyframes phone-live {
+  50% {
+    box-shadow: 0 0 0 3px rgba(108, 192, 112, 0.35);
+  }
+}
+
+/* Someone's calling: a card at the top of the screen. */
+/* Below the toasts, so a toast never covers the buttons. */
+.incoming-call {
+  position: fixed;
+  top: 124px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  animation: ring-in 0.25s ease-out;
+}
+
+.incoming-call .who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-right: 6px;
+}
+
+.incoming-call .hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.incoming-call button {
+  font: inherit;
+  font-weight: 700;
+  border: 0;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.incoming-call button.answer {
+  background: var(--leaf);
+  color: #fff;
+}
+
+.incoming-call button.decline {
+  background: var(--danger);
+  color: #fff;
+}
+
+@keyframes ring-in {
+  from {
+    transform: translate(-50%, -12px);
+    opacity: 0;
+  }
+}
+
+.label .name .calling {
+  margin-left: 3px;
+}

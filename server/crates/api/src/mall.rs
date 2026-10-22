@@ -156,6 +156,18 @@ async fn buy(
     if PLAYER_MADE.contains(&item.kind.as_str()) {
         return Err(gone());
     }
+    // A phone is for calling friends; under-16s can't, until calls are open
+    // to them (ADR 0013), so they aren't sold one.
+    if item.kind == "gadget"
+        && crate::auth::bearer(&state, &headers)?.minor
+        && !commons_common::voice::minors_enabled()
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "not_yet",
+            "Phones are for players 16 and over, for now.",
+        ));
+    }
     let key = format!("mall:{player}:{}", req.key);
     // A pet isn't goods for the bag: it needs a name, and comes home with you.
     let pet = crate::pets::is_pet(&item.kind);

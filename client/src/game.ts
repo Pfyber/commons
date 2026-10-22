@@ -71,6 +71,8 @@ import { Milestones } from "./world/milestones";
 import { Scene } from "./world/scene";
 import { HALL, type Library, NEW, type Place as BookPlace, wingOfZone, wingZone } from "./library";
 import type { BookCardPanel, CataloguePanel, ReaderPanel, ShelfPanel } from "./ui/library";
+import type { Calls } from "./calls";
+import type { PhonePanel } from "./ui/phone";
 import { LibraryRoom } from "./world/libraryroom";
 
 /** Error codes from server/crates/protocol (error_code). */
@@ -143,6 +145,8 @@ export interface Ui {
   shelf: ShelfPanel;
   bookCard: BookCardPanel;
   reader: ReaderPanel;
+  calls: Calls;
+  phone: PhonePanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -433,6 +437,11 @@ export class Game {
     if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
     // What you read shows in your hands; books stay in the library unless
     // they're borrowed.
+    // On a call: the phone at your ear, for everyone to see.
+    ui.calls.onCalling = (on) => {
+      this.socket?.send({ t: "Calling", on });
+      this.self?.setCalling(on);
+    };
     ui.reader.onRead = (b) => {
       this.socket?.send({ t: "Reading", book: b?.id ?? 0 });
       this.self?.setReading(b?.id ?? 0);
@@ -1145,7 +1154,7 @@ export class Game {
       // On the second pad, beside yours (the server puts you on the first).
       const you = this.avatars.get(st.a);
       const x = d.floor.x + 2;
-      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false, style: 0, pet: 0, vehicle: 0, tool: 0, reading: 0 };
+      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false, style: 0, pet: 0, vehicle: 0, tool: 0, reading: 0, calling: false };
       this.danceBot = new Avatar(info, this.scene, this.labels, false, serverNow);
       this.danceBot.markNpc();
       if (you) this.danceBot.faceToward(you.pos.x);
@@ -1440,6 +1449,7 @@ export class Game {
         this.clerk?.hello();
         // Still reading as you came through the door.
         if (this.ui.reader.bookId) this.socket?.send({ t: "Reading", book: this.ui.reader.bookId });
+        if (this.ui.calls.live) this.socket?.send({ t: "Calling", on: true });
         this.events.onWelcome();
         break;
       case "CellEnter":
@@ -1486,6 +1496,9 @@ export class Game {
         break;
       case "ReadingShown":
         this.avatars.get(m.id)?.setReading(m.book);
+        break;
+      case "CallingShown":
+        this.avatars.get(m.id)?.setCalling(m.on);
         break;
       case "EmoteShown":
         this.avatars.get(m.id)?.emote(m.emote);

@@ -2,6 +2,7 @@
 //! messages, doorstep gifts and notifications. One persistent socket per
 //! client, independent of the zone they're in.
 
+mod calls;
 mod db;
 mod homes;
 mod hub;
@@ -24,7 +25,12 @@ pub struct State {
     pub secret: Vec<u8>,
     pub catalog: Arc<Catalog>,
     pub hub: hub::Hub,
+    /// Phone calls in progress (ADR 0013).
+    pub calls: calls::Calls,
+    /// Where calls' voices go; `None`: the phone lines are down.
+    pub livekit: Option<commons_common::voice::LiveKit>,
     dm_limits: Mutex<HashMap<Uuid, Bucket>>,
+    ring_limits: Mutex<HashMap<Uuid, Bucket>>,
     started: Instant,
 }
 
@@ -35,7 +41,10 @@ impl State {
             secret,
             catalog,
             hub: hub::Hub::default(),
+            calls: calls::Calls::default(),
+            livekit: commons_common::voice::LiveKit::from_env(),
             dm_limits: Mutex::new(HashMap::new()),
+            ring_limits: Mutex::new(HashMap::new()),
             started: routes::started(),
         }
     }
@@ -53,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
     let catalog = Arc::new(Catalog::load(&db).await?);
     let state = Arc::new(State::new(db, config::secret(), catalog));
     rent::spawn_sweeper(state.clone());
+    calls::spawn_ring_timeouts(state.clone());
     let app = routes::routes()
         .with_state(state)
         .merge(telemetry::routes(prom));

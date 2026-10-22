@@ -174,6 +174,8 @@ struct Avatar {
     away: bool,
     /// The library book open in their hands (0: none).
     reading: u32,
+    /// On a phone call (their client says so).
+    calling: bool,
     /// Instance time the next sky lantern may go up.
     next_lantern: u32,
     fish: Option<fishing::FishSession>,
@@ -225,6 +227,7 @@ impl Avatar {
             mood: self.mood,
             away: self.away,
             reading: self.reading,
+            calling: self.calling,
         }
     }
 }
@@ -695,6 +698,7 @@ impl Instance {
             mood: 0,
             away: false,
             reading: 0,
+            calling: false,
             next_lantern: 0,
         };
         avatar.send(
@@ -807,6 +811,15 @@ impl Instance {
                 a.reading = book;
                 let cell = a.cell;
                 self.broadcast(cell, &ServerMsg::ReadingShown { id, book }, None);
+            }
+            ClientMsg::Calling { on } => {
+                let a = self.avatars.get_mut(&id).unwrap();
+                if a.calling == on {
+                    return;
+                }
+                a.calling = on;
+                let cell = a.cell;
+                self.broadcast(cell, &ServerMsg::CallingShown { id, on }, None);
             }
             ClientMsg::Ping { client_t } => {
                 self.send_to(
