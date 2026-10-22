@@ -288,12 +288,10 @@ fn park(k: &mut Blk) {
     }
     k.rect(11, 19, 2, 3, "path");
     k.spot("chess", 11, 17);
-    // The Old Oak and its swing, and the wishing well (south-west).
+    // The Old Oak and its swing (south-west).
     k.object("old_oak", 8, 30, 3, 3, "The Old Oak");
     k.decor(10, 34, "swing");
     k.spot("oak", 12, 33);
-    k.object("well", 15, 38, 2, 2, "Wishing Well");
-    k.spot("well", 16, 41);
     k.bench(4, 38, 2);
     // The Founders' Grove (spec §11): a stone with every founder's name,
     // seedlings filling out from it across the north-east and south-east.
@@ -749,6 +747,9 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
         "town_hall" => {
             k.object("town_hall", 19, 10, 10, 7, "Town Hall");
             k.rect(19, 17, 10, 1, "plaza");
+            // The wishing well, on the plaza beside the Town Hall's steps.
+            k.object("well", 32, 20, 2, 2, "Wishing Well");
+            k.spot("well", 33, 23);
         }
         // The arcade hall, the bar and the library have their own floors behind their
         // doors; `door:<place>` is where you come out again.

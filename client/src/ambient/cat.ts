@@ -16,7 +16,7 @@ const LEG_MS = 80_000;
 const SPEED_X10 = 16;
 
 /** Biscuit's favourite places (adjusted to the nearest walkable tile). */
-const FAVOURITES = ["fountain", "oak", "well", "chess", "pier", "grove"];
+const FAVOURITES = ["fountain", "oak", "chess", "pier", "grove"];
 
 export class Cat {
   readonly sprite = new Container();

@@ -17,7 +17,7 @@ const LEG_MS = 70_000;
 const SPEED_X10 = 12;
 
 /** Rounds, between the Market and the Park (map spots). */
-const ROUNDS = ["fountain", "grove", "chess", "oak", "well"];
+const ROUNDS = ["fountain", "grove", "chess", "oak"];
 
 export class Caretaker {
   readonly avatar: Avatar;

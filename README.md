@@ -41,7 +41,7 @@ notice board for daily requests, and the fountain for the town goal. Sit
 alone at a chess table to play the Park Elder. Corner activities: jam at
 the bandstand (keys 1–8), paint at the easels, kick the ball on the pitch
 (walk into it), and solve the town word at the arcade. Explore: the Old
-Oak, the wishing well, the hedge maze, the Whispering Wood (there's a tiny
+Oak, the wishing well by the Town Hall, the hedge maze, the Whispering Wood (there's a tiny
 door somewhere), and pet Biscuit the cat. In the Café block, the Mossy Mug:
 a beer from the bartender (5 coins) makes you woozy for a minute (water
 sobers you up), the pool table plays real 8-ball against a friend or the
@@ -69,8 +69,8 @@ goes through a LiveKit server, which `scripts/dev.mjs` starts for you (it
 uses `livekit-server` from your PATH, or fetches the official release into
 `tools/livekit/` the first time). Calls for under-16s are built but off
 (`COMMONS_VOICE_MINORS`).
-Testing on a dev server: a wish at the wishing well (south-west of the
-park) grants 10,000 coins, every time; real servers don't have it.
+Testing on a dev server: a wish at the wishing well (on the Town Hall's
+plaza) grants 10,000 coins, every time; real servers don't have it.
 🔊 or M toggles sound;
 `?weather=rain` (clear, cloudy, rain, mist) previews the weather.
 
