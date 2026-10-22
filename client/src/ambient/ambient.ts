@@ -59,6 +59,8 @@ export class Ambient {
   constructor(
     private scene: Scene,
     private map: ZoneMap,
+    /** No birds crossing the ceiling indoors. */
+    private indoors = false,
   ) {
     scene.world.addChild(this.sky);
     const flowers: { x: number; y: number }[] = [];
@@ -137,7 +139,7 @@ export class Ambient {
       b.sprite.zIndex = (y + 1.5) * TILE;
     }
 
-    if (now > this.nextFlock) {
+    if (!this.indoors && now > this.nextFlock) {
       this.nextFlock = now + rand(15000, 40000);
       const fromLeft = Math.random() < 0.5;
       const y0 = rand(view.y0, view.y1);

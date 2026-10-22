@@ -8,7 +8,7 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
-import { ATTENDANT, BARTENDER, Clerk, FISHERMAN } from "./ambient/clerk";
+import { ATTENDANT, BARTENDER, Clerk, FISHERMAN, LIBRARIAN } from "./ambient/clerk";
 import { ArcadePanel, BEAT_MS, BOT as ARCADE_BOT, PLAYING as ARCADE_PLAYING } from "./activities/arcade";
 import { PrizePanel } from "./ui/prizes";
 import { PoolPanel } from "./activities/pool";
@@ -69,6 +69,9 @@ import { TILE } from "./world/art";
 import { encodeLook } from "./world/look";
 import { Milestones } from "./world/milestones";
 import { Scene } from "./world/scene";
+import { HALL, type Library, NEW, type Place as BookPlace, wingOfZone, wingZone } from "./library";
+import type { BookCardPanel, CataloguePanel, ShelfPanel } from "./ui/library";
+import { LibraryRoom } from "./world/libraryroom";
 
 /** Error codes from server/crates/protocol (error_code). */
 const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION_MISMATCH: 3 };
@@ -135,6 +138,10 @@ export interface Ui {
   offer: OfferCard;
   mood: MoodPicker;
   wardrobe: WardrobePanel;
+  library: Library;
+  catalogue: CataloguePanel;
+  shelf: ShelfPanel;
+  bookCard: BookCardPanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -208,6 +215,8 @@ const DOORSTEP: TileXY[] = [
 
 /** Invisible map objects (areas and named places): never what you tapped. */
 const MARKERS = new Set(["spot", "dept", "nook", "grove_slot"]);
+/** Objects whose art reaches only a tile above them (rows of bookcases, an aisle apart). */
+const LOW_REACH = new Set(["bookcase", "stack_sign"]);
 
 const cheb = (a: TileXY, b: TileXY) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const SITTING = 1;
@@ -278,6 +287,8 @@ export class Game {
   /** Garden plots, watered or not, as last seen (to show a can being used). */
   private wateredSeen = new Map<string, boolean>();
   private clerk: Clerk | null = null;
+  /** In the Library's hall or one of its wings. */
+  private libraryRoom: LibraryRoom | null = null;
   /** Your three hands while a rock paper scissors match waits on your pick. */
   private rpsPicker = new RpsPicker((pick) => this.socket?.send({ t: "RpsPick", pick }));
   /** The bar's pool table, where the map has one. */
@@ -346,10 +357,10 @@ export class Game {
       this.screen = new BigScreen(screenObj);
       this.scene.sorted.addChild(this.screen.sprite);
     }
-    this.ambient = new Ambient(this.scene, map);
-    // Indoors (the mall, the bar, the arcade): the lights are on, no weather,
-    // no wheels, no sprinting; the arcade is lit by neon.
-    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade";
+    // Indoors (the mall, the bar, the arcade, the library): the lights are
+    // on, no weather, no birds, no wheels, no sprinting; the arcade is lit by neon.
+    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library");
+    this.ambient = new Ambient(this.scene, map, indoors);
     this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade");
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     if (zoneId === "city") {
@@ -419,6 +430,11 @@ export class Game {
     }
     const bar = map.objects.find((o) => o.kind === "bar_counter");
     if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
+    if (zoneId === HALL || wingOfZone(zoneId)) {
+      this.libraryRoom = new LibraryRoom(this.scene, map, zoneId, ui.library);
+      const desk = map.objects.find((o) => o.kind === "circulation_desk");
+      if (desk) this.clerk = new Clerk(map, desk, this.scene, labels, LIBRARIAN);
+    }
     const prizeCounter = map.objects.find((o) => o.kind === "prize_counter");
     if (prizeCounter) {
       this.clerk = new Clerk(map, prizeCounter, this.scene, labels, ATTENDANT);
@@ -628,6 +644,111 @@ export class Game {
     return true;
   }
 
+  // ---- the library ----------------------------------------------------------
+
+  /** The Library's doors, desk, bookcases and signs. */
+  private tapLibrary(obj: MapObject): boolean {
+    const self = this.self;
+    const ui = this.ui;
+    if (!self) return false;
+    const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+    switch (obj.kind) {
+      case "library":
+        this.enter(front, HALL);
+        return true;
+      case "library_exit":
+        this.events.onTravel("city");
+        return true;
+      case "wing_exit":
+        this.events.onTravel(HALL);
+        return true;
+      case "wing_door":
+        if (obj.label) this.enter({ x: obj.x + 1, y: obj.y + 1 }, obj.label);
+        return true;
+      case "circulation_desk":
+      case "card_catalogue": {
+        if (cheb(self.destination, front) > 2) this.walkTo(front);
+        if (obj.kind === "circulation_desk") this.clerk?.chat();
+        this.near(ui.catalogue, front, 8).show();
+        return true;
+      }
+      case "new_arrivals":
+        if (cheb(self.destination, front) > 2) this.walkTo(front);
+        this.near(ui.shelf, front, 5).openCase(NEW, 0);
+        return true;
+      case "bookcase": {
+        const room = this.libraryRoom;
+        if (!room?.wing) return false;
+        this.openBookcase(room.wing, Number(obj.label), null);
+        return true;
+      }
+      case "stack_sign": {
+        const text = this.libraryRoom?.signText(obj);
+        this.hud.toast(`🔖 ${text ?? "Reading the sign…"}`, 5000);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Walks up to bookcase `n` of this wing and looks at it close up. */
+  private openBookcase(wing: string, n: number, mark: number | null) {
+    const room = this.libraryRoom;
+    const o = room?.caseObj(n);
+    const self = this.self;
+    if (!room || !o || !self) return;
+    const at = room.front(o, self.destination);
+    if (cheb(self.destination, at) > 0) this.walkTo(at);
+    this.near(this.ui.shelf, at, 3).openCase(wing, n, mark);
+  }
+
+  /** Browsing along a row from the shelf panel. */
+  libraryBrowse(wing: string, n: number) {
+    if (this.libraryRoom?.wing !== wing) return;
+    this.openBookcase(wing, n, null);
+  }
+
+  /** How many bookcases a wing has (here: as on the map). */
+  libraryCases(wing: string): number {
+    return this.libraryRoom?.wing === wing ? this.libraryRoom.caseCount : 0;
+  }
+
+  /** "Show me": to the book's wing, up to its bookcase, the spine glowing. */
+  libraryShowMe(at: BookPlace, id: number, title: string) {
+    const lib = this.ui.library;
+    const zone = at.wing === NEW ? HALL : wingZone(at.wing);
+    lib.showing = { ...at, id, title };
+    if (zone !== this.zoneId) {
+      // Through the hall's door for that wing (the hall's own, from a wing).
+      this.events.onTravel(zone);
+      return;
+    }
+    this.libraryArrived();
+  }
+
+  /** Carries out a "Show me" once we're in the right room and standing. */
+  private libraryArrived() {
+    const lib = this.ui.library;
+    const s = lib.showing;
+    const room = this.libraryRoom;
+    if (!s || !room || !this.self) return;
+    const zone = s.wing === NEW ? HALL : wingZone(s.wing);
+    if (zone !== this.zoneId) return;
+    lib.showing = null;
+    if (s.wing === NEW) {
+      const shelf = this.scene.map.objects.find((o) => o.kind === "new_arrivals");
+      if (!shelf) return;
+      const front = { x: shelf.x + Math.floor(shelf.w / 2), y: shelf.y + shelf.h };
+      this.walkTo(front);
+      this.near(this.ui.shelf, front, 5).openCase(NEW, 0);
+      return;
+    }
+    if (s.slot === null) return; // just going to the wing
+    this.openBookcase(s.wing, s.case, s.slot);
+    room.glowAt(s.case, s.slot);
+    this.hud.toast(`📍 ${s.title}: bookcase ${s.case + 1}, shelf ${Math.floor(s.slot / 20) + 1}`, 5000);
+  }
+
   /** Tapping the clerk: a word of help, and the racks open. */
   private tapClerk(sx: number, sy: number): boolean {
     if (!this.clerk) return false;
@@ -642,6 +763,8 @@ export class Game {
     if (prizes && this.prizes) this.near(this.prizes, { x: prizes.x + Math.floor(prizes.w / 2), y: prizes.y + prizes.h }, 6).show();
     const fisher = map.objects.find((o) => o.kind === "fisherman");
     if (fisher && this.fisherman) this.openFisherman(fisher);
+    const desk = map.objects.find((o) => o.kind === "circulation_desk");
+    if (desk) this.near(this.ui.catalogue, { x: desk.x + Math.floor(desk.w / 2), y: desk.y + desk.h }, 8).show();
     return true;
   }
 
@@ -1915,7 +2038,7 @@ export class Game {
       return true;
     }
     // Map objects: the drawn art reaches a couple of tiles above the footprint.
-    const obj = map.objects.find((o) => !MARKERS.has(o.kind) && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 2 && t.y < o.y + o.h);
+    const obj = map.objects.find((o) => !MARKERS.has(o.kind) && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - (LOW_REACH.has(o.kind) ? 1 : 2) && t.y < o.y + o.h);
     if (obj?.kind === "market_cart") {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
@@ -1979,6 +2102,7 @@ export class Game {
       this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "arcade");
       return true;
     }
+    if (obj && this.tapLibrary(obj)) return true;
     if (obj?.kind === "arcade_exit") {
       this.events.onTravel("city");
       return true;
@@ -2454,6 +2578,10 @@ export class Game {
       this.caretakerChat(wallNow);
     }
     this.clerk?.update(Date.now(), wallNow);
+    if (this.libraryRoom) {
+      this.libraryRoom.update(performance.now());
+      this.libraryArrived();
+    }
     this.danceFloor(serverNow);
     this.checkEntering();
     this.sky.update(wallNow, this.daynight.dark > 0.5);
@@ -2513,6 +2641,10 @@ export class Game {
     this.houseFronts?.destroy();
     this.ui.decorate.hide();
     this.clerk?.destroy();
+    this.libraryRoom?.destroy();
+    this.ui.shelf.hide();
+    this.ui.bookCard.hide();
+    this.ui.catalogue.hide();
     this.rpsPicker.destroy();
     this.pool?.destroy();
     this.arcade?.destroy();

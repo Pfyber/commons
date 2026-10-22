@@ -4,6 +4,15 @@ import homeUrl from "../../assets/maps/home.json?url";
 import mallUrl from "../../assets/maps/mall.json?url";
 import barUrl from "../../assets/maps/bar.json?url";
 import arcadeUrl from "../../assets/maps/arcade.json?url";
+import libraryUrl from "../../assets/maps/library.json?url";
+import libChildrenUrl from "../../assets/maps/library_children.json?url";
+import libLitUrl from "../../assets/maps/library_lit.json?url";
+import libWorldUrl from "../../assets/maps/library_world.json?url";
+import libHistoryUrl from "../../assets/maps/library_history.json?url";
+import libSocietyUrl from "../../assets/maps/library_society.json?url";
+import libScienceUrl from "../../assets/maps/library_science.json?url";
+import libArtsUrl from "../../assets/maps/library_arts.json?url";
+import libReferenceUrl from "../../assets/maps/library_reference.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { Homes } from "./homes";
@@ -26,6 +35,8 @@ import { Minimap } from "./ui/minimap";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
 import { WardrobePanel } from "./ui/wardrobe";
+import { HALL, Library, wingOfZone } from "./library";
+import { BookCardPanel, CataloguePanel, type LibraryHost, ShelfPanel } from "./ui/library";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -43,7 +54,22 @@ import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
 import "./styles.css";
 
-const MAP_URLS: Record<string, string> = { city: cityUrl, home: homeUrl, mall: mallUrl, bar: barUrl, arcade: arcadeUrl };
+const MAP_URLS: Record<string, string> = {
+  city: cityUrl,
+  home: homeUrl,
+  mall: mallUrl,
+  bar: barUrl,
+  arcade: arcadeUrl,
+  library: libraryUrl,
+  library_children: libChildrenUrl,
+  library_lit: libLitUrl,
+  library_world: libWorldUrl,
+  library_history: libHistoryUrl,
+  library_society: libSocietyUrl,
+  library_science: libScienceUrl,
+  library_arts: libArtsUrl,
+  library_reference: libReferenceUrl,
+};
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
 
@@ -208,6 +234,13 @@ async function main() {
     if (m) hud.toast(`${MOODS.find((x) => x.id === m)?.icon} Others now see you're ${MOODS.find((x) => x.id === m)?.label.toLowerCase()}.`, 3500);
   });
   hud.setMuted(sound.muted);
+  const library = new Library(auth);
+  const libraryHost: LibraryHost = {
+    showMe: (at, id, title) => (game as Game | null)?.libraryShowMe(at, id, title),
+    browse: (wing, n) => (game as Game | null)?.libraryBrowse(wing, n),
+    cases: (wing) => (game as Game | null)?.libraryCases(wing) ?? 0,
+  };
+  const bookCard = new BookCardPanel(library, libraryHost);
   const ui: Ui = {
     eco,
     hud,
@@ -278,6 +311,10 @@ async function main() {
       eco,
       shop,
     ),
+    library,
+    bookCard,
+    shelf: new ShelfPanel(library, bookCard, libraryHost),
+    catalogue: new CataloguePanel(library, bookCard, libraryHost),
   };
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
   welcome.onChange(() => {
@@ -331,11 +368,19 @@ async function main() {
           onWelcome: () => (retry = 0),
           onDisconnect,
           // Out of a door into the city: you come out of that door (a
-          // house, or a public place: the mall, the bar, the arcade).
+          // house, or a public place: the mall, the bar, the arcade, the
+          // library). Out of a library wing, you're back at its door in the hall.
           onTravel: (z) => {
             const from = game as Game | null;
-            const place = from && ["mall", "bar", "arcade"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
-            const arrive = z !== "city" ? undefined : from?.zoneId === "home" ? (from.place.owner ?? "home") : place;
+            const place = from && ["mall", "bar", "arcade", HALL].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
+            const arrive =
+              z === HALL && from && wingOfZone(from.zoneId)
+                ? `place:${from.zoneId}`
+                : z !== "city"
+                  ? undefined
+                  : from?.zoneId === "home"
+                    ? (from.place.owner ?? "home")
+                    : place;
             void travel({ zone: z, arrive });
           },
           onVisit: (owner) => void travel({ zone: "home", owner }),

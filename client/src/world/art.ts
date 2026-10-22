@@ -8,6 +8,7 @@ import type { MapObject } from "./map";
 import { disc, oval, polygon } from "./pixeldraw";
 import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 import { decodeLook } from "./look";
+import { LIBRARY_GROUND, drawLibraryGround, libraryDecor, libraryObject } from "./libraryart";
 
 export const TILE = 32;
 
@@ -115,6 +116,7 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     curb: "#cfc6b2",
     arcade_carpet: "#211c30",
     tavern_floor: "#3e2a1c",
+    ...LIBRARY_GROUND,
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
   const differs = (dx: number, dy: number) => {
@@ -296,6 +298,8 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
       if (differs(-1, 0)) px(ctx, P.chalk, ox + 2, oy, 2, TILE);
       if (differs(1, 0)) px(ctx, P.chalk, ox + TILE - 4, oy, 2, TILE);
       break;
+    default:
+      drawLibraryGround(ctx, kind, tx, ty, ox, oy, differs);
   }
 }
 
@@ -773,8 +777,11 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       px(ctx, P.wood, 5, 5, 22, 12);
       break;
     }
-    default:
-      return null;
+    default: {
+      const lib = libraryDecor(kind, v);
+      if (!lib) return null;
+      c = lib;
+    }
   }
   const t = toTexture(c);
   decorCache.set(key, t);
@@ -2212,9 +2219,16 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       label(ctx, "🌱", 16, 13, "#000", 12);
       break;
     }
-    default:
+    default: {
+      const lib = libraryObject(o);
+      if (lib) {
+        c = lib.c;
+        overhang = lib.overhang;
+        break;
+      }
       [c, ctx] = makeCanvas(w, h);
       px(ctx, "rgba(0,0,0,0.2)", 0, 0, w, h);
+    }
   }
   return { texture: toTexture(c), overhang, left };
 }

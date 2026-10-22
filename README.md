@@ -50,7 +50,12 @@ and the Dance Off machine, each against its AI bot or whoever joins you;
 wins earn tickets for the prize counter. At the foot of the pond's pier, the
 Fisherman buys your catch. Skateboards, bikes and the rest are at the
 Commons Mall's Vehicles shop.
-Games earn tickets, traded for clothes at the prize counter.
+West of the square, the Library holds every Project Gutenberg book, in
+every language, each one a spine on a shelf: ask at the catalogue desk
+("Show me" walks you to it), or browse the eight wings, shelved like a
+real library. The Library starts empty; fill it with
+`cargo run --bin library-import` (downloads Gutenberg's catalogue, about
+20 MB; `--csv <file>` to use a copy, `--reshelve` to file new arrivals).
 🔊 or M toggles sound;
 `?weather=rain` (clear, cloudy, rain, mist) previews the weather.
 
@@ -105,7 +110,8 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | All Rust tests (includes a check that the generated TS is current) | `cargo test --workspace` |
 | Client tests (decodes Rust-produced bytes) | `cd client && npm test` |
 | Regenerate the TS protocol after editing `server/crates/protocol/src/lib.rs` | `cargo run -p commons-protocol --bin gen-ts` |
-| Regenerate the maps (city, mall, home) | `cargo run -p commons-sim --bin mapgen` |
+| Regenerate the maps (city, mall, bar, arcade, library, home) | `cargo run -p commons-sim --bin mapgen` |
+| Fill or update the Library's catalogue (weekly) | `cargo run --bin library-import [-- --reshelve]` |
 | Perf gate (start the zone server first) | `cargo run --release --bin botswarm -- --bots 500 --gate` |
 
 ## Configuration
@@ -118,10 +124,11 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `API_BIND` / `ORCHESTRATOR_BIND` / `ZONE_BIND` | `0.0.0.0:8080/8081/8082` | each service |
 | `COMMONS_CLIENT_URL` | `http://localhost:5173` | api (magic-link URLs) |
 | `ZONE_PUBLIC_URL` | `ws://localhost:8082/ws` | orchestrator |
-| `COMMONS_ZONES` | `city,home,mall,bar,arcade` | orchestrator |
+| `COMMONS_ZONES` | `city,home,mall,bar,arcade,library` and the eight `library_<wing>`s | orchestrator |
 | `COMMONS_MAPS_DIR` | `assets/maps` | zone |
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |
+| `LIBRARY_CATALOG_URL` / `LIBRARY_CONTACT` | Gutenberg's `pg_catalog.csv` / (none) | library-import: where to fetch, and a contact for its User-Agent |
 | `COMMONS_API_INTERNAL_URL` | `http://127.0.0.1:8080` | zone (economy calls) |
 | `COMMONS_SOCIAL_INTERNAL_URL` | `http://127.0.0.1:8083` | zone, orchestrator |
 | `SOCIAL_BIND` | `0.0.0.0:8083` | social |

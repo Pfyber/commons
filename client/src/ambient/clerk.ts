@@ -1,5 +1,5 @@
 // Shopkeepers behind a counter: the bar's bartender, the arcade's prize
-// attendant and the fisherman by the pond's pier. They potter about behind it, say hello as you come in, and
+// attendant, the Library's librarian and the fisherman by the pond's pier. They potter about behind it, say hello as you come in, and
 // chat when tapped. Like the Caretaker, where they stand comes from the wall
 // clock alone, so everyone sees the same.
 
@@ -15,6 +15,7 @@ export const CLERK_ID = 0xfffffff2;
 export const BARTENDER_ID = 0xfffffff4;
 export const ATTENDANT_ID = 0xfffffff6;
 export const FISHERMAN_ID = 0xfffffff7;
+export const LIBRARIAN_ID = 0xfffffff8;
 const LEG_MS = 9000;
 const SPEED_X10 = 10;
 /** A waistcoat, glasses and a ponytail. */
@@ -79,6 +80,21 @@ export const FISHERMAN: Keeper = {
     "Catfish and moonfish only come out after dark.",
     "Legendary ones thrash about. Wait for the needle to swing back through.",
     "I've seen a mythical dragonfish once. Pink as a sunset.",
+  ],
+};
+
+/** A cardigan, glasses and a bun: the Library's librarian at the circulation desk. */
+export const LIBRARIAN: Keeper = {
+  id: LIBRARIAN_ID,
+  name: "Librarian 📚",
+  look: encodeLook({ hue: 120, skin: 0, hair: 4, hat: 0, hatHue: 0, style: 3, accessory: 1, outfit: 7 }),
+  hellos: ["Welcome to the Library! Every book here is free to read.", "Hello! Looking for something? The catalogue knows where everything is.", "Come in. Mind the quiet in the Reading Room."],
+  tips: [
+    "Search the catalogue by title, author or subject, in any language. Then “Show me” walks you right to it.",
+    "Each wing is shelved like a real library: by class, then author, then title. The signs at the row ends say what's on them.",
+    "World Languages starts with French, Finnish and German, then the rest from A to Z.",
+    "New books wait on the New Arrivals case until they're given a place.",
+    "What's said in the Reading Room stays in the Reading Room.",
   ],
 };
 

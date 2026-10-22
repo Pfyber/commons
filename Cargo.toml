@@ -19,6 +19,7 @@ base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chess = "3.2"
+csv = "1"
 clap = { version = "4", features = ["derive", "env"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 hmac = "0.12"

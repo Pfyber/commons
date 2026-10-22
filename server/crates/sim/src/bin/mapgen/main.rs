@@ -1,12 +1,14 @@
 //! Generates the zone maps: `city.json`, the city of blocks (see `city.rs`,
-//! ADR 0010), `mall.json`, the Commons Mall (`mall.rs`, ADR 0011), and
-//! `home.json`, the cottage interior.
+//! ADR 0010), `mall.json`, the Commons Mall (`mall.rs`, ADR 0011),
+//! `home.json`, the cottage interior, and the Library's hall and wings
+//! (`library.rs`, ADR 0012).
 //!
 //! Deterministic: rerunning produces the same file. Hand-authored maps will
 //! replace this once `tools/mapedit` exists.
 
 mod city;
 mod leisure;
+mod library;
 mod mall;
 
 use commons_sim::map::{MapFile, MapObject, Spawn, StreetGrid};
@@ -35,6 +37,10 @@ const GROUND: &[&str] = &[
     "arcade_carpet",
     // The bar's worn plank floor: grain, knots, staggered joints.
     "tavern_floor",
+    // The library: warm parquet in the wings, marble in the hall, and rugs.
+    "parquet",
+    "marble",
+    "rug",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -71,6 +77,18 @@ const DECOR: &[&str] = &[
     "wood_wall",
     // The arcade's walls, striped with neon.
     "neon_wall",
+    // The library: panelled walls with tall windows, chairs (seats), long
+    // reading tables with green lamps, study carrels, a globe, plants, and
+    // the Children's Library's story cushions (seats).
+    "library_wall",
+    "chair",
+    "reading_table",
+    "carrel",
+    "globe",
+    "potted_plant",
+    "cushion",
+    // A library chair seen from behind (sitting facing north, at a table).
+    "chair_n",
 ];
 
 fn g(name: &str) -> u8 {
@@ -455,5 +473,9 @@ fn main() -> std::io::Result<()> {
     write("mall", &mall::mall())?;
     write("bar", &leisure::bar())?;
     write("arcade", &leisure::arcade())?;
+    write("library", &library::hall())?;
+    for wing in commons_sim::library::WINGS {
+        write(&wing.zone(), &library::wing(&wing))?;
+    }
     write("home", &home())
 }

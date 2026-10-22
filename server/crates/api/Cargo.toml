@@ -17,13 +17,16 @@ commons-sim.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 chrono.workspace = true
+csv.workspace = true
 futures-util.workspace = true
 lettre.workspace = true
 rand.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true

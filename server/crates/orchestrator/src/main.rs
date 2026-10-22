@@ -69,7 +69,11 @@ struct Located {
 }
 
 /// Public buildings with a door onto the city (a `door:<name>` spot there).
-const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade"];
+const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade", "library"];
+
+/// Zones served unless `COMMONS_ZONES` says otherwise: the city, homes, the
+/// public buildings, and the Library's hall and wings (ADR 0012).
+const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference";
 
 #[derive(Deserialize)]
 struct Lot {
@@ -179,9 +183,13 @@ async fn join(
         }
     };
     // Leaving somewhere through a door: step out of that door (best effort).
-    // `arrive` is a public place (`place:mall`), a home's owner, or "home"
-    // for your own.
+    // `arrive` is a public place (`place:mall`; a library wing, back into the
+    // hall), a home's owner, or "home" for your own.
     let arrive = match req.arrive.as_deref() {
+        Some(a) if zone == "library" => a
+            .strip_prefix("place:")
+            .filter(|w| w.starts_with("library_") && state.zones.iter().any(|z| z == w))
+            .map(String::from),
         Some(a) if zone == "city" => match a.strip_prefix("place:") {
             Some(place) => PUBLIC_DOORS.contains(&place).then(|| place.to_string()),
             None => {
@@ -227,7 +235,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         secret: config::secret(),
         zone_server_url: config::env_str("ZONE_PUBLIC_URL", "ws://localhost:8082/ws"),
-        zones: config::env_str("COMMONS_ZONES", "city,home,mall,bar,arcade")
+        zones: config::env_str("COMMONS_ZONES", ZONES)
             .split(',')
             .map(|s| s.trim().to_string())
             .collect(),

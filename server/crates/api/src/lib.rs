@@ -11,6 +11,7 @@ pub mod error;
 pub mod goods;
 pub mod gov;
 pub mod internal;
+pub mod library;
 pub mod mail;
 pub mod mall;
 pub mod pets;

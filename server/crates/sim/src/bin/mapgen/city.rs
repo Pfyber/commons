@@ -750,12 +750,17 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             k.object("town_hall", 19, 10, 10, 7, "Town Hall");
             k.rect(19, 17, 10, 1, "plaza");
         }
-        // The arcade hall and the bar have their own floors behind their
+        // The arcade hall, the bar and the library have their own floors behind their
         // doors; `door:<place>` is where you come out again.
         "arcade" => {
             k.object("arcade_hall", 16, 9, 16, 9, "Arcade");
             k.spot("door:arcade", 24, 18);
             k.spot("arcade_hall", 24, 19);
+        }
+        "library" => {
+            k.object("library", 13, 7, 22, 11, "Library");
+            k.spot("door:library", 24, 18);
+            k.spot("library", 24, 19);
         }
         "cafe" => {
             k.object("bar", 16, 9, 16, 9, "The Mossy Mug");
@@ -773,6 +778,10 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
                 .to_string()
         }
         "cafe" => "The Mossy Mug: drinks, the pool table and pinball inside".to_string(),
+        "library" => {
+            "Library: every book in Project Gutenberg, in every language. Browse the wings, or ask at the desk"
+                .to_string()
+        }
         "casino" => "Casino: opening soon. Play money only, never real money".to_string(),
         "club_hall" => "Club Hall: rooms for clubs, opening soon".to_string(),
         _ => format!("{name}: opening soon"),

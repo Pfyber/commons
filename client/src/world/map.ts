@@ -16,6 +16,11 @@ export interface MapObject {
   isNew?: boolean;
   /** Houses and postboxes: how they've been done up (0: as built). */
   style?: number;
+  /** Library bookcases: which wing, and how many books stand in it. */
+  wing?: string;
+  books?: number;
+  /** Library stack signs: the class (or language) on the row, in short. */
+  sign?: string;
 }
 
 /** The street grid of a city map (mirror of sim::map::StreetGrid). */

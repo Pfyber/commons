@@ -2563,3 +2563,128 @@ mod mall_shop {
         }
     }
 }
+
+// ---- the library's catalogue -------------------------------------------------
+
+mod library {
+    use super::*;
+    use crate::library::{Record, reshelve, upsert};
+    use axum::Router;
+    use serde_json::Value;
+
+    async fn get(app: &Router, auth: &str, path: &str) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .uri(path)
+            .header("authorization", auth)
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 22)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    #[tokio::test]
+    async fn books_arrive_get_shelved_and_are_found() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app: Router = Router::new()
+            .nest("/api", crate::library::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let claims = token::AccessClaims {
+            sub: p.to_string(),
+            name: "t".into(),
+            look: 1,
+            style: 0,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        let auth = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        );
+        let book = |id: i32, title: &str, languages: &str, locc: &str| Record {
+            id,
+            title: title.into(),
+            authors: "Quillfeather, Ottoline, 1801-1888".into(),
+            languages: languages.into(),
+            subjects: "Testing -- Fiction".into(),
+            locc: locc.into(),
+            bookshelves: "Category: Novels".into(),
+            issued: "2026-10-22".into(),
+        };
+        let ours = [9_900_001, 9_900_002];
+        sqlx::query("DELETE FROM books WHERE id = ANY($1)")
+            .bind(&ours[..])
+            .execute(&s.db)
+            .await
+            .unwrap();
+        let records = [
+            book(ours[0], "The Zorblewick Affair", "en", "PR"),
+            book(ours[1], "Le Zorblewick", "fr", "PQ"),
+        ];
+        assert_eq!(upsert(&s.db, &records).await.unwrap(), 2);
+        assert_eq!(upsert(&s.db, &records).await.unwrap(), 0, "nothing new");
+
+        // New arrivals wait on their own case in the hall, newest first.
+        let (st, case) = get(&app, &auth, "/api/library/case/new/0").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(case["books"][0]["id"], ours[1]);
+        let (st, found) = get(&app, &auth, "/api/library/search?q=zorblew").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(found["books"].as_array().unwrap().len(), 2);
+        assert_eq!(found["books"][0]["at"]["wing"], "new");
+        let (_, fr) = get(&app, &auth, "/api/library/search?q=zorblewick&lang=fr").await;
+        assert_eq!(fr["books"].as_array().unwrap().len(), 1);
+        assert_eq!(fr["books"][0]["id"], ours[1]);
+        let (st, _) = get(&app, "", "/api/library/search?q=zorblewick").await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+
+        // Re-shelved: each in its wing, its bookcase holding it at its slot.
+        reshelve(&s.db).await.unwrap();
+        let (st, card) = get(&app, &auth, &format!("/api/library/books/{}", ours[1])).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(card["at"]["wing"], "world");
+        assert_eq!(card["languages"][0]["name"], "French");
+        assert_eq!(card["bookshelves"][0], "Novels");
+        let (n, slot) = (&card["at"]["case"], &card["at"]["slot"]);
+        let (_, case) = get(&app, &auth, &format!("/api/library/case/world/{n}")).await;
+        let here = case["books"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == ours[1])
+            .expect("on its bookcase");
+        assert_eq!(&here["slot"], slot);
+        let (_, wings) = get(&app, &auth, "/api/library/wings").await;
+        assert_eq!(wings["arrivals"], 0);
+        let (_, wing) = get(&app, &auth, "/api/library/wing/world").await;
+        let lit = wings["wings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["key"] == "world")
+            .unwrap();
+        assert_eq!(wing["count"], lit["count"]);
+        assert_eq!(wing["cases"][0][0]["l"], "French");
+        let (st, _) = get(&app, &auth, "/api/library/case/world/9999").await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+
+        // A changed record is updated, not added; then put things back.
+        let renamed = [book(ours[0], "The Zorblewick Affair, Revised", "en", "PR")];
+        assert_eq!(upsert(&s.db, &renamed).await.unwrap(), 0);
+        sqlx::query("DELETE FROM books WHERE id = ANY($1)")
+            .bind(&ours[..])
+            .execute(&s.db)
+            .await
+            .unwrap();
+        reshelve(&s.db).await.unwrap();
+    }
+}

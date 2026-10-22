@@ -974,6 +974,62 @@ sprint. 500 bots pass the perf gate.
 Next: M8, polish (shopkeepers, music and lighting per department, a
 crowded-mall bot test).
 
+## Library L1 · Every book on a shelf: done (2026-10-22)
+
+ADR 0012. The Library block's building is now a door: behind it, the
+entrance hall and eight wings, holding all 78,383 Project Gutenberg texts
+in every language, each one a spine on a shelf.
+
+- **Catalogue:** `books` (migration 0026), filled by `library-import`
+  from Gutenberg's `pg_catalog.csv` (texts only; titles, authors,
+  languages, subjects, LoC classes, bookshelves). Re-running it adds new
+  books to the New Arrivals case; `--reshelve` files everything. A full
+  import takes about 20 s; a re-run with nothing new, 5 s.
+- **Shelving like a real library** (`commons_sim::library`): other
+  languages to World Languages (French, Finnish, German, Dutch, Italian,
+  Spanish, Hungarian, Portuguese, Chinese, then the rest by name); English
+  by class: juvenile fiction to the Children's Library, P to Literature,
+  C–G History & Geography, B/H–L Philosophy, Religion & Society, Q–V
+  Science & Technology, M–N Arts & Music, the rest Periodicals &
+  Reference. Within a wing: class, author, title (articles ignored).
+  Bookcases hold 100 (five shelves of twenty); wings are sized with a
+  third to spare and the maps are generated from the same table.
+- **The hall** (`library`): marble and a red runner, the circulation
+  desk with the Librarian and two card catalogues, the eight wing doors
+  along the north gallery, the Reading Room (long tables with green
+  lamps; a nook, so chat stays there), New Arrivals, armchairs, a globe.
+- **The wings** (`library_<wing>`): rows of bookcases facing south, an
+  aisle in front of each, two banks either side of a central aisle (one
+  in Arts & Music, with a reading corner), call-number signs at the row
+  ends (the class, or the language in World Languages; tap for the
+  range), carrels along the walls, reading tables by the door. The
+  Children's Library has painted shelves and a story circle of cushions.
+- **Browsing:** tap a bookcase to see it close up, every spine with its
+  title; walk along the row with Previous/Next; tap a spine for the
+  book's card (authors, language, subjects, classes, where it stands,
+  and a link to read it at Gutenberg until L2 brings reading in).
+- **The catalogue:** search title, author and subject in any language,
+  filter by language, or a book number; "Show me" takes you to the
+  wing, walks you to the bookcase, opens it with the book picked out and
+  points a bookmark at the glowing spine.
+- **Doors:** leaving a wing puts you at its door in the hall; leaving the
+  hall, at the Library's door in the city. Indoors, birds no longer fly
+  across the ceiling (in the mall, bar and arcade too).
+
+Checked: server tests (API 35 with the catalogue test: arrivals, search,
+the language filter, re-shelving and every route; sim 36 with shelving
+order; mapgen: every bookcase and wing door reachable), clippy clean;
+client 79 tests. In the browser: into the Library from the city, search
+"pride and prejudice" and French-only "misérables", a card, Show me into
+Literature with the spine marked, 100 spines on a full bookcase,
+browsing along a row, a row sign, out to the Literature door in the
+hall, World Languages (signs read FRE … FIN), the Children's story
+circle, the Reading Room, and out of the Library's door; and the shelf
+panel at phone width.
+
+Next: L2, reading (fetch, clean, page and cache texts; the reader; your
+place kept).
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,
