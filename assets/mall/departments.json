@@ -80,10 +80,11 @@
         {"item": "robot_suit", "price": 300, "limited": 3}
       ]
     },
-    {"key": "vehicles", "name": "Vehicles", "type": "track", "unit": [2, 23, 23, 56], "door": "e", "open": true, "slots": 4,
+    {"key": "vehicles", "name": "Vehicles", "type": "track", "unit": [2, 23, 23, 56], "door": "e", "open": true, "slots": 5,
       "catalog": [
         {"item": "roller_skates", "price": 150, "always": true},
         {"item": "kick_scooter", "price": 220, "always": true},
+        {"item": "skateboard", "price": 180, "always": true},
         {"item": "city_bike", "price": 320, "always": true},
         {"item": "vintage_bike", "price": 400, "limited": 3}
       ]

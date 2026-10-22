@@ -25,19 +25,33 @@ node scripts/dev.mjs --bots 50  # more bots (--bots 0 for none)
 
 Open http://localhost:5173 and use **Dev quick login** with any name, or the
 email flow (in dev mode the magic link is shown on screen). Click or tap to
-walk, or use WASD/arrows. Press Enter to chat, and 1–7 for emotes. Click a
+walk, or use WASD/arrows (double-tap, or press a direction twice, to
+sprint outdoors); the mouse wheel or a pinch zooms. Press Enter to chat, and 1–8 for emotes (8 is the robot). Click a
 bench to sit (🪑 sits on the ground); sit beside a chess table to play. Add
 `?hour=22` to the URL to see the park at night. Tap the pond to fish, tap a
 soil plot to garden, visit the market cart by the fountain, and take the west
 gate home. 🎒 is your bag (B), 📖 your album (L), 👥 friends (F) and 🔔
-notifications (N). Tap another player to befriend, message or block them.
+notifications (N). Tap another player to befriend, message or block them, or
+to play rock paper scissors (anyone, not just friends). The dev bots are
+real (dev) players: they accept friend requests, follows and games, wave
+back, and stop when you walk up to them.
 Tap a corner's board (sports, art, music, games) to read and post, the
 notice board for daily requests, and the fountain for the town goal. Sit
 alone at a chess table to play the Park Elder. Corner activities: jam at
 the bandstand (keys 1–8), paint at the easels, kick the ball on the pitch
 (walk into it), and solve the town word at the arcade. Explore: the Old
 Oak, the wishing well, the hedge maze, the Whispering Wood (there's a tiny
-door somewhere), and pet Biscuit the cat. 🔊 or M toggles sound;
+door somewhere), and pet Biscuit the cat. In the Café block, the Mossy Mug:
+a beer from the bartender (5 coins) makes you woozy for a minute (water
+sobers you up), the pool table plays real 8-ball against a friend or the
+pool shark bot, and there's pinball. In the Arcade block: Pong, Light
+Cycles, Connect Four, Memory Match, Basket Catch, Turbo Racer, Tank Duel
+and the Dance Off machine, each against its AI bot or whoever joins you;
+wins earn tickets for the prize counter. At the foot of the pond's pier, the
+Fisherman buys your catch. Skateboards, bikes and the rest are at the
+Commons Mall's Vehicles shop.
+Games earn tickets, traded for clothes at the prize counter.
+🔊 or M toggles sound;
 `?weather=rain` (clear, cloudy, rain, mist) previews the weather.
 
 Newcomers meet the Caretaker by the fountain: three first tasks (catch a
@@ -104,7 +118,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `API_BIND` / `ORCHESTRATOR_BIND` / `ZONE_BIND` | `0.0.0.0:8080/8081/8082` | each service |
 | `COMMONS_CLIENT_URL` | `http://localhost:5173` | api (magic-link URLs) |
 | `ZONE_PUBLIC_URL` | `ws://localhost:8082/ws` | orchestrator |
-| `COMMONS_ZONES` | `city,home,mall` | orchestrator |
+| `COMMONS_ZONES` | `city,home,mall,bar,arcade` | orchestrator |
 | `COMMONS_MAPS_DIR` | `assets/maps` | zone |
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |

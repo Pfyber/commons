@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 17;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -85,6 +85,26 @@ export function decTile(r: Reader): Tile {
   };
 }
 
+export interface PoolBall {
+  n: number;
+  x: number;
+  y: number;
+}
+
+export function encPoolBall(w: Writer, v: PoolBall) {
+  w.u8(v.n);
+  w.u16(v.x);
+  w.u16(v.y);
+}
+
+export function decPoolBall(r: Reader): PoolBall {
+  return {
+    n: r.u8(),
+    x: r.u16(),
+    y: r.u16(),
+  };
+}
+
 export interface EntityInfo {
   id: number;
   name: string;
@@ -98,8 +118,10 @@ export interface EntityInfo {
   state: number;
   speedX10: number;
   t0: number;
+  sprintIn: number;
   path: Tile[];
   mood: number;
+  away: boolean;
 }
 
 export function encEntityInfo(w: Writer, v: EntityInfo) {
@@ -115,8 +137,10 @@ export function encEntityInfo(w: Writer, v: EntityInfo) {
   w.u8(v.state);
   w.u8(v.speedX10);
   w.u32(v.t0);
+  w.u16(v.sprintIn);
   w.vec(v.path, (x) => encTile(w, x));
   w.u8(v.mood);
+  w.bool(v.away);
 }
 
 export function decEntityInfo(r: Reader): EntityInfo {
@@ -133,14 +157,16 @@ export function decEntityInfo(r: Reader): EntityInfo {
     state: r.u8(),
     speedX10: r.u8(),
     t0: r.u32(),
+    sprintIn: r.u16(),
     path: r.vec(() => decTile(r)),
     mood: r.u8(),
+    away: r.bool(),
   };
 }
 
 export type ClientMsg =
   | { t: "Hello"; joinToken: string; version: number; viewW: number; viewH: number }
-  | { t: "MoveTo"; x: number; y: number }
+  | { t: "MoveTo"; x: number; y: number; sprint: boolean }
   | { t: "Emote"; emote: number }
   | { t: "ChatSay"; text: string }
   | { t: "Ping"; clientT: number }
@@ -159,6 +185,17 @@ export type ClientMsg =
   | { t: "Accept"; from: number; kind: number }
   | { t: "SkyLantern"; text: string }
   | { t: "SetLook"; look: number }
+  | { t: "RpsPick"; pick: number }
+  | { t: "Drink"; kind: number }
+  | { t: "PoolJoin"; vsBot: boolean }
+  | { t: "PoolLeave" }
+  | { t: "PoolShoot"; angle: number; power: number }
+  | { t: "ArcadeJoin"; cab: number; vsBot: boolean }
+  | { t: "ArcadeLeave"; cab: number }
+  | { t: "ArcadeInput"; cab: number; value: number }
+  | { t: "PoolAim"; angle: number; pull: number }
+  | { t: "Away"; away: boolean }
+  | { t: "FishHit" }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -175,6 +212,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(2);
       w.u16(m.x);
       w.u16(m.y);
+      w.bool(m.sprint);
       break;
     case "Emote":
       w.u8(3);
@@ -261,6 +299,52 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(20);
       w.u32(m.look);
       break;
+    case "RpsPick":
+      w.u8(22);
+      w.u8(m.pick);
+      break;
+    case "Drink":
+      w.u8(23);
+      w.u8(m.kind);
+      break;
+    case "PoolJoin":
+      w.u8(24);
+      w.bool(m.vsBot);
+      break;
+    case "PoolLeave":
+      w.u8(25);
+      break;
+    case "PoolShoot":
+      w.u8(26);
+      w.u16(m.angle);
+      w.u16(m.power);
+      break;
+    case "ArcadeJoin":
+      w.u8(27);
+      w.u8(m.cab);
+      w.bool(m.vsBot);
+      break;
+    case "ArcadeLeave":
+      w.u8(28);
+      w.u8(m.cab);
+      break;
+    case "ArcadeInput":
+      w.u8(29);
+      w.u8(m.cab);
+      w.u16(m.value);
+      break;
+    case "PoolAim":
+      w.u8(30);
+      w.u16(m.angle);
+      w.u16(m.pull);
+      break;
+    case "Away":
+      w.u8(31);
+      w.bool(m.away);
+      break;
+    case "FishHit":
+      w.u8(32);
+      break;
   }
   return w.finish();
 }
@@ -274,7 +358,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "Hello", joinToken: r.str(), version: r.u16(), viewW: r.u8(), viewH: r.u8() };
       break;
     case 2:
-      m = { t: "MoveTo", x: r.u16(), y: r.u16() };
+      m = { t: "MoveTo", x: r.u16(), y: r.u16(), sprint: r.bool() };
       break;
     case 3:
       m = { t: "Emote", emote: r.u8() };
@@ -330,6 +414,39 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 20:
       m = { t: "SetLook", look: r.u32() };
       break;
+    case 22:
+      m = { t: "RpsPick", pick: r.u8() };
+      break;
+    case 23:
+      m = { t: "Drink", kind: r.u8() };
+      break;
+    case 24:
+      m = { t: "PoolJoin", vsBot: r.bool() };
+      break;
+    case 25:
+      m = { t: "PoolLeave" };
+      break;
+    case 26:
+      m = { t: "PoolShoot", angle: r.u16(), power: r.u16() };
+      break;
+    case 27:
+      m = { t: "ArcadeJoin", cab: r.u8(), vsBot: r.bool() };
+      break;
+    case 28:
+      m = { t: "ArcadeLeave", cab: r.u8() };
+      break;
+    case 29:
+      m = { t: "ArcadeInput", cab: r.u8(), value: r.u16() };
+      break;
+    case 30:
+      m = { t: "PoolAim", angle: r.u16(), pull: r.u16() };
+      break;
+    case 31:
+      m = { t: "Away", away: r.bool() };
+      break;
+    case 32:
+      m = { t: "FishHit" };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -343,7 +460,7 @@ export type ServerMsg =
   | { t: "CellLeave"; cell: number; ids: number[] }
   | { t: "Spawn"; entity: EntityInfo }
   | { t: "Despawn"; id: number }
-  | { t: "MoveStart"; id: number; speedX10: number; t0: number; path: Tile[] }
+  | { t: "MoveStart"; id: number; speedX10: number; t0: number; sprintIn: number; path: Tile[] }
   | { t: "Snap"; id: number; x: number; y: number }
   | { t: "EmoteShown"; id: number; emote: number }
   | { t: "ChatBubble"; id: number; text: string }
@@ -364,6 +481,13 @@ export type ServerMsg =
   | { t: "Together"; a: number; b: number; kind: number }
   | { t: "LanternRise"; id: number; x: number; y: number; text: string }
   | { t: "LookChanged"; id: number; look: number; style: number; pet: number; vehicle: number; tool: number }
+  | { t: "Rps"; a: number; b: number; phase: number; aPick: number; bPick: number; endsT: number }
+  | { t: "Woozy"; id: number; ms: number }
+  | { t: "PoolState"; a: number; b: number; turn: number; groups: number; status: number; shot: number; hole: number; balls: PoolBall[] }
+  | { t: "PoolShot"; by: number; vx: number; vy: number; shot: number }
+  | { t: "ArcadeState"; cab: number; kind: number; a: number; b: number; status: number; turn: number; t0: number; data: number[] }
+  | { t: "PoolAim"; by: number; angle: number; pull: number }
+  | { t: "AwayChanged"; id: number; away: boolean }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -399,6 +523,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.id);
       w.u8(m.speedX10);
       w.u32(m.t0);
+      w.u16(m.sprintIn);
       w.vec(m.path, (x) => encTile(w, x));
       break;
     case "Snap":
@@ -539,6 +664,60 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(m.vehicle);
       w.u8(m.tool);
       break;
+    case "Rps":
+      w.u8(27);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.phase);
+      w.u8(m.aPick);
+      w.u8(m.bPick);
+      w.u32(m.endsT);
+      break;
+    case "Woozy":
+      w.u8(28);
+      w.u32(m.id);
+      w.u32(m.ms);
+      break;
+    case "PoolState":
+      w.u8(29);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.turn);
+      w.u8(m.groups);
+      w.u8(m.status);
+      w.u32(m.shot);
+      w.u8(m.hole);
+      w.vec(m.balls, (x) => encPoolBall(w, x));
+      break;
+    case "PoolShot":
+      w.u8(30);
+      w.u32(m.by);
+      w.u16(m.vx);
+      w.u16(m.vy);
+      w.u32(m.shot);
+      break;
+    case "ArcadeState":
+      w.u8(31);
+      w.u8(m.cab);
+      w.u8(m.kind);
+      w.u32(m.a);
+      w.u32(m.b);
+      w.u8(m.status);
+      w.u8(m.turn);
+      w.u32(m.t0);
+      w.vec(m.data, (x) => w.u16(x));
+      break;
+    case "PoolAim":
+      w.u8(32);
+      w.u32(m.by);
+      w.u16(m.angle);
+      w.u16(m.pull);
+      break;
+    case "AwayChanged":
+      w.u8(33);
+      w.u32(m.id);
+      w.bool(m.away);
+      break;
   }
   return w.finish();
 }
@@ -564,7 +743,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "Despawn", id: r.u32() };
       break;
     case 6:
-      m = { t: "MoveStart", id: r.u32(), speedX10: r.u8(), t0: r.u32(), path: r.vec(() => decTile(r)) };
+      m = { t: "MoveStart", id: r.u32(), speedX10: r.u8(), t0: r.u32(), sprintIn: r.u16(), path: r.vec(() => decTile(r)) };
       break;
     case 7:
       m = { t: "Snap", id: r.u32(), x: r.u16(), y: r.u16() };
@@ -625,6 +804,27 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 26:
       m = { t: "LookChanged", id: r.u32(), look: r.u32(), style: r.u32(), pet: r.u16(), vehicle: r.u8(), tool: r.u8() };
+      break;
+    case 27:
+      m = { t: "Rps", a: r.u32(), b: r.u32(), phase: r.u8(), aPick: r.u8(), bPick: r.u8(), endsT: r.u32() };
+      break;
+    case 28:
+      m = { t: "Woozy", id: r.u32(), ms: r.u32() };
+      break;
+    case 29:
+      m = { t: "PoolState", a: r.u32(), b: r.u32(), turn: r.u8(), groups: r.u8(), status: r.u8(), shot: r.u32(), hole: r.u8(), balls: r.vec(() => decPoolBall(r)) };
+      break;
+    case 30:
+      m = { t: "PoolShot", by: r.u32(), vx: r.u16(), vy: r.u16(), shot: r.u32() };
+      break;
+    case 31:
+      m = { t: "ArcadeState", cab: r.u8(), kind: r.u8(), a: r.u32(), b: r.u32(), status: r.u8(), turn: r.u8(), t0: r.u32(), data: r.vec(() => r.u16()) };
+      break;
+    case 32:
+      m = { t: "PoolAim", by: r.u32(), angle: r.u16(), pull: r.u16() };
+      break;
+    case 33:
+      m = { t: "AwayChanged", id: r.u32(), away: r.bool() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

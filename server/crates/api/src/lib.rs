@@ -15,6 +15,7 @@ pub mod mail;
 pub mod mall;
 pub mod pets;
 pub mod play;
+pub mod prizes;
 pub mod store;
 #[cfg(test)]
 mod tests;

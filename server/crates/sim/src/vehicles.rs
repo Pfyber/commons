@@ -12,11 +12,12 @@ pub const TEST_RIDE: u8 = 0x80;
 pub const TRACK_GROUND: &str = "track";
 
 /// How much faster than walking each vehicle goes, in tenths.
-const SPEEDUP_X10: [(u8, u16); 4] = [
+const SPEEDUP_X10: [(u8, u16); 5] = [
     (1, 13), // roller skates
     (2, 15), // kick scooter
     (3, 18), // city bike
     (4, 18), // vintage bike
+    (5, 16), // skateboard
 ];
 
 /// Speed riding vehicle `code` (test-ride bit ignored), in tenths of a tile

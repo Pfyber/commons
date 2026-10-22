@@ -24,7 +24,7 @@ export class Furniture {
   constructor(private map: ZoneMap) {
     const table = map.decor_legend.indexOf("chess_table");
     // Picnic blankets (lie back and watch the stars) and logs round the campfire.
-    const seatKinds = new Set(["bench", "swing", "blanket", "log_seat"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
+    const seatKinds = new Set(["bench", "swing", "blanket", "log_seat", "stool"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
     const w = map.width;
     map.decor.forEach((d, i) => {
       if (seatKinds.has(d)) this.seats.set(i, { id: i, tile: { x: i % w, y: Math.floor(i / w) }, table: null });

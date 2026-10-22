@@ -21,6 +21,19 @@ function benchPiece(map: ZoneMap, x: number, y: number): string {
   return l && r ? "bench_mid" : l ? "bench_right" : r ? "bench_left" : "bench";
 }
 
+/** How far the wheel zooms, in steps either side of the default. */
+const ZOOM_IN = 3;
+const ZOOM_OUT = 2;
+const ZOOM_KEY = "commons.zoom";
+
+function loadZoom(): number {
+  try {
+    return Math.round(Number(localStorage.getItem(ZOOM_KEY)) || 0);
+  } catch {
+    return 0;
+  }
+}
+
 /** Chunks kept loaded around the view, and how many to bake per frame. */
 const MARGIN = 1;
 const BAKE_PER_FRAME = 4;
@@ -59,6 +72,14 @@ export class Scene {
   private marker = new Graphics();
   private markerUntil = 0;
   scale = 2;
+  /**
+   * Zoom, in steps from the default (each a whole device pixel per art
+   * pixel, so the art is crisp when it settles): where it's showing now,
+   * gliding toward where it's headed; remembered between visits.
+   */
+  private zoom = loadZoom();
+  private zoomTo = this.zoom;
+  private zoomAt = performance.now();
   private cam: TileXY = { x: 0, y: 0 };
   /**
    * The map streams in by chunks around the camera (ADR 0010): ground, decor
@@ -141,7 +162,8 @@ export class Scene {
     const { texture, overhang, left } = objectTexture(p.o);
     const s = new Sprite(texture);
     s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
-    s.zIndex = (p.o.y + p.o.h) * TILE - 1;
+    // The dance floor lies flat: people stand on it, not behind it.
+    s.zIndex = p.o.kind === "dance_floor" ? p.o.y * TILE + 1 : (p.o.y + p.o.h) * TILE - 1;
     this.sorted.addChild(s);
     p.sprite = s;
     if (p.o.item) {
@@ -240,23 +262,80 @@ export class Scene {
    * out unevenly sized.
    */
   resize() {
-    const { width, height } = this.app.screen;
     const res = this.app.renderer.resolution;
-    const want = Math.min(3, Math.min(width / (22 * TILE), height / (13 * TILE)));
-    this.scale = Math.max(1, Math.round(want * res)) / res;
+    const base = this.baseStep();
+    const step = Math.min(base + ZOOM_IN, Math.max(Math.max(1, base - ZOOM_OUT), base + this.zoom));
+    // Settled on a whole step, the art is pixel-perfect; between steps (gliding, pinching) it's smooth.
+    this.scale = step / res;
     this.world.scale.set(this.scale);
     this.follow(this.cam);
   }
 
-  /** Viewport size in tiles, sent to the server for interest management. */
-  viewTiles(): { w: number; h: number } {
+  /** The default zoom, in device pixels per art pixel. */
+  private baseStep(): number {
     const { width, height } = this.app.screen;
-    return { w: Math.ceil(width / (TILE * this.scale)) + 1, h: Math.ceil(height / (TILE * this.scale)) + 1 };
+    const res = this.app.renderer.resolution;
+    const want = Math.min(3, Math.min(width / (22 * TILE), height / (13 * TILE)));
+    return Math.max(1, Math.round(want * res));
   }
 
-  /** Visible area in tiles (inclusive bounds, may exceed the map). */
+  /** How far the zoom may go, in steps from the default. */
+  private zoomRange(): [number, number] {
+    const base = this.baseStep();
+    return [Math.max(1, base - ZOOM_OUT) - base, ZOOM_IN];
+  }
+
+  /** Glides a step in (+1) or out (−1). Returns whether it will change. */
+  zoomBy(dir: number): boolean {
+    const [lo, hi] = this.zoomRange();
+    const next = Math.max(lo, Math.min(hi, Math.round(this.zoomTo) + Math.sign(dir)));
+    if (next === this.zoomTo) return false;
+    this.zoomTo = next;
+    this.saveZoom();
+    return true;
+  }
+
+  /** The zoom now (for a pinch to start from). */
+  get zoomLevel(): number {
+    return this.zoom;
+  }
+
+  /** A pinch: zoom straight to `from` scaled by `ratio` (how far the fingers spread). */
+  pinch(from: number, ratio: number) {
+    const [lo, hi] = this.zoomRange();
+    const base = this.baseStep();
+    this.zoom = this.zoomTo = Math.max(lo, Math.min(hi, (base + from) * ratio - base));
+    this.resize();
+  }
+
+  /** The pinch let go: glide to the nearest crisp step. */
+  pinchEnd() {
+    this.zoomTo = Math.round(this.zoom);
+    this.saveZoom();
+  }
+
+  private saveZoom() {
+    try {
+      localStorage.setItem(ZOOM_KEY, String(this.zoomTo));
+    } catch {
+      // storage unavailable
+    }
+  }
+
+  /**
+   * Viewport size in tiles, sent to the server for interest management: as
+   * far out as the zoom goes, so zooming out never shows an empty edge.
+   */
+  viewTiles(): { w: number; h: number } {
+    const { width, height } = this.app.screen;
+    const widest = Math.max(1, this.baseStep() - ZOOM_OUT) / this.app.renderer.resolution;
+    return { w: Math.ceil(width / (TILE * widest)) + 1, h: Math.ceil(height / (TILE * widest)) + 1 };
+  }
+
+  /** Visible area in tiles at the zoom now (inclusive bounds, may exceed the map). */
   viewRect(): { x0: number; y0: number; x1: number; y1: number } {
-    const v = this.viewTiles();
+    const { width, height } = this.app.screen;
+    const v = { w: Math.ceil(width / (TILE * this.scale)) + 1, h: Math.ceil(height / (TILE * this.scale)) + 1 };
     return {
       x0: this.cam.x - v.w / 2,
       y0: this.cam.y - v.h / 2,
@@ -306,6 +385,14 @@ export class Scene {
 
   update() {
     const now = performance.now();
+    // The zoom glides to where it's headed.
+    const dt = Math.min(0.1, (now - this.zoomAt) / 1000);
+    this.zoomAt = now;
+    if (this.zoom !== this.zoomTo) {
+      const next = this.zoom + (this.zoomTo - this.zoom) * (1 - Math.exp(-dt / 0.085));
+      this.zoom = Math.abs(this.zoomTo - next) < 0.01 ? this.zoomTo : next;
+      this.resize();
+    }
     const left = this.markerUntil - now;
     this.marker.alpha = left > 0 ? Math.min(1, left / 300) : 0;
     this.stream();

@@ -19,10 +19,12 @@ export interface Item {
     night?: boolean;
     code?: number;
     account_bound?: boolean;
-    /** Tools: which hand (`rod`, `can`). */
+    /** Tools: which hand (`rod`, `can`). Home exterior: which part of the house. */
     tool?: string;
-    /** Home exterior: which part of the house. */
     slot?: string;
+    /** The fisherman's prices, and how often a fish bites. */
+    weight?: number;
+    coins?: number;
   };
 }
 
@@ -40,6 +42,8 @@ export interface Applied {
 }
 
 export const COIN = 1;
+/** The arcade's tickets (protocol `arcade::TICKET`). */
+export const TICKET = 900;
 
 export class Economy {
   readonly items = new Map<number, Item>();
@@ -103,7 +107,7 @@ export class Economy {
   }
 
   /** Takes new totals from any economy response. */
-  applyResult(r: Applied) {
+  applyResult(r: Pick<Applied, "totals">) {
     for (const [item, qty] of r.totals) this.inventory.set(item, qty);
     this.emit();
   }
@@ -114,6 +118,16 @@ export class Economy {
 
   async buy(item: number, qty: number) {
     this.applyResult(await this.auth.send<Applied>("/api/market/buy", { item, qty, key: crypto.randomUUID() }));
+  }
+
+  /** The arcade's prize shelf: each prize's item and price in tickets (`once`: kept for good, won once). */
+  async prizes(): Promise<{ item: number; tickets: number; once: boolean }[]> {
+    return (await this.auth.get<{ prizes: { item: number; tickets: number; once: boolean }[] }>("/api/arcade/prizes")).prizes;
+  }
+
+  /** The arcade's prize counter: tickets for a prize. */
+  async redeem(item: number) {
+    this.applyResult((await this.auth.send<{ applied: Applied }>("/api/arcade/redeem", { item, key: crypto.randomUUID() })).applied);
   }
 
   /** Today's small gift, if not yet collected. */

@@ -45,7 +45,7 @@ describe("protocol codec matches Rust", () => {
 
   it("frames and rejects garbage", () => {
     const a = encodeClientMsg({ t: "Emote", emote: 3 });
-    const b = encodeClientMsg({ t: "MoveTo", x: 1, y: 2 });
+    const b = encodeClientMsg({ t: "MoveTo", x: 1, y: 2, sprint: false });
     expect(splitFrame(encodeFrame([a, b])).map(toHex)).toEqual([toHex(a), toHex(b)]);
     expect(() => splitFrame(new Uint8Array([5, 0, 1]))).toThrow();
     expect(() => decodeServerMsg(new Uint8Array([200]))).toThrow();

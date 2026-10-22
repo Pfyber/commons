@@ -133,7 +133,7 @@ fn validate_name(raw: &str) -> ApiResult<String> {
     Ok(name)
 }
 
-async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
+pub(crate) async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Session> {
     // Trust tier and any mute come from activity and moderation (spec §10.6).
     let uid = uuid::Uuid::parse_str(&p.id).map_err(|_| ApiError::unauthorized("bad player id"))?;
     let tier = crate::gov::refresh_tier(&state.db, uid)

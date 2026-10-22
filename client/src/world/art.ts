@@ -113,6 +113,8 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     straw: "#e3c77a",
     track: "#c0674e",
     curb: "#cfc6b2",
+    arcade_carpet: "#211c30",
+    tavern_floor: "#3e2a1c",
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
   const differs = (dx: number, dy: number) => {
@@ -245,6 +247,35 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
       if (at(tx - 1, ty) === "road") px(ctx, "#7d776c", ox, oy, 4, TILE);
       if (at(tx + 1, ty) === "road") px(ctx, "#7d776c", ox + TILE - 4, oy, 4, TILE);
       break;
+    case "tavern_floor": {
+      // Dark, worn walnut planks, two to a tile: a quiet floor, so the
+      // tables and the machines stand out on it. Faint grain, soft joints
+      // staggered row to row, the odd knot.
+      const shades = ["#3e2a1c", "#3a271a", "#422d1e", "#3c291b"];
+      for (let r = 0; r < 2; r++) {
+        const y0 = oy + r * 16;
+        const row = ty * 2 + r;
+        const s3 = hash(tx, row, 60);
+        px(ctx, shades[s3 % shades.length], ox, y0, TILE, 16);
+        for (let g = 0; g < 2; g++) {
+          const gy = y0 + 4 + ((s3 >>> (g * 4)) % 9);
+          px(ctx, "rgba(20, 12, 6, 0.18)", ox + ((s3 >>> (g * 3)) % 10), gy, 9 + ((s3 >>> g) % 12), 1);
+        }
+        px(ctx, "rgba(255, 220, 170, 0.04)", ox, y0 + 1, TILE, 1);
+        px(ctx, "#2a1b10", ox, y0 + 15, TILE, 1);
+        const jx = ox + (((row % 2) * 16 + (s3 % 5)) % TILE);
+        px(ctx, "#2e1e12", jx, y0, 1, 15);
+        if (s3 % 11 === 0) px(ctx, "#33221a", ox + 8 + ((s3 >>> 5) % 14), y0 + 7, 3, 2);
+      }
+      break;
+    }
+    case "arcade_carpet": {
+      // A calm arcade carpet: dark, a faint weave, the odd muted speck.
+      if ((tx + ty) % 2) px(ctx, "#251f36", ox, oy, TILE, TILE);
+      const s2 = hash(tx, ty, 50);
+      if (s2 % 3 === 0) px(ctx, ["#3a3354", "#2f4a58", "#4a3350"][s2 % 9 % 3], ox + 4 + ((s2 >>> 4) % 22), oy + 4 + ((s2 >>> 10) % 22), 2, 2);
+      break;
+    }
     case "stones": {
       // Stepping stones: flat round stones over the water.
       px(ctx, P.water, ox, oy, TILE, TILE);
@@ -433,6 +464,83 @@ export function decorTexture(kind: string, variant: number): Texture | null {
         px(ctx, curtain ? "#b2d685" : leaf, sx, top, 2, len);
         px(ctx, "#c3e08f", sx, top + len - 4, 2, 4);
       }
+      break;
+    }
+    case "neon_wall": {
+      // A dark wall with a thin, dim trim along it.
+      [c, ctx] = makeCanvas(32, 48);
+      px(ctx, "#0f0a1c", 0, 4, 32, 44);
+      px(ctx, "#1d1832", 1, 5, 30, 40);
+      px(ctx, "#262040", 1, 40, 30, 6);
+      px(ctx, ["#5a3a5e", "#2f4a5a", "#45386a"][v], 0, 20, 32, 2);
+      px(ctx, "#0f0a1c", 0, 0, 32, 5);
+      break;
+    }
+    case "stool": {
+      // A round wooden bar stool.
+      [c, ctx] = makeCanvas(32, 26);
+      px(ctx, "rgba(0,0,0,0.18)", 8, 22, 16, 3);
+      px(ctx, P.outline, 9, 11, 3, 13);
+      px(ctx, P.outline, 20, 11, 3, 13);
+      px(ctx, P.woodDark, 10, 12, 1, 11);
+      px(ctx, P.woodDark, 21, 12, 1, 11);
+      px(ctx, P.outline, 10, 17, 12, 2);
+      oval(ctx, P.outline, 16, 9, 10, 5);
+      oval(ctx, "#8a5a33", 16, 9, 9, 4);
+      oval(ctx, "#b5844f", 16, 8, 8, 3);
+      px(ctx, "#d2a06a", 12, 7, 5, 1);
+      break;
+    }
+    case "bar_table": {
+      // A little round table with a mug and a candle on it.
+      [c, ctx] = makeCanvas(32, 36);
+      px(ctx, "rgba(0,0,0,0.18)", 7, 32, 18, 3);
+      px(ctx, P.outline, 14, 16, 4, 16);
+      px(ctx, P.woodDark, 15, 17, 2, 14);
+      px(ctx, P.outline, 9, 30, 14, 3);
+      oval(ctx, P.outline, 16, 14, 14, 6);
+      oval(ctx, "#8a5a33", 16, 14, 13, 5);
+      oval(ctx, "#b07d4f", 16, 13, 12, 4);
+      // a mug of beer
+      px(ctx, P.outline, 8, 5, 7, 9);
+      px(ctx, "#e9b949", 9, 7, 5, 6);
+      px(ctx, "#fff8e3", 9, 6, 5, 2);
+      px(ctx, P.outline, 15, 8, 2, 4);
+      // a candle
+      px(ctx, P.outline, 20, 6, 4, 8);
+      px(ctx, "#f4ead2", 21, 7, 2, 6);
+      px(ctx, "#f6c343", 21, 3, 2, 3);
+      px(ctx, "#fff6d0", 21, 4, 1, 1);
+      break;
+    }
+    case "barrel": {
+      // An oak barrel with iron hoops.
+      [c, ctx] = makeCanvas(32, 34);
+      px(ctx, "rgba(0,0,0,0.18)", 6, 30, 20, 3);
+      px(ctx, P.outline, 7, 4, 18, 28);
+      px(ctx, P.outline, 5, 8, 22, 20);
+      px(ctx, "#9a6a3f", 8, 5, 16, 26);
+      px(ctx, "#9a6a3f", 6, 9, 20, 18);
+      for (const x of [11, 16, 21]) px(ctx, "#7d5232", x, 6, 1, 24);
+      for (const y of [9, 24]) px(ctx, "#4a4a52", 6, y, 20, 2);
+      oval(ctx, P.outline, 16, 5, 9, 3);
+      oval(ctx, "#b5844f", 16, 5, 8, 2);
+      break;
+    }
+    case "wood_wall": {
+      // A log-cabin wall: stacked logs with dark seams, a beam along the top.
+      [c, ctx] = makeCanvas(32, 48);
+      px(ctx, P.outline, 0, 4, 32, 44);
+      const logs = ["#8a5a33", "#9a6a3f", "#7d5232"];
+      for (let i = 0; i < 6; i++) {
+        const y = 6 + i * 6;
+        px(ctx, logs[(i + v) % 3], 0, y, 32, 5);
+        px(ctx, "rgba(255,255,255,0.12)", 0, y, 32, 1);
+        px(ctx, "#5a3a22", 0, y + 5, 32, 1);
+      }
+      px(ctx, "#6e4b30", 0, 42, 32, 6);
+      px(ctx, "#4e3420", 0, 0, 32, 6);
+      px(ctx, "#6e4b30", 0, 1, 32, 2);
       break;
     }
     case "log_seat": {
@@ -1362,6 +1470,668 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, P.outline, 3, top + h - 3, w - 6, 3);
       break;
     }
+    case "bar": {
+      // The Mossy Mug: a log cabin with a mossy roof and a stone chimney,
+      // warm windows with flower boxes, a round-windowed door and a hanging
+      // sign with a mug on it.
+      [c, ctx] = makeCanvas(w, h + 64);
+      overhang = 64;
+      const top = 64;
+      px(ctx, "rgba(0,0,0,0.18)", 6, top + h - 8, w - 12, 8);
+      // log walls
+      px(ctx, P.outline, 8, top - 10, w - 16, h + 6);
+      for (let i = 0; i * 8 < h + 2; i++) {
+        const y = top - 8 + i * 8;
+        px(ctx, i % 2 ? "#9a6a3f" : "#8a5a33", 10, y, w - 20, 7);
+        px(ctx, "#5a3a22", 10, y + 7, w - 20, 1);
+        oval(ctx, "#c99567", 12, y + 3, 3, 3);
+        oval(ctx, "#c99567", w - 12, y + 3, 3, 3);
+      }
+      // chimney
+      px(ctx, P.outline, w - 52, 2, 20, 40);
+      px(ctx, P.stone, w - 50, 4, 16, 36);
+      for (let y = 8; y < 40; y += 6) px(ctx, P.stoneDark, w - 50 + ((y / 6) % 2) * 6, y, 6, 2);
+      px(ctx, P.outline, w - 54, 0, 24, 5);
+      circle(ctx, "rgba(220,220,220,0.5)", w - 40, -2, 6);
+      // roof, with moss
+      polygon(ctx, P.outline, [[0, top + 2], [30, top - 46], [w - 30, top - 46], [w, top + 2]]);
+      polygon(ctx, "#5d4a3a", [[4, top], [32, top - 43], [w - 32, top - 43], [w - 4, top]]);
+      for (let i = 1; i < 5; i++) px(ctx, "#4e3d30", 6 + i * 5, top - 43 + i * 9, w - 12 - i * 10, 2);
+      for (let i = 0; i < 14; i++) {
+        const mx = 30 + ((i * 37) % (w - 60));
+        const my = top - 38 + ((i * 13) % 34);
+        oval(ctx, i % 3 ? "#6f9a4f" : "#86b86b", mx, my, 5, 2);
+      }
+      px(ctx, "#3d2f24", 0, top - 2, w, 6);
+      // windows, lit from inside, with flower boxes
+      for (const wx of [24, w - 24 - 44]) {
+        const wy = top + 20;
+        px(ctx, P.outline, wx, wy, 44, 36);
+        px(ctx, "#ffd77a", wx + 3, wy + 3, 38, 30);
+        px(ctx, "#ffe9a8", wx + 5, wy + 5, 10, 12);
+        px(ctx, P.outline, wx + 21, wy + 3, 2, 30);
+        px(ctx, P.outline, wx + 3, wy + 17, 38, 2);
+        px(ctx, P.outline, wx - 2, wy + 36, 48, 8);
+        px(ctx, "#8a5a33", wx - 1, wy + 37, 46, 6);
+        for (let k = 0; k < 6; k++) px(ctx, ["#e8566b", "#f6c343", "#f28c9b"][k % 3], wx + 2 + k * 7, wy + 32, 4, 4);
+      }
+      // the door
+      const dx = w / 2 - 18;
+      px(ctx, P.outline, dx, top + h - 70, 36, 64);
+      px(ctx, "#6e4b30", dx + 2, top + h - 68, 32, 62);
+      for (const x of [dx + 9, dx + 17, dx + 25]) px(ctx, "#5a3a22", x, top + h - 66, 1, 58);
+      circle(ctx, P.outline, w / 2, top + h - 52, 7);
+      circle(ctx, "#ffd77a", w / 2, top + h - 52, 5);
+      px(ctx, "#f6c343", dx + 28, top + h - 34, 3, 3);
+      // hanging sign: a mug, and the name
+      px(ctx, P.outline, w / 2 - 70, top - 4, 140, 22);
+      px(ctx, "#f3e2c0", w / 2 - 68, top - 2, 136, 18);
+      label(ctx, o.label ?? "The Mossy Mug", w / 2 + 6, top + 7, "#5a3b2b", 12);
+      px(ctx, P.outline, w / 2 - 64, top, 11, 13);
+      px(ctx, "#e9b949", w / 2 - 63, top + 3, 9, 9);
+      px(ctx, "#fff8e3", w / 2 - 63, top + 1, 9, 3);
+      px(ctx, P.outline, w / 2 - 53, top + 4, 3, 6);
+      break;
+    }
+    case "bottle_shelf": {
+      // Shelves on the back wall, crowded with bottles.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, P.outline, 0, top - 38, w, h + 34);
+      px(ctx, "#6e4b30", 2, top - 36, w - 4, h + 30);
+      const colors = ["#5f8f4e", "#8f3a2b", "#e9b949", "#5f8fc4", "#9b7fd4", "#c8553d", "#3f7a4a"];
+      for (const sy of [top - 14, top + 14]) {
+        px(ctx, "#4e3420", 2, sy, w - 4, 3);
+        for (let x = 6; x < w - 8; x += 9) {
+          const k = (x * 7 + sy) % colors.length;
+          const tall = (x + sy) % 3 === 0 ? 14 : 11;
+          px(ctx, P.outline, x, sy - tall, 6, tall);
+          px(ctx, colors[k], x + 1, sy - tall + 1, 4, tall - 1);
+          px(ctx, P.outline, x + 2, sy - tall - 3, 2, 3);
+          px(ctx, "rgba(255,255,255,0.35)", x + 1, sy - tall + 3, 1, 4);
+        }
+      }
+      break;
+    }
+    case "bar_counter": {
+      // A long wooden counter: polished top, panelled front, beer taps and mugs.
+      [c, ctx] = makeCanvas(w, h + 24);
+      overhang = 24;
+      const top = 24;
+      px(ctx, P.outline, 0, top - 6, w, h + 4);
+      px(ctx, "#7d5232", 2, top, w - 4, h - 4);
+      for (let x = 10; x < w - 10; x += 32) {
+        px(ctx, "#5a3a22", x, top + 4, 24, h - 12);
+        px(ctx, "#8a5a33", x + 2, top + 6, 20, h - 16);
+      }
+      px(ctx, "#c99567", 0, top - 10, w, 6);
+      px(ctx, "#e0b47f", 0, top - 10, w, 2);
+      px(ctx, P.outline, 0, top - 11, w, 1);
+      // taps
+      for (const tx of [40, 52, 64]) {
+        px(ctx, "#9aa0a6", tx, top - 22, 4, 12);
+        px(ctx, P.outline, tx - 1, top - 26, 6, 5);
+        px(ctx, ["#c8553d", "#e9b949", "#5f8f4e"][(tx / 12) % 3], tx, top - 25, 4, 3);
+      }
+      // mugs on the counter
+      for (const mx of [120, 170, 214]) {
+        px(ctx, P.outline, mx, top - 20, 9, 11);
+        px(ctx, "#e9b949", mx + 1, top - 17, 7, 7);
+        px(ctx, "#fff8e3", mx + 1, top - 19, 7, 3);
+        px(ctx, P.outline, mx + 9, top - 16, 2, 5);
+      }
+      break;
+    }
+    case "pool_table": {
+      // Green cloth in a wooden frame, six pockets, the rack and a cue.
+      [c, ctx] = makeCanvas(w, h + 12);
+      overhang = 12;
+      const top = 12;
+      px(ctx, "rgba(0,0,0,0.2)", 6, top + h - 6, w - 12, 6);
+      px(ctx, P.outline, 4, top - 10, w - 8, h + 4);
+      px(ctx, "#7d5232", 5, top - 9, w - 10, h + 2);
+      px(ctx, P.outline, 12, top - 2, w - 24, h - 12);
+      px(ctx, "#2f7a4f", 13, top - 1, w - 26, h - 14);
+      px(ctx, "#2a6d47", 13, top + h - 18, w - 26, 3);
+      for (const [x, y] of [[13, top - 1], [w / 2 - 2, top - 2], [w - 17, top - 1], [13, top + h - 19], [w / 2 - 2, top + h - 18], [w - 17, top + h - 19]] as [number, number][]) {
+        px(ctx, "#1d1d1d", x, y, 5, 5);
+      }
+      // legs
+      px(ctx, P.outline, 10, top + h - 6, 6, 6);
+      px(ctx, P.outline, w - 16, top + h - 6, 6, 6);
+      // the rack and the cue ball
+      const balls = ["#f6c343", "#3f6fa0", "#c8553d", "#1d1d1d", "#9b7fd4", "#e8823a"];
+      let k = 0;
+      for (let row = 0; row < 3; row++) {
+        for (let i = 0; i <= row; i++) {
+          const bx = 84 + row * 4;
+          const by = top + 20 + i * 4 - row * 2;
+          px(ctx, balls[k++ % balls.length], bx, by, 3, 3);
+        }
+      }
+      px(ctx, "#fff8e3", 36, top + 22, 3, 3);
+      // a cue lying across
+      for (let i = 0; i < 40; i++) px(ctx, i < 30 ? "#d2a06a" : "#4e3420", 20 + i, top + 36 - Math.floor(i / 6), 2, 1);
+      break;
+    }
+    case "pinball": {
+      // A pinball machine on chrome legs, played from its left end: a
+      // painted cabinet with neon trim, the playfield lit up under glass
+      // (flippers at both ends, glowing bumpers, lanes of lamps), the
+      // flipper buttons at the left, and the backbox standing at the right
+      // with its starburst art and marquee lamps.
+      [c, ctx] = makeCanvas(w, h + 46);
+      overhang = 46;
+      const top = 46;
+      px(ctx, "rgba(0,0,0,0.35)", 2, top + h - 9, w - 4, 9);
+      // chrome legs with levellers
+      for (const lx of [7, w - 33]) {
+        px(ctx, P.outline, lx, top + h - 18, 6, 15);
+        px(ctx, "#dcdcea", lx + 1, top + h - 18, 2, 13);
+        px(ctx, "#9a9ab0", lx + 3, top + h - 18, 2, 13);
+        px(ctx, P.outline, lx - 1, top + h - 4, 8, 3);
+      }
+      // the cabinet: dark purple with pink and cyan side stripes
+      px(ctx, P.outline, 1, top - 5, w - 24, h - 6);
+      px(ctx, "#2a0f3a", 2, top - 4, w - 26, h - 8);
+      px(ctx, "#3d1656", 2, top + h - 24, w - 26, 10);
+      for (let i = 0; i < w - 26; i += 2) {
+        px(ctx, "#ff4fa3", 2 + i, top + h - 22 + ((i >> 3) % 2), 2, 1);
+        px(ctx, "#3fe0ff", 2 + i, top + h - 18 - ((i >> 3) % 2), 2, 1);
+      }
+      px(ctx, "#ffe14f", 2, top + h - 15, w - 26, 1);
+      // chrome rails round the glass
+      px(ctx, "#c8c8dc", 2, top - 4, w - 26, 2);
+      px(ctx, "#c8c8dc", 2, top + h - 26, w - 26, 2);
+      // the playfield under glass
+      const fx = 6;
+      const fy = top;
+      const fw = w - 34;
+      const fh = h - 28;
+      px(ctx, "#0b0618", fx - 1, fy - 1, fw + 2, fh + 2);
+      px(ctx, "#2a1450", fx, fy, fw, fh);
+      px(ctx, "#3a1868", fx + fw / 2 - 12, fy + 4, 24, fh - 8);
+      px(ctx, "#4a2080", fx + fw / 2 - 6, fy + 7, 12, fh - 14);
+      // lanes of lamps
+      for (let i = 0; i < fw - 8; i += 4) {
+        px(ctx, i % 8 ? "#6a4a20" : "#ffe14f", fx + 4 + i, fy + 1, 2, 1);
+        px(ctx, i % 8 ? "#6a4a20" : "#ffe14f", fx + 4 + i, fy + fh - 2, 2, 1);
+      }
+      // chevrons toward each end
+      for (let i = 0; i < 3; i++) {
+        px(ctx, "#3fe0ff", fx + fw / 2 - 16 - i * 5, fy + fh / 2 - 1, 2, 3);
+        px(ctx, "#ff4fa3", fx + fw / 2 + 14 + i * 5, fy + fh / 2 - 1, 2, 3);
+      }
+      // the holes and the flippers
+      px(ctx, "#3fe0ff", fx, fy + fh / 2 - 4, 2, 8);
+      px(ctx, "#ff4fa3", fx + fw - 2, fy + fh / 2 - 4, 2, 8);
+      for (const [x, y, col] of [[fx + 3, fy + fh / 2 - 7, "#3fe0ff"], [fx + 3, fy + fh / 2 + 5, "#3fe0ff"], [fx + fw - 9, fy + fh / 2 - 7, "#ff4fa3"], [fx + fw - 9, fy + fh / 2 + 5, "#ff4fa3"]] as [number, number, string][]) {
+        px(ctx, "#ffffff", x, y, 6, 2);
+        px(ctx, col, x + 1, y, 4, 1);
+      }
+      // glowing bumpers
+      for (const [bx, by, col] of [[fw / 2, fh / 2, "#ffe14f"], [fw / 2 - 11, 6, "#5fe08a"], [fw / 2 + 11, 6, "#5fe08a"], [fw / 2 - 11, fh - 7, "#b07bff"], [fw / 2 + 11, fh - 7, "#b07bff"]] as [number, number, string][]) {
+        px(ctx, "rgba(255,255,255,0.18)", fx + bx - 3, fy + by - 3, 7, 7);
+        px(ctx, col, fx + bx - 2, fy + by - 2, 5, 5);
+        px(ctx, "#ffffff", fx + bx - 1, fy + by - 1, 2, 2);
+      }
+      // the ball, and a gleam across the glass
+      px(ctx, "#f0f0f8", fx + fw / 2 - 20, fy + fh / 2 + 3, 3, 3);
+      for (let i = 0; i < 12; i++) px(ctx, "rgba(255,255,255,0.14)", fx + 10 + i * 2, fy + 1 + i, 2, 1);
+      // the lockdown bar and the flipper buttons at the left end
+      px(ctx, "#dcdcea", 1, top - 4, 3, h - 8);
+      px(ctx, "#3fe0ff", 0, top + 6, 2, 5);
+      px(ctx, "#3fe0ff", 0, top + h - 28, 2, 5);
+      // the backbox at the right
+      const bx0 = w - 25;
+      px(ctx, P.outline, bx0, top - 44, 24, h + 24);
+      px(ctx, "#2a0f3a", bx0 + 1, top - 43, 22, h + 22);
+      px(ctx, "#c8c8dc", bx0 + 1, top - 43, 22, 2);
+      // its art: a starburst behind the lights
+      px(ctx, "#0b0618", bx0 + 3, top - 40, 18, 32);
+      px(ctx, "#4a1a70", bx0 + 4, top - 39, 16, 30);
+      for (let i = 0; i < 6; i++) px(ctx, i % 2 ? "#ff4fa3" : "#ffe14f", bx0 + 11 - i, top - 26 + i, 2 + i * 2, 1);
+      // marquee lamps round the glass
+      for (let i = 0; i < 8; i++) {
+        px(ctx, i % 2 ? "#ffe14f" : "#ff4fa3", bx0 + 3 + i * 2, top - 41, 1, 1);
+        px(ctx, i % 2 ? "#ff4fa3" : "#ffe14f", bx0 + 3 + i * 2, top - 8, 1, 1);
+      }
+      label(ctx, "PIN", bx0 + 12, top - 34, "#ffe14f", 7);
+      label(ctx, "BALL", bx0 + 12, top - 17, "#3fe0ff", 7);
+      // its speaker grille and a coin slot
+      for (let i = 0; i < 4; i++) px(ctx, "#140820", bx0 + 5 + i * 4, top - 3, 2, 6);
+      px(ctx, "#ffe14f", bx0 + 10, top + 8, 4, 2);
+      px(ctx, "#3d1656", bx0 + 1, top + h - 24, 22, 4);
+      break;
+    }
+    case "fisherman": {
+      // His things on the boards beside him: a bucket of fish and a tackle box.
+      [c, ctx] = makeCanvas(w, h);
+      px(ctx, "rgba(0,0,0,0.2)", 1, 26, 12, 3);
+      px(ctx, P.outline, 2, 16, 10, 11);
+      px(ctx, "#5d7a8a", 3, 17, 8, 9);
+      px(ctx, "#7a9aaa", 3, 17, 8, 2);
+      px(ctx, "#9fb7c4", 4, 15, 3, 3);
+      px(ctx, "#f6c343", 7, 14, 3, 3);
+      px(ctx, P.outline, 4, 13, 6, 1);
+      px(ctx, P.outline, w - 12, 21, 11, 7);
+      px(ctx, "#2f6b3f", w - 11, 22, 9, 5);
+      px(ctx, "#c8553d", w - 8, 22, 3, 1);
+      break;
+    }
+    case "fireplace": {
+      // A stone fireplace with a crackling fire and candles on the mantel.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, P.outline, 4, top - 36, w - 8, h + 34);
+      px(ctx, P.stone, 6, top - 34, w - 12, h + 30);
+      for (let y = top - 32; y < top + h - 4; y += 8) {
+        for (let x = 8 + ((y / 8) % 2) * 8; x < w - 12; x += 16) px(ctx, P.stoneDark, x, y, 12, 1);
+      }
+      // mantel
+      px(ctx, P.outline, 0, top - 24, w, 8);
+      px(ctx, "#8a5a33", 1, top - 23, w - 2, 6);
+      for (const cx of [14, w - 18]) {
+        px(ctx, "#f4ead2", cx, top - 34, 4, 10);
+        px(ctx, "#f6c343", cx + 1, top - 38, 2, 4);
+      }
+      // the hearth and the fire
+      px(ctx, P.outline, 18, top - 10, w - 36, h + 4);
+      px(ctx, "#2a1d16", 20, top - 8, w - 40, h + 2);
+      px(ctx, P.trunk, 26, top + h - 14, w - 52, 5);
+      polygon(ctx, "#e8823a", [[28, top + h - 12], [w / 2, top + 6], [w - 28, top + h - 12]]);
+      polygon(ctx, "#f6c343", [[36, top + h - 12], [w / 2, top + 16], [w - 36, top + h - 12]]);
+      polygon(ctx, "#fff1b0", [[w / 2 - 6, top + h - 12], [w / 2, top + 28], [w / 2 + 6, top + h - 12]]);
+      break;
+    }
+    case "bar_exit": {
+      // The door out: a glimpse of the park and a doormat.
+      [c, ctx] = makeCanvas(w, h + 16);
+      overhang = 16;
+      px(ctx, P.outline, 0, 0, w, h + 16);
+      px(ctx, "#cfe8b8", 3, 3, w - 6, h + 10);
+      px(ctx, "#a8d08d", 3, h, w - 6, 13);
+      px(ctx, "#8a5a33", 6, h + 6, w - 12, 8);
+      label(ctx, "Exit", w / 2, h / 2 + 6, "#3b3a2e", 7);
+      break;
+    }
+    case "arcade_hall": {
+      // The arcade: a dark hall with a big neon ARCADE sign, a row of
+      // marquee bulbs, glowing glass doors and screens in the windows.
+      [c, ctx] = makeCanvas(w, h + 64);
+      overhang = 64;
+      const top = 64;
+      px(ctx, "rgba(0,0,0,0.25)", 6, top + h - 8, w - 12, 8);
+      px(ctx, "#0f0a1c", 6, top - 40, w - 12, h + 36);
+      px(ctx, "#241a3a", 8, top - 38, w - 16, h + 32);
+      // checkered base
+      for (let x = 8; x < w - 8; x += 8) px(ctx, (x / 8) % 2 ? "#ff4fa3" : "#1d1532", x, top + h - 14, 8, 6);
+      // the sign
+      px(ctx, "#0f0a1c", w / 2 - 92, top - 62, 184, 34);
+      px(ctx, "#1a1030", w / 2 - 90, top - 60, 180, 30);
+      px(ctx, "rgba(255,79,163,0.35)", w / 2 - 88, top - 58, 176, 26);
+      label(ctx, "ARCADE", w / 2, top - 45, "#ffd6ec", 22);
+      // marquee bulbs round the sign
+      for (let x = w / 2 - 88; x <= w / 2 + 86; x += 10) {
+        px(ctx, "#ffe14f", x, top - 62, 3, 3);
+        px(ctx, "#ffe14f", x, top - 31, 3, 3);
+      }
+      // neon stripe along the front
+      px(ctx, "#3fe0ff", 8, top - 22, w - 16, 2);
+      px(ctx, "rgba(63,224,255,0.3)", 8, top - 25, w - 16, 8);
+      // windows with cabinet screens glowing inside
+      for (const [wx, col] of [[24, "#3fe0ff"], [w - 24 - 56, "#ff4fa3"]] as [number, string][]) {
+        const wy = top + 4;
+        px(ctx, "#0f0a1c", wx, wy, 56, 44);
+        px(ctx, "#140e26", wx + 2, wy + 2, 52, 40);
+        for (const sx of [wx + 8, wx + 30]) {
+          px(ctx, "#2a2046", sx, wy + 10, 18, 30);
+          px(ctx, col, sx + 3, wy + 13, 12, 9);
+          px(ctx, "#ffffff", sx + 5, wy + 15, 3, 1);
+          px(ctx, "#ffe14f", sx + 6, wy + 26, 2, 2);
+        }
+        px(ctx, "rgba(255,255,255,0.12)", wx + 4, wy + 4, 8, 34);
+      }
+      // the doors
+      const dx = w / 2 - 22;
+      px(ctx, "#0f0a1c", dx, top + h - 70, 44, 58);
+      px(ctx, "rgba(63,224,255,0.55)", dx + 3, top + h - 67, 18, 54);
+      px(ctx, "rgba(63,224,255,0.55)", dx + 23, top + h - 67, 18, 54);
+      px(ctx, "#ffffff", dx + 5, top + h - 64, 2, 20);
+      px(ctx, "#ffe14f", dx + 19, top + h - 42, 2, 4);
+      px(ctx, "#ffe14f", dx + 23, top + h - 42, 2, 4);
+      // stars
+      for (const [x, y, col] of [[18, top - 30, "#ffe14f"], [w - 22, top - 34, "#3fe0ff"], [w - 40, top + 58, "#ff4fa3"]] as [number, number, string][]) {
+        px(ctx, col, x, y - 3, 2, 8);
+        px(ctx, col, x - 3, y, 8, 2);
+      }
+      break;
+    }
+    case "arcade_cabinet": {
+      // An upright cabinet: a lit marquee with the game's name, a glowing
+      // screen showing the game, a joystick and buttons.
+      const game = o.label ?? "";
+      const COL: Record<string, [string, string]> = {
+        Pong: ["#3fe0ff", "#1b6f8a"],
+        "Light Cycles": ["#ff4fa3", "#8a1b56"],
+        "Connect Four": ["#ffe14f", "#8a7a1b"],
+        "Memory Match": ["#b07bff", "#5a2a9a"],
+        "Basket Catch": ["#5fe08a", "#1b8a46"],
+        "Turbo Racer": ["#ff9a4f", "#9a4a1b"],
+        "Tank Duel": ["#c8d84f", "#5a6a1b"],
+      };
+      const [neon, body] = COL[game] ?? ["#3fe0ff", "#1b6f8a"];
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "rgba(0,0,0,0.3)", 6, top + h - 6, w - 12, 6);
+      px(ctx, "#0f0a1c", 8, top - 38, w - 16, h + 34);
+      px(ctx, body, 10, top - 36, w - 20, h + 30);
+      px(ctx, "#140e26", 12, top - 36, 4, h + 30);
+      // marquee
+      px(ctx, "#0f0a1c", 8, top - 40, w - 16, 14);
+      px(ctx, neon, 10, top - 38, w - 20, 10);
+      label(ctx, game.length > 9 ? game.split(" ")[0] : game, w / 2, top - 33, "#140e26", 7);
+      // screen
+      const sx = 16;
+      const sy = top - 22;
+      const sw = w - 32;
+      const sh = 26;
+      px(ctx, "#0f0a1c", sx - 2, sy - 2, sw + 4, sh + 4);
+      px(ctx, "#05030c", sx, sy, sw, sh);
+      switch (game) {
+        case "Pong":
+          px(ctx, neon, sx + 2, sy + 8, 2, 8);
+          px(ctx, neon, sx + sw - 4, sy + 12, 2, 8);
+          px(ctx, "#ffffff", sx + sw / 2, sy + 12, 2, 2);
+          for (let y = 1; y < sh; y += 4) px(ctx, "#3a3a5a", sx + sw / 2 - 6, sy + y, 1, 2);
+          break;
+        case "Light Cycles":
+          px(ctx, "#3fe0ff", sx + 2, sy + 6, 14, 1);
+          px(ctx, "#3fe0ff", sx + 15, sy + 6, 1, 12);
+          px(ctx, neon, sx + sw - 3, sy + 18, 1, 6);
+          px(ctx, neon, sx + 14, sy + 18, sw - 16, 1);
+          break;
+        case "Connect Four":
+          for (let r = 0; r < 3; r++) for (let k = 0; k < 4; k++) px(ctx, (r + k) % 3 ? "#3a3a5a" : (k % 2 ? "#ff4fa3" : neon), sx + 4 + k * 7, sy + 5 + r * 7, 4, 4);
+          break;
+        case "Basket Catch":
+          px(ctx, "#e8566b", sx + 8, sy + 4, 3, 3);
+          px(ctx, "#ffe14f", sx + 18, sy + 9, 3, 3);
+          px(ctx, "#05030c", sx + 12, sy + 13, 3, 3);
+          px(ctx, "#ff4f4f", sx + 12, sy + 12, 3, 1);
+          px(ctx, "#a0703f", sx + 9, sy + 20, 12, 4);
+          break;
+        case "Turbo Racer":
+          px(ctx, "#2a2a36", sx + 4, sy, sw - 8, sh);
+          for (let y = 1; y < sh; y += 6) px(ctx, "#c8c8d8", sx + sw / 2, sy + y, 1, 3);
+          px(ctx, neon, sx + 7, sy + 16, 6, 8);
+          px(ctx, "#ffe14f", sx + 17, sy + 4, 6, 8);
+          break;
+        case "Tank Duel":
+          px(ctx, "#14200f", sx + 1, sy + 1, sw - 2, sh - 2);
+          px(ctx, "#3fe0ff", sx + 4, sy + 14, 6, 5);
+          px(ctx, "#3fe0ff", sx + 10, sy + 16, 4, 1);
+          px(ctx, "#ff4fa3", sx + sw - 10, sy + 5, 6, 5);
+          px(ctx, "#ffe14f", sx + 16, sy + 15, 2, 2);
+          px(ctx, "#5a5078", sx + 13, sy + 7, 3, 6);
+          break;
+        case "Memory Match":
+          for (let k = 0; k < 4; k++) px(ctx, k === 1 ? neon : "#3a3a5a", sx + 3 + k * 7, sy + 8, 5, 8);
+          break;
+        default:
+          px(ctx, neon, sx + 4, sy + 4, sw - 8, sh - 8);
+      }
+      px(ctx, "rgba(255,255,255,0.12)", sx + 1, sy + 1, 3, sh - 2);
+      // control panel
+      px(ctx, "#0f0a1c", 8, top + 8, w - 16, 10);
+      px(ctx, "#2a2046", 10, top + 9, w - 20, 8);
+      px(ctx, "#05030c", 20, top + 6, 2, 6);
+      px(ctx, "#ff4fa3", 19, top + 4, 4, 3);
+      px(ctx, "#ffe14f", 34, top + 11, 3, 3);
+      px(ctx, "#3fe0ff", 40, top + 11, 3, 3);
+      break;
+    }
+    case "dance_machine": {
+      // The Dance Off: a big screen of arrows between two speakers, a
+      // marquee, and the dance floor's rail in front.
+      [c, ctx] = makeCanvas(w, h + 48);
+      overhang = 48;
+      const top = 48;
+      px(ctx, "rgba(0,0,0,0.3)", 4, top + h - 6, w - 8, 6);
+      px(ctx, "#0f0a1c", 4, top - 46, w - 8, h + 42);
+      px(ctx, "#3a1a4a", 6, top - 44, w - 12, h + 38);
+      px(ctx, "#0f0a1c", 4, top - 48, w - 8, 14);
+      px(ctx, "#ff4fa3", 6, top - 46, w - 12, 10);
+      label(ctx, "DANCE OFF", w / 2, top - 41, "#1a0f1e", 8);
+      // speakers
+      for (const sx of [10, w - 30]) {
+        px(ctx, "#0f0a1c", sx, top - 28, 20, 44);
+        circle(ctx, "#2a2046", sx + 10, top - 16, 7);
+        circle(ctx, "#0f0a1c", sx + 10, top - 16, 3);
+        circle(ctx, "#2a2046", sx + 10, top + 6, 7);
+        circle(ctx, "#0f0a1c", sx + 10, top + 6, 3);
+      }
+      // the screen
+      const sx = 36;
+      const sw = w - 72;
+      px(ctx, "#0f0a1c", sx - 2, top - 30, sw + 4, 34);
+      px(ctx, "#05030c", sx, top - 28, sw, 30);
+      const cols = ["#ff4fa3", "#3fe0ff", "#5fe08a", "#ffe14f"];
+      for (let i = 0; i < 4; i++) {
+        const ax = sx + 8 + i * ((sw - 16) / 4);
+        px(ctx, cols[i], ax, top - 22 + (i % 2) * 8, 8, 8);
+        px(ctx, "#5a5078", ax, top - 26, 8, 2);
+      }
+      px(ctx, "#2a2046", 6, top + h - 12, w - 12, 6);
+      break;
+    }
+    case "dance_floor": {
+      // Four dark glass tiles with arrows; they light up during a dance.
+      [c, ctx] = makeCanvas(w, h);
+      for (let i = 0; i < o.w; i++) {
+        const x = i * TILE;
+        px(ctx, "#0f0a1c", x + 1, 1, TILE - 2, TILE - 2);
+        px(ctx, "#1d1832", x + 3, 3, TILE - 6, TILE - 6);
+        px(ctx, "#3a3354", x + 13, 9, 6, 14);
+        px(ctx, "#3a3354", x + 9, 13, 14, 6);
+      }
+      break;
+    }
+    case "claw_machine": {
+      // A claw machine: glass box of plushies under a pink frame.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "rgba(0,0,0,0.3)", 6, top + h - 6, w - 12, 6);
+      px(ctx, "#0f0a1c", 6, top - 38, w - 12, h + 34);
+      px(ctx, "#ff4fa3", 8, top - 36, w - 16, 8);
+      px(ctx, "rgba(160,220,255,0.35)", 10, top - 26, w - 20, 40);
+      px(ctx, "#c8c8d8", w / 2 - 1, top - 26, 2, 10);
+      px(ctx, "#c8c8d8", w / 2 - 5, top - 16, 10, 2);
+      px(ctx, "#c8c8d8", w / 2 - 5, top - 14, 2, 4);
+      px(ctx, "#c8c8d8", w / 2 + 3, top - 14, 2, 4);
+      for (const [x, col] of [[14, "#ffe14f"], [24, "#5fe08a"], [36, "#3fe0ff"], [44, "#ff9a4f"]] as [number, string][]) {
+        circle(ctx, "#0f0a1c", x + 3, top + 8, 5);
+        circle(ctx, col, x + 3, top + 8, 4);
+        px(ctx, "#0f0a1c", x + 1, top + 6, 1, 1);
+        px(ctx, "#0f0a1c", x + 4, top + 6, 1, 1);
+      }
+      px(ctx, "#2a2046", 8, top + 14, w - 16, h - 18);
+      px(ctx, "#ffe14f", w / 2 - 4, top + 18, 8, 3);
+      break;
+    }
+    case "prize_counter": {
+      // A glass prize counter full of hats and glasses, under a neon sign.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "#0f0a1c", w / 2 - 44, top - 40, 88, 18);
+      px(ctx, "#1a1030", w / 2 - 42, top - 38, 84, 14);
+      label(ctx, "PRIZES", w / 2, top - 31, "#ffe14f", 10);
+      px(ctx, "#0f0a1c", 0, top - 14, w, h + 12);
+      px(ctx, "rgba(160,220,255,0.3)", 2, top - 12, w - 4, 16);
+      px(ctx, "#2a2046", 2, top + 4, w - 4, h - 8);
+      for (let x = 8; x < w - 12; x += 20) {
+        const col = ["#ff4fa3", "#3fe0ff", "#ffe14f", "#5fe08a", "#b07bff"][(x / 20) % 5];
+        px(ctx, col, x, top - 6, 10, 6);
+        px(ctx, col, x - 2, top, 14, 2);
+      }
+      px(ctx, "#3fe0ff", 0, top + h - 6, w, 2);
+      break;
+    }
+    case "arcade_exit": {
+      [c, ctx] = makeCanvas(w, h + 16);
+      overhang = 16;
+      px(ctx, "#0f0a1c", 0, 0, w, h + 16);
+      px(ctx, "#2f5a3a", 3, 3, w - 6, h + 10);
+      px(ctx, "#ff4fa3", 6, h + 6, w - 12, 8);
+      label(ctx, "EXIT", w / 2, h / 2 + 6, "#5fe08a", 7);
+      break;
+    }
+    case "clothes_shop": {
+      // A little boutique: teal roof, a pink-and-cream awning, two display
+      // windows with dressed mannequins, and a door in the middle.
+      [c, ctx] = makeCanvas(w, h + 56);
+      overhang = 56;
+      const top = 56;
+      px(ctx, "rgba(0,0,0,0.15)", 6, top + h - 8, w - 12, 8);
+      // walls
+      px(ctx, P.outline, 8, top - 8, w - 16, h + 4);
+      px(ctx, "#f3e6d3", 10, top - 6, w - 20, h);
+      px(ctx, "#e6d4bb", 10, top + h - 14, w - 20, 8);
+      // roof
+      polygon(ctx, P.outline, [[0, top + 2], [24, top - 46], [w - 24, top - 46], [w, top + 2]]);
+      polygon(ctx, "#4f8a8b", [[4, top], [27, top - 43], [w - 27, top - 43], [w - 4, top]]);
+      for (let i = 1; i < 4; i++) px(ctx, "#437778", 6 + i * 4, top - 43 + i * 11, w - 12 - i * 8, 2);
+      px(ctx, "#3d6c6d", 0, top - 2, w, 6);
+      // sign
+      px(ctx, P.outline, w / 2 - 66, top - 38, 132, 22);
+      px(ctx, "#fff6e0", w / 2 - 64, top - 36, 128, 18);
+      label(ctx, o.label ?? "Clothes Shop", w / 2, top - 27, "#7a3a5a", 14);
+      // awning
+      const aw = top + 6;
+      for (let i = 0; i < 14; i++) {
+        const x0 = 10 + i * ((w - 20) / 14);
+        const cw = (w - 20) / 14;
+        px(ctx, i % 2 ? "#fff6e0" : "#e88aa6", x0, aw, cw, 12);
+        oval(ctx, i % 2 ? "#fff6e0" : "#e88aa6", x0 + cw / 2, aw + 12, cw / 2, 4);
+      }
+      px(ctx, P.outline, 10, aw - 2, w - 20, 2);
+      // display windows, each with a mannequin in a dress or a jacket
+      for (const [wx, dress] of [[22, "#e8566b"], [w - 22 - 58, "#5d8ab8"]] as [number, string][]) {
+        const wy = top + 30;
+        px(ctx, P.outline, wx, wy, 58, 58);
+        px(ctx, "#cfe3ea", wx + 2, wy + 2, 54, 54);
+        px(ctx, "#e4f1f5", wx + 4, wy + 4, 6, 20);
+        const mx = wx + 29;
+        circle(ctx, P.outline, mx, wy + 16, 6);
+        circle(ctx, "#e9d3b5", mx, wy + 16, 5);
+        polygon(ctx, P.outline, [[mx - 9, wy + 22], [mx + 9, wy + 22], [mx + 15, wy + 48], [mx - 15, wy + 48]]);
+        polygon(ctx, dress, [[mx - 8, wy + 23], [mx + 8, wy + 23], [mx + 13, wy + 47], [mx - 13, wy + 47]]);
+        px(ctx, P.outline, mx - 1, wy + 48, 2, 6);
+        px(ctx, P.woodDark, wx + 2, wy + 52, 54, 4);
+      }
+      // door
+      const dx = w / 2 - 18;
+      px(ctx, P.outline, dx, top + h - 66, 36, 60);
+      px(ctx, P.woodDark, dx + 2, top + h - 64, 32, 58);
+      px(ctx, "#cfe3ea", dx + 7, top + h - 58, 22, 18);
+      px(ctx, "#f6c343", dx + 26, top + h - 34, 3, 3);
+      label(ctx, "OPEN", w / 2, top + h - 30, "#fff6e0", 7);
+      break;
+    }
+    case "clothes_rack": {
+      // A rail on two posts; what hangs on it depends on the rack.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, "rgba(0,0,0,0.15)", 4, top + h - 8, w - 8, 6);
+      px(ctx, P.outline, 4, top - 34, 4, h + 26);
+      px(ctx, P.outline, w - 8, top - 34, 4, h + 26);
+      px(ctx, P.outline, 2, top + h - 10, 10, 4);
+      px(ctx, P.outline, w - 12, top + h - 10, 10, 4);
+      px(ctx, P.outline, 4, top - 34, w - 8, 3);
+      const colors = ["#e8566b", "#5d8ab8", "#f6c343", "#7fb069", "#9b7fd4", "#f28c9b", "#4f8a8b"];
+      const kind = o.label ?? "";
+      for (let i = 0; i < 6; i++) {
+        const x = 16 + i * ((w - 32) / 5);
+        const col = colors[(i + kind.length) % colors.length];
+        px(ctx, P.outline, x - 1, top - 31, 2, 4); // hanger hook
+        if (kind === "Hats") {
+          // hats on hooks: a beanie, a cap…
+          oval(ctx, P.outline, x, top - 18, 8, 7);
+          oval(ctx, col, x, top - 19, 7, 6);
+          px(ctx, i % 2 ? col : "#fff6e0", x - 7, top - 14, 14, 3);
+        } else if (kind === "Accessories") {
+          // scarves hanging down, with glasses and bows pinned on
+          px(ctx, P.outline, x - 4, top - 27, 8, 30);
+          px(ctx, col, x - 3, top - 26, 6, 28);
+          px(ctx, "#fff6e0", x - 3, top - 18, 6, 2);
+          if (i % 2) {
+            px(ctx, P.outline, x - 6, top - 22, 5, 3);
+            px(ctx, P.outline, x + 1, top - 22, 5, 3);
+          }
+        } else {
+          // shirts and dresses on hangers
+          polygon(ctx, P.outline, [[x - 9, top - 27], [x + 9, top - 27], [x + 11, top + 4], [x - 11, top + 4]]);
+          polygon(ctx, col, [[x - 8, top - 26], [x + 8, top - 26], [x + 10, top + 3], [x - 10, top + 3]]);
+          px(ctx, "rgba(255,255,255,0.25)", x - 6, top - 24, 3, 24);
+        }
+      }
+      break;
+    }
+    case "shop_counter": {
+      // A wooden counter with a till and a pile of folded jumpers.
+      [c, ctx] = makeCanvas(w, h + 24);
+      overhang = 24;
+      const top = 24;
+      px(ctx, P.outline, 0, top - 4, w, h + 2);
+      px(ctx, P.wood, 2, top - 2, w - 4, h - 2);
+      px(ctx, "#c99567", 0, top - 8, w, 6);
+      px(ctx, P.outline, 0, top - 9, w, 1);
+      for (let x = 14; x < w - 8; x += 24) px(ctx, P.woodDark, x, top + 2, 2, h - 8);
+      // till
+      px(ctx, P.outline, w - 46, top - 26, 30, 20);
+      px(ctx, "#9fb7c4", w - 44, top - 24, 26, 10);
+      px(ctx, "#6e8794", w - 44, top - 14, 26, 6);
+      px(ctx, "#f6c343", w - 36, top - 22, 10, 4);
+      // folded jumpers
+      for (const [i, col] of [[0, "#e8566b"], [1, "#7fb069"], [2, "#f6c343"]] as [number, string][]) {
+        px(ctx, P.outline, 18, top - 14 - i * 6, 28, 7);
+        px(ctx, col, 19, top - 13 - i * 6, 26, 5);
+      }
+      break;
+    }
+    case "fitting_room": {
+      // A booth with a curtain, and a little "Changing" sign.
+      [c, ctx] = makeCanvas(w, h + 40);
+      overhang = 40;
+      const top = 40;
+      px(ctx, P.outline, 4, top - 30, w - 8, h + 28);
+      px(ctx, P.wood, 6, top - 28, w - 12, h + 24);
+      px(ctx, P.outline, 12, top - 18, w - 24, h + 14);
+      px(ctx, "#7a4a8c", 14, top - 16, w - 28, h + 12);
+      for (let x = 18; x < w - 16; x += 10) px(ctx, "#9a6aac", x, top - 16, 3, h + 12);
+      px(ctx, "#f6c343", 14, top - 18, w - 28, 2);
+      px(ctx, P.outline, w / 2 - 26, top - 40, 52, 14);
+      px(ctx, "#fff6e0", w / 2 - 25, top - 39, 50, 12);
+      label(ctx, "Changing", w / 2, top - 33, "#5a3b2b", 7);
+      break;
+    }
+    case "shop_exit": {
+      // The open door: daylight and a doormat.
+      [c, ctx] = makeCanvas(w, h + 16);
+      overhang = 16;
+      px(ctx, P.outline, 0, 0, w, h + 16);
+      px(ctx, "#cfe8b8", 3, 3, w - 6, h + 10);
+      px(ctx, "#a8d08d", 3, h, w - 6, 13);
+      px(ctx, "#b5544a", 6, h + 6, w - 12, 8);
+      label(ctx, "Exit", w / 2, h / 2 + 6, "#3b3a2e", 7);
+      break;
+    }
     case "campfire": {
       // A ring of stones and crossed logs; the flames are animated on top.
       [c, ctx] = makeCanvas(w + 16, h + 8);
@@ -1472,14 +2242,46 @@ export function lookParts(look: number) {
   };
 }
 
+/** 0, 1 walking; 2 sitting; 4 riding a skateboard; 3, 5, 6 pushing one; 7–12 the robot; 13–15 dozing; 16, 17 sprinting. */
+export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+/** Sprinting: a stride, legs passing, the other stride, passing again. */
+export const SPRINT_FRAMES: AvatarFrame[] = [16, 0, 17, 0];
+const DOZING = (f: AvatarFrame) => f >= 13 && f <= 15;
+/**
+ * Standing asleep, eyes shut, the upper body slumped `slump` (0–2) pixels
+ * on legs that stay put (see Avatar's dozing).
+ */
+export function dozeFrame(slump: number): AvatarFrame {
+  return (13 + Math.max(0, Math.min(2, slump))) as AvatarFrame;
+}
+
+/** How an arm is held: hanging, straight out, or bent at a right angle up or down. */
+type ArmPose = "down" | "out" | "up" | "bent";
+
+/** The robot's poses: (left arm, right arm) for frames 7–12. */
+export const ROBOT_ARMS: Record<number, [ArmPose, ArmPose]> = {
+  7: ["up", "bent"],
+  8: ["out", "out"],
+  9: ["bent", "up"],
+  10: ["up", "up"],
+  11: ["out", "down"],
+  12: ["down", "out"],
+};
+
+/** For the pushing frames: how many pixels the standing knee bends. */
+export const PUSH_CROUCH: Record<number, number> = { 5: 1, 6: 2, 3: 3 };
+
 const avatarCache = new Map<string, Texture>();
 const canvasCache = new Map<string, HTMLCanvasElement>();
 
 /**
  * 24×34 avatar sprite, feet at the bottom centre. Frames 0/1 alternate the
- * legs while walking; frame 2 is sitting (body lowered, legs forward).
+ * legs while walking; frame 2 is sitting (body lowered, legs forward); on a
+ * skateboard, frame 4 rides (no ground shadow) and frames 5, 6 and 3 push
+ * off, crouching 1–3 pixels (only the front leg; the back one is drawn with
+ * the board).
  */
-export function avatarTexture(look: number, frame: 0 | 1 | 2, style = 0): Texture {
+export function avatarTexture(look: number, frame: AvatarFrame, style = 0): Texture {
   const key = `${look}:${frame}:${style}`;
   const cached = avatarCache.get(key);
   if (cached) return cached;
@@ -1504,7 +2306,7 @@ export function styleFor(slot: string, code: number): number {
  * room). `style` adds what's worn from the mall: an outfit, hat or
  * accessory over the look, or a full-body skin instead of it.
  */
-export function avatarCanvas(look: number, frame: 0 | 1 | 2, style = 0): HTMLCanvasElement {
+export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLCanvasElement {
   const key = `${look}:${frame}:${style}`;
   const cached = canvasCache.get(key);
   if (cached) return cached;
@@ -1519,12 +2321,18 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2, style = 0): HTMLCan
   const [c, ctx] = makeCanvas(24, 34);
   const o = PALETTE.outline;
   const hair = p.hairColor;
-  px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
+  // On a board the shadow is on the ground below it, drawn with the board.
+  if (frame < 3 || frame in ROBOT_ARMS || frame >= 13) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
+  // A full-body skin from the mall: the suit in the basic poses (walking,
+  // sitting; standing for the rest).
   if (m.skin) {
-    drawSkin(ctx, m.skin, frame, p.skinColor);
+    drawSkin(ctx, m.skin, frame <= 2 ? (frame as 0 | 1 | 2) : 0, p.skinColor);
     canvasCache.set(key, c);
     return c;
   }
+  // Sprinting: a long stride, one knee up high (shorter leg) and the other
+  // stretched out wide behind.
+  const sprint = frame === 16 ? -1 : frame === 17 ? 1 : 0;
   // legs
   if (frame === 2) {
     px(ctx, o, 6, 27, 12, 5);
@@ -1532,12 +2340,29 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2, style = 0): HTMLCan
     px(ctx, o, 6, 31, 3, 2);
     px(ctx, o, 15, 31, 3, 2);
     ctx.translate(0, 4);
+  } else if (frame in PUSH_CROUCH) {
+    // Pushing a skateboard: the front leg stays on the board, its knee bent
+    // by `c` pixels (the body sinks with it); the back leg, the same 7
+    // pixels long, is drawn reaching for the ground (see Avatar.drawBoard).
+    const c = PUSH_CROUCH[frame];
+    px(ctx, o, 13, 25 + c, 4, 7 - c);
+    px(ctx, "#4a4a5a", 14, 25 + c, 2, 6 - c);
+    ctx.translate(0, c);
+  } else if (sprint) {
+    const [upX, backX] = sprint < 0 ? [7, 15] : [13, 5];
+    px(ctx, o, upX, 25, 4, 5);
+    px(ctx, "#4a4a5a", upX + 1, 25, 2, 4);
+    px(ctx, o, backX, 25, 4, 7);
+    px(ctx, "#4a4a5a", backX + 1, 25, 2, 6);
   } else {
-    px(ctx, o, frame ? 7 : 8, 25, 4, 7);
-    px(ctx, o, frame ? 14 : 13, 25, 4, 7);
-    px(ctx, "#4a4a5a", frame ? 8 : 9, 25, 2, 6);
-    px(ctx, "#4a4a5a", frame ? 15 : 14, 25, 2, 6);
+    px(ctx, o, frame === 1 ? 7 : 8, 25, 4, 7);
+    px(ctx, o, frame === 1 ? 14 : 13, 25, 4, 7);
+    px(ctx, "#4a4a5a", frame === 1 ? 8 : 9, 25, 2, 6);
+    px(ctx, "#4a4a5a", frame === 1 ? 15 : 14, 25, 2, 6);
   }
+
+  // Dozing: everything above the legs sinks a pixel or two.
+  if (DOZING(frame)) ctx.translate(0, frame - 13);
 
   // ---- behind the body: long hair, curls, buns, a ponytail, a backpack ----
   if (p.style === 1) {
@@ -1570,6 +2395,17 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2, style = 0): HTMLCan
       px(ctx, "#b48ae0", x + 1, 18, 5, 5);
       px(ctx, "#fff8e3", x + (dir > 0 ? 2 : 3), 14, 1, 1);
     }
+  }
+
+  // Sprinting, the arms swing opposite each other and the legs (the sprite
+  // faces +x, mirrored to face left): the one on the side whose knee is up
+  // swings back and low, behind the body (so it shows only past its back).
+  if (sprint) {
+    const ax = sprint < 0 ? 4 : 18;
+    const arm = p.outfit === 2 || p.outfit === 4 || p.outfit === 5 || p.outfit === 6 ? p.outfitDark : p.skinColor;
+    px(ctx, arm, ax, 18, 2, 2);
+    px(ctx, arm, ax - 2, 20, 3, 2);
+    px(ctx, p.skinColor, ax - 3, 21, 2, 2);
   }
 
   // ---- body and outfit ----
@@ -1633,9 +2469,60 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2, style = 0): HTMLCan
   // arms: long sleeves for stripes, hoodies, jackets and jumpers
   const mallSleeve = MALL_SLEEVES[m.outfit];
   const sleeves = p.outfit === 2 || p.outfit === 4 || p.outfit === 5 || p.outfit === 6 || !!mallSleeve;
-  for (const ax of [4, 18]) {
-    px(ctx, mallSleeve ?? (sleeves ? dark : p.skinColor), ax, 18, 2, 5);
-    if (sleeves) px(ctx, p.skinColor, ax, 22, 2, 1);
+  /** The arm's colour: a mall outfit's sleeve, the look's own, or bare. */
+  const armColor = mallSleeve ?? (sleeves ? dark : p.skinColor);
+  // On a skateboard the arms come out for balance: a pixel while riding,
+  // two while pushing off.
+  const out = frame === 4 ? 1 : frame in PUSH_CROUCH ? 2 : 0;
+  const robot = ROBOT_ARMS[frame];
+  for (const [ax, dir] of [
+    [4, -1],
+    [18, 1],
+  ]) {
+    if (robot) {
+      // The robot: stiff 2-pixel arms with right-angle elbows, hands in skin.
+      const pose = robot[dir < 0 ? 0 : 1];
+      const arm = armColor;
+      const elbow = dir < 0 ? ax - 3 : ax + 3; // forearm column, 3 out from the shoulder
+      if (pose === "down") {
+        px(ctx, arm, ax, 18, 2, 5);
+        px(ctx, p.skinColor, ax, 22, 2, 1);
+      } else if (pose === "out") {
+        const x0 = dir < 0 ? 0 : ax;
+        px(ctx, arm, x0, 18, 6, 2);
+        px(ctx, p.skinColor, dir < 0 ? 0 : 23, 18, 1, 2);
+      } else {
+        // Upper arm straight out to the elbow, forearm up or down from it.
+        px(ctx, arm, Math.min(ax, elbow), 18, 5, 2);
+        if (pose === "up") {
+          px(ctx, arm, elbow, 13, 2, 5);
+          px(ctx, p.skinColor, elbow, 13, 2, 1);
+        } else {
+          px(ctx, arm, elbow, 20, 2, 3);
+          px(ctx, p.skinColor, elbow, 22, 2, 1);
+        }
+      }
+      continue;
+    }
+    if (sprint) {
+      // The arm swinging forward (and up), in front of the body; the one
+      // swinging back was drawn behind it (see above).
+      if (dir === sprint) continue;
+      const arm = armColor;
+      px(ctx, arm, ax, 18, 2, 2);
+      px(ctx, arm, ax + 1, 19, 3, 2);
+      px(ctx, p.skinColor, ax + 3, 18, 2, 2);
+      continue;
+    }
+    if (!out) {
+      px(ctx, armColor, ax, 18, 2, 5);
+      if (sleeves) px(ctx, p.skinColor, ax, 22, 2, 1);
+      continue;
+    }
+    const hx = ax + dir * out;
+    px(ctx, armColor, ax, 18, 2, 2);
+    px(ctx, armColor, hx, 20, 2, 3);
+    if (sleeves) px(ctx, p.skinColor, hx, 22, 2, 1);
   }
   if (p.accessory === 4) {
     px(ctx, "#6e4b30", 7, 16, 2, 7);
@@ -1689,10 +2576,19 @@ export function avatarCanvas(look: number, frame: 0 | 1 | 2, style = 0): HTMLCan
       px(ctx, hair, 17, 8, 1, 6);
       break;
   }
-  px(ctx, o, 9, 10, 2, 2);
-  px(ctx, o, 14, 10, 2, 2);
-  px(ctx, "#e89a8f", 8, 12, 2, 1);
-  px(ctx, "#e89a8f", 15, 12, 2, 1);
+  if (DOZING(frame)) {
+    // Asleep: eyes shut (little downturned lines), cheeks a touch rosier, mouth a small "o".
+    px(ctx, o, 9, 11, 2, 1);
+    px(ctx, o, 14, 11, 2, 1);
+    px(ctx, "#f0a89c", 8, 12, 2, 1);
+    px(ctx, "#f0a89c", 15, 12, 2, 1);
+    px(ctx, o, 12, 13, 1, 1);
+  } else {
+    px(ctx, o, 9, 10, 2, 2);
+    px(ctx, o, 14, 10, 2, 2);
+    px(ctx, "#e89a8f", 8, 12, 2, 1);
+    px(ctx, "#e89a8f", 15, 12, 2, 1);
+  }
 
   // ---- hat ----
   if (p.hat === 1) {

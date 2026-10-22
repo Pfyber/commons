@@ -1,6 +1,6 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
-import { type Application, type FederatedPointerEvent, Sprite } from "pixi.js";
+import { type Application, type FederatedPointerEvent, Graphics, Sprite, Text } from "pixi.js";
 import { Ball } from "./activities/ball";
 import { ChessPanel, type GameStateMsg } from "./activities/chess";
 import { EaselDisplays, type EaselPanel } from "./activities/easel";
@@ -8,6 +8,11 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
+import { ATTENDANT, BARTENDER, Clerk, FISHERMAN } from "./ambient/clerk";
+import { ArcadePanel, BEAT_MS, BOT as ARCADE_BOT, PLAYING as ARCADE_PLAYING } from "./activities/arcade";
+import { PrizePanel } from "./ui/prizes";
+import { PoolPanel } from "./activities/pool";
+import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
 import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
 import { FOLLOW, type MoodPicker, type OfferCard, STOP_FOLLOW, TOGETHER } from "./activities/together";
@@ -15,6 +20,7 @@ import type { BottlesPanel, WishPanel } from "./ui/dream";
 import type { WardrobePanel } from "./ui/wardrobe";
 import { Critters } from "./ambient/critters";
 import type { Soundscape } from "./ambient/sound";
+import * as sfx from "./ambient/sfx";
 import { Weather } from "./ambient/weather";
 import { BigScreen } from "./activities/screen";
 import { Ambient } from "./ambient/ambient";
@@ -30,6 +36,9 @@ import type { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { type FoundersPanel, STAGES, type WelcomePanel } from "./ui/welcome";
 import { type Welcome, happeningNow } from "./welcome";
 import { Grove } from "./world/grove";
+import { tier } from "./ui/rarity";
+import { CatchShows } from "./world/catchfx";
+import { FlopShows } from "./world/flopfx";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Homes } from "./homes";
 import type { Pets } from "./pets";
@@ -48,15 +57,16 @@ import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
-import { type ActionMenu, type AlbumPanel, type BagPanel, type MarketPanel, Panel, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
-import { Avatar } from "./world/avatars";
+import { type ActionMenu, type AlbumPanel, type BagPanel, FishermanPanel, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
+import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
-import { type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
-import { type TileXY, WALK_SPEED_X10, splice } from "./world/motion";
+import { type MapObject, type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
+import { type TileXY, WALK_SPEED_X10, endT, splice, sprintProfile } from "./world/motion";
 import { compress, route } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
 import { TILE } from "./world/art";
+import { encodeLook } from "./world/look";
 import { Milestones } from "./world/milestones";
 import { Scene } from "./world/scene";
 
@@ -65,7 +75,17 @@ const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION
 /** Errors worth showing to the player as-is. */
 const TOAST_CODES = new Set([ERR.RATE_LIMITED, 9, 10, 11, 12, 13]);
 const FISHING = 2;
-const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3 };
+/** The Dance Off's AI bot dancer (not a server avatar): an id clear of real ones, and a party look. */
+const DANCE_BOT_ID = 0xfffffff7;
+const DANCE_BOT_LOOK = encodeLook({ hue: 200, skin: 0, hair: 4, hat: 0, hatHue: 0, style: 5, accessory: 2, outfit: 6 });
+
+/** Protocol `drink::*`. */
+const BEER = 1;
+const WATER = 2;
+const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5 };
+/** protocol `fish_event::FLOP_MS`; and the treasure chest (opened for coins). */
+const FLOP_MS = 4500;
+const TREASURE_ITEM = 113;
 /** Casts reach this far from where you stand (server: CAST_RANGE). */
 const CAST_RANGE = 2;
 /** Matches the server's bite window minus a little latency headroom. */
@@ -196,8 +216,15 @@ const SEAT_GROUND = 0xffffffff;
 const WATCH_RANGE = 12;
 /** Names are drawn for the nearest few avatars only, to keep crowds readable. */
 const MAX_NAMES = 25;
-const KEY_STEPS = 3;
+/** How far ahead a held arrow key plans the walk (twice that on a board). */
+const KEY_STEPS = 6;
+/** No input for this long and you're away from the keyboard (you doze off). */
+const AWAY_AFTER_MS = 60_000;
+/** Map objects that are game machines (the server numbers them in map order, as here). */
+const CABINET_KINDS = ["arcade_cabinet", "dance_machine", "pinball"];
 const KEY_RESEND_MS = 180;
+/** Two key presses or taps closer together than this ask for a sprint. */
+const SPRINT_ASK_MS = 350;
 
 const KEY_DIRS: Record<string, TileXY> = {
   ArrowUp: { x: 0, y: -1 }, KeyW: { x: 0, y: -1 },
@@ -216,6 +243,17 @@ export class Game {
   private keys = new Set<string>();
   private lastKeyDir = "";
   private lastKeySend = 0;
+  /** Walks we've predicted and sent, oldest first, awaiting the server's echo. */
+  private sentMoves: { x: number; y: number; at: number }[] = [];
+  /**
+   * Sprinting (outdoors): a direction key pressed twice in quick succession,
+   * a tile tapped twice, or tiles tapped one after another quickly. It lasts
+   * while the keys are held, or until the walk ends.
+   */
+  private sprint = false;
+  private sprintAt = 0;
+  private lastTapAt = 0;
+  private keyPressAt: Record<string, number> = {};
   private disposers: (() => void)[] = [];
   private furniture: Furniture;
   private games = new Map<number, GameStateMsg>();
@@ -239,6 +277,31 @@ export class Game {
   private houseFronts: HouseFronts | null = null;
   /** Garden plots, watered or not, as last seen (to show a can being used). */
   private wateredSeen = new Map<string, boolean>();
+  private clerk: Clerk | null = null;
+  /** Your three hands while a rock paper scissors match waits on your pick. */
+  private rpsPicker = new RpsPicker((pick) => this.socket?.send({ t: "RpsPick", pick }));
+  /** The bar's pool table, where the map has one. */
+  private pool: PoolPanel | null = null;
+  /** The arcade's cabinets and its prize counter, where the map has them. */
+  private arcade: ArcadePanel | null = null;
+  /** When who's playing at which table was last worked out. */
+  private playingCheckAt = 0;
+  /** Fish just landed, held up above their anglers. */
+  private catches: CatchShows;
+  /** Rare fish flopping on the bank, to be hit; and where each angler's line went in. */
+  private flops: FlopShows;
+  private castAt = new Map<number, TileXY>();
+  /** The fisherman on the pier, who buys your catch. */
+  private fisherman: FishermanPanel | null = null;
+  private prizes: PrizePanel | null = null;
+  /** The Dance Off machine: its number, the light-up floor and the scoreboard over it. */
+  private dance: { cab: number; floor: MapObject; lights: Graphics; board: Text } | null = null;
+  /** Dancing next to you when you take on the AI bot at the Dance Off. */
+  private danceBot: Avatar | null = null;
+  /** A building we're walking to the door of, to go in once we get there. */
+  private entering: { door: TileXY; zone: string } | null = null;
+  /** When your own wooziness wears off. */
+  private soberTimer = 0;
   private grove: Grove | null = null;
   private caretakerTalkAt = 0;
   private sky: Sky;
@@ -284,8 +347,10 @@ export class Game {
       this.scene.sorted.addChild(this.screen.sprite);
     }
     this.ambient = new Ambient(this.scene, map);
-    const indoor = zoneId === "mall";
-    this.daynight = new DayNight(app, this.scene, map, indoor);
+    // Indoors (the mall, the bar, the arcade): the lights are on, no weather,
+    // no wheels, no sprinting; the arcade is lit by neon.
+    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade";
+    this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade");
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     if (zoneId === "city") {
       ui.town
@@ -294,7 +359,9 @@ export class Game {
         .catch(() => {});
     }
     this.setupCorners(map);
-    this.weather = new Weather(app, this.scene, map, indoor);
+    this.weather = new Weather(app, this.scene, map, indoors);
+    this.catches = new CatchShows(this.scene);
+    this.flops = new FlopShows(this.scene);
     this.critters = new Critters(app, this.scene, map);
     if (zoneId === "city") {
       this.cat = new Cat(map);
@@ -338,6 +405,60 @@ export class Game {
     }
     // In through your own front door: a pet out with you is home.
     if (zoneId === "home" && place.owner === ui.social.selfId && ui.pets.mine?.out) void this.petLife.bringHome().catch(() => {});
+    // The fisherman stands still on his spot (a one-tile "counter" just below it).
+    const fisher = map.objects.find((o) => o.kind === "fisherman");
+    if (fisher) {
+      this.clerk = new Clerk(map, { ...fisher, x: fisher.x - 1, y: fisher.y + 1, w: 3, h: 1 }, this.scene, labels, FISHERMAN);
+      this.fisherman = new FishermanPanel(ui.eco, (coins, best) => {
+        this.clerk?.say(coins >= 8 ? `Now that's a catch! ${coins} coins for you.` : `${coins} coins, as promised. Thanks!`);
+        this.hud.toast(`🎣 Sold to the fisherman: +${coins} coins (best: ${best.name})`, 3500);
+      }, () => {
+        this.clerk?.say("She's a beauty. Fish'll practically jump onto that hook!");
+        this.hud.toast("🎣 You bought the Angler's Rod! Fish bite sooner and you get an extra swing.", 4500);
+      });
+    }
+    const bar = map.objects.find((o) => o.kind === "bar_counter");
+    if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
+    const prizeCounter = map.objects.find((o) => o.kind === "prize_counter");
+    if (prizeCounter) {
+      this.clerk = new Clerk(map, prizeCounter, this.scene, labels, ATTENDANT);
+      this.prizes = new PrizePanel(ui.eco, (name) => {
+        this.clerk?.say(`One ${name}, all yours! Looks great.`);
+        this.hud.toast(`🎟️ You got the ${name}! It's in your bag.`, 4000);
+      });
+    }
+    const cabinets = map.objects.filter((o) => CABINET_KINDS.includes(o.kind));
+    if (cabinets.length) {
+      this.arcade = new ArcadePanel(
+        cabinets.map((o) => o.label ?? "Arcade"),
+        () => this.selfId,
+        (id) => this.avatars.get(id)?.info.name ?? "someone",
+        (m) => this.socket?.send(m),
+        () => this.socket?.clock.now() ?? 0,
+        () => ui.sound.muted,
+      );
+      const machine = map.objects.find((o) => o.kind === "dance_machine");
+      const floor = map.objects.find((o) => o.kind === "dance_floor");
+      if (machine && floor) {
+        const lights = new Graphics();
+        lights.zIndex = floor.y * TILE + 2;
+        this.scene.sorted.addChild(lights);
+        const board = new Text({ text: "", style: { fontFamily: "ui-monospace, monospace", fontSize: 9, fontWeight: "bold", fill: 0xfff1b0, stroke: { color: 0x05030c, width: 3 }, align: "center" } });
+        board.anchor.set(0.5, 1);
+        board.resolution = 4;
+        board.position.set((machine.x + machine.w / 2) * TILE, machine.y * TILE - 50);
+        board.zIndex = 1e6;
+        this.scene.sorted.addChild(board);
+        this.dance = { cab: cabinets.indexOf(machine), floor, lights, board };
+      }
+    }
+    if (map.objects.some((o) => o.kind === "pool_table")) {
+      this.pool = new PoolPanel(
+        () => this.selfId,
+        (id) => this.avatars.get(id)?.info.name ?? "someone",
+        (m) => this.socket?.send(m),
+      );
+    }
     this.sky = new Sky(app, this.scene, () => this.onShootingStar());
     const fire = map.objects.find((o) => o.kind === "campfire");
     if (fire) {
@@ -367,6 +488,9 @@ export class Game {
   }
 
   connect(serverUrl: string, joinToken: string) {
+    // One connection at a time: a second would show you twice, and the zone
+    // would then drop the first as "signed in elsewhere".
+    this.socket?.close();
     this.clearAvatars();
     this.socket = new ZoneSocket(serverUrl, joinToken, this.scene.viewTiles(), (m) => this.handle(m), (r) => {
       this.socket = null;
@@ -398,6 +522,7 @@ export class Game {
     if (existing) existing.apply(info, now);
     else {
       const a = new Avatar(info, this.scene, this.labels, info.id === this.selfId, now);
+      a.setAway(info.away);
       a.setFounder(this.ui.welcome.founderNamed(info.name)?.no ?? null);
       this.avatars.set(info.id, a);
     }
@@ -503,6 +628,118 @@ export class Game {
     return true;
   }
 
+  /** Tapping the clerk: a word of help, and the racks open. */
+  private tapClerk(sx: number, sy: number): boolean {
+    if (!this.clerk) return false;
+    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
+    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    if (!this.clerk.hit(x, y)) return false;
+    this.clerk.chat();
+    const map = this.scene.map;
+    const bar = map.objects.find((o) => o.kind === "bar_counter");
+    if (bar) this.openBar(bar);
+    const prizes = map.objects.find((o) => o.kind === "prize_counter");
+    if (prizes && this.prizes) this.near(this.prizes, { x: prizes.x + Math.floor(prizes.w / 2), y: prizes.y + prizes.h }, 6).show();
+    const fisher = map.objects.find((o) => o.kind === "fisherman");
+    if (fisher && this.fisherman) this.openFisherman(fisher);
+    return true;
+  }
+
+  /**
+   * Everyone in a game at a cabinet or the pool table faces it and looks
+   * busy at it (and doesn't doze off, however long they think).
+   */
+  private markPlayers() {
+    const at = new Map<number, { x: number; y: number; kind: "arcade" | "pool" }>();
+    const map = this.scene.map;
+    if (this.arcade) {
+      map.objects
+        .filter((o) => CABINET_KINDS.includes(o.kind))
+        .forEach((o, cab) => {
+          const st = this.arcade?.stateOf(cab);
+          if (st?.status !== ARCADE_PLAYING) return;
+          for (const id of [st.a, st.b]) at.set(id, { x: o.x + o.w / 2 - 0.5, y: o.y + o.h / 2, kind: "arcade" });
+        });
+    }
+    const table = map.objects.find((o) => o.kind === "pool_table");
+    if (table && this.pool) for (const id of this.pool.players) at.set(id, { x: table.x + table.w / 2 - 0.5, y: table.y + table.h / 2, kind: "pool" });
+    for (const [id, a] of this.avatars) a.setPlaying(at.get(id) ?? null);
+  }
+
+  /** Walk up to the fisherman and see what he'll give for your catch. */
+  private openFisherman(spot: MapObject) {
+    const self = this.self;
+    const at = { x: spot.x, y: spot.y };
+    if (self && cheb(self.destination, at) > 2) {
+      const near = nearestWalkable(this.scene.map, at.x + 1, at.y, 2);
+      if (near) this.moveTo(near, true);
+    }
+    void this.ui.eco.loadAlbum().catch(() => {});
+    this.near(this.fisherman!, at, 5).show();
+  }
+
+  /** The bartender's menu: a beer, or a glass of water to sober up. */
+  private openBar(counter: MapObject) {
+    const self = this.self;
+    const front = { x: counter.x + Math.floor(counter.w / 2), y: counter.y + counter.h };
+    if (self && cheb(self.destination, front) > 3) {
+      const spot = nearestWalkable(this.scene.map, front.x, front.y, 2);
+      if (spot) this.moveTo(spot, true);
+    }
+    const order = (kind: number, line: string) => {
+      this.socket?.send({ t: "Drink", kind });
+      this.clerk?.say(line);
+    };
+    this.near(this.ui.menu, front, 6).showWith("Bartender 🍺", "The Mossy Mug", [
+      ["🍺 A beer · 5 coins", () => order(BEER, "One cold one, coming up!")],
+      ["💧 A glass of water · free", () => order(WATER, "Here you go. Sip slowly.")],
+    ]);
+  }
+
+  /** A drink took effect: `ms` of wooziness (0: sober again). */
+  private onWoozy(id: number, ms: number) {
+    const a = this.avatars.get(id);
+    a?.setWoozy(ms);
+    a?.flash(ms ? "🍺" : "💧");
+    if (id !== this.selfId) return;
+    window.clearTimeout(this.soberTimer);
+    document.body.classList.toggle("woozy", ms > 0);
+    if (ms) {
+      this.hud.toast("🍺 Cheers! The room's gone a little wobbly…", 4000);
+      this.soberTimer = window.setTimeout(() => document.body.classList.remove("woozy"), ms);
+    } else {
+      this.hud.toast("💧 Ahh. Much better.", 2500);
+    }
+  }
+
+  /** Walks to a building's door and goes in on arrival (or at once if already there). */
+  private enter(door: TileXY, zone: string) {
+    const self = this.self;
+    if (!self) return;
+    if (cheb(self.destination, door) <= 1 && !self.moving) {
+      this.events.onTravel(zone);
+      return;
+    }
+    const spot = nearestWalkable(this.scene.map, door.x, door.y, 2);
+    if (!spot) return;
+    this.moveTo(spot, true);
+    this.entering = { door: spot, zone };
+  }
+
+  /** Goes in once we've walked up to the door we're entering. */
+  private checkEntering() {
+    const e = this.entering;
+    const self = this.self;
+    if (!e || !self) return;
+    if (self.destination.x !== e.door.x || self.destination.y !== e.door.y) {
+      this.entering = null; // walked somewhere else instead
+      return;
+    }
+    if (self.moving) return;
+    this.entering = null;
+    this.events.onTravel(e.zone);
+  }
+
   /** The Caretaker says something now and then when you're close by. */
   private caretakerChat(now: number) {
     const self = this.self;
@@ -543,6 +780,7 @@ export class Game {
 
   private followStarted(a: number, b: number) {
     const name = (id: number) => this.avatars.get(id)?.info.name ?? "someone";
+    if (a === this.selfId || b === this.selfId) sfx.follow();
     if (a === this.selfId) {
       this.following = b;
       this.followGoal = "";
@@ -688,12 +926,132 @@ export class Game {
       if (kind === 3) p.emote(4);
       else p.flash(t.icon);
     }
+    // They turn to each other and really hug, or slap hands.
+    if (pa && pb && (kind === 1 || kind === 2)) {
+      const how = kind === 1 ? "hug" : "five";
+      pa.together(how, () => (this.avatars.has(b) ? pb.pos : null));
+      pb.together(how, () => (this.avatars.has(a) ? pa.pos : null));
+    }
+    const vol = Math.max(this.nearbyVolume(a), this.nearbyVolume(b));
+    if (kind === 1) sfx.hug(vol);
+    else if (kind === 2) sfx.highFive(vol, 450);
+    else if (kind === 3) sfx.danceRiff(vol);
     if (kind === 1) window.setTimeout(() => [pa, pb].forEach((p) => p?.flash("💞")), 900);
     const other = a === this.selfId ? pb : b === this.selfId ? pa : null;
     if (other) this.hud.toast(`${t.icon} You and ${other.info.name} ${t.done}${kind === 1 ? " 💞" : "!"}`, 3500);
   }
 
-  /** You changed clothes: show it here and to everyone nearby. */
+  /**
+   * Rock paper scissors: while choosing, the two face each other and the
+   * players get their picker; at the reveal everyone nearby sees them pump
+   * their fists three times, show their hands, and who won.
+   */
+  private onRps(m: Extract<ServerMsg, { t: "Rps" }>) {
+    const pa = this.avatars.get(m.a);
+    const pb = this.avatars.get(m.b);
+    const mine = m.a === this.selfId || m.b === this.selfId;
+    if (pa && pb) {
+      pa.faceToward(pb.pos.x);
+      pb.faceToward(pa.pos.x);
+    }
+    if (m.phase === CHOOSING) {
+      for (const p of [pa, pb]) p?.flash("🤔");
+      const other = m.a === this.selfId ? pb : pa;
+      if (mine) this.rpsPicker.show(other?.info.name ?? "someone", () => m.endsT - (this.socket?.clock.now() ?? m.endsT));
+      return;
+    }
+    if (mine) this.rpsPicker.hide();
+    if (m.phase === CANCELLED) {
+      if (mine) this.hud.toast("✊ The game was called off.");
+      return;
+    }
+    const now = performance.now();
+    pa?.pumpFist(now);
+    pb?.pumpFist(now);
+    // "Rock… paper… scissors!": a thump with each pump.
+    const rpsVol = mine ? 1 : Math.max(this.nearbyVolume(m.a), this.nearbyVolume(m.b));
+    for (let i = 0; i < 3; i++) sfx.fistPump(rpsVol, (PUMP_MS / 3) * i);
+    window.setTimeout(() => {
+      this.avatars.get(m.a)?.flash(pickIcon(m.aPick));
+      this.avatars.get(m.b)?.flash(pickIcon(m.bPick));
+    }, PUMP_MS);
+    window.setTimeout(() => {
+      const winner = beats(m.aPick, m.bPick) ? m.a : beats(m.bPick, m.aPick) ? m.b : 0;
+      if (winner) this.avatars.get(winner)?.say("🏆 Wins!");
+      if (!mine) return;
+      sfx.rpsResult(winner === this.selfId ? "win" : winner ? "lose" : "draw");
+      const [me, them] = m.a === this.selfId ? [m.aPick, m.bPick] : [m.bPick, m.aPick];
+      const text =
+        !me && !them
+          ? "🤷 Nobody picked in time."
+          : winner === this.selfId
+            ? `🏆 You win! ${pickIcon(me)} beats ${pickIcon(them)}`
+            : winner
+              ? `You lose: ${pickIcon(them)} beats ${pickIcon(me)}`
+              : `A draw: ${pickIcon(me)} and ${pickIcon(them)}`;
+      this.hud.toast(text, 4000);
+    }, PUMP_MS + 900);
+  }
+
+  /**
+   * The Dance Off, as seen from the room: while a dance is on, the floor in
+   * front of the machine lights up on the beat (brighter under whoever just
+   * scored), the dancers dance, and a scoreboard over the machine shows who's
+   * ahead; after, who won.
+   */
+  private danceFloor(serverNow: number) {
+    const d = this.dance;
+    if (!d || !this.arcade) return;
+    const st = this.arcade.stateOf(d.cab);
+    const g = d.lights.clear();
+    const name = (id: number) => (id === ARCADE_BOT ? "AI bot" : (this.avatars.get(id)?.info.name ?? "someone"));
+    // The AI bot dances on the floor beside you while you take it on.
+    const botDancing = st?.status === ARCADE_PLAYING && st.b === ARCADE_BOT;
+    if (botDancing && !this.danceBot && st) {
+      // On the second pad, beside yours (the server puts you on the first).
+      const you = this.avatars.get(st.a);
+      const x = d.floor.x + 2;
+      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false, style: 0, pet: 0, vehicle: 0, tool: 0 };
+      this.danceBot = new Avatar(info, this.scene, this.labels, false, serverNow);
+      this.danceBot.markNpc();
+      if (you) this.danceBot.faceToward(you.pos.x);
+    } else if (!botDancing && this.danceBot) {
+      this.danceBot.destroy();
+      this.danceBot = null;
+    }
+    if (this.danceBot) {
+      this.danceBot.keepDancing(300);
+      this.danceBot.update(serverNow, performance.now());
+    }
+    if (!st || st.status === 0 || st.status === 4) {
+      d.board.text = "";
+      return;
+    }
+    const data = st.data;
+    const [sa, sb] = [data[5], data[6]];
+    if (st.status !== ARCADE_PLAYING) {
+      const winner = st.status === 2 ? st.a : st.status === 3 ? st.b : 0;
+      d.board.text = winner ? `🏆 ${name(winner)} won the Dance Off!\n${sa} – ${sb}` : `A draw! ${sa} – ${sb}`;
+      return;
+    }
+    const start = data[1] * 65536 + data[2];
+    const beat = (serverNow - start) / BEAT_MS;
+    const crown = (mine: number, theirs: number) => (mine > theirs ? "👑 " : "");
+    d.board.text = beat < 0 ? `💃 Dance Off starting… ${Math.ceil(-beat * BEAT_MS / 1000)}` : `${crown(sa, sb)}${name(st.a)} ${sa}  –  ${sb} ${name(st.b)}${sb > sa ? " 👑" : ""}`;
+    if (beat < 0) return;
+    // The floor: each tile its own colour, changing on every beat, pulsing.
+    const pulse = Math.max(0, 1 - (beat - Math.floor(beat)) * 2);
+    const colors = [0xff4fa3, 0x3fe0ff, 0xffe14f, 0x5fe08a, 0xb07bff];
+    for (let i = 0; i < d.floor.w; i++) {
+      const c = colors[(i + Math.floor(beat)) % colors.length];
+      const x = (d.floor.x + i) * TILE;
+      const y = d.floor.y * TILE;
+      g.rect(x + 2, y + 2, TILE - 4, TILE - 4).fill({ color: c, alpha: 0.25 + pulse * 0.45 });
+      g.rect(x + 8, y + 8, TILE - 16, TILE - 16).fill({ color: 0xffffff, alpha: pulse * 0.25 });
+    }
+    for (const id of [st.a, st.b]) this.avatars.get(id)?.keepDancing(300);
+  }
+
   /** New clothes (saved already): show them, and tell the zone to show them to everyone. */
   changeLook(look: number, style: number) {
     const self = this.self;
@@ -751,6 +1109,8 @@ export class Game {
     };
     switch (it.kind) {
       case "tool": {
+        // The Angler's Rod works on its own (fish bite sooner); the others are looks.
+        if (!it.meta.tool) return tip("Fish bite sooner with it");
         const tool = this.self?.info.tool ?? 0;
         const code = it.meta.code ?? 0;
         const using = it.meta.tool === "can" ? tool >> 4 === code : (tool & 0xf) === code;
@@ -943,6 +1303,7 @@ export class Game {
         this.hud.setPlace(this.place.label || this.scene.map.name, m.instance);
         if (this.isOwnHome) void this.loadGifts();
         if (this.mood) this.socket?.send({ t: "SetMood", mood: this.mood });
+        this.clerk?.hello();
         this.events.onWelcome();
         break;
       case "CellEnter":
@@ -961,20 +1322,35 @@ export class Game {
         const a = this.avatars.get(m.id);
         if (!a) break;
         if (m.id === this.selfId) {
-          // The server confirming our predicted walk: keep the local timing
+          // The server confirming a walk we predicted: keep the local timing
           // (unless it says we go at another pace: on wheels, or keeping up).
+          // Held arrow keys send a new stretch before the last one's echo is
+          // back, so match any walk still in flight, not just the latest one
+          // (taking an older echo as a correction snapped us back and forth).
           const end = m.path[m.path.length - 1];
+          // (Same speed, and both breaking into a sprint or neither: a sprint's start
+          // can differ by a few ms without anyone seeing it.)
+          const samePace = a.currentMotion?.speedX10 === m.speedX10 && !(a.currentMotion?.sprintIn ?? 0) === !m.sprintIn;
+          const i = this.sentMoves.findIndex((s) => s.x === end.x && s.y === end.y);
+          if (i >= 0) {
+            this.sentMoves.splice(0, i + 1);
+            if (samePace) break;
+          }
           const dest = a.destination;
-          if (end.x === dest.x && end.y === dest.y && a.currentMotion?.speedX10 === m.speedX10) break;
+          if (end.x === dest.x && end.y === dest.y && samePace) break;
         }
-        a.setMotion({ path: m.path, t0: m.t0, speedX10: m.speedX10 }, now);
+        a.setMotion({ path: m.path, t0: m.t0, speedX10: m.speedX10, sprintIn: m.sprintIn }, now);
         break;
       }
       case "Snap":
         this.avatars.get(m.id)?.snap({ x: m.x, y: m.y });
         break;
+      case "AwayChanged":
+        this.avatars.get(m.id)?.setAway(m.away);
+        break;
       case "EmoteShown":
         this.avatars.get(m.id)?.emote(m.emote);
+        sfx.emoteSound(m.emote, this.nearbyVolume(m.id) * 0.8);
         break;
       case "ChatBubble": {
         const a = this.avatars.get(m.id);
@@ -987,6 +1363,8 @@ export class Game {
         const a = this.avatars.get(m.id);
         if (!a) break;
         a.setState(m.state, { x: m.x, y: m.y });
+        // Walking off mid-cast ends fishing without a FishEvent.
+        if (m.state !== FISHING) this.props.reelIn(m.id);
         if (m.id === this.selfId) this.onSelfState(m.state, { x: m.x, y: m.y });
         break;
       }
@@ -1080,11 +1458,30 @@ export class Game {
           this.socket?.send({ t: "Accept", from: m.from, kind: m.kind });
           break;
         }
+        sfx.asked();
         this.ui.offer.show(from.info.name, m.kind, () => this.socket?.send({ t: "Accept", from: m.from, kind: m.kind }));
         break;
       }
       case "Together":
         this.together(m.a, m.b, m.kind);
+        break;
+      case "Rps":
+        this.onRps(m);
+        break;
+      case "Woozy":
+        this.onWoozy(m.id, m.ms);
+        break;
+      case "PoolState":
+        this.pool?.onState(m);
+        break;
+      case "PoolShot":
+        this.pool?.onShot(m.by, m.vx, m.vy, m.shot);
+        break;
+      case "PoolAim":
+        this.pool?.onAim(m.by, m.angle, m.pull);
+        break;
+      case "ArcadeState":
+        this.arcade?.onState(m);
         break;
       case "LanternRise": {
         const who = this.avatars.get(m.id);
@@ -1195,6 +1592,11 @@ export class Game {
   private moveTo(t: TileXY, marker: boolean) {
     const self = this.self;
     if (!this.socket || !self) return;
+    // A little woozy: now and then you end up a step off where you meant.
+    if (self.woozy && Math.random() < 0.5) {
+      const off = { x: t.x + Math.round(Math.random() * 2 - 1), y: t.y + Math.round(Math.random() * 2 - 1) };
+      if (walkable(this.scene.map, off.x, off.y)) t = off;
+    }
     const now = this.socket.clock.now();
     // Walking off stands us up; the server does the same on MoveTo.
     if (self.state === SITTING) {
@@ -1203,6 +1605,9 @@ export class Game {
     }
     const cur = self.currentMotion;
     const sp = cur ? splice(cur, now) : null;
+    const walkingOn = !!cur && now < endT(cur);
+    // A fresh walk from standing still is a walk again, unless it was just asked to be a sprint.
+    if (!walkingOn && performance.now() - this.sprintAt > SPRINT_ASK_MS) this.sprint = false;
     let start: TileXY;
     let t0 = now;
     if (sp) {
@@ -1217,21 +1622,122 @@ export class Game {
       return;
     }
     if (sp) full.unshift(sp.prev);
-    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10: this.predictSpeed(full) }, now);
-    this.socket.send({ t: "MoveTo", x: t.x, y: t.y });
+    // On wheels where they apply; on foot outdoors, a sprint if asked for
+    // (the server works it out the same way).
+    const ridden = this.predictSpeed(full);
+    const pace =
+      ridden !== WALK_SPEED_X10
+        ? { speedX10: ridden, sprintIn: 0 }
+        : this.sprint && this.zoneId === "city"
+          ? sprintProfile(sp ? cur : null, t0, now)
+          : { speedX10: WALK_SPEED_X10, sprintIn: 0 };
+    if (full.length >= 2) self.setMotion({ path: compress(full), t0, ...pace }, now);
+    const wall = performance.now();
+    this.sentMoves = this.sentMoves.filter((s) => wall - s.at < 3000);
+    this.sentMoves.push({ x: t.x, y: t.y, at: wall });
+    this.socket.send({ t: "MoveTo", x: t.x, y: t.y, sprint: this.sprint });
     if (marker) this.scene.showTarget(t);
   }
 
   private bindInput() {
+    // Away from the keyboard: a minute with no key, click, touch, scroll or
+    // even a mouse move (tabbed out counts), and everyone sees you doze off.
+    let lastInput = performance.now();
+    let away = false;
+    const active = () => {
+      lastInput = performance.now();
+      if (away) {
+        away = false;
+        this.socket?.send({ t: "Away", away: false });
+      }
+    };
+    const awayCheck = window.setInterval(() => {
+      if (!away && performance.now() - lastInput > AWAY_AFTER_MS) {
+        away = true;
+        this.socket?.send({ t: "Away", away: true });
+      }
+    }, 2000);
+    for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) window.addEventListener(ev, active, { passive: true });
+    this.disposers.push(() => {
+      window.clearInterval(awayCheck);
+      for (const ev of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) window.removeEventListener(ev, active);
+    });
+
+    // Two fingers pinch the world to zoom.
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinch: { dist: number; from: number } | null = null;
+    let pinchedAt = 0;
+    const spread = () => {
+      const [a, b] = [...touches.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    const touchDown = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) pinch = { dist: Math.max(20, spread()), from: this.scene.zoomLevel };
+    };
+    const touchMove = (e: PointerEvent) => {
+      const t = touches.get(e.pointerId);
+      if (!t) return;
+      t.x = e.clientX;
+      t.y = e.clientY;
+      if (pinch && touches.size >= 2) {
+        this.scene.pinch(pinch.from, spread() / pinch.dist);
+        pinchedAt = performance.now();
+      }
+    };
+    const touchUp = (e: PointerEvent) => {
+      if (!touches.delete(e.pointerId)) return;
+      if (pinch && touches.size < 2) {
+        pinch = null;
+        pinchedAt = performance.now();
+        this.scene.pinchEnd();
+      }
+    };
+    const surface = this.app.canvas;
+    surface.addEventListener("pointerdown", touchDown);
+    window.addEventListener("pointermove", touchMove);
+    window.addEventListener("pointerup", touchUp);
+    window.addEventListener("pointercancel", touchUp);
+    // And on touch screens, zoom buttons too.
+    const zoomPad = document.createElement("div");
+    zoomPad.className = "zoom-pad";
+    for (const [label, dir, name] of [["+", 1, "Zoom in"], ["−", -1, "Zoom out"]] as [string, number, string][]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.setAttribute("aria-label", name);
+      b.onclick = () => this.scene.zoomBy(dir);
+      zoomPad.append(b);
+    }
+    document.body.append(zoomPad);
+    this.disposers.push(() => {
+      surface.removeEventListener("pointerdown", touchDown);
+      window.removeEventListener("pointermove", touchMove);
+      window.removeEventListener("pointerup", touchUp);
+      window.removeEventListener("pointercancel", touchUp);
+      zoomPad.remove();
+    });
+
     const stage = this.app.stage;
     stage.eventMode = "static";
     stage.hitArea = this.app.screen;
     const tap = (e: FederatedPointerEvent) => {
+      // A pinch isn't a tap.
+      if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
+      // Your fish flopping on the bank: hit it.
+      const wx = (e.global.x - this.scene.world.position.x) / this.scene.scale;
+      const wy = (e.global.y - this.scene.world.position.y) / this.scene.scale;
+      if (this.flops.hits(this.selfId, wx, wy)) {
+        this.socket?.send({ t: "FishHit" });
+        return;
+      }
       const t = this.scene.screenToTile(e.global.x, e.global.y);
       if (this.tapBall(e.global.x, e.global.y)) return;
       if (this.tapPet(e.global.x, e.global.y)) return;
       if (this.tapCat(e.global.x, e.global.y)) return;
       if (this.tapCaretaker(e.global.x, e.global.y)) return;
+      if (this.tapClerk(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
       // Taking your own steps ends following someone.
       if (this.following !== null) this.stopFollowing(true);
@@ -1243,6 +1749,10 @@ export class Game {
       const table = this.furniture.tables.get(id);
       if (table) return this.watchTable(table.id);
       const target = nearestWalkable(this.scene.map, t.x, t.y, 2);
+      // Tapping twice, or tile after tile in quick succession: sprint there.
+      const wall = performance.now();
+      if (wall - this.lastTapAt < SPRINT_ASK_MS) this.askSprint();
+      this.lastTapAt = wall;
       if (target) this.moveTo(target, true);
     };
     stage.on("pointertap", tap);
@@ -1260,18 +1770,41 @@ export class Game {
         this.hud.focusChat();
         return;
       }
-      if (/^[1-7]$/.test(e.key)) {
+      if (/^[1-8]$/.test(e.key)) {
         this.emote(Number(e.key));
         return;
       }
       if (KEY_DIRS[e.code]) {
         e.preventDefault();
+        // The same way twice in quick succession: sprint.
+        if (!e.repeat) {
+          const d = KEY_DIRS[e.code];
+          const way = `${d.x},${d.y}`;
+          const wall = performance.now();
+          if (wall - (this.keyPressAt[way] ?? -Infinity) < SPRINT_ASK_MS) {
+            this.askSprint();
+            this.lastKeyDir = ""; // re-plan the walk at once, at a run
+          }
+          this.keyPressAt[way] = wall;
+        }
         this.keys.add(e.code);
       }
     };
     const up = (e: KeyboardEvent) => this.keys.delete(e.code);
     const blur = () => this.keys.clear();
     const resize = () => this.scene.resize();
+    // The mouse wheel zooms (a trackpad's many small scrolls add up to a step).
+    let wheel = 0;
+    const zoom = (e: WheelEvent) => {
+      e.preventDefault();
+      wheel += e.deltaY;
+      if (Math.abs(wheel) < 60) return;
+      this.scene.zoomBy(wheel < 0 ? 1 : -1);
+      wheel = 0;
+    };
+    const canvas = this.app.canvas;
+    canvas.addEventListener("wheel", zoom, { passive: false });
+    this.disposers.push(() => canvas.removeEventListener("wheel", zoom));
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", blur);
@@ -1415,6 +1948,74 @@ export class Game {
         if (spot) this.moveTo(spot, true);
       }
       this.near(ui.wardrobe, { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }).openAs(obj.label ?? "Changing room");
+      return true;
+    }
+    // The bar: in through the door; inside, the counter, the pool table, the fire.
+    if (obj?.kind === "bar") {
+      this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "bar");
+      return true;
+    }
+    if (obj?.kind === "bar_exit") {
+      this.events.onTravel("city");
+      return true;
+    }
+    if (obj && (obj.kind === "bar_counter" || obj.kind === "bottle_shelf")) {
+      this.clerk?.chat();
+      const counter = map.objects.find((o) => o.kind === "bar_counter");
+      if (counter) this.openBar(counter);
+      return true;
+    }
+    if (obj?.kind === "pool_table" && this.pool) {
+      const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 3) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(this.pool, front, 7).show();
+      return true;
+    }
+    // The arcade: in through the doors; inside, the cabinets and the prizes.
+    if (obj?.kind === "arcade_hall") {
+      this.enter({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, "arcade");
+      return true;
+    }
+    if (obj?.kind === "arcade_exit") {
+      this.events.onTravel("city");
+      return true;
+    }
+    if (obj?.kind === "dance_floor" && this.arcade && this.dance) {
+      this.moveTo({ x: t.x, y: t.y }, true);
+      this.near(this.arcade, t, 5).openCab(this.dance.cab);
+      return true;
+    }
+    if (obj && CABINET_KINDS.includes(obj.kind) && this.arcade) {
+      const cab = map.objects.filter((o) => CABINET_KINDS.includes(o.kind)).indexOf(obj);
+      // Cabinets are played from the front; the pinball machine from its left end.
+      const front = obj.kind === "pinball" ? { x: obj.x - 1, y: obj.y + Math.floor(obj.h / 2) } : { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 1) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(this.arcade, front, 5).openCab(cab);
+      return true;
+    }
+    if (obj?.kind === "prize_counter" && this.prizes) {
+      this.clerk?.chat();
+      const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 3) {
+        const spot = nearestWalkable(map, front.x, front.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(this.prizes, front, 6).show();
+      return true;
+    }
+    if (obj?.kind === "claw_machine") {
+      const lines = ["🧸 The claw grabs a plushie… and drops it. So close!", "🧸 The claw wobbles over the duck… nope.", "🧸 Almost had the frog that time."];
+      this.hud.toast(lines[Math.floor(Math.random() * lines.length)], 3000);
+      return true;
+    }
+    if (obj?.kind === "fireplace") {
+      this.hud.toast("🔥 The fire crackles. It's warm and smells of pine.", 3500);
       return true;
     }
     if (obj?.kind === "founders_stone") {
@@ -1589,31 +2190,108 @@ export class Game {
 
   private onFish(m: Extract<ServerMsg, { t: "FishEvent" }>) {
     const isSelf = m.id === this.selfId;
+    const vol = this.nearbyVolume(m.id);
     switch (m.kind) {
       case FISH.CAST:
+        this.castAt.set(m.id, { x: m.x, y: m.y });
         this.props.cast(m.id, { x: m.x, y: m.y });
+        this.avatars.get(m.id)?.castLine({ x: m.x, y: m.y }, performance.now());
+        sfx.splash(vol, CAST_SWING_MS);
         break;
       case FISH.BITE:
         this.props.bite(m.id);
-        if (isSelf) this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }));
+        this.avatars.get(m.id)?.bite(performance.now());
+        if (isSelf) {
+          sfx.nibble();
+          // How hard the fight is depends on what's on the hook.
+          const rarity = this.ui.eco.items.get(m.item)?.rarity ?? 0;
+          const rod = this.ui.eco.qty(ROD_ITEM) > 0;
+          this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }), rarity, rod);
+        }
+        break;
+      case FISH.FLOP: {
+        // Out it comes, onto the bank beside the angler, flopping: hit it!
+        this.props.reelIn(m.id);
+        this.avatars.get(m.id)?.reelIn(performance.now());
+        const fish = this.ui.eco.items.get(m.item);
+        const water = this.castAt.get(m.id) ?? { x: m.x, y: m.y };
+        // Rare: 3 hits; epic: 4; legendary and mythical: 5 (the server's flop_toughness).
+        const need = [3, 3, 3, 4, 5, 5][fish?.rarity ?? 2] ?? 5;
+        this.flops.start(m.id, water, { x: m.x, y: m.y }, fish?.key ?? "minnow", fish?.rarity ?? 2, FLOP_MS, isSelf, need);
+        sfx.flop(vol);
+        if (isSelf) {
+          this.ui.reel.stop();
+          this.hud.toast(`🐟 It's out, and flopping! Tap it ${need} times in 4.5 seconds (it hops away each time) or it jumps back in!`, 4000);
+        }
+        break;
+      }
+      case FISH.HIT:
+        this.flops.hit(m.id, m.item, { x: m.x, y: m.y });
+        sfx.whack(vol, m.item);
         break;
       case FISH.CAUGHT: {
+        this.flops.remove(m.id);
         this.props.reelIn(m.id);
+        this.avatars.get(m.id)?.reelIn(performance.now());
+        const caught = this.ui.eco.items.get(m.item);
+        const rarity = caught?.rarity ?? 0;
+        const t = tier(rarity);
+        sfx.landed(vol, rarity);
+        // Out of the water and up above the angler's head, for all to see.
+        const angler = m.id;
+        this.catches.start(
+          { x: m.x, y: m.y },
+          () => {
+            const a = this.avatars.get(angler);
+            return a ? { x: a.pos.x * TILE + TILE / 2, y: a.pos.y * TILE + TILE - 4 - 34 } : null;
+          },
+          caught?.key ?? "minnow",
+          caught?.name ?? "A fish",
+          rarity,
+          caught?.kind ?? "fish",
+        );
+        if (isSelf && rarity >= 4) {
+          // A legendary or mythical catch lights up the whole screen.
+          const flash = document.createElement("div");
+          flash.className = `catch-flash tier-${rarity}`;
+          flash.style.setProperty("--tier", t.color);
+          document.body.appendChild(flash);
+          window.setTimeout(() => flash.remove(), 2600);
+        }
+        const sparkle = (caught?.rarity ?? 0) >= 3 ? "✨" : "🎣";
         if (isSelf) {
           this.ui.reel.stop();
           this.taskMaybeDone();
+          if (m.item === TREASURE_ITEM) this.hud.toast("💰 A treasure chest! You prise it open: +50 coins!", 5000);
+          else this.hud.toast(`${sparkle} ${t.name} catch: ${this.ui.eco.name(m.item)}! (worth ${caught?.meta.sell ?? 0} coins to the fisherman)`, (caught?.rarity ?? 0) >= 3 ? 5000 : 3000);
         }
-        this.avatars.get(m.id)?.say(`🎣 ${this.ui.eco.name(m.item)}!`);
         break;
       }
       case FISH.ESCAPED:
+        if (this.flops.has(m.id)) {
+          // Back into the water it goes.
+          this.flops.escape(m.id);
+          sfx.splash(vol, 450);
+        }
         this.props.reelIn(m.id);
+        this.avatars.get(m.id)?.reelIn(performance.now());
         if (isSelf) {
+          sfx.gotAway();
           this.ui.reel.stop();
           this.hud.toast("It got away…");
         }
         break;
     }
+  }
+
+  /** How loud someone's sounds are to you: full for your own, fading out over a dozen tiles. */
+  private nearbyVolume(id: number): number {
+    if (id === this.selfId) return 1;
+    const a = this.avatars.get(id);
+    const self = this.self;
+    if (!a || !self) return 0;
+    const d = Math.hypot(a.pos.x - self.pos.x, a.pos.y - self.pos.y);
+    return Math.max(0, 1 - d / 12) * 0.6;
   }
 
   /** Garden action from the plot menu: walk next to the plot, then act. */
@@ -1675,6 +2353,12 @@ export class Game {
     this.socket?.send({ t: "ChatSay", text });
   }
 
+  /** A double tap or key press: sprint from here (outdoors, on foot). */
+  private askSprint() {
+    this.sprint = true;
+    this.sprintAt = performance.now();
+  }
+
   /** Keyboard walking: short segments ahead, re-sent while keys are held. */
   private keyboardMove(wallNow: number) {
     const self = this.self;
@@ -1686,6 +2370,7 @@ export class Game {
         const m = self.currentMotion;
         const sp = m ? splice(m, this.socket.clock.now()) : null;
         if (sp) this.moveTo(sp.next, false);
+        this.sprint = false;
       }
       this.lastKeyDir = "";
       return;
@@ -1702,13 +2387,23 @@ export class Game {
     const dirKey = `${dx},${dy}`;
     const dest = self.destination;
     const remaining = Math.hypot(dest.x - self.pos.x, dest.y - self.pos.y);
-    const due = dirKey !== this.lastKeyDir || remaining < 1.5;
-    if (!due || wallNow - this.lastKeySend < KEY_RESEND_MS) return;
-    // Plan from the tile we're heading into, so segments chain smoothly.
-    const from = { x: Math.round(self.pos.x + dx * 0.49), y: Math.round(self.pos.y + dy * 0.49) };
+    // On wheels we cover ground faster, so plan further ahead.
+    const steps = self.info.vehicle ? KEY_STEPS * 2 : KEY_STEPS;
+    // Turning answers at once; going straight, the next stretch is planned
+    // well before this one runs out, so the walk never eases off.
+    const turned = dirKey !== this.lastKeyDir;
+    const due = turned || remaining < steps / 2;
+    if (!due || (!turned && wallNow - this.lastKeySend < KEY_RESEND_MS)) return;
+    // Plan from exactly where the new stretch will start (the tile we're
+    // stepping into, as moveTo splices it), so the walk goes dead straight
+    // the way the keys point instead of cutting back toward another line.
+    const now = this.socket?.clock.now() ?? 0;
+    const cur = self.currentMotion;
+    const sp = cur ? splice(cur, now) : null;
+    const from = sp ? sp.next : cur && now <= cur.t0 ? cur.path[0] : self.destination;
     const target =
-      stepTarget(this.scene.map, from, dx, dy, KEY_STEPS) ??
-      (dx && dy ? stepTarget(this.scene.map, from, dx, 0, KEY_STEPS) ?? stepTarget(this.scene.map, from, 0, dy, KEY_STEPS) : null);
+      stepTarget(this.scene.map, from, dx, dy, steps) ??
+      (dx && dy ? stepTarget(this.scene.map, from, dx, 0, steps) ?? stepTarget(this.scene.map, from, 0, dy, steps) : null);
     if (!target) return;
     this.lastKeyDir = dirKey;
     this.lastKeySend = wallNow;
@@ -1744,7 +2439,7 @@ export class Game {
       this.hud.setNearby(this.avatars.size);
     }
     this.scene.update();
-    this.props.update(wallNow);
+    this.props.update(wallNow, (id) => this.avatars.get(id)?.rodTip ?? null);
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
     this.daynight.update();
     this.milestones.update(wallNow, this.daynight.dark);
@@ -1758,6 +2453,9 @@ export class Game {
       this.caretaker.update(Date.now(), wallNow);
       this.caretakerChat(wallNow);
     }
+    this.clerk?.update(Date.now(), wallNow);
+    this.danceFloor(serverNow);
+    this.checkEntering();
     this.sky.update(wallNow, this.daynight.dark > 0.5);
     if (this.following !== null && wallNow > this.followCheckAt) {
       this.followCheckAt = wallNow + 350;
@@ -1778,6 +2476,13 @@ export class Game {
       this.closeIfWalkedAway();
     }
     this.ui.sound.update(wallNow, { dark: this.daynight.dark, weather: this.weather.kind });
+    this.catches.update(wallNow);
+    this.flops.update(wallNow);
+    if (wallNow > this.playingCheckAt) {
+      this.playingCheckAt = wallNow + 300;
+      this.markPlayers();
+    }
+    sfx.skate.update(!!self?.riding, wallNow);
     // The jam pads go away when you walk off from the bandstand.
     if (this.jam?.open && self) {
       const b = this.scene.map.objects.find((o) => o.kind === "bandstand");
@@ -1807,6 +2512,17 @@ export class Game {
     this.petLife.destroy();
     this.houseFronts?.destroy();
     this.ui.decorate.hide();
+    this.clerk?.destroy();
+    this.rpsPicker.destroy();
+    this.pool?.destroy();
+    this.arcade?.destroy();
+    this.fisherman?.destroy();
+    this.catches.destroy();
+    this.flops.destroy();
+    this.danceBot?.destroy();
+    this.prizes?.destroy();
+    document.body.classList.remove("woozy");
+    window.clearTimeout(this.soberTimer);
     this.campfire?.destroy();
     this.sky.destroy();
     this.ui.offer.hide();

@@ -69,7 +69,7 @@ struct Located {
 }
 
 /// Public buildings with a door onto the city (a `door:<name>` spot there).
-const PUBLIC_DOORS: &[&str] = &["mall"];
+const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade"];
 
 #[derive(Deserialize)]
 struct Lot {
@@ -227,7 +227,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         secret: config::secret(),
         zone_server_url: config::env_str("ZONE_PUBLIC_URL", "ws://localhost:8082/ws"),
-        zones: config::env_str("COMMONS_ZONES", "city,home,mall")
+        zones: config::env_str("COMMONS_ZONES", "city,home,mall,bar,arcade")
             .split(',')
             .map(|s| s.trim().to_string())
             .collect(),

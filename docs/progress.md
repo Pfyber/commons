@@ -925,6 +925,52 @@ by another player), and a wrapped birthday gift arriving on a doorstep and
 opening to its card. The earlier steps pass again, and 500 bots pass the
 perf gate.
 
+## Merge: the arcade, the bar and the fishing update (2026-10-22)
+
+The `mancro5/commons` fork's work (8 commits, branched before the city)
+merged into the city and mall, keeping its history:
+
+- **The arcade** in the Arcade block: a neon hall with Pong, Light Cycles,
+  Connect Four, Memory Match, Basket Catch, Turbo Racer, Tank Duel, the
+  Dance Off (light-up floor, a scoreboard, an AI dancer) and claw machines.
+  Play someone or the AI bot; wins earn arcade tickets (10, or 5 against
+  the bot). The **prize counter** now trades tickets for mall things (toys,
+  hats, a bow tie, a satchel, gift wrap), kept-for-good ones won once
+  (`/api/arcade/prizes`, `/api/arcade/redeem`).
+- **The Mossy Mug**, the bar in the Café block: a beer (5 coins, a woozy
+  minute) or a glass of water, eight-ball pool against a friend or the
+  pool shark, and pinball.
+- **Fishing 3.0:** fish by rarity (common to mythical), five new fish, a
+  treasure chest, the catch held up for all to see, rare fish flopping on
+  the bank to be tapped, and **the Fisherman** at the foot of the pond's
+  pier who buys your catch and sells the Angler's Rod (fish bite sooner).
+  The rod you use from the mall's Tools shop colours the rod you're seen
+  with.
+- **Moving and being together:** sprinting outdoors (double-tap or
+  double key press), mouse-wheel and pinch zoom (remembered), dozing on
+  your feet when away, real hugs and high fives, rock paper scissors, the
+  Robot dance (emote 8), sound effects, and smoother keyboard walking.
+- **Kept from our side:** the free looks and the mall's clothes (the
+  fork's clothes shop and its paid look pieces are not merged), and the
+  vehicles: the fork's skateboard is now a fifth mall vehicle (180 coins,
+  1.6× outdoors), with the fork's push-off animation.
+- **Renumbered:** the fork's migrations follow ours (0017–0023), the
+  ticket is item 900 (600 is a pet), the toys' emotes moved to 9–12
+  (0024), the skateboard is item 704 (0025). Protocol v17 (MoveTo.sprint,
+  EntityInfo.sprint_in and away, and the arcade, bar, pool, rock paper
+  scissors and fishing messages).
+- **One UI:** money reads in coins everywhere again (the fork had "$"),
+  and the play pop-up and the pool and arcade windows use the game's paper
+  panels; the game screens inside them stay dark.
+
+Checked: every server test (API 34, sim 34, zone 54 with the fork's
+arcade, pool, rock paper scissors and fishing tests, social 10); the
+client's 76 tests (with the fork's pool and pinball physics vectors). In
+the browser: into the arcade from its block and out of its door, a Pong
+cabinet, the prize counter; into the bar, water from the bartender, the
+pool table; the fisherman's board; zoom; a skateboard at its speed; a
+sprint. 500 bots pass the perf gate.
+
 Next: M8, polish (shopkeepers, music and lighting per department, a
 crowded-mall bot test).
 

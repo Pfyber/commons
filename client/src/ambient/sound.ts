@@ -3,6 +3,7 @@
 // choice is remembered.
 
 import { audio } from "../activities/jam";
+import { setSfxMuted } from "./sfx";
 import type { WeatherKind } from "./weather";
 
 const MUTE_KEY = "commons.muted";
@@ -27,6 +28,7 @@ export class Soundscape {
       // storage unavailable
     }
     this.muted = m;
+    setSfxMuted(m);
     const start = () => {
       this.start();
       window.removeEventListener("pointerdown", start);
@@ -44,6 +46,7 @@ export class Soundscape {
       // storage unavailable
     }
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.6;
+    setSfxMuted(this.muted);
     return this.muted;
   }
 

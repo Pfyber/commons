@@ -9,10 +9,14 @@
 //! watched cells via CellEnter/CellLeave (subscription changes) and
 //! Spawn/Despawn (an avatar crossing into or out of the watched area).
 
+mod arcade;
+mod bar;
 mod fishing;
 mod garden;
 mod hangout;
 mod home;
+mod pool;
+mod rps;
 mod together;
 
 pub use together::nook_map;
@@ -30,9 +34,12 @@ use commons_common::token::JoinClaims;
 use commons_protocol::{
     CELL_TILES, ClientMsg, EntityInfo, ServerMsg, Tile, emote, error_code, push_framed, state,
 };
-use commons_sim::{Grid, Motion, TilePos, WALK_SPEED_X10, compress, route, vehicles};
+use commons_sim::{
+    Grid, Motion, SPRINT_SPEED_X10, TilePos, WALK_SPEED_X10, compress, route, vehicles,
+};
 
-/// The zone where vehicles can be ridden (everywhere else, you're on foot).
+/// The zone where vehicles can be ridden and people can sprint (everywhere
+/// else is indoors: on foot, at a walk).
 pub(crate) const OUTDOORS: &str = "city";
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
@@ -143,6 +150,8 @@ struct Avatar {
     move_rl: Bucket,
     chat_rl: Bucket,
     emote_rl: Bucket,
+    /// Smacks at a flopping fish (a few a second).
+    hit_rl: Bucket,
     game_rl: Bucket,
     /// Jam notes and paint strokes.
     play_rl: Bucket,
@@ -161,6 +170,8 @@ struct Avatar {
     sat_together: bool,
     /// What the avatar signals to others (`mood::*`).
     mood: u8,
+    /// Away from the keyboard (their client says so).
+    away: bool,
     /// Instance time the next sky lantern may go up.
     next_lantern: u32,
     fish: Option<fishing::FishSession>,
@@ -185,13 +196,14 @@ impl Avatar {
     }
 
     fn info(&self, now: u32) -> EntityInfo {
-        let (speed_x10, t0, path) = match &self.motion {
+        let (speed_x10, t0, sprint_in, path) = match &self.motion {
             Some(m) if !m.is_done(now) => (
                 m.speed_x10,
                 m.t0,
+                m.sprint_in,
                 m.path.iter().map(|&(x, y)| Tile { x, y }).collect(),
             ),
-            _ => (0, 0, Vec::new()),
+            _ => (0, 0, 0, Vec::new()),
         };
         EntityInfo {
             id: self.id,
@@ -206,9 +218,24 @@ impl Avatar {
             state: self.state,
             speed_x10,
             t0,
+            sprint_in,
             path,
             mood: self.mood,
+            away: self.away,
         }
+    }
+}
+
+/// A sprint asked for, starting at `t0`: its speed, and when (ms after `t0`)
+/// it speeds up (0: from the start). Joining a walk in progress (`spliced`,
+/// whose stretch began in the past at `t0`), it keeps that walk's pace up to
+/// `now`, so there's no jump, and breaks into the sprint from there.
+fn sprint_profile(spliced: Option<&Motion>, t0: u32, now: u32) -> (u8, u16) {
+    match spliced {
+        Some(m) if !m.sprinting_at(t0) && now > t0 => {
+            (WALK_SPEED_X10, (now - t0).min(u16::MAX as u32) as u16)
+        }
+        _ => (SPRINT_SPEED_X10, 0),
     }
 }
 
@@ -234,6 +261,12 @@ pub struct Instance {
     /// Who walks after whom: follower → leader. A follower keeps up with a
     /// leader on wheels.
     follows: HashMap<u32, u32>,
+    /// Rock paper scissors matches under way.
+    rps: Vec<rps::RpsMatch>,
+    /// The bar's pool table, where the map has one.
+    pool: Option<pool::Table>,
+    /// The arcade's cabinets, in map order.
+    cabinets: Vec<arcade::Cabinet>,
     /// The pitch's ball, if the zone has a pitch.
     ball: Option<play::Ball>,
     /// Activity of players who left since the last report.
@@ -280,6 +313,36 @@ impl Instance {
             .map(|(i, _)| ((i % w) as u16, (i / w) as u16))
             .collect();
         let ball = zone.pitch.as_ref().map(play::Ball::new);
+        let pool = zone
+            .map
+            .objects
+            .iter()
+            .find(|o| o.kind == "pool_table")
+            .map(|o| pool::Table::new((o.x, o.y)));
+        let cabinets = zone
+            .map
+            .objects
+            .iter()
+            .filter(|o| {
+                o.kind == "arcade_cabinet" || o.kind == "dance_machine" || o.kind == "pinball"
+            })
+            .map(|o| {
+                let cab = arcade::Cabinet::new(
+                    (o.x, o.y),
+                    arcade::kind_for(o.label.as_deref().unwrap_or("")),
+                );
+                // The dance machine's players stand on the middle two tiles of its floor.
+                match zone
+                    .map
+                    .objects
+                    .iter()
+                    .find(|f| f.kind == "dance_floor" && o.kind == "dance_machine")
+                {
+                    Some(f) => cab.with_pads([(f.x + 1, f.y), (f.x + 2, f.y)]),
+                    None => cab,
+                }
+            })
+            .collect();
         Instance {
             grid: zone.grid.clone(),
             zone,
@@ -297,6 +360,9 @@ impl Instance {
             elders: HashMap::new(),
             offers: HashMap::new(),
             follows: HashMap::new(),
+            rps: Vec::new(),
+            pool,
+            cabinets,
             ball,
             activity_left: Vec::new(),
             next_activity_report: ACTIVITY_EVERY_MS,
@@ -430,6 +496,9 @@ impl Instance {
             }
             self.screen_tick(now);
             self.fish_tick(now);
+            self.rps_tick(now);
+            self.pool_tick(now);
+            self.arcade_tick(now);
             self.garden_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
@@ -609,6 +678,7 @@ impl Instance {
             move_rl: Bucket::new(10.0, 5.0),
             chat_rl: Bucket::new(3.0, 0.5),
             emote_rl: Bucket::new(3.0, 1.0),
+            hit_rl: Bucket::new(4.0, 8.0),
             game_rl: Bucket::new(5.0, 2.0),
             play_rl: Bucket::new(24.0, 12.0),
             seat: None,
@@ -620,6 +690,7 @@ impl Instance {
             interactions: 0,
             sat_together: false,
             mood: 0,
+            away: false,
             next_lantern: 0,
         };
         avatar.send(
@@ -647,6 +718,8 @@ impl Instance {
         if let Some(msg) = self.screen_state(now) {
             self.send_to(id, &msg);
         }
+        self.pool_hello(id);
+        self.arcade_hello(id);
         self.stats
             .population
             .store(self.avatars.len() as u32, Ordering::Relaxed);
@@ -656,6 +729,9 @@ impl Instance {
         self.follows.retain(|&f, &mut l| f != id && l != id);
         self.leave_seat(id);
         self.stop_fishing(id, false);
+        self.rps_leave(id);
+        self.pool_leave(id);
+        self.arcade_leave(id, None);
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
@@ -696,7 +772,7 @@ impl Instance {
             a.interactions = (a.interactions + 1).min(MAX_INTERACTIONS_PER_REPORT);
         }
         match msg {
-            ClientMsg::MoveTo { x, y } => self.move_to(id, (x, y), now),
+            ClientMsg::MoveTo { x, y, sprint } => self.move_to(id, (x, y), sprint, now),
             ClientMsg::Emote { emote: e } => {
                 let a = self.avatars.get_mut(&id).unwrap();
                 // Free emotes, or playing with a toy you own.
@@ -708,6 +784,15 @@ impl Instance {
                 self.broadcast(cell, &ServerMsg::EmoteShown { id, emote: e }, None);
             }
             ClientMsg::ChatSay { text } => self.chat(id, &text, now),
+            ClientMsg::Away { away } => {
+                let a = self.avatars.get_mut(&id).unwrap();
+                if a.away == away {
+                    return;
+                }
+                a.away = away;
+                let cell = a.cell;
+                self.broadcast(cell, &ServerMsg::AwayChanged { id, away }, None);
+            }
             ClientMsg::Ping { client_t } => {
                 self.send_to(
                     id,
@@ -722,6 +807,7 @@ impl Instance {
             ClientMsg::GameMove { table, uci } => self.game_move(id, table, &uci, now),
             ClientMsg::FishCast { x, y } => self.fish_cast(id, (x, y), now),
             ClientMsg::FishReel { quality } => self.fish_reel(id, quality, now),
+            ClientMsg::FishHit {} => self.fish_hit(id, now),
             ClientMsg::PlotAction { x, y, action, item } => {
                 self.plot_action(id, (x, y), action, item, now)
             }
@@ -738,11 +824,20 @@ impl Instance {
             ClientMsg::Accept { from, kind } => self.accept(id, from, kind, now),
             ClientMsg::SkyLantern { text } => self.sky_lantern(id, &text, now),
             ClientMsg::SetLook { look } => self.set_look(id, look, now),
+            ClientMsg::RpsPick { pick } => self.rps_pick(id, pick),
+            ClientMsg::Drink { kind } => self.drink(id, kind, now),
+            ClientMsg::PoolJoin { vs_bot } => self.pool_join(id, vs_bot, now),
+            ClientMsg::PoolLeave {} => self.pool_leave(id),
+            ClientMsg::PoolShoot { angle, power } => self.pool_shoot(id, angle, power, now),
+            ClientMsg::PoolAim { angle, pull } => self.pool_aim(id, angle, pull, now),
+            ClientMsg::ArcadeJoin { cab, vs_bot } => self.arcade_join(id, cab, vs_bot, now),
+            ClientMsg::ArcadeLeave { cab } => self.arcade_leave(id, Some(cab)),
+            ClientMsg::ArcadeInput { cab, value } => self.arcade_input(id, cab, value, now),
             ClientMsg::Hello { .. } => self.error(id, error_code::BAD_MESSAGE, "already joined"),
         }
     }
 
-    fn move_to(&mut self, id: u32, target: TilePos, now: u32) {
+    fn move_to(&mut self, id: u32, target: TilePos, sprint: bool, now: u32) {
         let a = self.avatars.get_mut(&id).unwrap();
         if !a.move_rl.try_take(now as u64) {
             return;
@@ -754,6 +849,7 @@ impl Instance {
             _ => {}
         }
         let grid = &self.grid;
+        let outdoors = self.zone.id == OUTDOORS;
         let a = self.avatars.get_mut(&id).unwrap();
         // Mid-walk, continue through the tile being walked into so the new path
         // joins the old one without a seam. Otherwise start shortly in the future
@@ -778,23 +874,30 @@ impl Instance {
         if full.len() < 2 {
             return;
         }
-        // On wheels where they apply; following someone, at least their pace.
+        // On wheels where they apply; following someone, at least their pace;
+        // on foot outdoors, a sprint if asked for.
         let own = self.ride_speed(id, &full);
         let leader = self
             .follows
             .get(&id)
             .and_then(|&l| self.ride_speed(l, &full));
-        let speed_x10 = own.max(leader).unwrap_or(WALK_SPEED_X10);
         let a = self.avatars.get_mut(&id).unwrap();
+        let (speed_x10, sprint_in) = match own.max(leader) {
+            Some(s) => (s, 0),
+            None if sprint && outdoors => sprint_profile(prefix.and(a.motion.as_ref()), t0, now),
+            None => (WALK_SPEED_X10, 0),
+        };
         let motion = Motion {
             path: compress(&full),
             t0,
             speed_x10,
+            sprint_in,
         };
         let msg = ServerMsg::MoveStart {
             id,
             speed_x10: motion.speed_x10,
             t0: motion.t0,
+            sprint_in: motion.sprint_in,
             path: motion.path.iter().map(|&(x, y)| Tile { x, y }).collect(),
         };
         a.motion = Some(motion);
@@ -1275,7 +1378,11 @@ pub(crate) mod tests {
         for (i, t) in targets.iter().enumerate() {
             inst.handle(Cmd::Msg {
                 conn: i as u64 + 1,
-                msg: ClientMsg::MoveTo { x: t.0, y: t.1 },
+                msg: ClientMsg::MoveTo {
+                    x: t.0,
+                    y: t.1,
+                    sprint: false,
+                },
             });
         }
         // Simulate 25 seconds of ticks with a synthetic clock.
@@ -1384,7 +1491,11 @@ pub(crate) mod tests {
         inst.grid.set_blocked(20, 20, true);
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::MoveTo { x: 20, y: 20 },
+            msg: ClientMsg::MoveTo {
+                x: 20,
+                y: 20,
+                sprint: false,
+            },
         });
         inst.flush();
         a.pump();

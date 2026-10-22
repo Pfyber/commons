@@ -7,12 +7,17 @@ use crate::TilePos;
 
 /// Walking speed in tenths of a tile per second.
 pub const WALK_SPEED_X10: u8 = 40;
+/// Sprinting (asked for by the player, outdoors; see `sprint_in`).
+pub const SPRINT_SPEED_X10: u8 = 58;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Motion {
     pub path: Vec<TilePos>,
     pub t0: u32,
     pub speed_x10: u8,
+    /// A walk that breaks into a sprint: this many ms after `t0` the speed
+    /// rises to `SPRINT_SPEED_X10` (0: it never does).
+    pub sprint_in: u16,
 }
 
 fn seg_len(a: TilePos, b: TilePos) -> f64 {
@@ -26,9 +31,38 @@ impl Motion {
         10_000.0 / self.speed_x10.max(1) as f64
     }
 
+    /// Tiles covered by `t` (walking, then sprinting once `sprint_in` is up).
+    fn dist_at(&self, t: u32) -> f64 {
+        if t <= self.t0 {
+            return 0.0;
+        }
+        let dt = (t - self.t0) as f64;
+        let s = self.sprint_in as f64;
+        if self.sprint_in == 0 || dt <= s {
+            return dt / self.ms_per_tile();
+        }
+        s / self.ms_per_tile() + (dt - s) / (10_000.0 / SPRINT_SPEED_X10 as f64)
+    }
+
+    /// When `d` tiles have been covered (ms after `t0`): the inverse of `dist_at`.
+    fn time_for(&self, d: f64) -> f64 {
+        let s = self.sprint_in as f64;
+        let walked = s / self.ms_per_tile();
+        if self.sprint_in == 0 || d <= walked {
+            return d * self.ms_per_tile();
+        }
+        s + (d - walked) * (10_000.0 / SPRINT_SPEED_X10 as f64)
+    }
+
+    /// Whether they're sprinting at `t`.
+    pub fn sprinting_at(&self, t: u32) -> bool {
+        self.speed_x10 == SPRINT_SPEED_X10
+            || (self.sprint_in > 0 && t > self.t0 + self.sprint_in as u32)
+    }
+
     pub fn duration_ms(&self) -> u32 {
         let len: f64 = self.path.windows(2).map(|w| seg_len(w[0], w[1])).sum();
-        (len * self.ms_per_tile()).ceil() as u32
+        self.time_for(len).ceil() as u32
     }
 
     pub fn end_t(&self) -> u32 {
@@ -45,7 +79,7 @@ impl Motion {
         if t <= self.t0 || self.path.len() == 1 {
             return (first.0 as f64, first.1 as f64);
         }
-        let mut remaining = (t - self.t0) as f64 / self.ms_per_tile();
+        let mut remaining = self.dist_at(t);
         for w in self.path.windows(2) {
             let len = seg_len(w[0], w[1]);
             if remaining < len {
@@ -76,8 +110,7 @@ impl Motion {
         if t <= self.t0 || self.is_done(t) {
             return None;
         }
-        let ms_per_tile = self.ms_per_tile();
-        let travelled = (t - self.t0) as f64 / ms_per_tile;
+        let travelled = self.dist_at(t);
         let mut before = 0.0;
         for w in self.path.windows(2) {
             let (a, b) = (w[0], w[1]);
@@ -94,8 +127,7 @@ impl Motion {
                 let k = (((travelled - before) / step_len).floor() as i32).min(steps - 1);
                 let prev = (a.0 as i32 + dx * k, a.1 as i32 + dy * k);
                 let next = (prev.0 + dx, prev.1 + dy);
-                let t_prev =
-                    self.t0 + ((before + k as f64 * step_len) * ms_per_tile).round() as u32;
+                let t_prev = self.t0 + self.time_for(before + k as f64 * step_len).round() as u32;
                 return Some((
                     (prev.0 as u16, prev.1 as u16),
                     (next.0 as u16, next.1 as u16),
@@ -118,6 +150,7 @@ mod tests {
             path: vec![(0, 0), (4, 0), (4, 3)],
             t0: 1000,
             speed_x10: 40,
+            sprint_in: 0,
         };
         assert_eq!(m.duration_ms(), 1750);
         assert_eq!(m.pos_at(0), (0.0, 0.0));
@@ -134,6 +167,7 @@ mod tests {
             path: vec![(0, 0), (4, 0), (7, 3)],
             t0: 1000,
             speed_x10: 40,
+            sprint_in: 0,
         };
         assert_eq!(m.splice(1000), None);
         assert_eq!(m.splice(1600), Some(((2, 0), (3, 0), 1500)));
@@ -144,6 +178,7 @@ mod tests {
             path: vec![prev, next, (6, 9)],
             t0: t_prev,
             speed_x10: 40,
+            sprint_in: 0,
         };
         for t in [2400, 2450, 2500] {
             let (a, b) = (m.pos_at(t), redirected.pos_at(t));
@@ -153,5 +188,26 @@ mod tests {
             );
         }
         assert_eq!(m.splice(9999), None);
+    }
+
+    #[test]
+    fn breaks_into_a_sprint() {
+        // 2 tiles walking (500 ms), then sprinting.
+        let sp = SPRINT_SPEED_X10 as f64 / 10.0;
+        let m = Motion {
+            path: vec![(0, 0), (15, 0)],
+            t0: 1000,
+            speed_x10: WALK_SPEED_X10,
+            sprint_in: 500,
+        };
+        assert_eq!(m.pos_at(1500), (2.0, 0.0));
+        assert!((m.pos_at(2500).0 - (2.0 + sp)).abs() < 1e-9);
+        assert_eq!(m.duration_ms(), (500.0 + 13.0 / sp * 1000.0).ceil() as u32);
+        assert!(!m.sprinting_at(1400) && m.sprinting_at(1600));
+        // Splicing mid-sprint still lines up.
+        let (prev, next, t_prev) = m.splice(2000).unwrap();
+        let k = (2.0 + 0.5 * sp).floor() as u16;
+        assert_eq!((prev, next), ((k, 0), (k + 1, 0)));
+        assert!((m.pos_at(t_prev).0 - k as f64).abs() < 0.01);
     }
 }

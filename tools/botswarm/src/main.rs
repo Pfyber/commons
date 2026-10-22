@@ -5,18 +5,30 @@
 //! and p99 outbound bandwidth per client < 8 KB/s, measured after ramp-up.
 //!
 //! Bots mint their own join tokens with the shared secret, so only the zone
-//! server needs to be running.
+//! server needs to be running. With `--api` (the dev stack) each bot also
+//! signs in as a real player, "Bot 3", so people can befriend it.
+//!
+//! Bots are good sports: they accept friend requests, being followed, hugs,
+//! high fives, dances and rock paper scissors (picking at random), wave back
+//! at people who wave at them, and stop walking when someone comes close.
+//! Now and then one goes fishing: walks to the water, casts, reels in (not
+//! always well) and smacks a rare catch flopping on the bank (not always fast
+//! enough).
 
 use anyhow::{Context, bail};
 use clap::{Parser, ValueEnum};
-use commons_common::token::{self, JoinClaims, TrustTier};
-use commons_protocol::{ClientMsg, PROTOCOL_VERSION, ServerMsg, emote, push_framed, split_frame};
+use commons_common::token::{self, AccessClaims, JoinClaims, TrustTier};
+use commons_protocol::{
+    ClientMsg, EntityInfo, PROTOCOL_VERSION, ServerMsg, emote, fish_event, push_framed, rps,
+    split_frame, together,
+};
 use commons_sim::furniture::{Furniture, Side};
 use commons_sim::{Grid, MapFile, Motion, TilePos};
 use futures_util::{SinkExt, StreamExt};
 use rand::rngs::SmallRng;
 use rand::seq::IndexedRandom;
 use rand::{Rng, SeedableRng};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -68,6 +80,126 @@ struct Args {
     max_tick_p99_ms: f64,
     #[arg(long, default_value_t = 8.0)]
     max_client_kbps: f64,
+    /// The API (dev mode only): bots sign in as real players, so they can be
+    /// befriended. Without it they're anonymous (load tests).
+    #[arg(long)]
+    api: Option<String>,
+    /// The social gateway, where bots answer friend requests (with `--api`).
+    #[arg(long, default_value = "http://127.0.0.1:8083")]
+    social: String,
+}
+
+/// Someone else a bot can see.
+struct Other {
+    /// A person, not another bot: the one worth waving back at.
+    human: bool,
+    tile: TilePos,
+    motion: Option<Motion>,
+}
+
+impl Other {
+    fn from(e: &EntityInfo) -> Self {
+        let motion = (e.path.len() >= 2).then(|| Motion {
+            path: e.path.iter().map(|t| (t.x, t.y)).collect(),
+            t0: e.t0,
+            speed_x10: e.speed_x10,
+            sprint_in: e.sprint_in,
+        });
+        Other {
+            human: !e.name.starts_with("Bot "),
+            tile: (e.x, e.y),
+            motion,
+        }
+    }
+
+    fn at(&self, t: u32) -> TilePos {
+        self.motion.as_ref().map_or(self.tile, |m| m.tile_at(t))
+    }
+}
+
+/// How close (tiles) someone must come for a bot to stop and say hello.
+const STOP_NEAR: i32 = 2;
+/// How close a wave must be for a bot to wave back.
+const WAVE_BACK_NEAR: i32 = 8;
+
+fn cheb(a: TilePos, b: TilePos) -> i32 {
+    (a.0 as i32 - b.0 as i32)
+        .abs()
+        .max((a.1 as i32 - b.1 as i32).abs())
+}
+
+/// Signs in (dev mode) as `name`, creating the account the first time.
+/// Returns the player's id and look. Waits for the API to come up.
+async fn sign_in(api: &str, name: &str) -> anyhow::Result<(String, u32)> {
+    let http = reqwest::Client::new();
+    let mut last = anyhow::anyhow!("no answer");
+    for _ in 0..60 {
+        let res = http
+            .post(format!("{api}/api/auth/dev-login"))
+            .json(&serde_json::json!({ "display_name": name }))
+            .send()
+            .await;
+        match res {
+            Ok(r) if r.status().is_success() => {
+                let v: serde_json::Value = r.json().await?;
+                let id = v["player"]["id"]
+                    .as_str()
+                    .context("no player id")?
+                    .to_string();
+                let look = v["player"]["look"].as_u64().unwrap_or(0) as u32;
+                return Ok((id, look));
+            }
+            Ok(r) => last = anyhow::anyhow!("dev login: {}", r.status()),
+            Err(e) => last = e.into(),
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    Err(last)
+}
+
+/// Accepts every friend request a bot gets, the way a friendly player would.
+async fn answer_friends(social: String, secret: Vec<u8>, claims: AccessClaims, end: Instant) {
+    let http = reqwest::Client::new();
+    while Instant::now() < end {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let bearer = format!("Bearer {}", token::sign(&secret, &claims, 300));
+        let Ok(res) = http
+            .get(format!("{social}/api/social/notifications"))
+            .header("authorization", &bearer)
+            .send()
+            .await
+        else {
+            continue;
+        };
+        let Ok(list) = res.json::<serde_json::Value>().await else {
+            continue;
+        };
+        let mut unread = false;
+        for n in list.as_array().into_iter().flatten() {
+            if n["read"].as_bool() == Some(true) {
+                continue;
+            }
+            unread = true;
+            if n["kind"] == "friend_request"
+                && let Some(from) = n["body"]["from_id"].as_str()
+            {
+                let _ = http
+                    .post(format!("{social}/api/social/respond"))
+                    .header("authorization", &bearer)
+                    .json(&serde_json::json!({ "id": from, "accept": true }))
+                    .send()
+                    .await;
+            }
+        }
+        if unread {
+            let _ = http
+                .post(format!("{social}/api/social/notifications/read"))
+                .header("authorization", &bearer)
+                .json(&serde_json::json!({}))
+                .send()
+                .await;
+        }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -107,6 +239,53 @@ fn frame(msg: &ClientMsg) -> Message {
 struct World {
     grid: Grid,
     furniture: Furniture,
+    /// Where one can fish: a dry tile to stand on and a water tile in casting reach.
+    fishing: Vec<(TilePos, TilePos)>,
+}
+
+/// Bots fish within this many tiles of the fisherman (the pond by the pier).
+const FISHING_NEAR: i32 = 14;
+/// One bot in this many is a keen angler, out at the pond nearly all the
+/// time, so there's almost always someone fishing.
+const ANGLER_EVERY: usize = 7;
+
+/// Every dry, walkable tile right by the water, with a water tile next to it;
+/// around the fisherman's pond if the map has him.
+fn fishing_spots(map: &MapFile, grid: &Grid) -> Vec<(TilePos, TilePos)> {
+    let fisherman = map
+        .objects
+        .iter()
+        .find(|o| o.kind == "fisherman")
+        .map(|o| (o.x, o.y));
+    let Some(water) = map.ground_legend.iter().position(|n| n == "water") else {
+        return vec![];
+    };
+    let is_water = |x: i32, y: i32| {
+        x >= 0
+            && y >= 0
+            && (x as u16) < map.width
+            && (y as u16) < map.height
+            && map.ground[y as usize * map.width as usize + x as usize] as usize == water
+    };
+    let mut spots = vec![];
+    for y in 0..map.height as i32 {
+        for x in 0..map.width as i32 {
+            if !grid.walkable_i(x, y) || is_water(x, y) {
+                continue;
+            }
+            if fisherman.is_some_and(|f| cheb(f, (x as u16, y as u16)) > FISHING_NEAR) {
+                continue;
+            }
+            if let Some((wx, wy)) = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+                .iter()
+                .map(|(dx, dy)| (x + dx, y + dy))
+                .find(|&(wx, wy)| is_water(wx, wy))
+            {
+                spots.push(((x as u16, y as u16), (wx as u16, wy as u16)));
+            }
+        }
+    }
+    spots
 }
 
 /// A walkable tile next to `seat`, to stand on before sitting.
@@ -182,20 +361,48 @@ async fn bot_loop(
     report: &mut BotReport,
 ) -> anyhow::Result<()> {
     let mut rng = SmallRng::seed_from_u64(i as u64 ^ rand::random::<u64>());
-    let behaviour = match args.behaviour {
-        Behaviour::Mix => {
-            if rng.random_bool(0.3) {
-                Behaviour::Crowd
-            } else {
-                Behaviour::Wander
+    // Keen anglers wander (between casts) and fish all day.
+    let angler = i.is_multiple_of(ANGLER_EVERY);
+    let behaviour = if angler {
+        Behaviour::Wander
+    } else {
+        match args.behaviour {
+            Behaviour::Mix => {
+                if rng.random_bool(0.3) {
+                    Behaviour::Crowd
+                } else {
+                    Behaviour::Wander
+                }
             }
+            b => b,
         }
-        b => b,
     };
+    let name = format!("Bot {i}");
+    let (sub, look) = match &args.api {
+        Some(api) => sign_in(api, &name).await?,
+        None => (format!("bot-{i}"), rng.random()),
+    };
+    if args.api.is_some() {
+        let me = AccessClaims {
+            sub: sub.clone(),
+            name: name.clone(),
+            look,
+            style: 0,
+            tier: TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        tokio::spawn(answer_friends(
+            args.social.clone(),
+            secret.to_vec(),
+            me,
+            end,
+        ));
+    }
     let claims = JoinClaims {
-        sub: format!("bot-{i}"),
-        name: format!("Bot {i}"),
-        look: rng.random(),
+        sub,
+        name,
+        look,
         style: 0,
         tier: TrustTier::Visitor,
         minor: false,
@@ -240,6 +447,20 @@ async fn bot_loop(
     let mut next_sit = Instant::now() + Duration::from_secs(rng.random_range(5..40));
     let mut stand_at = Instant::now();
     let mut chess_move: Option<(Instant, u32, String)> = None;
+    // Being a good sport: who's around, answers waiting to be sent, and a
+    // pause while someone stands close.
+    let mut others: HashMap<u32, Other> = HashMap::new();
+    let mut replies: Vec<(Instant, ClientMsg)> = Vec::new();
+    let mut paused_until = Instant::now();
+    let mut next_wave_back = Instant::now();
+    // Fishing: when to go next, and, while out fishing, when to give up on it.
+    let mut next_fish = Instant::now()
+        + Duration::from_secs(if angler {
+            rng.random_range(3..15)
+        } else {
+            rng.random_range(20..90)
+        });
+    let mut fishing_until: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -266,15 +487,48 @@ async fn bot_loop(
                         }
                         ServerMsg::CellEnter { entities, .. } => {
                             for e in entities {
-                                if e.id == self_id { me = (e.x, e.y); }
+                                if e.id == self_id { me = (e.x, e.y); } else { others.insert(e.id, Other::from(&e)); }
                                 known.insert(e.id);
                             }
                         }
-                        ServerMsg::Spawn { entity } => { known.insert(entity.id); }
-                        ServerMsg::CellLeave { ids, .. } => for id in ids { known.remove(&id); },
-                        ServerMsg::Despawn { id } => { known.remove(&id); }
-                        ServerMsg::MoveStart { id, speed_x10, t0, path } if id == self_id => {
-                            motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10 });
+                        ServerMsg::Spawn { entity } => {
+                            if entity.id != self_id { others.insert(entity.id, Other::from(&entity)); }
+                            known.insert(entity.id);
+                        }
+                        ServerMsg::CellLeave { ids, .. } => for id in ids { known.remove(&id); others.remove(&id); },
+                        ServerMsg::Despawn { id } => { known.remove(&id); others.remove(&id); }
+                        ServerMsg::MoveStart { id, speed_x10, t0, sprint_in, path } if id != self_id => {
+                            if let Some(o) = others.get_mut(&id) {
+                                o.motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10, sprint_in });
+                            }
+                        }
+                        ServerMsg::Snap { id, x, y } | ServerMsg::StateChange { id, x, y, .. } if id != self_id => {
+                            if let Some(o) = others.get_mut(&id) {
+                                o.tile = (x, y);
+                                o.motion = None;
+                            }
+                        }
+                        // Say yes to whatever's offered: following, a hug, a game…
+                        ServerMsg::Offered { from, kind } if kind != together::STOP_FOLLOW => {
+                            let after = Duration::from_millis(rng.random_range(500..1500));
+                            replies.push((Instant::now() + after, ClientMsg::Accept { from, kind }));
+                        }
+                        ServerMsg::Rps { a, b, phase, .. } if phase == rps::CHOOSING && (a == self_id || b == self_id) => {
+                            let after = Duration::from_millis(rng.random_range(1000..4000));
+                            let pick = rng.random_range(rps::ROCK..=rps::SCISSORS);
+                            replies.push((Instant::now() + after, ClientMsg::RpsPick { pick }));
+                        }
+                        // Someone nearby waved: wave back.
+                        ServerMsg::EmoteShown { id, emote: emote::WAVE } if Instant::now() >= next_wave_back => {
+                            let server_now = (local_ms() + server_offset).max(0) as u32;
+                            if others.get(&id).is_some_and(|o| o.human && cheb(o.at(server_now), me) <= WAVE_BACK_NEAR) {
+                                next_wave_back = Instant::now() + Duration::from_secs(3);
+                                let after = Duration::from_millis(rng.random_range(400..1000));
+                                replies.push((Instant::now() + after, ClientMsg::Emote { emote: emote::WAVE }));
+                            }
+                        }
+                        ServerMsg::MoveStart { id, speed_x10, t0, sprint_in, path } if id == self_id => {
+                            motion = Some(Motion { path: path.iter().map(|t| (t.x, t.y)).collect(), t0, speed_x10, sprint_in });
                         }
                         ServerMsg::Pong { client_t, server_t } => {
                             let rtt = local_ms() - client_t as i64;
@@ -306,6 +560,35 @@ async fn bot_loop(
                                 chess_move = Some((Instant::now() + delay * 3, table, "new".into()));
                             }
                         }
+                        // Out fishing: reel in a bite (fumbling it now and then); smack a fish
+                        // flopping on the bank, mostly quick enough; done when it's caught or gone.
+                        ServerMsg::FishEvent { id, kind, .. } if id == self_id => match kind {
+                            fish_event::BITE => {
+                                let after = Duration::from_millis(rng.random_range(500..1800));
+                                let quality = if rng.random_bool(0.75) { rng.random_range(500..1000) } else { 100 };
+                                replies.push((Instant::now() + after, ClientMsg::FishReel { quality }));
+                            }
+                            fish_event::FLOP => {
+                                let hits = if rng.random_bool(0.8) { 5 } else { 2 };
+                                let mut at = Instant::now();
+                                for _ in 0..hits {
+                                    at += Duration::from_millis(rng.random_range(450..850));
+                                    replies.push((at, ClientMsg::FishHit {}));
+                                }
+                            }
+                            fish_event::CAUGHT | fish_event::ESCAPED => {
+                                fishing_until = None;
+                                if angler {
+                                    // Straight back to it, from about the same spot.
+                                    next_fish = Instant::now() + Duration::from_secs(rng.random_range(5..15));
+                                    next_move = next_fish + Duration::from_secs(30);
+                                } else {
+                                    next_fish = Instant::now() + Duration::from_secs(rng.random_range(60..180));
+                                    next_move = Instant::now() + Duration::from_secs(rng.random_range(2..6));
+                                }
+                            }
+                            _ => {}
+                        },
                         ServerMsg::Error { code, message } => {
                             report.server_errors += 1;
                             if code == commons_protocol::error_code::UNAUTHORIZED { bail!("unauthorized: {message}"); }
@@ -326,6 +609,23 @@ async fn bot_loop(
                     me = m.tile_at(server_now);
                     if m.is_done(server_now) { motion = None; }
                 }
+                // Answers that are due.
+                let (due, later): (Vec<_>, Vec<_>) = replies.drain(..).partition(|(at, _)| *at <= now);
+                replies = later;
+                for (_, msg) in due {
+                    tx.send(frame(&msg)).await?;
+                }
+                // Someone's right here: stop on the tile we're walking into and stay a while.
+                if others.values().any(|o| o.human && cheb(o.at(server_now), me) <= STOP_NEAR) {
+                    paused_until = now + Duration::from_secs(3);
+                    if let Some(m) = &motion
+                        && let Some((_, next, _)) = m.splice(server_now)
+                        && m.path.last() != Some(&next)
+                    {
+                        tx.send(frame(&ClientMsg::MoveTo { x: next.0, y: next.1, sprint: false })).await?;
+                    }
+                }
+                let paused = now < paused_until;
                 if let Some((at, table, uci)) = chess_move.take() {
                     if now >= at {
                         tx.send(frame(&ClientMsg::GameMove { table, uci })).await?;
@@ -339,7 +639,26 @@ async fn bot_loop(
                         sitting = false;
                         next_move = now + Duration::from_secs(1);
                     }
-                } else if now >= next_sit && self_id != 0 && behaviour == Behaviour::Wander {
+                } else if paused {
+                    // Standing still for the person close by.
+                } else if let Some(until) = fishing_until {
+                    // Out fishing; giving up if nothing comes of it.
+                    if now >= until {
+                        fishing_until = None;
+                        next_move = now;
+                    }
+                } else if now >= next_fish && self_id != 0 && behaviour == Behaviour::Wander && !world.fishing.is_empty() {
+                    // Off to the water: walk to a spot nearby (casting on arrival).
+                    next_fish = now + Duration::from_secs(if angler { rng.random_range(5..15) } else { rng.random_range(60..180) });
+                    // An angler already at the pond stays near where they were; others pick any spot there.
+                    let near: Vec<_> = world.fishing.iter().filter(|(stand, _)| cheb(*stand, me) <= 4).collect();
+                    let pick = if angler && !near.is_empty() { near.choose(&mut rng).copied() } else { world.fishing.choose(&mut rng) };
+                    if let Some(&(stand, water)) = pick {
+                        tx.send(frame(&ClientMsg::MoveTo { x: stand.0, y: stand.1, sprint: false })).await?;
+                        tx.send(frame(&ClientMsg::FishCast { x: water.0, y: water.1 })).await?;
+                        fishing_until = Some(now + Duration::from_secs(60));
+                    }
+                } else if now >= next_sit && self_id != 0 && behaviour == Behaviour::Wander && !angler {
                     next_sit = now + Duration::from_secs(rng.random_range(30..90));
                     // Table seats a third of the time, so games actually happen.
                     let table_seats: Vec<_> = world.furniture.seats.iter().filter(|(_, s)| s.table.is_some()).collect();
@@ -348,7 +667,7 @@ async fn bot_loop(
                     if let Some((&id, seat)) = pool.choose(&mut rng).copied()
                         && let Some((x, y)) = approach(grid, seat.tile)
                     {
-                        tx.send(frame(&ClientMsg::MoveTo { x, y })).await?;
+                        tx.send(frame(&ClientMsg::MoveTo { x, y, sprint: false })).await?;
                         tx.send(frame(&ClientMsg::Sit { seat: id })).await?;
                         next_move = now + Duration::from_secs(20);
                     }
@@ -358,7 +677,7 @@ async fn bot_loop(
                         _ => pick_target(grid, &mut rng, me, 12),
                     };
                     if let Some((x, y)) = target {
-                        tx.send(frame(&ClientMsg::MoveTo { x, y })).await?;
+                        tx.send(frame(&ClientMsg::MoveTo { x, y, sprint: false })).await?;
                     }
                     next_move = now + Duration::from_millis(rng.random_range(2000..8000));
                 }
@@ -413,8 +732,10 @@ async fn main() -> anyhow::Result<()> {
     let map_text =
         std::fs::read_to_string(&args.map).with_context(|| format!("reading {}", args.map))?;
     let map = MapFile::from_json(&map_text).map_err(anyhow::Error::msg)?;
+    let grid = map.grid();
     let world = Arc::new(World {
-        grid: map.grid(),
+        fishing: fishing_spots(&map, &grid),
+        grid,
         furniture: Furniture::from_map(&map),
     });
     let spawn = (map.spawn.x, map.spawn.y);

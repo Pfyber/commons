@@ -2,6 +2,8 @@ import { Application } from "pixi.js";
 import cityUrl from "../../assets/maps/city.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
 import mallUrl from "../../assets/maps/mall.json?url";
+import barUrl from "../../assets/maps/bar.json?url";
+import arcadeUrl from "../../assets/maps/arcade.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { Homes } from "./homes";
@@ -41,7 +43,7 @@ import "@fontsource/pixelify-sans/600.css";
 import "@fontsource/pixelify-sans/700.css";
 import "./styles.css";
 
-const MAP_URLS: Record<string, string> = { city: cityUrl, home: homeUrl, mall: mallUrl };
+const MAP_URLS: Record<string, string> = { city: cityUrl, home: homeUrl, mall: mallUrl, bar: barUrl, arcade: arcadeUrl };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
 
@@ -328,11 +330,12 @@ async function main() {
         game = new Game(app, map, ticket.zone_id, placeInfo, ui, document.getElementById("labels")!, {
           onWelcome: () => (retry = 0),
           onDisconnect,
-          // Out of a home's door into the city: you come out of that house.
+          // Out of a door into the city: you come out of that door (a
+          // house, or a public place: the mall, the bar, the arcade).
           onTravel: (z) => {
             const from = game as Game | null;
-            const arrive =
-              z !== "city" ? undefined : from?.zoneId === "home" ? (from.place.owner ?? "home") : from?.zoneId === "mall" ? "place:mall" : undefined;
+            const place = from && ["mall", "bar", "arcade"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
+            const arrive = z !== "city" ? undefined : from?.zoneId === "home" ? (from.place.owner ?? "home") : place;
             void travel({ zone: z, arrive });
           },
           onVisit: (owner) => void travel({ zone: "home", owner }),
@@ -353,7 +356,11 @@ async function main() {
       scheduleRetry();
     }
   };
+  let travelling = false;
   const travel = async (to: Destination) => {
+    // A second tap on a door while we're already on our way is ignored.
+    if (travelling) return;
+    travelling = true;
     const previous = dest;
     dest = to;
     document.body.classList.add("fading");
@@ -365,6 +372,7 @@ async function main() {
       hud.toast(e instanceof ApiError ? e.message : "You can't go there right now.", 4000);
     } finally {
       document.body.classList.remove("fading");
+      travelling = false;
     }
   };
   const scheduleRetry = () => {

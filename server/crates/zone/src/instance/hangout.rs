@@ -421,7 +421,11 @@ mod tests {
         // Black walks away: the game is abandoned and white's seat stays taken.
         inst.handle(Cmd::Msg {
             conn: 2,
-            msg: ClientMsg::MoveTo { x: 10, y: 10 },
+            msg: ClientMsg::MoveTo {
+                x: 10,
+                y: 10,
+                sprint: false,
+            },
         });
         assert_eq!(inst.avatars[&2].state, state::IDLE);
         assert_eq!(inst.avatars[&2].tile, (6, 4));
@@ -502,13 +506,21 @@ mod tests {
         // Alone again and the elder sits in; leaving sends it home too.
         inst.handle(Cmd::Msg {
             conn: 2,
-            msg: ClientMsg::MoveTo { x: 10, y: 10 },
+            msg: ClientMsg::MoveTo {
+                x: 10,
+                y: 10,
+                sprint: false,
+            },
         });
         ask(&mut inst);
         assert_eq!(inst.players(table), (commons_protocol::ELDER_ID, 1));
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::MoveTo { x: 10, y: 10 },
+            msg: ClientMsg::MoveTo {
+                x: 10,
+                y: 10,
+                sprint: false,
+            },
         });
         assert!(inst.elders.is_empty());
         assert_eq!(inst.games[&table].status, game_status::WAITING);
@@ -524,7 +536,11 @@ mod tests {
         place(&mut inst, 1, (1, 1));
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::MoveTo { x: 3, y: 5 },
+            msg: ClientMsg::MoveTo {
+                x: 3,
+                y: 5,
+                sprint: false,
+            },
         });
         inst.handle(Cmd::Msg {
             conn: 1,

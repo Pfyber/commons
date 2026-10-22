@@ -29,6 +29,7 @@ type S = State<Arc<AppState>>;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/grant", post(grant))
+        .route("/has", get(has))
         .route("/plots", get(plots))
         .route("/plots/plant", post(plant))
         .route("/plots/water", post(water))
@@ -92,6 +93,30 @@ async fn grant(
         )
         .await?,
     ))
+}
+
+#[derive(Deserialize)]
+struct HasQuery {
+    player: String,
+    item: i32,
+}
+
+/// How many of `item` a player holds (the zone asks, e.g., whether an angler has the better rod).
+async fn has(
+    State(state): S,
+    headers: HeaderMap,
+    Query(q): Query<HasQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    service(&state, &headers)?;
+    let player = uuid(&q.player)?;
+    let qty: Option<i32> =
+        sqlx::query_scalar("SELECT qty FROM inventory WHERE player_id = $1 AND item_id = $2")
+            .bind(player)
+            .bind(q.item)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(db_err)?;
+    Ok(Json(serde_json::json!({ "qty": qty.unwrap_or(0) })))
 }
 
 // ---- garden plots ---------------------------------------------------------------

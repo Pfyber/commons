@@ -13,13 +13,17 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 10;
+pub const PROTOCOL_VERSION: u16 = 17;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
 
 records! {
     Tile { x: u16, y: u16 }
+
+    /// A pool ball still on the table (`n`: 0 cue, 1–7 solids, 8, 9–15
+    /// stripes) at whole table units.
+    PoolBall { n: u8, x: u16, y: u16 }
 
     /// Everything a client needs to render another avatar, including any
     /// walk in progress so it can be simulated locally, and what it signals
@@ -42,8 +46,12 @@ records! {
         state: u8,
         speed_x10: u8,
         t0: u32,
+        // sprint_in: the walk breaks into a sprint this many ms after t0 (0: never).
+        sprint_in: u16,
         path: Vec<Tile>,
         mood: u8,
+        // away: away from the keyboard (see `Away`), shown dozing on their feet.
+        away: bool,
     }
 }
 
@@ -51,7 +59,8 @@ message_enum! {
     /// Client → server.
     ClientMsg {
         1 Hello { join_token: String, version: u16, view_w: u8, view_h: u8 }
-        2 MoveTo { x: u16, y: u16 }
+        /// `sprint`: run there (outdoors; asked for by a double tap or double key press).
+        2 MoveTo { x: u16, y: u16, sprint: bool }
         3 Emote { emote: u8 }
         4 ChatSay { text: String }
         5 Ping { client_t: u32 }
@@ -90,6 +99,35 @@ message_enum! {
         19 SkyLantern { text: String }
         /// You changed clothes (saved through the API); show it to people nearby.
         20 SetLook { look: u32 }
+        /// Your pick in a rock paper scissors match (`rps::ROCK`…).
+        22 RpsPick { pick: u8 }
+        /// Order at the bar (`drink::*`): a beer (coins) or a glass of water.
+        23 Drink { kind: u8 }
+        /// Take a cue at the pool table: against the bar's bot, or wait for
+        /// someone to play you.
+        24 PoolJoin { vs_bot: bool }
+        /// Put the cue down (forfeits a game in progress).
+        25 PoolLeave {}
+        /// Your shot: direction as a fraction of a full turn (0–65535) and
+        /// power 0–1000.
+        26 PoolShoot { angle: u16, power: u16 }
+        /// Play the arcade cabinet `cab` (its index among the map's
+        /// cabinets): against its bot, or wait for someone to join.
+        27 ArcadeJoin { cab: u8, vs_bot: bool }
+        /// Step away from cabinet `cab` (forfeits a game in progress).
+        28 ArcadeLeave { cab: u8 }
+        /// A move or control at cabinet `cab` (`arcade::*` says what
+        /// `value` means for each game).
+        29 ArcadeInput { cab: u8, value: u16 }
+        /// Where you are aiming while it is your shot at the pool table
+        /// (`angle` as `PoolShoot`) and how far the cue is drawn back
+        /// (`pull` 0–1000), so the people watching see you line it up.
+        30 PoolAim { angle: u16, pull: u16 }
+        /// You've been away from the keyboard a while (no input for a
+        /// minute), or you're back. Others see you doze off on your feet.
+        31 Away { away: bool }
+        /// A smack at your fish flopping on the bank (`fish_event::FLOP`).
+        32 FishHit {}
     }
 }
 
@@ -105,7 +143,7 @@ message_enum! {
         5 Despawn { id: u32 }
         /// `path` holds corner waypoints only; the avatar walks straight
         /// lines between them, starting at `path[0]` at time `t0`.
-        6 MoveStart { id: u32, speed_x10: u8, t0: u32, path: Vec<Tile> }
+        6 MoveStart { id: u32, speed_x10: u8, t0: u32, sprint_in: u16, path: Vec<Tile> }
         7 Snap { id: u32, x: u16, y: u16 }
         8 EmoteShown { id: u32, emote: u8 }
         9 ChatBubble { id: u32, text: String }
@@ -168,6 +206,34 @@ message_enum! {
         /// took its pet out or home, got on or off something to ride, or
         /// picked up another rod or watering can.
         26 LookChanged { id: u32, look: u32, style: u32, pet: u16, vehicle: u8, tool: u8 }
+        /// A rock paper scissors match between `a` and `b` (`rps::*` phase).
+        /// While choosing, picks are hidden (0) and `ends_t` is the deadline;
+        /// at the reveal they show what each chose (0: didn't choose in time).
+        27 Rps { a: u32, b: u32, phase: u8, a_pick: u8, b_pick: u8, ends_t: u32 }
+        /// Avatar `id` is a little woozy for `ms` (0: sober again).
+        28 Woozy { id: u32, ms: u32 }
+        /// The pool table: players `a` and `b` (0: empty; `pool::BOT`: the
+        /// bar's bot), whose `turn` (0 a, 1 b), `groups` (0 open, or a's
+        /// group: `pool::SOLIDS`/`STRIPES`), `status` (`pool::*`) and the
+        /// balls. `shot` counts shots, so clients can match it to `PoolShot`.
+        /// `hole`: the pocket (0–5: top left, top middle, top right, then
+        /// the bottom row) whoever's shot it is must sink the 8 in, once
+        /// they've cleared their group (where their last ball went); 255 until then.
+        29 PoolState { a: u32, b: u32, turn: u8, groups: u8, status: u8, shot: u32, hole: u8, balls: Vec<PoolBall> }
+        /// `by` played shot number `shot`: the cue ball leaves at (`vx`,
+        /// `vy`) units/s, each offset by `pool::V_OFFSET`. Clients replay it from the last state with the
+        /// shared physics; the next `PoolState` is where everything stopped.
+        30 PoolShot { by: u32, vx: u16, vy: u16, shot: u32 }
+        /// Arcade cabinet `cab` running game `kind`: players `a` and `b`
+        /// (0: empty; `arcade::BOT`), `status` (`arcade::*`), whose `turn`
+        /// (0 a, 1 b) and the game's own `data` (see `arcade`). `t0` is the
+        /// server time `data` describes (Pong's ball).
+        31 ArcadeState { cab: u8, kind: u8, a: u32, b: u32, status: u8, turn: u8, t0: u32, data: Vec<u16> }
+        /// `by` (a player, or `pool::BOT`) lining up their shot: the cue at
+        /// `angle`, drawn back `pull` (as `PoolAim`).
+        32 PoolAim { by: u32, angle: u16, pull: u16 }
+        /// Avatar `id` went away from the keyboard, or came back (as `Away`).
+        33 AwayChanged { id: u32, away: bool }
     }
 }
 
@@ -180,13 +246,15 @@ pub mod emote {
     pub const SLEEP: u8 = 5;
     pub const CHEER: u8 = 6;
     pub const HEART: u8 = 7;
+    /// The robot: a stiff, poppy dance.
+    pub const ROBOT: u8 = 8;
     /// Free to everyone.
-    pub const MAX: u8 = HEART;
+    pub const MAX: u8 = ROBOT;
     /// Playing with a toy from the mall (only with the toy: its `code`).
-    pub const BUBBLES: u8 = 8;
-    pub const KITE: u8 = 9;
-    pub const YO_YO: u8 = 10;
-    pub const PINWHEEL: u8 = 11;
+    pub const BUBBLES: u8 = 9;
+    pub const KITE: u8 = 10;
+    pub const YO_YO: u8 = 11;
+    pub const PINWHEEL: u8 = 12;
     pub const TOYS: std::ops::RangeInclusive<u8> = BUBBLES..=PINWHEEL;
 }
 
@@ -214,7 +282,128 @@ pub mod together {
     pub const FOLLOW: u8 = 4;
     /// Either side ends a follow; just a notice, nothing to accept.
     pub const STOP_FOLLOW: u8 = 5;
-    pub const MAX: u8 = STOP_FOLLOW;
+    /// A game of rock paper scissors (see `rps`); anyone may be asked.
+    pub const RPS: u8 = 6;
+    pub const MAX: u8 = RPS;
+}
+
+/// `Drink.kind`.
+pub mod drink {
+    pub const BEER: u8 = 1;
+    pub const WATER: u8 = 2;
+    /// What a beer costs, in coins.
+    pub const BEER_PRICE: i32 = 5;
+    /// How long a beer makes you woozy.
+    pub const WOOZY_MS: u32 = 60_000;
+}
+
+/// The bar's pool table (`PoolState`); the game itself is `commons_sim::pool`.
+pub mod pool {
+    /// `PoolState.status`: nobody at the table, one player waiting for an
+    /// opponent, a game on, or won.
+    pub const EMPTY: u8 = 0;
+    pub const WAITING: u8 = 4;
+    pub const PLAYING: u8 = 1;
+    pub const A_WON: u8 = 2;
+    pub const B_WON: u8 = 3;
+    pub const SOLIDS: u8 = 1;
+    pub const STRIPES: u8 = 2;
+    /// The bar's bot, as a player id.
+    pub const BOT: u32 = 0xffff_fff3;
+    /// Added to `PoolShot` velocities so they fit a u16.
+    pub const V_OFFSET: i32 = 32_768;
+}
+
+/// The arcade's cabinets (`ArcadeState`).
+pub mod arcade {
+    /// Games, by cabinet label.
+    pub const PONG: u8 = 1;
+    pub const CYCLES: u8 = 2;
+    pub const CONNECT4: u8 = 3;
+    pub const MEMORY: u8 = 5;
+    pub const CATCH: u8 = 7;
+    pub const RACER: u8 = 8;
+    pub const DANCE: u8 = 9;
+    pub const TANKS: u8 = 10;
+    /// Pinball 1v1 (the bar): flippers either end, first to `PINBALL_WIN`.
+    pub const PINBALL: u8 = 11;
+    pub const PINBALL_WIN: u16 = 10;
+    /// Pinball controls, as bits of `ArcadeInput.value`: your top and bottom flipper.
+    pub const FLIP_TOP: u16 = 1;
+    pub const FLIP_BOTTOM: u16 = 2;
+    /// Contests (catch, racer, dance) and tanks count down this long first.
+    pub const COUNTDOWN_MS: u32 = 3_000;
+    /// Basket catch lasts this long.
+    pub const CATCH_MS: u32 = 45_000;
+    /// The race is this many units long, run within `RACE_MS`.
+    pub const RACE_GOAL: u16 = 3_000;
+    pub const RACE_MS: u32 = 90_000;
+    /// The racer's top speed, units per second.
+    pub const RACE_TOP_SPEED: u32 = 120;
+    /// Dance off: a beat every `BEAT_MS`, for `DANCE_BEATS` beats (40 s). The
+    /// chart starts easy and gets busier (see `dance_notes`).
+    pub const BEAT_MS: u32 = 500;
+    pub const DANCE_BEATS: u32 = 80;
+    /// A tank duel lasts at most this long.
+    pub const TANK_MS: u32 = 90_000;
+    /// Contest reports at or above this are scores (less it); below, positions.
+    pub const SCORE_FLAG: u16 = 0x8000;
+    /// Tank controls, as bits of `ArcadeInput.value`.
+    pub const KEY_FORWARD: u16 = 1;
+    pub const KEY_BACK: u16 = 2;
+    pub const KEY_LEFT: u16 = 4;
+    pub const KEY_RIGHT: u16 = 8;
+    pub const KEY_FIRE: u16 = 16;
+    /// `status`: as at the pool table, plus a draw.
+    pub const EMPTY: u8 = 0;
+    pub const PLAYING: u8 = 1;
+    pub const A_WON: u8 = 2;
+    pub const B_WON: u8 = 3;
+    pub const WAITING: u8 = 4;
+    pub const DRAW: u8 = 5;
+    /// The arcade's bot, as a player id.
+    pub const BOT: u32 = 0xffff_fff5;
+    /// Tickets for winning a game, against a person or the bot (nothing for
+    /// a draw or a loss).
+    pub const TICKETS_WIN: i32 = 10;
+    pub const TICKETS_WIN_BOT: i32 = 5;
+
+    /// How many arrows the dance has on beat `b` (from its start), not
+    /// counting a possible extra half-beat arrow (`dance_half`): none in
+    /// the two-beat count-in, one every other beat for the first 12 s, then
+    /// one every beat. Clients build the chart from this, the bot dances to it.
+    pub fn dance_notes(b: u32) -> u32 {
+        match b {
+            0..=1 => 0,
+            2..=23 => b.is_multiple_of(2) as u32,
+            _ => (b < DANCE_BEATS - 1) as u32,
+        }
+    }
+
+    /// Whether beat `b` may also have an arrow half a beat after it (the last 14 s).
+    pub fn dance_half(b: u32) -> bool {
+        (52..DANCE_BEATS - 2).contains(&b)
+    }
+    /// The ticket's item id.
+    pub const TICKET: u32 = 900;
+}
+
+/// Rock paper scissors: picks for `RpsPick` / `Rps`, and `Rps.phase`.
+pub mod rps {
+    pub const ROCK: u8 = 1;
+    pub const PAPER: u8 = 2;
+    pub const SCISSORS: u8 = 3;
+    /// Both choose within `CHOOSE_MS`.
+    pub const CHOOSING: u8 = 0;
+    pub const REVEAL: u8 = 1;
+    /// Someone left before the reveal.
+    pub const CANCELLED: u8 = 2;
+    pub const CHOOSE_MS: u32 = 10_000;
+
+    /// Whether pick `a` beats pick `b` (not choosing loses to any pick).
+    pub fn beats(a: u8, b: u8) -> bool {
+        matches!((a, b), (ROCK, SCISSORS) | (PAPER, ROCK) | (SCISSORS, PAPER)) || (a != 0 && b == 0)
+    }
 }
 
 /// Codes for `Error`.
@@ -248,6 +437,15 @@ pub mod fish_event {
     pub const BITE: u8 = 1;
     pub const CAUGHT: u8 = 2;
     pub const ESCAPED: u8 = 3;
+    /// A rare (or rarer) fish landed on the bank beside its angler, at
+    /// (x, y): it flops about until hit enough times (`FishHit`: 3 for a
+    /// rare fish, 4 epic, 5 legendary or mythical, which hops two tiles), or
+    /// jumps back in `FLOP_MS` after landing (ESCAPED), however many hits it took.
+    pub const FLOP: u8 = 4;
+    /// The flopping fish was hit and flopped off to (x, y); `item` is how
+    /// many hits so far.
+    pub const HIT: u8 = 5;
+    pub const FLOP_MS: u32 = 4_500;
 }
 
 /// Shared jam beat length (a sixteenth note at 120 bpm).
@@ -320,8 +518,10 @@ mod tests {
             state: 0,
             speed_x10: 40,
             t0: 1234,
+            sprint_in: 0,
             path: vec![Tile { x: 3, y: 4 }, Tile { x: 9, y: 4 }],
             mood: 2,
+            away: false,
         };
         let msgs = vec![
             ServerMsg::Welcome {
@@ -344,6 +544,7 @@ mod tests {
                 id: 1,
                 speed_x10: 40,
                 t0: 5,
+                sprint_in: 300,
                 path: vec![Tile { x: 1, y: 1 }],
             },
             ServerMsg::Snap { id: 1, x: 2, y: 3 },
@@ -398,18 +599,20 @@ mod tests {
 
     #[test]
     fn move_start_fits_budget() {
-        // Spec §5.3: ≤ 24 bytes for a MoveStart with a short path.
+        // Spec §5.3: ≤ 24 bytes for a MoveStart with a short path, plus 2 for
+        // when it breaks into a sprint.
         let m = ServerMsg::MoveStart {
             id: 1,
             speed_x10: 40,
             t0: 1,
+            sprint_in: 0,
             path: vec![
                 Tile { x: 1, y: 1 },
                 Tile { x: 5, y: 1 },
                 Tile { x: 9, y: 5 },
             ],
         };
-        assert!(m.to_bytes().len() <= 24, "{} bytes", m.to_bytes().len());
+        assert!(m.to_bytes().len() <= 26, "{} bytes", m.to_bytes().len());
     }
 
     #[test]

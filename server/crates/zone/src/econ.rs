@@ -269,6 +269,15 @@ impl EconomyClient {
             .await
     }
 
+    /// How many of `item` the player holds.
+    pub async fn has(&self, player: &str, item: u32) -> Result<i64, CallError> {
+        let path = format!("/internal/has?player={}&item={item}", urlencode(player));
+        let r: serde_json::Value = self
+            .call::<(), _>(reqwest::Method::GET, &path, None)
+            .await?;
+        Ok(r.get("qty").and_then(|v| v.as_i64()).unwrap_or(0))
+    }
+
     pub async fn plots(&self, space: &str) -> Result<Vec<Plot>, CallError> {
         let path = format!("/internal/plots?space={}", urlencode(space));
         self.call::<(), _>(reqwest::Method::GET, &path, None).await

@@ -6,6 +6,7 @@
 //! replace this once `tools/mapedit` exists.
 
 mod city;
+mod leisure;
 mod mall;
 
 use commons_sim::map::{MapFile, MapObject, Spawn, StreetGrid};
@@ -30,6 +31,10 @@ const GROUND: &[&str] = &[
     "carpet",
     "straw",
     "track",
+    // The arcade's dark carpet, with neon squiggles.
+    "arcade_carpet",
+    // The bar's worn plank floor: grain, knots, staggered joints.
+    "tavern_floor",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -59,6 +64,13 @@ const DECOR: &[&str] = &[
     "log_seat",
     "lantern",
     "cafe_table",
+    // The bar: stools to sit on, little round tables, barrels, log walls.
+    "stool",
+    "bar_table",
+    "barrel",
+    "wood_wall",
+    // The arcade's walls, striped with neon.
+    "neon_wall",
 ];
 
 fn g(name: &str) -> u8 {
@@ -441,5 +453,7 @@ fn write(name: &str, map: &MapFile) -> std::io::Result<()> {
 fn main() -> std::io::Result<()> {
     write("city", &city::city())?;
     write("mall", &mall::mall())?;
+    write("bar", &leisure::bar())?;
+    write("arcade", &leisure::arcade())?;
     write("home", &home())
 }

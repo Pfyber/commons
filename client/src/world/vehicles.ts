@@ -1,6 +1,6 @@
 // Vehicles (ADR 0011, M6): how they look under a rider, and on a display.
 // Codes are `commons_sim::vehicles`: 1 roller skates, 2 kick scooter, 3 city
-// bike, 4 vintage bike. Drawn facing right on a 32×24 canvas, the ground on
+// bike, 4 vintage bike, 5 skateboard (drawn with the rider, see Avatar). Drawn facing right on a 32×24 canvas, the ground on
 // the bottom row; `RIDE_POSE` says how the rider sits on each.
 
 import type { Texture } from "pixi.js";
@@ -12,7 +12,7 @@ const O = "#3b3a2e";
 export const TEST_RIDE = 0x80;
 
 /** Riding speeds in tenths of a tile a second (`commons_sim::vehicles`). */
-const SPEED_X10: Record<number, number> = { 1: 52, 2: 60, 3: 72, 4: 72 };
+const SPEED_X10: Record<number, number> = { 1: 52, 2: 60, 3: 72, 4: 72, 5: 64 };
 
 /** How fast vehicle `code` goes (0: not a vehicle). */
 export function rideSpeed(code: number): number {

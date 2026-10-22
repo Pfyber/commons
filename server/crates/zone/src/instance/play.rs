@@ -380,6 +380,7 @@ mod tests {
             msg: ClientMsg::MoveTo {
                 x: start.0 + 3,
                 y: start.1,
+                sprint: false,
             },
         });
         let t0 = inst.clock.now_ms();

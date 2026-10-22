@@ -20,6 +20,8 @@ pub(super) const OFFER_MS: u32 = 20_000;
 const TOGETHER_RANGE: i32 = 2;
 /// Following works across a little more distance: anyone in sight.
 const FOLLOW_RANGE: i32 = 16;
+/// Rock paper scissors: near enough to see each other's hands.
+const RPS_RANGE: i32 = 4;
 /// One sky lantern per person this often.
 pub(super) const LANTERN_EVERY_MS: u32 = 30_000;
 
@@ -150,10 +152,10 @@ impl Instance {
     }
 
     fn close_enough(&self, a: u32, b: u32, kind: u8) -> bool {
-        let range = if kind >= together::FOLLOW {
-            FOLLOW_RANGE
-        } else {
-            TOGETHER_RANGE
+        let range = match kind {
+            together::FOLLOW | together::STOP_FOLLOW => FOLLOW_RANGE,
+            together::RPS => RPS_RANGE,
+            _ => TOGETHER_RANGE,
         };
         match (self.avatars.get(&a), self.avatars.get(&b)) {
             (Some(x), Some(y)) => {
@@ -204,6 +206,9 @@ impl Instance {
                 // A hug or a dance is time together; agreeing to be followed isn't yet.
                 a.sat_together |= kind < together::FOLLOW;
             }
+        }
+        if kind == together::RPS {
+            return self.rps_start(from, id, now);
         }
         // `from` asked to walk after `id`.
         if kind == together::FOLLOW {
@@ -510,7 +515,11 @@ mod tests {
     ) -> u8 {
         inst.handle(Cmd::Msg {
             conn,
-            msg: ClientMsg::MoveTo { x: to.0, y: to.1 },
+            msg: ClientMsg::MoveTo {
+                x: to.0,
+                y: to.1,
+                sprint: false,
+            },
         });
         inst.flush();
         watcher.pump();

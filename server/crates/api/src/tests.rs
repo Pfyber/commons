@@ -1493,6 +1493,26 @@ mod founding {
         )
         .await;
         assert_eq!(st, StatusCode::OK, "{r}");
+        // The zone can ask what a player holds (the fisherman's rod, say).
+        let (st, r) = call(
+            &app,
+            &svc,
+            "GET",
+            &format!("/internal/has?player={p}&item=1"),
+            json!({}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert!(r["qty"].as_i64().unwrap() > 0, "coins: {r}");
+        let (_, r) = call(
+            &app,
+            &svc,
+            "GET",
+            &format!("/internal/has?player={p}&item=112"),
+            json!({}),
+        )
+        .await;
+        assert_eq!(r["qty"], 0, "no rod yet");
         let (st, _) = call(
             &app,
             &svc,
@@ -1699,6 +1719,129 @@ mod changing_room {
             StatusCode::BAD_REQUEST,
             "nobody dresses as the Caretaker"
         );
+    }
+}
+
+// ---- the arcade's prize counter ----------------------------------------------------
+
+mod prize_counter {
+    use super::*;
+    use axum::Router;
+    use serde_json::{Value, json};
+
+    async fn call(
+        app: &Router,
+        auth: &str,
+        method: &str,
+        path: &str,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(if method == "GET" {
+                Body::empty()
+            } else {
+                Body::from(body.to_string())
+            })
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    #[tokio::test]
+    async fn tickets_buy_prizes_and_keepsakes_once() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app: Router = Router::new()
+            .nest("/api", crate::prizes::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let claims = token::AccessClaims {
+            sub: p.to_string(),
+            name: "t".into(),
+            look: 1,
+            style: 0,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        let auth = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        );
+        let qty = |item: i32| {
+            let db = s.db.clone();
+            async move {
+                sqlx::query_scalar::<_, i32>(
+                    "SELECT COALESCE((SELECT qty FROM inventory WHERE player_id = $1 AND item_id = $2), 0)",
+                )
+                .bind(p)
+                .bind(item)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+            }
+        };
+        let (_, shelf) = call(&app, &auth, "GET", "/api/arcade/prizes", json!({})).await;
+        let price = |key: &str| {
+            let id = s.catalog.by_key(key).unwrap().id;
+            let p = shelf["prizes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|x| x["item"] == id)
+                .unwrap();
+            (id, p["tickets"].as_i64().unwrap() as i32)
+        };
+        let (yoyo, cost) = price("yo_yo");
+        let redeem = |item: i32| json!({ "item": item, "key": Uuid::new_v4().to_string() });
+        let (st, r) = call(&app, &auth, "POST", "/api/arcade/redeem", redeem(yoyo)).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not_enough_tickets"))
+        );
+        let ticket = crate::prizes::TICKET;
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            p,
+            &[Op {
+                item: ticket,
+                delta: cost + 30,
+            }],
+            "test",
+            &Uuid::new_v4().to_string(),
+        )
+        .await
+        .unwrap();
+        let (st, r) = call(&app, &auth, "POST", "/api/arcade/redeem", redeem(yoyo)).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!((qty(ticket).await, qty(yoyo).await), (30, 1));
+        // A toy is kept for good: won once.
+        let (st, r) = call(&app, &auth, "POST", "/api/arcade/redeem", redeem(yoyo)).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("owned"))
+        );
+        // Wrapping paper is used up, so it can be won again and again.
+        let (wrap, wcost) = price("polka_wrap");
+        for _ in 0..2 {
+            let (st, r) = call(&app, &auth, "POST", "/api/arcade/redeem", redeem(wrap)).await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+        }
+        assert_eq!((qty(ticket).await, qty(wrap).await), (30 - 2 * wcost, 2));
+        let (st, _) = call(&app, &auth, "POST", "/api/arcade/redeem", redeem(1)).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "coins aren't a prize");
     }
 }
 

@@ -388,6 +388,9 @@ fn pond(k: &mut Blk) {
     k.clear(23, 27, 2, 9, "bridge");
     k.spot("pier", 24, 30);
     k.object("bottles", 27, 37, 1, 1, "Messages in bottles");
+    // The fisherman, at the foot of the pier: he buys your catch.
+    k.marker("fisherman", 21, 37, 1, 1, Some("Fisherman"));
+    k.spot("fisherman", 22, 38);
     k.bench(5, 22, 3);
     k.bench(40, 22, 3);
     k.scatter(3, 3, N - 3, N - 3, 13, &["tree", "bush", "willow"]);
@@ -747,13 +750,29 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             k.object("town_hall", 19, 10, 10, 7, "Town Hall");
             k.rect(19, 17, 10, 1, "plaza");
         }
+        // The arcade hall and the bar have their own floors behind their
+        // doors; `door:<place>` is where you come out again.
+        "arcade" => {
+            k.object("arcade_hall", 16, 9, 16, 9, "Arcade");
+            k.spot("door:arcade", 24, 18);
+            k.spot("arcade_hall", 24, 19);
+        }
+        "cafe" => {
+            k.object("bar", 16, 9, 16, 9, "The Mossy Mug");
+            k.spot("door:bar", 24, 18);
+            k.spot("bar", 24, 19);
+        }
         _ => k.object("building", 12, 7, 24, 11, name),
     }
     let sign = match key {
         "town_hall" => "Town Hall: the town's votes and proposals".to_string(),
         "gallery" => "Gallery: paint on the easels outside; the gallery opens soon".to_string(),
         "cinema" => "Cinema: the big screen plays outside; the cinema opens soon".to_string(),
-        "arcade" => "Arcade: word games inside, more soon".to_string(),
+        "arcade" => {
+            "Arcade: pong, light cycles, racers, a dance-off and more inside; word games out here"
+                .to_string()
+        }
+        "cafe" => "The Mossy Mug: drinks, the pool table and pinball inside".to_string(),
         "casino" => "Casino: opening soon. Play money only, never real money".to_string(),
         "club_hall" => "Club Hall: rooms for clubs, opening soon".to_string(),
         _ => format!("{name}: opening soon"),

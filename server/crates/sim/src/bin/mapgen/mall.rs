@@ -262,7 +262,7 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
                 }
             }
             b.object("spot", tx1, cy, 1, 1, Some("track"), false);
-            for y in [iy0 + 3, iy1 - 4] {
+            for y in [iy0 + 3, iy1 - 10, iy1 - 4] {
                 for x in [tx1 + 3, tx1 + 6] {
                     for dy in 0..2 {
                         for dx in 0..2 {

@@ -274,6 +274,34 @@ export const ICONS: Record<string, string[]> = {
     "............",
     "............",
   ],
+  robot: [
+    "......o.....",
+    "...oooooo...",
+    "...obbbbo...",
+    "...oybbyo...",
+    "...obbbbo...",
+    "...oooooo...",
+    "o...obbo...o",
+    "o.oooooooo.o",
+    "oooobbbboooo",
+    "....obbo....",
+    "....oooo....",
+    "....o..o....",
+  ],
+  skate: [
+    "............",
+    "............",
+    "............",
+    "............",
+    "............",
+    "o..........o",
+    "oooooooooooo",
+    ".orrrrrrrro.",
+    "..oooooooo..",
+    "..oyo..oyo..",
+    "...o....o...",
+    "............",
+  ],
   close: [
     "............",
     "............",
@@ -286,6 +314,36 @@ export const ICONS: Record<string, string[]> = {
     "..ooo..ooo..",
     "..oo....oo..",
     "............",
+    "............",
+  ],
+  // Four corners pointing out: make the window bigger.
+  expand: [
+    "............",
+    ".oooo..oooo.",
+    ".ooo....ooo.",
+    ".oo......oo.",
+    ".o........o.",
+    "............",
+    "............",
+    ".o........o.",
+    ".oo......oo.",
+    ".ooo....ooo.",
+    ".oooo..oooo.",
+    "............",
+  ],
+  // Four corners pointing in: back to normal size.
+  shrink: [
+    "............",
+    "....o..o....",
+    "...oo..oo...",
+    "..ooo..ooo..",
+    ".oooo..oooo.",
+    "............",
+    "............",
+    ".oooo..oooo.",
+    "..ooo..ooo..",
+    "...oo..oo...",
+    "....o..o....",
     "............",
   ],
 };
@@ -327,4 +385,4 @@ export function pxIcon(name: string, scale = 2): HTMLImageElement {
 }
 
 /** Emote id → icon name (ids as in protocol `emote::*`). */
-export const EMOTE_ICONS: Record<number, string> = { 1: "wave", 2: "laugh", 3: "clap", 4: "dance", 5: "sleep", 6: "cheer", 7: "heart" };
+export const EMOTE_ICONS: Record<number, string> = { 1: "wave", 2: "laugh", 3: "clap", 4: "dance", 5: "sleep", 6: "cheer", 7: "heart", 8: "robot" };

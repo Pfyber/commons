@@ -9,10 +9,11 @@ pub mod mall;
 pub mod map;
 pub mod motion;
 pub mod path;
+pub mod pool;
 pub mod vehicles;
 
 pub use map::{Grid, MapFile, StreetGrid};
-pub use motion::{Motion, WALK_SPEED_X10};
+pub use motion::{Motion, SPRINT_SPEED_X10, WALK_SPEED_X10};
 pub use path::{compress, find_path, route};
 
 pub type TilePos = (u16, u16);
