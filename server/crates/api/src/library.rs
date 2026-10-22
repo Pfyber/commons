@@ -134,6 +134,8 @@ struct Spine {
     authors: String,
     languages: String,
     shelf_index: Option<i32>,
+    /// Readers who have it out.
+    out: i64,
 }
 
 fn spine(b: &Spine, slot: usize) -> Value {
@@ -144,6 +146,7 @@ fn spine(b: &Spine, slot: usize) -> Value {
         "authors": b.authors,
         "lang": first_language(&b.languages),
         "language": language_name(first_language(&b.languages)),
+        "out": b.out,
     })
 }
 
@@ -152,7 +155,9 @@ fn spine(b: &Spine, slot: usize) -> Value {
 async fn case(State(state): S, Path((key, n)): Path<(String, i32)>) -> ApiResult<Json<Value>> {
     if key == NEW {
         let books: Vec<Spine> = sqlx::query_as(
-            "SELECT id, title, authors, languages, shelf_index FROM books
+            "SELECT id, title, authors, languages, shelf_index,
+                    (SELECT count(*) FROM loans l WHERE l.book_id = books.id AND l.due_at > now()) AS out
+             FROM books
              WHERE shelf_index IS NULL ORDER BY id DESC LIMIT $1",
         )
         .bind(PER_CASE as i64)
@@ -172,7 +177,9 @@ async fn case(State(state): S, Path((key, n)): Path<(String, i32)>) -> ApiResult
     }
     let first = n * PER_CASE as i32;
     let books: Vec<Spine> = sqlx::query_as(
-        "SELECT id, title, authors, languages, shelf_index FROM books
+        "SELECT id, title, authors, languages, shelf_index,
+                    (SELECT count(*) FROM loans l WHERE l.book_id = books.id AND l.due_at > now()) AS out
+             FROM books
          WHERE wing = $1 AND shelf_index >= $2 AND shelf_index < $3 ORDER BY shelf_index",
     )
     .bind(w.key)
@@ -298,6 +305,9 @@ async fn book(State(state): S, Path(id): Path<i32>) -> ApiResult<Json<Value>> {
             "That book isn't in the catalogue.",
         ));
     };
+    let out = crate::loans::out_count(&state.db, id)
+        .await
+        .map_err(db_err)?;
     let list = |s: &str| lib::codes(s).map(String::from).collect::<Vec<_>>();
     let langs: Vec<_> = lib::codes(&languages)
         .map(|c| json!({ "code": c, "name": language_name(c) }))
@@ -314,6 +324,7 @@ async fn book(State(state): S, Path(id): Path<i32>) -> ApiResult<Json<Value>> {
             .collect::<Vec<_>>(),
         "issued": issued.map(|d| d.to_string()),
         "at": place(&wing, shelf),
+        "out": out,
     })))
 }
 

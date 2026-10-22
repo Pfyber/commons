@@ -3664,3 +3664,32 @@ body.woozy #stage canvas {
   color: #7a6a4e;
   white-space: normal;
 }
+
+.shelf-row .spine.out {
+  opacity: 0.35;
+  filter: saturate(0.4);
+}
+
+.panel.my-books {
+  width: min(440px, calc(100vw - 24px));
+}
+
+.panel .row.loan .name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.books-btn {
+  position: relative;
+}
+
+.books-btn .badge-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+}
+
+.label .name .reading {
+  margin-left: 3px;
+}

@@ -431,6 +431,16 @@ export class Game {
     }
     const bar = map.objects.find((o) => o.kind === "bar_counter");
     if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
+    // What you read shows in your hands; books stay in the library unless
+    // they're borrowed.
+    ui.reader.onRead = (b) => {
+      this.socket?.send({ t: "Reading", book: b?.id ?? 0 });
+      this.self?.setReading(b?.id ?? 0);
+    };
+    if (!zoneId.startsWith("library") && ui.reader.open && !ui.library.isBorrowed(ui.reader.bookId)) {
+      ui.reader.hide();
+      this.hud.toast("📚 Library books stay in the library unless you borrow them. Tap Borrow on a book's card to take it with you.", 6000);
+    }
     if (zoneId === HALL || wingOfZone(zoneId)) {
       this.libraryRoom = new LibraryRoom(this.scene, map, zoneId, ui.library);
       const desk = map.objects.find((o) => o.kind === "circulation_desk");
@@ -1135,7 +1145,7 @@ export class Game {
       // On the second pad, beside yours (the server puts you on the first).
       const you = this.avatars.get(st.a);
       const x = d.floor.x + 2;
-      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false, style: 0, pet: 0, vehicle: 0, tool: 0 };
+      const info = { id: DANCE_BOT_ID, name: "AI bot 🤖", look: DANCE_BOT_LOOK, x, y: d.floor.y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false, style: 0, pet: 0, vehicle: 0, tool: 0, reading: 0 };
       this.danceBot = new Avatar(info, this.scene, this.labels, false, serverNow);
       this.danceBot.markNpc();
       if (you) this.danceBot.faceToward(you.pos.x);
@@ -1428,6 +1438,8 @@ export class Game {
         if (this.isOwnHome) void this.loadGifts();
         if (this.mood) this.socket?.send({ t: "SetMood", mood: this.mood });
         this.clerk?.hello();
+        // Still reading as you came through the door.
+        if (this.ui.reader.bookId) this.socket?.send({ t: "Reading", book: this.ui.reader.bookId });
         this.events.onWelcome();
         break;
       case "CellEnter":
@@ -1471,6 +1483,9 @@ export class Game {
         break;
       case "AwayChanged":
         this.avatars.get(m.id)?.setAway(m.away);
+        break;
+      case "ReadingShown":
+        this.avatars.get(m.id)?.setReading(m.book);
         break;
       case "EmoteShown":
         this.avatars.get(m.id)?.emote(m.emote);
@@ -1961,6 +1976,8 @@ export class Game {
         ? [["Message", () => this.ui.friends.chatWith(friend)]]
         : [["Add friend", () => void say(social.request(name))]];
       const them = a.info.id;
+      // Reading something: see what, and open the same book.
+      if (a.reading) actions.unshift(["📖 What are they reading?", () => this.ui.bookCard.showBook(a.reading, null)]);
       if (this.following === them) actions.unshift(["👣 Stop following", () => this.stopFollowing(true)]);
       else actions.unshift([friend ? "👣 Follow" : "👣 Ask to follow", () => this.askToFollow(them, name, !!friend)]);
       for (const [kind, t] of Object.entries(TOGETHER)) {

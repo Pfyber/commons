@@ -100,6 +100,8 @@ export interface Spine {
   authors: string;
   lang: string;
   language: string;
+  /** Readers who have it out (its place shows a gap). */
+  out?: number;
 }
 
 export interface Place {
@@ -127,6 +129,27 @@ export interface Card {
   bookshelves: string[];
   issued: string | null;
   at: Place;
+  /** Readers who have it out. */
+  out?: number;
+}
+
+/** A book you've borrowed: due back at `due` (unix seconds). */
+export interface Loan {
+  id: number;
+  title: string;
+  authors: string;
+  due: number;
+  page: number | null;
+  pages: number | null;
+}
+
+/** Books on one library card at a time (`loans::MAX_LOANS`). */
+export const MAX_LOANS = 5;
+
+/** "due in 12 days", "due tomorrow", "due today". */
+export function dueText(due: number, now = Date.now()): string {
+  const days = Math.round((due * 1000 - now) / 86_400_000);
+  return days <= 0 ? "due today" : days === 1 ? "due tomorrow" : `due in ${days} days`;
 }
 
 /** "Austen, Jane, 1775-1817" → "Jane Austen". */
@@ -187,8 +210,50 @@ export class Library {
   private cards = new Map<number, Promise<Card>>();
   /** A book to walk to on arriving in its wing ("Show me"). */
   showing: (Place & { id: number; title: string }) | null = null;
+  /** What you have out on your library card. */
+  loans: Loan[] = [];
+  private loanListeners = new Set<(l: Loan[]) => void>();
 
   constructor(private auth: Auth) {}
+
+  onLoans(fn: (l: Loan[]) => void): () => void {
+    this.loanListeners.add(fn);
+    return () => this.loanListeners.delete(fn);
+  }
+
+  /** Fetches what you have out. */
+  async loadLoans(): Promise<Loan[]> {
+    const r = await this.auth.get<{ books: Loan[] }>("/api/library/loans");
+    this.loans = r.books;
+    for (const fn of this.loanListeners) fn(this.loans);
+    return this.loans;
+  }
+
+  isBorrowed(id: number): boolean {
+    return this.loans.some((l) => l.id === id);
+  }
+
+  /** Takes a book out on your card (or renews it). */
+  async borrow(id: number): Promise<{ due: number; renewed: boolean }> {
+    const r = await this.auth.send<{ due: number; renewed: boolean }>("/api/library/borrow", { book: id });
+    this.cards.delete(id);
+    this.cases.clear();
+    await this.loadLoans().catch(() => {});
+    return r;
+  }
+
+  /** Brings a book back. */
+  async giveBack(id: number): Promise<void> {
+    await this.auth.send("/api/library/return", { book: id });
+    this.cards.delete(id);
+    this.cases.clear();
+    await this.loadLoans().catch(() => {});
+  }
+
+  /** The shelf places in a wing whose book someone has out. */
+  out(wing: string): Promise<number[]> {
+    return this.auth.get<{ out: number[] }>(`/api/library/out/${wing}`).then((r) => r.out);
+  }
 
   /** How many books each wing holds (refreshed every ten minutes). */
   wings(): Promise<Wings> {

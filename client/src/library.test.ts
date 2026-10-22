@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authorName, byline, rangeText, wingOfZone } from "./library";
+import { authorName, byline, dueText, rangeText, wingOfZone } from "./library";
 
 describe("the library", () => {
   it("writes authors the way a card does", () => {
@@ -21,6 +21,14 @@ describe("the library", () => {
     const fr = { c: "PQ", a: "Balzac", l: "French" };
     expect(rangeText(fr, { ...fr, a: "Zola" }, true)).toBe("French · Balzac – Zola");
     expect(rangeText(fr, { ...fr, l: "Finnish" }, true)).toBe("French – Finnish");
+  });
+
+  it("says when a loan is due", () => {
+    const now = Date.UTC(2026, 9, 22, 12);
+    const day = 86_400;
+    expect(dueText(now / 1000 + 21 * day + 60, now)).toBe("due in 21 days");
+    expect(dueText(now / 1000 + day + 60, now)).toBe("due tomorrow");
+    expect(dueText(now / 1000 + 3600, now)).toBe("due today");
   });
 
   it("knows its wings", () => {

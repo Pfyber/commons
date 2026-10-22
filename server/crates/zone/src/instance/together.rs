@@ -307,6 +307,36 @@ mod tests {
     }
 
     #[test]
+    fn what_you_read_is_shown_and_seen_by_newcomers() {
+        let mut inst = nook_instance();
+        let _a = connect(&mut inst, 1, "a", (20, 12));
+        let mut b = connect(&mut inst, 2, "b", (20, 12));
+        place(&mut inst, 1, (5, 5));
+        place(&mut inst, 2, (6, 5));
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::Reading { book: 1342 },
+        });
+        inst.flush();
+        b.pump();
+        assert!(
+            b.log
+                .iter()
+                .any(|m| matches!(m, ServerMsg::ReadingShown { id: 1, book: 1342 }))
+        );
+        assert_eq!(
+            inst.avatars[&1].info(0).reading,
+            1342,
+            "newcomers see it too"
+        );
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::Reading { book: u32::MAX },
+        });
+        assert_eq!(inst.avatars[&1].reading, 0, "no such book: closed");
+    }
+
+    #[test]
     fn a_hug_needs_both_and_moods_are_shown() {
         let mut inst = nook_instance();
         let mut a = connect(&mut inst, 1, "a", (20, 12));

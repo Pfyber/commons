@@ -20,12 +20,13 @@ export class LibraryRoom {
   private index: WingIndex | null = null;
   private glow: Graphics | null = null;
   private glowUntil = 0;
+  private stopLoans: () => void = () => {};
 
   constructor(
     private scene: Scene,
     map: ZoneMap,
     zoneId: string,
-    lib: Library,
+    private lib: Library,
   ) {
     this.wing = wingOfZone(zoneId);
     const wing = this.wing;
@@ -58,6 +59,9 @@ export class LibraryRoom {
           }
         })
         .catch(() => {});
+      this.showGaps();
+      // Borrowing or bringing one back here changes the shelves at once.
+      this.stopLoans = lib.onLoans(() => this.showGaps());
     } else if (zoneId === HALL) {
       const shelf = map.objects.find((o) => o.kind === "new_arrivals");
       if (shelf) {
@@ -70,6 +74,28 @@ export class LibraryRoom {
           .catch(() => {});
       }
     }
+  }
+
+  /** Gaps where books are out on loan. */
+  private showGaps() {
+    const wing = this.wing;
+    if (!wing) return;
+    void this.lib
+      .out(wing)
+      .then((places) => {
+        const by = new Map<number, number[]>();
+        for (const p of places) {
+          const n = Math.floor(p / PER_CASE);
+          by.set(n, [...(by.get(n) ?? []), p % PER_CASE]);
+        }
+        for (const o of this.cases) {
+          const gaps = by.get(Number(o.label)) ?? [];
+          if ((o.gaps ?? []).join() === gaps.join()) continue;
+          o.gaps = gaps;
+          this.scene.redraw(o);
+        }
+      })
+      .catch(() => {});
   }
 
   /** Bookcase `n` of this wing. */
@@ -138,6 +164,7 @@ export class LibraryRoom {
   }
 
   destroy() {
+    this.stopLoans();
     this.glow?.destroy();
     this.glow = null;
   }

@@ -125,6 +125,8 @@ export const PUMP_MS = 1200;
 /** A fist, knuckles forward (mirrored when facing left). */
 const FIST = [".ooo.", "ossso", "ossso", ".ooo."];
 const ROD_LEN = 18;
+/** Library book covers, as the bindings on the shelves. */
+const BOOK_COVERS = [0x7a2e2e, 0x2f5a3c, 0x2c3e66, 0x6b4a2b, 0x8c6d2e, 0x5c2a3e, 0x2f5f5f, 0x8a3f22];
 const DEG = Math.PI / 180;
 
 export class Avatar {
@@ -169,6 +171,9 @@ export class Avatar {
   private board = new Graphics();
   /** Rock paper scissors: a fist pumping in front of you, from `pumpAt`. */
   private hand = new Graphics();
+  /** The library book open in our hands (its Gutenberg number; 0: none). */
+  reading = 0;
+  private book = new Graphics();
   private pumpAt = -Infinity;
   /** A beer at the bar: wobbly until then (wall clock). */
   private woozyUntil = 0;
@@ -207,7 +212,7 @@ export class Avatar {
     this.stack.appendChild(this.nameEl);
     this.label.appendChild(this.stack);
     labels.appendChild(this.label);
-    scene.sorted.addChild(this.sprite, this.rod, this.board, this.hand);
+    scene.sorted.addChild(this.sprite, this.rod, this.board, this.hand, this.book);
     this.apply(info, now);
   }
 
@@ -249,6 +254,24 @@ export class Avatar {
     this.playing = at;
   }
 
+  /** A library book open in their hands (ReadingShown; 0: closed), and 📖 by the name. */
+  setReading(book: number) {
+    this.reading = book;
+    let mark = this.nameEl.querySelector<HTMLSpanElement>(".reading");
+    if (!book) {
+      mark?.remove();
+      this.nameW = 0;
+      return;
+    }
+    if (!mark) {
+      mark = document.createElement("span");
+      mark.className = "reading";
+      mark.textContent = "📖";
+      this.nameEl.appendChild(mark);
+      this.nameW = 0;
+    }
+  }
+
   /** Shows a founder's leaf by the name (title: "Founder #n"). */
   setFounder(no: number | null) {
     let leaf = this.nameEl.querySelector<HTMLSpanElement>(".founder");
@@ -273,6 +296,7 @@ export class Avatar {
     this.state = info.state;
     this.setMood(info.mood);
     this.setAway(info.away);
+    this.setReading(info.reading);
     if (info.path.length > 0) this.setMotion({ path: info.path, t0: info.t0, speedX10: info.speedX10, sprintIn: info.sprintIn }, now);
     else this.snap({ x: info.x, y: info.y });
   }
@@ -509,6 +533,7 @@ export class Avatar {
     this.drawBoard(skating, feetX, feetY, push);
     this.drawRod(feetX, feetY + bob, walking, wallNow);
     this.drawFist(feetX, Math.round(feetY + bob), wallNow);
+    this.drawBook(feetX, Math.round(feetY + bob));
     this.updateWheels(ride ? vehicle : 0, feetX, feetY, walking, wallNow);
     this.updateCan(feetX, feetY, wallNow);
     this.updatePet({ x, y }, wallNow);
@@ -608,6 +633,28 @@ export class Avatar {
   /** "Rock, paper, scissors…": pumps a fist three times from now. */
   pumpFist(now: number) {
     this.pumpAt = now;
+  }
+
+  /**
+   * The open book held up in both hands at chest height: its cover's colour
+   * (from the book), cream pages, a line or two of print.
+   */
+  private drawBook(feetX: number, spriteBottom: number) {
+    const g = this.book.clear();
+    if (!this.reading || this.state === FISHING || this.playing) return;
+    const cover = BOOK_COVERS[this.reading % BOOK_COVERS.length];
+    const x = Math.round(feetX) - 6;
+    const y = spriteBottom - 17;
+    g.rect(x, y, 12, 8).fill(0x3b3a2e);
+    g.rect(x + 1, y + 1, 10, 6).fill(cover);
+    g.rect(x + 1, y, 4, 6).fill(0xfbf5e6);
+    g.rect(x + 7, y, 4, 6).fill(0xfbf5e6);
+    g.rect(x + 2, y + 2, 2, 1).fill(0xb8ab8e);
+    g.rect(x + 8, y + 2, 2, 1).fill(0xb8ab8e);
+    g.rect(x + 2, y + 4, 2, 1).fill(0xb8ab8e);
+    g.rect(x + 8, y + 4, 2, 1).fill(0xb8ab8e);
+    g.rect(x + 5, y, 2, 7).fill(0x3b3a2e);
+    this.book.zIndex = this.sprite.zIndex + 0.15;
   }
 
   /** The pumping fist, in whole pixels at the end of the front arm. */
@@ -773,6 +820,7 @@ export class Avatar {
     this.rod.destroy();
     this.board.destroy();
     this.hand.destroy();
+    this.book.destroy();
     this.label.remove();
   }
 }

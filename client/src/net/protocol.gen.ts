@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -122,6 +122,7 @@ export interface EntityInfo {
   path: Tile[];
   mood: number;
   away: boolean;
+  reading: number;
 }
 
 export function encEntityInfo(w: Writer, v: EntityInfo) {
@@ -141,6 +142,7 @@ export function encEntityInfo(w: Writer, v: EntityInfo) {
   w.vec(v.path, (x) => encTile(w, x));
   w.u8(v.mood);
   w.bool(v.away);
+  w.u32(v.reading);
 }
 
 export function decEntityInfo(r: Reader): EntityInfo {
@@ -161,6 +163,7 @@ export function decEntityInfo(r: Reader): EntityInfo {
     path: r.vec(() => decTile(r)),
     mood: r.u8(),
     away: r.bool(),
+    reading: r.u32(),
   };
 }
 
@@ -196,6 +199,7 @@ export type ClientMsg =
   | { t: "PoolAim"; angle: number; pull: number }
   | { t: "Away"; away: boolean }
   | { t: "FishHit" }
+  | { t: "Reading"; book: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -345,6 +349,10 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
     case "FishHit":
       w.u8(32);
       break;
+    case "Reading":
+      w.u8(33);
+      w.u32(m.book);
+      break;
   }
   return w.finish();
 }
@@ -447,6 +455,9 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 32:
       m = { t: "FishHit" };
       break;
+    case 33:
+      m = { t: "Reading", book: r.u32() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -488,6 +499,7 @@ export type ServerMsg =
   | { t: "ArcadeState"; cab: number; kind: number; a: number; b: number; status: number; turn: number; t0: number; data: number[] }
   | { t: "PoolAim"; by: number; angle: number; pull: number }
   | { t: "AwayChanged"; id: number; away: boolean }
+  | { t: "ReadingShown"; id: number; book: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -718,6 +730,11 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u32(m.id);
       w.bool(m.away);
       break;
+    case "ReadingShown":
+      w.u8(34);
+      w.u32(m.id);
+      w.u32(m.book);
+      break;
   }
   return w.finish();
 }
@@ -825,6 +842,9 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 33:
       m = { t: "AwayChanged", id: r.u32(), away: r.bool() };
+      break;
+    case 34:
+      m = { t: "ReadingShown", id: r.u32(), book: r.u32() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

@@ -64,6 +64,21 @@ export const ICONS: Record<string, string[]> = {
     ".oGwwwwwwwo.",
     "..ooooooooo.",
   ],
+  // Library books on a shelf: your borrowed books.
+  books: [
+    "............",
+    ".ooo........",
+    ".oro.ooo....",
+    ".oyo.obo.ooo",
+    ".oro.obo.ogo",
+    ".oro.oyo.ogo",
+    ".oro.obo.oyo",
+    ".oro.obo.ogo",
+    ".oyo.obo.ogo",
+    ".oro.obo.ogo",
+    "oooooooooooo",
+    ".NNNNNNNNNN.",
+  ],
   friends: [
     "............",
     "..ooo..ooo..",

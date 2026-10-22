@@ -1086,6 +1086,35 @@ says the books are still being unpacked while it happens.
 Checked: an empty database stocked to all 78,383 books, shelved in their
 eight wings, 16 s after the API started; the main database is stocked.
 
+## Library L3 · Taking books home, reading together: done (2026-10-22)
+
+- **Borrowing** (`api/src/loans.rs`, migration 0028): Borrow on a book's
+  card puts it on your library card, up to five for three weeks
+  (borrowing again renews; past due, it's simply back). There are always
+  more copies in the stacks, so anyone can borrow anything; while someone
+  has a book out, its place on the shelf is a gap (in the world and,
+  faded, in the bookcase panel) and its card says "On loan to N readers".
+  Books stay in the library otherwise: leave with one open that isn't
+  borrowed and it's put back, with a word about borrowing.
+- **Your books:** a pixel 📚 button joins the HUD while you have books
+  out, with how many; it lists them with your page and when they're due,
+  to read anywhere (the park, home) or bring back.
+- **Reading together** (protocol v18: `Reading`, `ReadingShown`,
+  `EntityInfo.reading`): whoever has a book open holds it in both hands,
+  its cover the book's colour, with 📖 by their name. Tap them: "What are
+  they reading?" opens its card, and you can read the same book.
+- Your place is kept as soon as you open a book, not only on a turn.
+
+Checked: API 43 tests (borrowing: five, a sixth refused, renewing,
+bringing back, the gap, the counts), zone 55 (reading shown, and to
+newcomers), protocol vectors, client 82; clippy clean. In the browser
+with two players: Ada borrows Pride and Prejudice, Bo sees the gap at
+its place, Ada reads it and Bo sees it in her hands and 📖 on her tag,
+taps her and opens the same book; Ada walks out to the city still
+reading; Bo, who didn't borrow, has it put back at the door; Ada's 📚
+list shows page 1 of 349 and due in 21 days; bringing it back clears
+the button.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

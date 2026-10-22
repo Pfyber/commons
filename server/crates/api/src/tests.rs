@@ -2590,6 +2590,111 @@ mod library {
     }
 
     #[tokio::test]
+    async fn borrow_up_to_five_and_their_places_show_gaps() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app: Router = Router::new()
+            .nest(
+                "/api",
+                crate::library::routes().merge(crate::loans::routes()),
+            )
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let claims = token::AccessClaims {
+            sub: p.to_string(),
+            name: "t".into(),
+            look: 1,
+            style: 0,
+            tier: token::TrustTier::Newcomer,
+            minor: false,
+            muted_until: 0,
+        };
+        let auth = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &claims, token::ACCESS_TTL_SECS)
+        );
+        let books: Vec<(i32, String, i32)> = sqlx::query_as(
+            "SELECT id, wing, shelf_index FROM books WHERE shelf_index IS NOT NULL ORDER BY id LIMIT 6",
+        )
+        .fetch_all(&s.db)
+        .await
+        .unwrap();
+        if books.len() < 6 {
+            eprintln!("skipping: the test library isn't stocked");
+            return;
+        }
+        let post = |path: &'static str, book: i32| {
+            let app = app.clone();
+            let auth = auth.clone();
+            async move {
+                let req = Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("authorization", auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"book":{book}}}"#)))
+                    .unwrap();
+                let res = app.oneshot(req).await.unwrap();
+                let st = res.status();
+                let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+                    .await
+                    .unwrap();
+                (
+                    st,
+                    serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+                )
+            }
+        };
+        for &(id, ..) in &books[..5] {
+            let (st, b) = post("/api/library/borrow", id).await;
+            assert_eq!(st, StatusCode::OK, "{b}");
+            assert_eq!(b["renewed"], false);
+        }
+        let (st, b) = post("/api/library/borrow", books[5].0).await;
+        assert_eq!(st, StatusCode::CONFLICT, "a sixth: {b}");
+        assert_eq!(b["error"], "too_many");
+        let (st, b) = post("/api/library/borrow", books[0].0).await;
+        assert_eq!(st, StatusCode::OK, "renewing is fine: {b}");
+        assert_eq!(b["renewed"], true);
+        let (_, mine) = get(&app, &auth, "/api/library/loans").await;
+        assert_eq!(mine["books"].as_array().unwrap().len(), 5);
+        // The gap on the shelf, the count on the card and the spine.
+        let (id, wing, place) = &books[0];
+        let (_, out) = get(&app, &auth, &format!("/api/library/out/{wing}")).await;
+        assert!(
+            out["out"]
+                .as_array()
+                .unwrap()
+                .contains(&Value::from(*place))
+        );
+        let (_, card) = get(&app, &auth, &format!("/api/library/books/{id}")).await;
+        assert!(card["out"].as_i64().unwrap() >= 1);
+        let (_, case) = get(
+            &app,
+            &auth,
+            &format!("/api/library/case/{wing}/{}", place / 100),
+        )
+        .await;
+        let spine = case["books"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == *id)
+            .unwrap();
+        assert!(spine["out"].as_i64().unwrap() >= 1);
+        // Bring one back; now there's room for the sixth.
+        let (st, _) = post("/api/library/return", books[1].0).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (st, _) = post("/api/library/borrow", books[5].0).await;
+        assert_eq!(st, StatusCode::OK);
+        sqlx::query("DELETE FROM loans WHERE player_id = $1")
+            .bind(p)
+            .execute(&s.db)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn books_arrive_get_shelved_and_are_found() {
         let Some(db) = db().await else { return };
         let s = state(db, 1000).await;

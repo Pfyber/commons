@@ -172,6 +172,8 @@ struct Avatar {
     mood: u8,
     /// Away from the keyboard (their client says so).
     away: bool,
+    /// The library book open in their hands (0: none).
+    reading: u32,
     /// Instance time the next sky lantern may go up.
     next_lantern: u32,
     fish: Option<fishing::FishSession>,
@@ -222,6 +224,7 @@ impl Avatar {
             path,
             mood: self.mood,
             away: self.away,
+            reading: self.reading,
         }
     }
 }
@@ -691,6 +694,7 @@ impl Instance {
             sat_together: false,
             mood: 0,
             away: false,
+            reading: 0,
             next_lantern: 0,
         };
         avatar.send(
@@ -792,6 +796,17 @@ impl Instance {
                 a.away = away;
                 let cell = a.cell;
                 self.broadcast(cell, &ServerMsg::AwayChanged { id, away }, None);
+            }
+            ClientMsg::Reading { book } => {
+                // Gutenberg numbers are well under ten million.
+                let book = if book < 10_000_000 { book } else { 0 };
+                let a = self.avatars.get_mut(&id).unwrap();
+                if a.reading == book {
+                    return;
+                }
+                a.reading = book;
+                let cell = a.cell;
+                self.broadcast(cell, &ServerMsg::ReadingShown { id, book }, None);
             }
             ClientMsg::Ping { client_t } => {
                 self.send_to(

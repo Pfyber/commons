@@ -55,7 +55,10 @@ every language, each one a spine on a shelf: ask at the catalogue desk
 ("Show me" walks you to it), or browse the eight wings, shelved like a
 real library. Tap "Read" on a book's card to read it, a page at a time; it
 opens where you left off, and the catalogue lists what you've been
-reading. The API stocks the Library itself from Gutenberg's catalogue
+reading. Books stay in the library unless you Borrow them (up to five,
+for three weeks): then they're under 📚 at the top, to read anywhere.
+Whoever's reading holds their book open for all to see: tap them to open
+the same one. The API stocks the Library itself from Gutenberg's catalogue
 (about 20 MB) when it starts with none, and looks for new books weekly;
 `cargo run --bin library-import` does it by hand (`--csv <file>` to use a
 copy, `--reshelve` to file new arrivals).

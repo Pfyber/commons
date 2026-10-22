@@ -36,7 +36,7 @@ import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
 import { WardrobePanel } from "./ui/wardrobe";
 import { HALL, Library, wingOfZone } from "./library";
-import { BookCardPanel, CataloguePanel, type LibraryHost, ReaderPanel, ShelfPanel } from "./ui/library";
+import { BookCardPanel, CataloguePanel, type LibraryHost, MyBooksPanel, ReaderPanel, ShelfPanel } from "./ui/library";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -168,6 +168,7 @@ async function main() {
     onSound: () => sound.toggle(),
     onTasks: () => welcomePanel.show(),
     onMap: () => cityMap.toggle(),
+    onBooks: () => myBooks.toggle(),
     onMood: () => {
       moodPicker.setCurrent((game as Game | null)?.currentMood ?? 0);
       moodPicker.toggle();
@@ -243,6 +244,14 @@ async function main() {
   const bookCard = new BookCardPanel(library, libraryHost);
   const reader = new ReaderPanel(library);
   bookCard.reader = reader;
+  const myBooks = new MyBooksPanel(library, reader);
+  library.onLoans((l) => {
+    hud.setBooks(l.length);
+    // Brought back while reading it away from the Library: it goes back too.
+    const g = game as Game | null;
+    if (reader.open && g && !g.zoneId.startsWith("library") && !library.isBorrowed(reader.bookId)) reader.hide();
+  });
+  void library.loadLoans().catch(() => {});
   const ui: Ui = {
     eco,
     hud,

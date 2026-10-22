@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 17;
+pub const PROTOCOL_VERSION: u16 = 18;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -52,6 +52,8 @@ records! {
         mood: u8,
         // away: away from the keyboard (see `Away`), shown dozing on their feet.
         away: bool,
+        // reading: the library book open in their hands (v18; 0: none).
+        reading: u32,
     }
 }
 
@@ -128,6 +130,9 @@ message_enum! {
         31 Away { away: bool }
         /// A smack at your fish flopping on the bank (`fish_event::FLOP`).
         32 FishHit {}
+        /// You opened a library book (its Gutenberg number), or closed it (0).
+        /// Others see it in your hands and can open the same one.
+        33 Reading { book: u32 }
     }
 }
 
@@ -234,6 +239,8 @@ message_enum! {
         32 PoolAim { by: u32, angle: u16, pull: u16 }
         /// Avatar `id` went away from the keyboard, or came back (as `Away`).
         33 AwayChanged { id: u32, away: bool }
+        /// Avatar `id` opened library book `book`, or closed it (0).
+        34 ReadingShown { id: u32, book: u32 }
     }
 }
 
@@ -522,6 +529,7 @@ mod tests {
             path: vec![Tile { x: 3, y: 4 }, Tile { x: 9, y: 4 }],
             mood: 2,
             away: false,
+            reading: 1342,
         };
         let msgs = vec![
             ServerMsg::Welcome {

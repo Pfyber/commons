@@ -234,6 +234,7 @@ pub fn sample_vectors() -> String {
         path: vec![Tile { x: 95, y: 0 }, Tile { x: 90, y: 5 }],
         mood: 1,
         away: false,
+        reading: 0,
     };
     let client = [
         ClientMsg::Hello {
@@ -275,6 +276,7 @@ pub fn sample_vectors() -> String {
         },
         ClientMsg::Pickup { x: 5, y: 4 },
         ClientMsg::SetMood { mood: 2 },
+        ClientMsg::Reading { book: 1342 },
         ClientMsg::Offer { to: 7, kind: 1 },
         ClientMsg::Accept { from: 7, kind: 1 },
         ClientMsg::SkyLantern {
@@ -363,6 +365,7 @@ pub fn sample_vectors() -> String {
             first: true,
         },
         ServerMsg::MoodShown { id: 9, mood: 3 },
+        ServerMsg::ReadingShown { id: 9, book: 1342 },
         ServerMsg::Offered { from: 9, kind: 2 },
         ServerMsg::Together {
             a: 9,

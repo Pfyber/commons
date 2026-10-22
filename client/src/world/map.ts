@@ -19,6 +19,8 @@ export interface MapObject {
   /** Library bookcases: which wing, and how many books stand in it. */
   wing?: string;
   books?: number;
+  /** Library bookcases: slots whose book someone has out. */
+  gaps?: number[];
   /** Library stack signs: the class (or language) on the row, in short. */
   sign?: string;
 }

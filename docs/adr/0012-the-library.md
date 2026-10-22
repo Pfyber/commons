@@ -66,6 +66,7 @@ The hall: the circulation and catalogue desk with the librarian; the
 | New books | Join **New Arrivals** in the hall; a **re-shelving** (run by hand, a few times a year) files them into the wings. Nothing moves in between. |
 | Wing sizes | `commons_sim::library::WINGS` (rows, bookcases per row), about a third to spare; the maps are generated from it, and re-shelving refuses to overfill a wing. |
 | Titles | Too small on a spine: a wing loads its shelf list a bookcase at a time as you walk up (`/api/library/case`), and the row-end signs show the range ("PR · Austen – Brontë"). Tap a spine for the book's card. |
+| Taking books home | Books are read in the library; borrowed on your library card they go anywhere (up to five, three weeks, borrowing again renews). There are always more copies in the stacks, so nobody waits; while anyone has a book out its place on the shelf shows a gap and its card says how many have it. |
 | Finding a book | The catalogue desk searches the whole collection (title, author, subject; filter by language). "Show me" walks you to the bookcase and the spine glows. |
 | Languages | All. World Languages is shelved by language (French, Finnish, German, Dutch, Italian, Spanish, Hungarian, Portuguese, Chinese, then the rest A–Z), then by class. |
 
@@ -75,5 +76,5 @@ The hall: the circulation and catalogue desk with the librarian; the
 |---|---|---|
 | **L1** ✓ | Catalogue import, the shelf list, search; the hall and all eight wings with every book a spine; tap a spine for its card; the catalogue desk with "Show me". | Browse the whole collection. |
 | **L2** ✓ | Reading: fetch, clean, page and cache texts; the reader; your place kept per book; "continue reading". | Read any book. |
-| **L3** | Together: what someone's reading on their name tag (tap to open the same book), books pulled slightly out where they're being read, reading nooks and the reading room's quiet. | Reading near people. |
+| **L3** ✓ | Borrowing (your library card, gaps on the shelves, your books from the HUD); the open book in your hands and 📖 on your name tag for everyone to see (tap to open the same book). | Reading near people, and taking books home. |
 | **L4** | A book club board, recommending a book as a doorstep gift, curated shelves for under-16s, per-country hiding, re-shelving with an announcement. | Care and community. |

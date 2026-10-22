@@ -9,6 +9,7 @@ import {
   type Found,
   LANGUAGES,
   type Library,
+  MAX_LOANS,
   NEW,
   PER_SHELF,
   type Place,
@@ -18,10 +19,12 @@ import {
   type TextPage,
   WINGS,
   byline,
+  dueText,
   rangeText,
   wingName,
 } from "../library";
 import { spineLook } from "../world/libraryart";
+import { ApiError } from "../net/api";
 import { Panel, button, el, isTyping } from "./panels";
 
 /** What the panels need from the game. */
@@ -46,12 +49,36 @@ export class BookCardPanel extends Panel {
   private loading = 0;
   private back: (() => void) | null = null;
   private here = false;
+  private msg = "";
+  private busy = false;
 
   constructor(
     private lib: Library,
     private host: LibraryHost,
   ) {
     super("📖 Book", "book-card");
+    lib.onLoans(() => this.open && this.card && this.render());
+  }
+
+  private async lend(id: number, borrow: boolean) {
+    this.busy = true;
+    this.msg = "";
+    this.render();
+    try {
+      if (borrow) {
+        const r = await this.lib.borrow(id);
+        this.msg = r.renewed ? `📚 Renewed: ${dueText(r.due)}.` : `📚 It's yours to take anywhere: ${dueText(r.due)}. Find it under 📚 at the top.`;
+      } else {
+        await this.lib.giveBack(id);
+        this.msg = "Back on the shelf. Thank you!";
+      }
+      if (this.card) this.card = await this.lib.book(id);
+    } catch (e) {
+      this.msg = e instanceof ApiError ? e.message : "That didn't work. Try again?";
+    } finally {
+      this.busy = false;
+      if (this.open) this.render();
+    }
   }
 
   /** Opens book `id`'s card; `back` returns to where it was opened from; `here`: you're at its shelf already. */
@@ -59,6 +86,7 @@ export class BookCardPanel extends Panel {
     this.back = back;
     this.here = here;
     this.card = null;
+    this.msg = "";
     const ticket = ++this.loading;
     this.show();
     void this.lib
@@ -98,10 +126,20 @@ export class BookCardPanel extends Panel {
     fact("Shelved under", [...c.locc, ...c.bookshelves.slice(0, 3)].join(" · "));
     fact("Added", c.issued ? new Date(c.issued).getFullYear().toString() : "");
     fact("Stands in", placeText(c.at));
+    const out = c.out ?? 0;
+    if (out) fact("On loan", out === 1 ? "to one reader" : `to ${out} readers`);
     this.body.append(facts);
     const actions = el("div", "book-actions");
     const reader = this.reader;
     if (reader) actions.append(button("📖 Read", () => reader.openBook(c.id, c.title), "small read"));
+    const mine = this.lib.loans.find((l) => l.id === c.id);
+    if (mine) {
+      actions.append(button("Bring back", () => void this.lend(c.id, false), "small"));
+    } else {
+      const b = button("📚 Borrow", () => void this.lend(c.id, true), "small");
+      b.disabled = this.busy;
+      actions.append(b);
+    }
     if (this.back) {
       const back = this.back;
       actions.append(button("‹ Back", () => back(), "small"));
@@ -115,6 +153,8 @@ export class BookCardPanel extends Panel {
       );
     }
     this.body.append(actions);
+    if (mine) this.body.append(el("p", "hint", `📚 Borrowed, ${dueText(mine.due)}: read it anywhere.`));
+    if (this.msg) this.body.append(el("p", "hint", this.msg));
     const link = el("a", "book-link", `Also at gutenberg.org/ebooks/${c.id} ↗`);
     link.href = `https://www.gutenberg.org/ebooks/${c.id}`;
     link.target = "_blank";
@@ -201,8 +241,10 @@ export class ShelfPanel extends Panel {
         sp.style.background = look.color;
         sp.style.height = `${60 + look.height * 5}%`;
         if (look.bands) sp.classList.add("bands");
+        // Out on loan: a ghost of the book in its gap (more copies wait in the stacks).
+        if (b.out) sp.classList.add("out");
         if (slot === this.mark) sp.classList.add("marked");
-        sp.title = `${b.title} · ${byline(b.authors)}${b.lang !== "en" ? ` · ${b.language}` : ""}`;
+        sp.title = `${b.title} · ${byline(b.authors)}${b.lang !== "en" ? ` · ${b.language}` : ""}${b.out ? " · on loan" : ""}`;
         shelf.append(sp);
       }
       shelves.append(shelf);
@@ -385,6 +427,8 @@ export class ReaderPanel extends Panel {
   private sheet = el("div", "reader-page");
   /** Told whenever the open book or page changes (null: closed). */
   onRead: (book: { id: number; title: string } | null) => void = () => {};
+  /** The book open (0: none). */
+  bookId = 0;
 
   constructor(private lib: Library) {
     super("📖 Reading", "reader");
@@ -416,6 +460,7 @@ export class ReaderPanel extends Panel {
 
   /** Opens book `id` where you left off (or at `page`). */
   openBook(id: number, title: string, page?: number) {
+    this.bookId = id;
     this.book = null;
     this.contents = [];
     this.error = "";
@@ -427,6 +472,7 @@ export class ReaderPanel extends Panel {
 
   hide() {
     if (this.open) this.onRead(null);
+    this.bookId = 0;
     super.hide();
   }
 
@@ -457,7 +503,7 @@ export class ReaderPanel extends Panel {
         this.sheet.scrollTop = 0;
         this.body.scrollTop = 0;
         this.onRead({ id: t.id, title: t.title });
-        if (!opening) this.keepPlace();
+        this.keepPlace();
         // The next page, ready for the turn.
         if (t.page + 1 < t.pages) void this.fetchPage(t.id, t.page + 1).catch(() => {});
       })
@@ -571,5 +617,60 @@ export class ReaderPanel extends Panel {
     nav.append(prev, where, next);
     this.body.append(nav);
     this.body.append(el("p", "reader-credit", "From the collection of Project Gutenberg"));
+  }
+}
+
+/** Your library card: the books you have out, to read anywhere or bring back. */
+export class MyBooksPanel extends Panel {
+  private msg = "";
+
+  constructor(
+    private lib: Library,
+    private reader: ReaderPanel,
+  ) {
+    super("📚 Your library books", "my-books");
+    lib.onLoans(() => this.open && this.render());
+  }
+
+  show() {
+    super.show();
+    void this.lib.loadLoans().catch(() => {});
+  }
+
+  render() {
+    this.body.replaceChildren();
+    const loans = this.lib.loans;
+    this.body.append(el("p", "hint", `Borrowed books go wherever you go: up to ${MAX_LOANS} at a time, for three weeks.`));
+    if (!loans.length) {
+      this.body.append(el("p", "empty", "Nothing borrowed yet. Find a book at the Library and tap Borrow."));
+      return;
+    }
+    const list = el("div", "rows");
+    for (const l of loans) {
+      const row = el("div", "row loan");
+      const name = el("span", "name");
+      const where = l.page !== null && l.pages ? `page ${l.page + 1} of ${l.pages}` : "not started";
+      name.append(el("strong", "", l.title), el("span", "hint", `${byline(l.authors)} · ${where} · ${dueText(l.due)}`));
+      row.append(
+        name,
+        button("Read", () => this.reader.openBook(l.id, l.title), "small read"),
+        button("Bring back", () => {
+          this.msg = "";
+          void this.lib
+            .giveBack(l.id)
+            .then(() => {
+              this.msg = `“${l.title}” is back on its shelf.`;
+              if (this.open) this.render();
+            })
+            .catch(() => {
+              this.msg = "That didn't work. Try again?";
+              if (this.open) this.render();
+            });
+        }, "small"),
+      );
+      list.append(row);
+    }
+    this.body.append(list);
+    if (this.msg) this.body.append(el("p", "hint", this.msg));
   }
 }

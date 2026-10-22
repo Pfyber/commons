@@ -90,6 +90,7 @@ function bookcase(o: MapObject, wing: string, books: number, slots = 100): HTMLC
     px(ctx, "#4fa3d9", w - 3, 5, 2, c.height - 8);
   }
   const n = Number(o.label ?? 0);
+  const gaps = new Set(o.gaps ?? []);
   for (let s = 0; s < 5; s++) {
     const y = SHELF_Y + s * SHELF_PITCH;
     px(ctx, back, SHELF_X, y - 1, SHELF_W, 11);
@@ -98,6 +99,8 @@ function bookcase(o: MapObject, wing: string, books: number, slots = 100): HTMLC
     for (let i = 0; i < 20; i++) {
       const slot = s * 20 + i;
       if (slot >= Math.min(books, slots)) break;
+      // Out on loan: a gap, and the next book leaning into it.
+      if (gaps.has(slot)) continue;
       const r = slotRect(slot);
       const look = spineLook(wing, n, slot);
       const top = y + 10 - look.height;
