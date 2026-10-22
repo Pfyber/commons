@@ -9,6 +9,7 @@ import { disc, oval, polygon } from "./pixeldraw";
 import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 import { decodeLook } from "./look";
 import { LIBRARY_GROUND, drawLibraryGround, libraryDecor, libraryObject } from "./libraryart";
+import { clubObject } from "./clubart";
 
 export const TILE = 32;
 
@@ -2220,7 +2221,7 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       break;
     }
     default: {
-      const lib = libraryObject(o);
+      const lib = libraryObject(o) ?? clubObject(o);
       if (lib) {
         c = lib.c;
         overhang = lib.overhang;

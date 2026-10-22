@@ -18,7 +18,7 @@ export interface PostOfficeHost {
 const errText = (e: unknown) => (e instanceof Error ? e.message : "That didn't work.");
 
 /** A button that asks again before doing something you can't take back. */
-function confirmButton(label: string, ask: string, run: () => void): HTMLButtonElement {
+export function confirmButton(label: string, ask: string, run: () => void): HTMLButtonElement {
   let armed = false;
   const b = button(label, () => {
     if (armed) return run();

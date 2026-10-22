@@ -31,7 +31,7 @@ export interface Dm {
 export interface Notification {
   id: number;
   kind: "friend_request" | "friend_accepted" | "gift" | "home_invite" | "close_friend" | string;
-  body: { from_id?: string; from_name?: string; item?: number; item_name?: string; qty?: number };
+  body: { from_id?: string; from_name?: string; item?: number; item_name?: string; qty?: number; club?: string; club_id?: string; crest?: string };
   at: number;
   read: boolean;
 }
@@ -150,6 +150,7 @@ export class Social {
         this.onToast(describe(n));
         if (["friend_request", "friend_accepted", "close_friend"].includes(n.kind)) void this.refresh();
         else this.emit();
+        for (const f of this.pushListeners) f(m);
         break;
       }
       case "dm": {
@@ -266,12 +267,18 @@ export function describe(n: Notification): string {
       return `You and ${who} are now close friends 💛`;
     case "bottle_thanks":
       return "Someone found your message in a bottle and sent a thank-you 💛";
+    case "club_invite":
+      return `${who} invited you to join ${n.body.crest ?? "🛡"} ${n.body.club ?? "their club"}`;
+    case "club_removed":
+      return `You're no longer a member of ${n.body.club ?? "a club"}`;
     case "rent_due": {
-      const b = n.body as { what?: string; rent?: number };
+      const b = n.body as { what?: string; rent?: number; club?: string };
+      if (b.club) return `Rent for ${b.what} is due: ${b.rent ?? "some"} coins from the treasury. Ask members to chip in, then pay at the Club Hall 🛡`;
       return `Rent for ${b.what ?? "your place"} is due: ${b.rent ?? "some"} coins. Pay at the Post Office; nothing is lost if you can't 🏡`;
     }
     case "lease_ended": {
-      const b = n.body as { what?: string; returned?: number };
+      const b = n.body as { what?: string; returned?: number; club?: string };
+      if (b.club) return `${b.what} has been given up: the rent wasn't paid. The club carries on, and can rent a room again at the Club Hall 🛡`;
       return `The lease on ${b.what ?? "your place"} has ended. ${b.returned ? `${b.returned} things went back to your bag.` : ""} The Post Office can find you a new one 📦`;
     }
     case "stall_sale": {

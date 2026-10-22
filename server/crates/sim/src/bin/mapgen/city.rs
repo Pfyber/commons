@@ -681,7 +681,7 @@ fn club_lot(k: &mut Blk) {
         43,
         1,
         1,
-        "Club lot: a club can make its home here (clubs are coming soon)",
+        "Club lot: one day a club can rent this land for its own clubhouse",
     );
     k.scatter(3, 3, 6, N - 3, 5, &["tree", "bush"]);
     k.scatter(42, 3, N - 3, N - 3, 5, &["tree", "bush"]);
@@ -758,6 +758,11 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             k.spot("door:arcade", 24, 18);
             k.spot("arcade_hall", 24, 19);
         }
+        "club_hall" => {
+            k.object("club_hall", 14, 8, 20, 10, "Club Hall");
+            k.spot("door:club_hall", 24, 18);
+            k.spot("club_hall", 24, 19);
+        }
         "library" => {
             k.object("library", 13, 7, 22, 11, "Library");
             k.spot("door:library", 24, 18);
@@ -784,7 +789,9 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
                 .to_string()
         }
         "casino" => "Casino: opening soon. Play money only, never real money".to_string(),
-        "club_hall" => "Club Hall: rooms for clubs, opening soon".to_string(),
+        "club_hall" => {
+            "Club Hall: found a club, rent its room, and meet up with your members".to_string()
+        }
         _ => format!("{name}: opening soon"),
     };
     k.object("signpost", 20, 19, 1, 1, &sign);

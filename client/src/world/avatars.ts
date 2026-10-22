@@ -311,6 +311,27 @@ export class Avatar {
     leaf.title = `Founder #${no}`;
   }
 
+  /** Shows the crest of the club they show (ADR 0014) by the name. */
+  setClub(badge: { club: string; crest: string; color: string } | null) {
+    let mark = this.nameEl.querySelector<HTMLSpanElement>(".club-badge");
+    if (!badge) {
+      if (mark) {
+        mark.remove();
+        this.nameW = 0;
+      }
+      return;
+    }
+    if (!mark) {
+      mark = document.createElement("span");
+      mark.className = "club-badge";
+      this.nameEl.appendChild(mark);
+      this.nameW = 0;
+    }
+    mark.textContent = badge.crest;
+    mark.style.background = badge.color;
+    mark.title = badge.club;
+  }
+
   /** Updates from a Spawn/CellEnter snapshot. */
   apply(info: EntityInfo, now: number) {
     this.info = info;

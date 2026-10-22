@@ -1171,6 +1171,71 @@ has no Remove buttons, Ada removes Cy, LiveKit's rooms drop to two and Cy
 is told; the Recent tab for Ada ("↗ Bo, Cy · 5 s") and Cy ("removed"); a
 click on the well takes coins from 100 to 10,100.
 
+## Clubs C1 · The Club Hall: done (2026-10-22)
+
+ADR 0014. Clubs give people a reason to come back: a few friends with a
+name, a crest, a room of their own and a board. Like everything players
+hold, **club rooms are rented, never bought**.
+
+- **The Club Hall**, a red-brick clubhouse strung with pennants on the
+  block east of the Town Hall (`club_hall` in the city). Inside
+  (`club_hall` zone) are the desk, the directory of clubs and the stairs
+  up to the club rooms.
+- **Founding** (`clubs.rs`) means renting a Club room for the first week
+  (25 coins, paid by the founder through the new club's treasury). Each
+  club needs a name (3 to 24 characters, filtered, unique among open
+  clubs), a crest (16 to choose from) and a colour (8).
+- **Rent from the treasury.** A club room is a lease like a home
+  (`leases`, kind `club_room`, migration 0031). The sweeper charges the
+  club's treasury, not a player, through `clubs::spend`, which is
+  idempotent per charge.
+  - When rent can't be paid: a grace period, with a notice to the owner
+    and moderators. Then the room is given up, but the club itself
+    carries on and can rent again.
+  - Tiers: Club room (12 members, 25 a week) and Big club room (30
+    members, 60 a week). Moving up costs the difference for this week.
+  - Members chip in; `club_treasury_ledger` records every coin in and
+    out.
+- **Members:**
+  - Invites go to friends only. Each player can be in up to five clubs.
+  - Roles are owner, moderator and member. The owner can hand the club
+    over, and the lease goes with it.
+  - Leaving and removing members are supported. The owner can only leave
+    by handing over or closing the club, and when the last member leaves,
+    the club closes and its room is given up.
+- **The board:** short posts, filtered like chat. The owner and
+  moderators can remove any post; members can remove their own.
+- **The room** is its own instance per club (`clubroom`, owned by the
+  club, members only, checked through social `/internal/club_room`). It
+  has the club's banner (its crest on its colour, with its name) and the
+  board.
+- **Client:**
+  - A 🛡 HUD button (K), marked while an invite waits or rent is due.
+  - One clubs panel for your clubs and invites, founding, the directory,
+    the stairs, and a club's page (board, members, inviting, treasury,
+    room and tiers, badge, leaving).
+  - Join from the notification.
+  - The crest of the club you show appears by your name for everyone.
+    Badges are fetched in batches and refreshed when someone joins or
+    leaves, or you change place.
+
+Checked:
+- Server: social 16, with the whole club lifecycle (founding and its
+  rent, a taken name, invites only to friends, members can't invite,
+  chipping in twice with the same key gives once, the board's rights,
+  badges, members-only room, moving up, rent due then paid from the
+  treasury, handing over, the last one out closing it). Also sim
+  (mapgen: everything in the hall and room reachable), orchestrator, API
+  45 and zone 55; clippy clean; client 84.
+- In the browser, two players who are friends:
+  - Owl walks into the Club Hall, founds "Night Owls" at the desk
+    (100 → 75 coins) and invites Fox, who joins from the notification.
+  - Both go up to the room (Owl by the stairs, Fox from the 🛡 panel).
+    The banner shows the crest, colour and name, and each sees the
+    other's crest by their name.
+  - A post on the board.
+  - Down the stairs to the hall, and out at the Club Hall's door.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

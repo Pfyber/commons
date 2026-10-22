@@ -1028,3 +1028,232 @@ async fn friends_with_phones_call_and_group_up_but_not_under_16s_yet() {
     let cl = log(&c).await;
     assert_eq!(cl[0]["status"], "removed");
 }
+
+// ---- clubs ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_club_is_rented_shared_paid_for_together_and_handed_on() {
+    let Some(s) = state().await else { return };
+    let (a, b, c) = (player(&s).await, player(&s).await, player(&s).await);
+    let tag = &a.name[1..7];
+    let post = |p: &P, path: String, body: Value| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move { call(&s, "POST", &path, &tok, Some(body)).await }
+    };
+    let get = |p: &P, path: String| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move { call(&s, "GET", &path, &tok, None).await }
+    };
+
+    // Founding rents the room: the first week's rent (25) from the founder,
+    // through the treasury.
+    let before = coins(&s, &a).await;
+    let name = format!("Owls {tag}");
+    let (st, r) = post(
+        &a,
+        "/api/social/clubs/found".into(),
+        json!({ "name": name, "crest": "🦉", "color": "#3f7a8a" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let id = r["id"].as_str().unwrap().to_string();
+    assert_eq!(coins(&s, &a).await, before - 25);
+    let (_, d) = get(&a, format!("/api/social/clubs/{id}")).await;
+    assert_eq!(
+        (d["role"].as_str(), d["treasury"].as_i64()),
+        (Some("owner"), Some(0))
+    );
+    assert_eq!(d["room"]["state"], "active");
+    assert_eq!(
+        d["badge"], true,
+        "your first club's crest goes by your name"
+    );
+    let (st, r) = post(
+        &c,
+        "/api/social/clubs/found".into(),
+        json!({ "name": name.to_uppercase(), "crest": "🦊", "color": "#c8553d" }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("name_taken"))
+    );
+
+    // Invites go to friends only; members can't invite.
+    let invite = |by: &P, to: &P| {
+        post(
+            by,
+            format!("/api/social/clubs/{id}/invite"),
+            json!({ "id": to.id.to_string() }),
+        )
+    };
+    let (st, _) = invite(&a, &b).await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "not friends yet");
+    befriend(&s, &a, &b).await;
+    let (st, r) = invite(&a, &b).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (_, mine) = get(&b, "/api/social/clubs".into()).await;
+    assert_eq!(mine["invites"][0]["name"], name.as_str());
+    let (st, _) = post(
+        &b,
+        format!("/api/social/clubs/{id}/answer"),
+        json!({ "accept": true }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    befriend(&s, &b, &c).await;
+    let (st, r) = invite(&b, &c).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("not_staff"))
+    );
+
+    // B chips in; the board.
+    let (st, r) = post(
+        &b,
+        format!("/api/social/clubs/{id}/donate"),
+        json!({ "coins": 40, "key": "d1" }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["treasury"].as_i64()),
+        (StatusCode::OK, Some(40)),
+        "{r}"
+    );
+    post(
+        &b,
+        format!("/api/social/clubs/{id}/donate"),
+        json!({ "coins": 40, "key": "d1" }),
+    )
+    .await;
+    let (_, d) = get(&a, format!("/api/social/clubs/{id}")).await;
+    assert_eq!(d["treasury"], 40, "the same press twice gives once");
+    let (_, p1) = post(
+        &a,
+        format!("/api/social/clubs/{id}/post"),
+        json!({ "text": "Welcome, owls!" }),
+    )
+    .await;
+    let (st, _) = post(
+        &b,
+        format!("/api/social/clubs/{id}/posts/{}/delete", p1["id"]),
+        json!({}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "not B's post");
+    let (_, d) = get(&b, format!("/api/social/clubs/{id}")).await;
+    assert_eq!(d["posts"][0]["text"], "Welcome, owls!");
+    assert_eq!(d["members"].as_array().unwrap().len(), 2);
+
+    // The badge by B's name, and room access: members only.
+    let (_, badges) = get(
+        &c,
+        format!("/api/social/clubs/badges?names={},{}", b.name, c.name),
+    )
+    .await;
+    assert_eq!(badges[&b.name]["crest"], "🦉");
+    assert!(badges.get(&c.name).is_none());
+    let svc = service(&s);
+    let (st, room) = call(
+        &s,
+        "GET",
+        &format!("/internal/club_room?player={}&club={id}", b.id),
+        &svc,
+        None,
+    )
+    .await;
+    assert_eq!(
+        (st, room["name"].as_str()),
+        (StatusCode::OK, Some(name.as_str()))
+    );
+    let (st, _) = call(
+        &s,
+        "GET",
+        &format!("/internal/club_room?player={}&club={id}", c.id),
+        &svc,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+
+    // A bigger room: the difference this week (60 - 25 = 35) from the treasury.
+    let (st, r) = post(
+        &a,
+        format!("/api/social/clubs/{id}/room"),
+        json!({ "tier": 2 }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (_, d) = get(&a, format!("/api/social/clubs/{id}")).await;
+    assert_eq!(
+        (d["treasury"].as_i64(), d["cap"].as_i64()),
+        (Some(5), Some(30))
+    );
+
+    // Rent comes due and the treasury can't pay: grace, and the owner hears.
+    sqlx::query("UPDATE leases SET paid_until = now() - interval '1 second' WHERE club_id = $1::uuid AND state <> 'ended'")
+        .bind(&id)
+        .execute(&s.db)
+        .await
+        .unwrap();
+    crate::rent::sweep(&s).await.unwrap();
+    let (_, d) = get(&a, format!("/api/social/clubs/{id}")).await;
+    assert_eq!(d["room"]["state"], "grace");
+    let (_, n) = call(&s, "GET", "/api/social/notifications", &a.token, None).await;
+    let due = n
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["kind"] == "rent_due")
+        .expect("told");
+    assert_eq!(due["body"]["club"], name.as_str());
+    let (st, _) = post(&a, format!("/api/social/clubs/{id}/pay"), json!({})).await;
+    assert_eq!(st, StatusCode::CONFLICT, "still not enough");
+    post(
+        &b,
+        format!("/api/social/clubs/{id}/donate"),
+        json!({ "coins": 60, "key": "d2" }),
+    )
+    .await;
+    let (st, r) = post(&b, format!("/api/social/clubs/{id}/pay"), json!({})).await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "members don't pay: {r}");
+    let (st, r) = post(&a, format!("/api/social/clubs/{id}/pay"), json!({})).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["room"]["state"], "active");
+
+    // The owner can't walk away from members: hand it over first. The lease
+    // goes into B's name; when the last member leaves, the club closes.
+    let (st, _) = post(&a, format!("/api/social/clubs/{id}/leave"), json!({})).await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    let (st, _) = post(
+        &a,
+        format!("/api/social/clubs/{id}/role"),
+        json!({ "id": b.id.to_string(), "role": "owner" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let holder: Uuid = sqlx::query_scalar(
+        "SELECT player_id FROM leases WHERE club_id = $1::uuid AND state <> 'ended'",
+    )
+    .bind(&id)
+    .fetch_one(&s.db)
+    .await
+    .unwrap();
+    assert_eq!(holder, b.id);
+    let (st, _) = post(&a, format!("/api/social/clubs/{id}/leave"), json!({})).await;
+    assert_eq!(st, StatusCode::OK);
+    let (_, r) = post(&b, format!("/api/social/clubs/{id}/leave"), json!({})).await;
+    assert_eq!(r["closed"], true);
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM leases WHERE club_id = $1::uuid AND state <> 'ended'",
+    )
+    .bind(&id)
+    .fetch_one(&s.db)
+    .await
+    .unwrap();
+    assert_eq!(open, 0, "its room is given up");
+    let (st, _) = get(&b, format!("/api/social/clubs/{id}")).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}

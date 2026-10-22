@@ -1,7 +1,9 @@
-//! Renting (ADR 0010, C4): every house, apartment and market stall is
-//! leased for coins per period, by tier (`assets/city/rent.json`). Nothing
-//! is ever bought, and nothing is lost when a lease ends: furniture and stall
-//! goods go back to the player's bag.
+//! Renting (ADR 0010, C4): every house, apartment, market stall and club
+//! room is leased for coins per period, by tier (`assets/city/rent.json`).
+//! Nothing is ever bought, and nothing is lost when a lease ends: furniture
+//! and stall goods go back to the player's bag. A club room's rent comes
+//! out of the club's treasury (ADR 0014), and its notices go to the club's
+//! owner and moderators.
 //!
 //! - Opening a lease pays the first period up front.
 //! - A sweeper renews leases as they come due; one that can't be paid gets
@@ -39,9 +41,13 @@ pub static RENT: LazyLock<RentCatalog> = LazyLock::new(|| {
     r
 });
 
-/// "home" (a house or an apartment) or "stall".
+/// "home" (a house or an apartment), "stall" or "club" (a club room).
 pub fn slot_of(kind: &str) -> &'static str {
-    if kind == "stall" { "stall" } else { "home" }
+    match kind {
+        "stall" => "stall",
+        "club_room" => "club",
+        _ => "home",
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -55,13 +61,15 @@ pub struct Lease {
     pub paid_until: i64,
     pub grace_until: Option<i64>,
     pub state: String,
+    /// A club room: the club it's for (rent from its treasury).
+    pub club: Option<Uuid>,
 }
 
-const LEASE_COLS: &str = "id, kind, plot, player_id, tier, periods_paid, \
+pub(crate) const LEASE_COLS: &str = "id, kind, plot, player_id, tier, periods_paid, \
      extract(epoch FROM paid_until)::bigint AS paid_until, \
-     extract(epoch FROM grace_until)::bigint AS grace_until, state";
+     extract(epoch FROM grace_until)::bigint AS grace_until, state, club_id";
 
-fn lease_row(r: &sqlx::postgres::PgRow) -> Lease {
+pub(crate) fn lease_row(r: &sqlx::postgres::PgRow) -> Lease {
     Lease {
         id: r.get("id"),
         kind: r.get("kind"),
@@ -72,6 +80,7 @@ fn lease_row(r: &sqlx::postgres::PgRow) -> Lease {
         paid_until: r.get("paid_until"),
         grace_until: r.get("grace_until"),
         state: r.get("state"),
+        club: r.get("club_id"),
     }
 }
 
@@ -87,6 +96,7 @@ impl Lease {
         json!({
             "id": self.id, "kind": self.kind, "plot": self.plot, "tier": self.tier,
             "tier_name": t.name, "rent": t.rent, "furniture": t.furniture, "listings": t.listings,
+            "members": t.members,
             "paid_until": self.paid_until, "grace_until": self.grace_until, "state": self.state,
         })
     }
@@ -215,7 +225,7 @@ pub async fn open(
     Ok(lease)
 }
 
-async fn charge_in(
+pub(crate) async fn charge_in(
     conn: &mut PgConnection,
     state: &SocialState,
     lease: &Lease,
@@ -224,6 +234,9 @@ async fn charge_in(
 ) -> Result<(), EconError> {
     if amount <= 0 {
         return Ok(());
+    }
+    if let Some(club) = lease.club {
+        return crate::clubs::spend(conn, club, amount, "rent", key).await;
     }
     apply(
         conn,
@@ -240,7 +253,7 @@ async fn charge_in(
     .map(|_| ())
 }
 
-async fn record_charge(
+pub(crate) async fn record_charge(
     conn: &mut PgConnection,
     lease: i64,
     period: i32,
@@ -257,7 +270,7 @@ async fn record_charge(
 }
 
 /// Pays the next period. Ok(false): not enough coins (nothing changed).
-async fn renew(state: &SocialState, lease: &Lease) -> ApiResult<bool> {
+pub(crate) async fn renew(state: &SocialState, lease: &Lease) -> ApiResult<bool> {
     let rent = lease.tier_info().rent;
     let mut tx = state.db.begin().await.map_err(db_err)?;
     let key = format!("rent:{}:{}", lease.id, lease.periods_paid);
@@ -299,7 +312,10 @@ pub async fn release(state: &SocialState, lease: &Lease, reason: &str) -> ApiRes
     if ended == 0 {
         return Ok(0);
     }
-    let back: Vec<(i32, i64)> = if slot_of(&lease.kind) == "home" {
+    // Nothing can be placed in a club room yet (C2), so nothing comes back.
+    let back: Vec<(i32, i64)> = if lease.club.is_some() {
+        vec![]
+    } else if slot_of(&lease.kind) == "home" {
         let rows = sqlx::query_as(
             "SELECT item_id, count(*) FROM home_objects WHERE owner_id = $1 GROUP BY item_id ORDER BY item_id",
         )
@@ -350,8 +366,21 @@ pub async fn release(state: &SocialState, lease: &Lease, reason: &str) -> ApiRes
     Ok(ops.iter().map(|o| o.delta).sum())
 }
 
-async fn notify(state: &SocialState, to: Uuid, kind: &str, body: serde_json::Value) {
-    crate::routes::notify(state, to, kind, body).await;
+/// Tells whoever holds the lease, or for a club room its owner and
+/// moderators (naming the club).
+async fn notify_lease(state: &SocialState, lease: &Lease, kind: &str, mut body: serde_json::Value) {
+    let Some(club) = lease.club else {
+        crate::routes::notify(state, lease.player, kind, body).await;
+        return;
+    };
+    let (name, staff) = crate::clubs::staff(&state.db, club)
+        .await
+        .unwrap_or_default();
+    body["club"] = json!(name);
+    body["what"] = json!(format!("{name}'s club room"));
+    for p in staff {
+        crate::routes::notify(state, p, kind, body.clone()).await;
+    }
 }
 
 /// Renews leases that are due, starts grace for those that can't pay, and
@@ -387,18 +416,18 @@ pub async fn sweep(state: &SocialState) -> ApiResult<usize> {
             .execute(&state.db)
             .await
             .map_err(db_err)?;
-            notify(
+            notify_lease(
                 state,
-                lease.player,
+                lease,
                 "rent_due",
                 json!({ "kind": lease.kind, "plot": lease.plot, "what": what, "rent": t.rent, "grace_until": grace_until }),
             )
             .await;
         } else if lease.grace_until.is_some_and(|g| g <= now) {
             let back = release(state, lease, "unpaid").await?;
-            notify(
+            notify_lease(
                 state,
-                lease.player,
+                lease,
                 "lease_ended",
                 json!({ "kind": lease.kind, "plot": lease.plot, "what": what, "returned": back }),
             )

@@ -69,6 +69,13 @@ goes through a LiveKit server, which `scripts/dev.mjs` starts for you (it
 uses `livekit-server` from your PATH, or fetches the official release into
 `tools/livekit/` the first time). Calls for under-16s are built but off
 (`COMMONS_VOICE_MINORS`).
+Clubs (🛡 at the top, or K): found one at the Club Hall's desk, next to
+the Town Hall, by renting its room (25 coins for the first week; a Big
+club room for 30 members costs 60). After that the club's treasury pays
+the rent, from what members chip in; if it can't, the room is given up
+after a grace period, but the club carries on. Owners and moderators
+invite friends; the board, roles and your club's crest by your name are
+on the club's page, and the stairs lead up to its room.
 Testing on a dev server: a wish at the wishing well (on the Town Hall's
 plaza) grants 10,000 coins, every time; real servers don't have it.
 🔊 or M toggles sound;
@@ -139,7 +146,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `API_BIND` / `ORCHESTRATOR_BIND` / `ZONE_BIND` | `0.0.0.0:8080/8081/8082` | each service |
 | `COMMONS_CLIENT_URL` | `http://localhost:5173` | api (magic-link URLs) |
 | `ZONE_PUBLIC_URL` | `ws://localhost:8082/ws` | orchestrator |
-| `COMMONS_ZONES` | `city,home,mall,bar,arcade,library` and the eight `library_<wing>`s | orchestrator |
+| `COMMONS_ZONES` | `city,home,mall,bar,arcade,library`, the eight `library_<wing>`s, `club_hall,clubroom` | orchestrator |
 | `COMMONS_MAPS_DIR` | `assets/maps` | zone |
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |

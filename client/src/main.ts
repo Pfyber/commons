@@ -13,6 +13,8 @@ import libSocietyUrl from "../../assets/maps/library_society.json?url";
 import libScienceUrl from "../../assets/maps/library_science.json?url";
 import libArtsUrl from "../../assets/maps/library_arts.json?url";
 import libReferenceUrl from "../../assets/maps/library_reference.json?url";
+import clubHallUrl from "../../assets/maps/club_hall.json?url";
+import clubRoomUrl from "../../assets/maps/clubroom.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
 import { Homes } from "./homes";
@@ -39,6 +41,8 @@ import { HALL, Library, wingOfZone } from "./library";
 import { BookCardPanel, CataloguePanel, type LibraryHost, MyBooksPanel, ReaderPanel, ShelfPanel } from "./ui/library";
 import { Calls, PHONE } from "./calls";
 import { IncomingCall, PhonePanel } from "./ui/phone";
+import { Clubs } from "./clubs";
+import { ClubsPanel } from "./ui/clubs";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -71,6 +75,8 @@ const MAP_URLS: Record<string, string> = {
   library_science: libScienceUrl,
   library_arts: libArtsUrl,
   library_reference: libReferenceUrl,
+  club_hall: clubHallUrl,
+  clubroom: clubRoomUrl,
 };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
@@ -172,6 +178,7 @@ async function main() {
     onMap: () => cityMap.toggle(),
     onBooks: () => myBooks.toggle(),
     onPhone: () => phone.toggle(),
+    onClubs: () => (clubsPanel.open ? clubsPanel.hide() : clubsPanel.showList()),
     onMood: () => {
       moodPicker.setCurrent((game as Game | null)?.currentMood ?? 0);
       moodPicker.toggle();
@@ -256,6 +263,18 @@ async function main() {
   const showPhone = () => hud.setPhone(eco.qty(PHONE) > 0 || calls.live, calls.live);
   calls.onChange(showPhone);
   eco.onChange(showPhone);
+  const clubs = new Clubs(auth, social);
+  const clubsPanel = new ClubsPanel(clubs, social, eco, {
+    goToRoom: (id) => void travel({ zone: "clubroom", owner: id }),
+    inRoom: () => {
+      const g = game as Game | null;
+      return g?.zoneId === "clubroom" ? (g.place.owner ?? null) : null;
+    },
+    toast: (t) => hud.toast(t, 4500),
+  });
+  // The 🛡 button lights up while an invite waits or a club's rent is due.
+  clubs.onChange(() => hud.setClubs(clubs.invites.length > 0 || clubs.mine.some((c) => c.room?.state === "grace")));
+  void clubs.load().catch(() => {});
   // Still on a call from before a reload: back onto it.
   void calls.resume().catch(() => {});
   library.onLoans((l) => {
@@ -342,6 +361,8 @@ async function main() {
     reader,
     calls,
     phone,
+    clubs,
+    clubsPanel,
   };
   ui.catalogue.reader = reader;
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
@@ -350,7 +371,15 @@ async function main() {
     if (!s || s.founder || (!s.season.open && welcome.done < 3)) return hud.setTasks(null);
     hud.setTasks(welcome.done === 3 ? "🌱 Plant your seedling!" : `🌿 Caretaker's tasks ${welcome.done}/3`);
   });
-  const notifications = new NotificationsPanel(social, friendActions);
+  const notifications = new NotificationsPanel(social, {
+    ...friendActions,
+    clubInvited: (id) => clubs.invites.some((i) => i.id === id),
+    answerClub: (id, accept) =>
+      void clubs
+        .answer(id, accept)
+        .then((r) => r.joined && hud.toast(`🛡 Welcome to ${clubs.club(id)?.name ?? "the club"}!`, 4000))
+        .catch((e) => hud.toast(e instanceof ApiError ? e.message : "That didn't work.", 4000)),
+  });
   eco.onChange(() => hud.setCoins(eco.coins));
   social.onChange(() => hud.setBadge(social.unreadCount));
   social.onToast = (t) => hud.toast(t, 4000);
@@ -389,6 +418,17 @@ async function main() {
           }
         }
       }
+      // In a club room, its banner shows the club's crest and colour.
+      if (ticket.zone_id === "clubroom" && ticket.owner) {
+        if (!clubs.club(ticket.owner)) await clubs.load().catch(() => {});
+        const c = clubs.club(ticket.owner);
+        for (const o of map.objects) {
+          if (o.kind !== "club_banner" || !c) continue;
+          o.label = c.name;
+          o.sign = c.crest;
+          o.color = c.color;
+        }
+      }
       const placeInfo = { label: ticket.label, owner: ticket.owner };
       if (!game || game.zoneId !== ticket.zone_id || game.place.owner !== placeInfo.owner) {
         game?.destroy();
@@ -400,9 +440,9 @@ async function main() {
           // library). Out of a library wing, you're back at its door in the hall.
           onTravel: (z) => {
             const from = game as Game | null;
-            const place = from && ["mall", "bar", "arcade", HALL].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
+            const place = from && ["mall", "bar", "arcade", HALL, "club_hall"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
             const arrive =
-              z === HALL && from && wingOfZone(from.zoneId)
+              (z === HALL && from && wingOfZone(from.zoneId)) || (z === "club_hall" && from?.zoneId === "clubroom")
                 ? `place:${from.zoneId}`
                 : z !== "city"
                   ? undefined

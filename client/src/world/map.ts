@@ -23,6 +23,8 @@ export interface MapObject {
   gaps?: number[];
   /** Library stack signs: the class (or language) on the row, in short. */
   sign?: string;
+  /** Club banners: the club's colour (its crest is `sign`). */
+  color?: string;
 }
 
 /** The street grid of a city map (mirror of sim::map::StreetGrid). */

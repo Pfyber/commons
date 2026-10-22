@@ -218,7 +218,12 @@ export class FriendsPanel extends Panel {
 export class NotificationsPanel extends Panel {
   constructor(
     private social: Social,
-    private actions: FriendActions & { visitId(id: string, name: string): void },
+    private actions: FriendActions & {
+      visitId(id: string, name: string): void;
+      /** Whether the invite into club `id` is still waiting for an answer. */
+      clubInvited?(id: string): boolean;
+      answerClub?(id: string, accept: boolean): void;
+    },
   ) {
     super("Notifications", "notifications");
     social.onChange(() => this.open && this.render());
@@ -258,6 +263,13 @@ export class NotificationsPanel extends Panel {
       }
       const inviteLive = Date.now() / 1000 - n.at < INVITE_SECS;
       if (n.kind === "home_invite" && from && inviteLive) row.append(button("Visit", () => this.actions.visitId(from, name), "small primary-sm"));
+      const club = n.body.club_id;
+      if (n.kind === "club_invite" && club && this.actions.clubInvited?.(club)) {
+        row.append(
+          button("Join", () => this.actions.answerClub?.(club, true), "small primary-sm"),
+          button("No thanks", () => this.actions.answerClub?.(club, false), "small"),
+        );
+      }
       if (n === newestGift && this.waitingGifts > 0) row.append(button("Go home", () => this.actions.goHome(), "small"));
       this.body.append(row);
     }

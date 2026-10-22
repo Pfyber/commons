@@ -7,6 +7,7 @@
 //! replace this once `tools/mapedit` exists.
 
 mod city;
+mod clubs;
 mod leisure;
 mod library;
 mod mall;
@@ -474,6 +475,8 @@ fn main() -> std::io::Result<()> {
     write("bar", &leisure::bar())?;
     write("arcade", &leisure::arcade())?;
     write("library", &library::hall())?;
+    write("club_hall", &clubs::lobby())?;
+    write("clubroom", &clubs::room())?;
     for wing in commons_sim::library::WINGS {
         write(&wing.zone(), &library::wing(&wing))?;
     }

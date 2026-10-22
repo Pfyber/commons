@@ -3803,3 +3803,78 @@ body.woozy #stage canvas {
 .call-log .dir.bad {
   color: var(--danger);
 }
+
+/* Clubs: crests on their colours, the founding form's swatches, members online. */
+.panel .crest {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  font-size: 15px;
+  border: 2px solid var(--ink, #3b3a2e);
+}
+
+.panel .crest.big {
+  width: 44px;
+  height: 44px;
+  font-size: 26px;
+}
+
+.panel .club-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+
+.panel .swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.panel .swatches button.small {
+  min-width: 34px;
+  font-size: 17px;
+  padding: 4px 6px;
+}
+
+.panel .swatches button.on {
+  outline: 3px solid var(--leaf);
+  outline-offset: -3px;
+}
+
+.panel .swatches button.swatch {
+  height: 30px;
+}
+
+.panel .member-row .dot {
+  color: #b9b2a0;
+  font-size: 11px;
+}
+
+.panel .member-row .dot.on {
+  color: var(--leaf);
+}
+
+.panel .member-row button.small,
+.panel .club-row button.small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.panel .add-friend select {
+  flex: 1;
+  font: inherit;
+  padding: 6px;
+}
+
+/* A club's crest by a name. */
+.label .club-badge {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 2px;
+  font-size: 0.85em;
+  border-radius: 2px;
+}

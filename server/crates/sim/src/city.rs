@@ -377,6 +377,9 @@ pub struct RentTier {
     /// Stalls: goods that can be on show.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listings: Option<i64>,
+    /// Club rooms: how many members the club can have.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

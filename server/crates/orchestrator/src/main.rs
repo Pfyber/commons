@@ -69,11 +69,11 @@ struct Located {
 }
 
 /// Public buildings with a door onto the city (a `door:<name>` spot there).
-const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade", "library"];
+const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade", "library", "club_hall"];
 
 /// Zones served unless `COMMONS_ZONES` says otherwise: the city, homes, the
 /// public buildings, and the Library's hall and wings (ADR 0012).
-const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference";
+const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom";
 
 #[derive(Deserialize)]
 struct Lot {
@@ -178,18 +178,36 @@ async fn join(
                 label = format!("{}'s home", v.owner_name);
             }
             (zone, 1, Some(owner), label)
+        } else if zone == "clubroom" {
+            // A club's own room (ADR 0014): its members only, while it has one.
+            let club = req
+                .owner
+                .clone()
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "no_club", "Which club's room?"))?;
+            #[derive(Deserialize)]
+            struct Room {
+                name: String,
+            }
+            let room: Room = ask_social(
+                &state,
+                &format!("/internal/club_room?player={}&club={club}", who.sub),
+            )
+            .await?;
+            (zone, 1, Some(club), room.name)
         } else {
             (zone, 1, None, String::new())
         }
     };
     // Leaving somewhere through a door: step out of that door (best effort).
     // `arrive` is a public place (`place:mall`; a library wing, back into the
-    // hall), a home's owner, or "home" for your own.
+    // hall; a club room, back into the Club Hall), a home's owner, or "home"
+    // for your own.
     let arrive = match req.arrive.as_deref() {
         Some(a) if zone == "library" => a
             .strip_prefix("place:")
             .filter(|w| w.starts_with("library_") && state.zones.iter().any(|z| z == w))
             .map(String::from),
+        Some("place:clubroom") if zone == "club_hall" => Some("clubroom".to_string()),
         Some(a) if zone == "city" => match a.strip_prefix("place:") {
             Some(place) => PUBLIC_DOORS.contains(&place).then(|| place.to_string()),
             None => {

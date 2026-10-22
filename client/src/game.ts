@@ -74,6 +74,8 @@ import type { BookCardPanel, CataloguePanel, ReaderPanel, ShelfPanel } from "./u
 import type { Calls } from "./calls";
 import type { PhonePanel } from "./ui/phone";
 import { LibraryRoom } from "./world/libraryroom";
+import type { Clubs } from "./clubs";
+import type { ClubsPanel } from "./ui/clubs";
 
 /** Error codes from server/crates/protocol (error_code). */
 const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION_MISMATCH: 3 };
@@ -147,6 +149,8 @@ export interface Ui {
   reader: ReaderPanel;
   calls: Calls;
   phone: PhonePanel;
+  clubs: Clubs;
+  clubsPanel: ClubsPanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -364,7 +368,7 @@ export class Game {
     }
     // Indoors (the mall, the bar, the arcade, the library): the lights are
     // on, no weather, no birds, no wheels, no sprinting; the arcade is lit by neon.
-    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library");
+    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club");
     this.ambient = new Ambient(this.scene, map, indoors);
     this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade");
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
@@ -512,6 +516,9 @@ export class Game {
     this.disposers.push(ui.welcome.onChange(() => this.applyFounders()));
     this.applyFounders();
     void ui.welcome.loadFounders().catch(() => {});
+    // Club crests by names (asked afresh in each place).
+    ui.clubs.forgetBadges();
+    this.disposers.push(ui.clubs.onBadges(() => this.applyClubBadges()));
     this.chess = new ChessPanel(document.body, () => this.selfId, {
       move: (table, uci) => this.socket?.send({ t: "GameMove", table, uci }),
       close: () => this.chess.hide(),
@@ -560,6 +567,7 @@ export class Game {
       const a = new Avatar(info, this.scene, this.labels, info.id === this.selfId, now);
       a.setAway(info.away);
       a.setFounder(this.ui.welcome.founderNamed(info.name)?.no ?? null);
+      a.setClub(this.ui.clubs.badgeOf(info.name));
       this.avatars.set(info.id, a);
     }
   }
@@ -567,6 +575,10 @@ export class Game {
   private applyFounders() {
     this.grove?.setFounders(this.ui.welcome.founders);
     for (const a of this.avatars.values()) a.setFounder(this.ui.welcome.founderNamed(a.info.name)?.no ?? null);
+  }
+
+  private applyClubBadges() {
+    for (const a of this.avatars.values()) a.setClub(this.ui.clubs.badgeOf(a.info.name));
   }
 
   /** Ties `panel` to a place: it closes once you walk away from it. */
@@ -705,6 +717,52 @@ export class Game {
       case "stack_sign": {
         const text = this.libraryRoom?.signText(obj);
         this.hud.toast(`🔖 ${text ?? "Reading the sign…"}`, 5000);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ---- the club hall --------------------------------------------------------
+
+  /** The Club Hall's doors, desk, directory and stairs; a club room's board and banner. */
+  private tapClubs(obj: MapObject): boolean {
+    const self = this.self;
+    const ui = this.ui;
+    if (!self) return false;
+    const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+    const walkUp = () => {
+      if (cheb(self.destination, front) > 2) this.walkTo(front);
+    };
+    switch (obj.kind) {
+      case "club_hall":
+        this.enter(front, "club_hall");
+        return true;
+      case "clubhall_exit":
+        this.events.onTravel("city");
+        return true;
+      case "clubroom_exit":
+        this.events.onTravel("club_hall");
+        return true;
+      case "club_desk":
+        walkUp();
+        this.near(ui.clubsPanel, front, 8).showList();
+        return true;
+      case "club_directory":
+        walkUp();
+        this.near(ui.clubsPanel, front, 8).showDirectory();
+        return true;
+      case "club_stairs":
+        walkUp();
+        this.near(ui.clubsPanel, front, 8).showRooms();
+        return true;
+      case "club_board":
+        walkUp();
+        if (this.place.owner) this.near(ui.clubsPanel, front, 8).showClub(this.place.owner);
+        return true;
+      case "club_banner": {
+        const c = this.place.owner ? ui.clubs.club(this.place.owner) : null;
+        this.hud.toast(c ? `${c.crest} ${c.name}: ${c.members} member${c.members === 1 ? "" : "s"}.` : "The club's banner.", 4000);
         return true;
       }
     }
@@ -2134,6 +2192,7 @@ export class Game {
       return true;
     }
     if (obj && this.tapLibrary(obj)) return true;
+    if (obj && this.tapClubs(obj)) return true;
     if (obj?.kind === "arcade_exit") {
       this.events.onTravel("city");
       return true;

@@ -79,6 +79,21 @@ export const ICONS: Record<string, string[]> = {
     "...okook....",
     "....oooo....",
   ],
+  // A shield with a star: your clubs.
+  shield: [
+    "oooooooooooo",
+    "obbbbbbbbbbo",
+    "obbbbybbbbbo",
+    "obbbyyybbbbo",
+    "obyyyyyyybbo",
+    "obbyyyyybbbo",
+    "obbybbbybbbo",
+    ".obbbbbbbbo.",
+    ".obbbbbbbbo.",
+    "..obbbbbbo..",
+    "...obbbbo...",
+    "....oooo....",
+  ],
   // Library books on a shelf: your borrowed books.
   books: [
     "............",
