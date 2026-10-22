@@ -70,7 +70,7 @@ import { encodeLook } from "./world/look";
 import { Milestones } from "./world/milestones";
 import { Scene } from "./world/scene";
 import { HALL, type Library, NEW, type Place as BookPlace, wingOfZone, wingZone } from "./library";
-import type { BookCardPanel, CataloguePanel, ShelfPanel } from "./ui/library";
+import type { BookCardPanel, CataloguePanel, ReaderPanel, ShelfPanel } from "./ui/library";
 import { LibraryRoom } from "./world/libraryroom";
 
 /** Error codes from server/crates/protocol (error_code). */
@@ -142,6 +142,7 @@ export interface Ui {
   catalogue: CataloguePanel;
   shelf: ShelfPanel;
   bookCard: BookCardPanel;
+  reader: ReaderPanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */

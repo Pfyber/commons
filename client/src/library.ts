@@ -160,6 +160,25 @@ export function rangeText(from: SignLabel, to: SignLabel, world: boolean): strin
   return `${cls ? `${cls} · ` : ""}${from.a} – ${to.a}`;
 }
 
+/** A page of a book (with the contents, on opening). */
+export interface TextPage {
+  id: number;
+  title: string;
+  page: number;
+  pages: number;
+  body: string;
+  contents?: { page: number; title: string }[];
+}
+
+/** A book you've been reading. */
+export interface Reading {
+  id: number;
+  title: string;
+  authors: string;
+  page: number;
+  pages: number;
+}
+
 export class Library {
   private wingsP: Promise<Wings> | null = null;
   private wingsAt = 0;
@@ -209,6 +228,22 @@ export class Library {
   search(q: string, lang = ""): Promise<Found[]> {
     const qs = new URLSearchParams({ q, lang });
     return this.auth.get<{ books: Found[] }>(`/api/library/search?${qs}`).then((r) => r.books);
+  }
+
+  /** A page of book `id`; without `page`, where you left off (fetching the text first if nobody has opened it yet). */
+  text(id: number, page?: number): Promise<TextPage> {
+    const q = page === undefined ? "" : `?page=${page}`;
+    return this.auth.get<TextPage>(`/api/library/books/${id}/text${q}`);
+  }
+
+  /** Keeps your place in a book. */
+  savePlace(book: number, page: number): Promise<unknown> {
+    return this.auth.send("/api/library/reading", { book, page });
+  }
+
+  /** What you've been reading, latest first. */
+  recent(): Promise<Reading[]> {
+    return this.auth.get<{ books: Reading[] }>("/api/library/reading").then((r) => r.books);
   }
 
   book(id: number): Promise<Card> {

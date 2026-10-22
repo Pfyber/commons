@@ -36,7 +36,7 @@ import { FoundersPanel, WelcomePanel } from "./ui/welcome";
 import { BottlesPanel, WishPanel } from "./ui/dream";
 import { WardrobePanel } from "./ui/wardrobe";
 import { HALL, Library, wingOfZone } from "./library";
-import { BookCardPanel, CataloguePanel, type LibraryHost, ShelfPanel } from "./ui/library";
+import { BookCardPanel, CataloguePanel, type LibraryHost, ReaderPanel, ShelfPanel } from "./ui/library";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -241,6 +241,8 @@ async function main() {
     cases: (wing) => (game as Game | null)?.libraryCases(wing) ?? 0,
   };
   const bookCard = new BookCardPanel(library, libraryHost);
+  const reader = new ReaderPanel(library);
+  bookCard.reader = reader;
   const ui: Ui = {
     eco,
     hud,
@@ -315,7 +317,9 @@ async function main() {
     bookCard,
     shelf: new ShelfPanel(library, bookCard, libraryHost),
     catalogue: new CataloguePanel(library, bookCard, libraryHost),
+    reader,
   };
+  ui.catalogue.reader = reader;
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
   welcome.onChange(() => {
     const s = welcome.status;

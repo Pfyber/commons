@@ -1030,6 +1030,49 @@ panel at phone width.
 Next: L2, reading (fetch, clean, page and cache texts; the reader; your
 place kept).
 
+## Library L2 · Reading: done (2026-10-22)
+
+Any of the 78,383 books can now be read in the game.
+
+- **Fetching, politely** (`api/src/reading.rs`, migration 0027): the
+  first time anyone opens a book, the API server fetches its plain text
+  from Gutenberg (`LIBRARY_TEXT_URL`), one book at a time with a pause
+  between (`LIBRARY_FETCH_PAUSE_MS`, 1.5 s), a proper User-Agent, a 24 MB
+  cap; too many readers waiting gets "the stacks are busy". A book that
+  can't be found is remembered as missing. Opening Pride and Prejudice
+  the first time takes about 1.5 s; after that it's from our database.
+- **Cleaning:** Gutenberg's header and footer come off (everything
+  outside the `*** START OF` / `*** END OF` lines), so what's kept is
+  plain public-domain text. Hard-wrapped prose is joined back into
+  paragraphs; verse keeps its lines (long lines that all start with a
+  capital are verse: The Raven), and so do headings and lists. A bracketed
+  note over several paragraphs (`[Illustration: …]`) stays one.
+- **Pages and contents:** cut at paragraph breaks into pages of about
+  2,400 characters (an over-long paragraph at sentence ends); chapter
+  headings (Chapter, Book, Part, Act, Letter, Stave, Canto, Chapitre,
+  Kapitel, Capítulo, Luku …) make the contents, the printed table of
+  contents ignored. `TEXT_VERSION` marks how a text was made: raise it and
+  books are fetched and paged again as they're next opened.
+- **The reader:** a paper page in a serif face, three text sizes, the
+  contents to jump by, a page slider, page turns by button, arrow keys
+  (the avatar stays put) or a swipe, the next page fetched ahead,
+  pictures shown as their captions, Gutenberg's _italics_ as italics,
+  "From the collection of Project Gutenberg" at the foot. Your place is
+  kept a moment after each turn and the book opens there next time; the
+  catalogue lists what you've been reading. The reader stays open as you
+  walk, so you can take a book out to a bench.
+
+Checked: server tests (API 41 with the reading routes against a stored
+text: header gone, contents, place kept, a missing book, sign-in
+needed; six cleaning and paging tests), clippy clean; client 79 tests.
+In the browser, from Gutenberg itself: Pride and Prejudice (349 pages,
+63 contents entries, chapter 34 by the contents, arrows turn pages,
+reopens at page 180), The Raven's stanzas, Les Misérables in French,
+Continue reading at the catalogue, and the reader at phone width.
+
+Next: L3, reading together (what someone's reading on their name tag,
+reading nooks).
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

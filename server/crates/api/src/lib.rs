@@ -17,6 +17,7 @@ pub mod mall;
 pub mod pets;
 pub mod play;
 pub mod prizes;
+pub mod reading;
 pub mod store;
 #[cfg(test)]
 mod tests;

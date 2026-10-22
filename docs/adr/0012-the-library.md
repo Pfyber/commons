@@ -74,6 +74,6 @@ The hall: the circulation and catalogue desk with the librarian; the
 | Step | What | Playable because |
 |---|---|---|
 | **L1** ✓ | Catalogue import, the shelf list, search; the hall and all eight wings with every book a spine; tap a spine for its card; the catalogue desk with "Show me". | Browse the whole collection. |
-| **L2** | Reading: fetch, clean, page and cache texts; the reader; your place kept per book; "continue reading". | Read any book. |
+| **L2** ✓ | Reading: fetch, clean, page and cache texts; the reader; your place kept per book; "continue reading". | Read any book. |
 | **L3** | Together: what someone's reading on their name tag (tap to open the same book), books pulled slightly out where they're being read, reading nooks and the reading room's quiet. | Reading near people. |
 | **L4** | A book club board, recommending a book as a doorstep gift, curated shelves for under-16s, per-country hiding, re-shelving with an announcement. | Care and community. |

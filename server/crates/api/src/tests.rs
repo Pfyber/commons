@@ -2677,6 +2677,90 @@ mod library {
         let (st, _) = get(&app, &auth, "/api/library/case/world/9999").await;
         assert_eq!(st, StatusCode::NOT_FOUND);
 
+        // Reading: a text already in the stacks (no fetching in tests),
+        // a page at a time, your place kept; a book with no text says so.
+        let raw = format!(
+            "Header
+*** START OF THE PROJECT GUTENBERG EBOOK X ***
+
+CHAPTER I
+
+{}
+
+CHAPTER II
+
+The end.
+*** END OF THE PROJECT GUTENBERG EBOOK X ***
+Footer",
+            "A long paragraph of the story goes on here. ".repeat(120)
+        );
+        let pages = crate::reading::store(&s.db, ours[0], &raw).await.unwrap();
+        assert!(pages >= 3, "{pages} pages");
+        let reading: Router = Router::new()
+            .nest("/api", crate::reading::routes())
+            .with_state(s.clone());
+        let (st, first) = get(
+            &reading,
+            &auth,
+            &format!("/api/library/books/{}/text", ours[0]),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(first["page"], 0);
+        assert_eq!(first["pages"], pages);
+        assert!(first["body"].as_str().unwrap().starts_with("CHAPTER I"));
+        assert!(!first["body"].as_str().unwrap().contains("Header"));
+        assert_eq!(first["contents"][1]["title"], "CHAPTER II");
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/library/reading")
+            .header("authorization", &auth)
+            .header("content-type", "application/json")
+            .body(Body::from(format!(r#"{{"book":{},"page":2}}"#, ours[0])))
+            .unwrap();
+        assert_eq!(
+            reading.clone().oneshot(req).await.unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
+        let (_, back) = get(
+            &reading,
+            &auth,
+            &format!("/api/library/books/{}/text", ours[0]),
+        )
+        .await;
+        assert_eq!(back["page"], 2, "opens where you left off");
+        let (_, p1) = get(
+            &reading,
+            &auth,
+            &format!("/api/library/books/{}/text?page=1", ours[0]),
+        )
+        .await;
+        assert_eq!(p1["page"], 1);
+        assert!(p1.get("contents").is_none());
+        let (_, recent) = get(&reading, &auth, "/api/library/reading").await;
+        assert_eq!(recent["books"][0]["id"], ours[0]);
+        assert_eq!(recent["books"][0]["page"], 2);
+        sqlx::query("INSERT INTO book_texts (book_id, status, version) VALUES ($1, 'missing', $2)")
+            .bind(ours[1])
+            .bind(crate::reading::TEXT_VERSION)
+            .execute(&s.db)
+            .await
+            .unwrap();
+        let (st, _) = get(
+            &reading,
+            &auth,
+            &format!("/api/library/books/{}/text", ours[1]),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = get(
+            &reading,
+            "",
+            &format!("/api/library/books/{}/text", ours[0]),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+
         // A changed record is updated, not added; then put things back.
         let renamed = [book(ours[0], "The Zorblewick Affair, Revised", "en", "PR")];
         assert_eq!(upsert(&s.db, &renamed).await.unwrap(), 0);
