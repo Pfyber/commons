@@ -1,6 +1,7 @@
 // Vehicles (ADR 0011, M6): how they look under a rider, and on a display.
 // Codes are `commons_sim::vehicles`: 1 roller skates, 2 kick scooter, 3 city
-// bike, 4 vintage bike, 5 skateboard (drawn with the rider, see Avatar). Drawn facing right on a 32×24 canvas, the ground on
+// bike, 4 vintage bike, 5 skateboard (under a rider it is drawn with the
+// rider, see Avatar; this is how it looks on its own). Drawn facing right on a 32×24 canvas, the ground on
 // the bottom row; `RIDE_POSE` says how the rider sits on each.
 
 import type { Texture } from "pixi.js";
@@ -79,6 +80,26 @@ export function vehicleCanvas(code: number, frame: 0 | 1 = 0): HTMLCanvasElement
       px(ctx, O, 24, 2, 2, 17);
       px(ctx, "#7fb5d8", 24, 3, 1, 15);
       px(ctx, O, 21, 1, 8, 2);
+      break;
+    }
+    case 5: {
+      // Skateboard, as it looks under a rider: a black deck kicked up at
+      // both ends, red trucks, cream wheels whose hub turns as they roll.
+      const hub = frame ? 1 : 0;
+      for (const wx of [7, 21]) {
+        px(ctx, O, wx + 1, 17, 2, 1);
+        px(ctx, O, wx, 18, 4, 3);
+        px(ctx, "#f1e9d2", wx + 1, 18, 2, 2);
+        px(ctx, "#9c8f73", wx + 1 + hub, 18 + hub, 1, 1);
+        px(ctx, O, wx + 1, 21, 2, 1);
+        px(ctx, "#c8553d", wx, 16, 4, 1);
+      }
+      px(ctx, "#141414", 4, 14, 24, 2);
+      px(ctx, "#2a2a2a", 5, 14, 22, 1);
+      px(ctx, "#141414", 2, 12, 3, 2);
+      px(ctx, "#141414", 27, 12, 3, 2);
+      // A flash of colour on the deck's edge.
+      px(ctx, "#f6c343", 12, 15, 8, 1);
       break;
     }
     default: {
