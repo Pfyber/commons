@@ -1563,6 +1563,35 @@ Checked:
 Next: K2, blackjack. After that, K3: poker tables, a jackpot and
 cosmetic prizes.
 
+## Faster vehicles (2026-10-23)
+
+Vehicles now give real speed. Before, a bike was barely faster than a
+sprint (1.3× to 1.8× walking); now it's 2.2× to 3.5×, and the dearer the
+ride, the faster it goes:
+
+| Vehicle | Speed |
+|---|---|
+| Roller skates | 2.2× |
+| Skateboard | 2.4× |
+| Kick scooter | 2.7× |
+| City bike | 3.2× |
+| Vintage bike | 3.5× |
+
+The changes:
+- The speeds live in `commons_sim::vehicles` and in the client's
+  `vehicles.ts`.
+- Migration 0037 updates the `speed` in each vehicle item's meta.
+- The shop shows "⚡ N× walking speed".
+- Riders leave dust puffs and speed streaks behind them (none with
+  reduced motion), and their wheels spin faster.
+
+Checked:
+- Sim test: every vehicle is at least 2× walking and faster than a
+  sprint.
+- Server and client test suites pass, clippy clean.
+- In the browser, Market station to Lake station: 48 s on foot, 15 s on
+  the city bike.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

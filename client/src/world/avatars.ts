@@ -64,6 +64,11 @@ const FISHING = 2;
 const SKATEBOARD = 5;
 /** Rods by `tool` code: the plain one, cherrywood, carbon, golden. */
 const ROD_COLORS = [0x7a5230, 0xa0473f, 0x2f3440, 0xf2c94c];
+/** On wheels: a puff of dust this often, each lasting this long. */
+const PUFF_EVERY_MS = 70;
+const PUFF_MS = 420;
+const REDUCED_MOTION = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 /** How far the board lifts you: a 2-pixel deck on 4-pixel wheels. */
 const BOARD_RISE = 4;
 /** Pixels rolled per quarter turn of a wheel (about a quarter of its rim). */
@@ -187,6 +192,10 @@ export class Avatar {
   private canUntil = 0;
   private rod = new Graphics();
   private board = new Graphics();
+  /** On wheels: dust kicked up behind, and streaks for the speed. */
+  private trail = new Graphics();
+  private puffs: { x: number; y: number; at: number; dir: number }[] = [];
+  private lastPuff = 0;
   /** Rock paper scissors: a fist pumping in front of you, from `pumpAt`. */
   private hand = new Graphics();
   /** The library book open in our hands (its Gutenberg number; 0: none). */
@@ -235,7 +244,7 @@ export class Avatar {
     this.stack.appendChild(this.nameEl);
     this.label.appendChild(this.stack);
     labels.appendChild(this.label);
-    scene.sorted.addChild(this.sprite, this.rod, this.board, this.hand, this.book, this.phone);
+    scene.sorted.addChild(this.trail, this.sprite, this.rod, this.board, this.hand, this.book, this.phone);
     this.apply(info, now);
   }
 
@@ -658,6 +667,7 @@ export class Avatar {
     this.drawBook(feetX, Math.round(feetY + bob));
     this.drawPhone(feetX, Math.round(feetY + bob));
     this.updateWheels(ride ? vehicle : 0, feetX, feetY, walking, wallNow);
+    this.drawTrail(walking && !!vehicle, feetX, feetY, wallNow);
     this.updateCan(feetX, feetY, wallNow);
     this.updatePet({ x, y }, wallNow);
 
@@ -865,11 +875,40 @@ export class Avatar {
     }
     const w = this.wheels;
     w.visible = true;
-    w.texture = vehicleTexture(code, moving ? ((Math.floor(now / 90) % 2) as 0 | 1) : 0);
+    w.texture = vehicleTexture(code, moving ? ((Math.floor(now / 50) % 2) as 0 | 1) : 0);
     w.position.set(Math.round(feetX), Math.round(feetY + 3));
     w.scale.x = this.facing;
     // In front of the rider's legs.
     w.zIndex = feetY + 0.6;
+  }
+
+  /**
+   * Riding fast: little puffs of dust left behind the wheels, fading and
+   * spreading, and a couple of streaks just behind the rider while moving.
+   */
+  private drawTrail(moving: boolean, feetX: number, feetY: number, now: number) {
+    const g = this.trail.clear();
+    if (moving && now - this.lastPuff > PUFF_EVERY_MS && !REDUCED_MOTION) {
+      this.lastPuff = now;
+      this.puffs.push({ x: feetX - this.facing * 9, y: feetY + 2, at: now, dir: -this.facing });
+    }
+    this.puffs = this.puffs.filter((p) => now - p.at < PUFF_MS);
+    if (!this.puffs.length && !moving) return;
+    for (const p of this.puffs) {
+      const t = (now - p.at) / PUFF_MS;
+      const r = 2 + t * 4;
+      g.circle(Math.round(p.x + p.dir * t * 6), Math.round(p.y - t * 4), r).fill({ color: 0xb8ab8c, alpha: 0.7 * (1 - t) });
+    }
+    if (moving && !REDUCED_MOTION) {
+      // Streaks behind, at chest and knee height, flickering a little.
+      const back = -this.facing;
+      const flick = Math.floor(now / 60) % 2;
+      for (const [dy, len] of [[-22, 10 + flick * 3], [-12, 7 + (1 - flick) * 3]]) {
+        const x0 = Math.round(feetX + back * 9);
+        g.rect(back > 0 ? x0 : x0 - len, Math.round(feetY + dy), len, 1).fill({ color: 0xffffff, alpha: 0.6 });
+      }
+    }
+    this.trail.zIndex = feetY - 0.5;
   }
 
   /** Watering a plant: the can shows for a moment. */
@@ -955,6 +994,7 @@ export class Avatar {
     this.sprite.destroy();
     this.rod.destroy();
     this.board.destroy();
+    this.trail.destroy();
     this.hand.destroy();
     this.book.destroy();
     this.phone.destroy();

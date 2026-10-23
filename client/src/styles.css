@@ -4603,3 +4603,10 @@ body.woozy #stage canvas {
     animation: none;
   }
 }
+
+/* Vehicles: how fast this one goes, in the shop. */
+.panel .ride-speed {
+  font-weight: 700;
+  color: #b07a1a;
+  margin: 4px 0 8px;
+}

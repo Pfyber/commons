@@ -1704,7 +1704,7 @@ export class Game {
       await this.ui.rides.set(it?.id ?? 0);
       this.refreshLook();
       this.showRideButton();
-      if (it) this.hud.toast(`${it.name}: off you go! Faster anywhere outdoors; you'll hop off at doors.`, 3500);
+      if (it) this.hud.toast(`${it.name}: off you go! Zip anywhere outdoors; you'll hop off at doors.`, 3500);
     } catch (e) {
       this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 3500);
     }

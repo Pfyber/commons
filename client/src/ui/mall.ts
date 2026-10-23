@@ -6,6 +6,7 @@ import departments from "../../../assets/mall/departments.json";
 import type { Economy } from "../economy";
 import type { Dept, Shelf, Shop } from "../shop";
 import { isWearable } from "../world/items";
+import { rideTimes } from "../world/vehicles";
 import { type ZoneMap, nearestWalkable, spot } from "../world/map";
 import type { TileXY } from "../world/motion";
 import { cityImage, drawYou } from "./citymap";
@@ -119,7 +120,7 @@ const ABOUT: Record<string, string> = {
   wrap: "Wrap a doorstep gift in it: choose it when you give a gift. Used up once the gift's sent.",
   card: "Goes with a doorstep gift, with your note inside. Used up once the gift's sent.",
   exterior: "For the outside of your house, for everyone passing to see. Put it up at your front door.",
-  vehicle: "Faster anywhere outdoors in the city; you hop off at every door. Yours to keep. Try it on the test track first!",
+  vehicle: "Zips you across the city: anywhere outdoors, and you hop off at every door. Yours to keep. Try it on the test track first!",
   pet: "A friend for life. Pets live at your house and wait in the yard by your door. They'd love a walk every day: take them out, show them the city, bring them home.",
 };
 
@@ -255,6 +256,8 @@ export class ShopPanel extends Panel {
       this.body.append(card, el("p", "hint", ABOUT[it?.kind ?? ""] ?? ""));
       if (it?.kind === "pet") return void this.body.append(...this.adoptForm(s), this.msg);
       if (it?.kind === "vehicle") {
+        const times = rideTimes(Number(it.meta.code ?? 0));
+        if (times) this.body.append(el("p", "ride-speed", `⚡ ${times.toFixed(1)}× walking speed`));
         this.body.append(button("Test ride on the track 🛼", () => (this.hide(), this.testRide(s.item)), owned ? "" : "primary"));
         if (owned) return void this.body.append(el("p", "hint", "It's yours: ride it outside from your bag or the ride button."), this.msg);
       }
