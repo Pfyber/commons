@@ -1978,3 +1978,125 @@ async fn a_yard_stand_sells_from_the_front_of_a_house_and_gives_back_on_moving_o
     assert_eq!(st, StatusCode::OK, "{r}");
     assert_eq!(fish(a.id).await, 1, "the one not sold");
 }
+
+// ---- the Casino (ADR 0017) -------------------------------------------------------------
+
+fn in_zone(s: &State, p: &P, zone: &str) {
+    s.hub.set_location(
+        p.id,
+        crate::hub::Location {
+            zone: zone.into(),
+            instance: 1,
+            owner: None,
+            label: zone.into(),
+        },
+        true,
+        chrono::Utc::now().timestamp_millis(),
+    );
+}
+
+#[tokio::test]
+async fn the_casino_is_for_grown_ups_inside_it_within_limits_and_lets_you_take_a_break() {
+    let Some(s) = state().await else { return };
+    let a = player(&s).await;
+    let kid = player_born(&s, chrono::Datelike::year(&chrono::Utc::now()) - 12).await;
+    let tag = &a.name[1..7];
+    grant(&s, &a, 1, 1000, "test", &format!("casino:{tag}")).await;
+    let post = |p: &P, path: &str, body: Value| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        let path = path.to_string();
+        async move { call(&s, "POST", &path, &tok, Some(body)).await }
+    };
+    let spin = |p: &P, bet: i32, key: &str| {
+        post(
+            p,
+            "/api/social/casino/slots",
+            json!({ "bet": bet, "key": format!("{key}:{tag}") }),
+        )
+    };
+
+    // Under 16: turned away (even inside).
+    in_zone(&s, &kid, "casino");
+    let (st, r) = spin(&kid, 5, "k").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("age"))
+    );
+    // Only inside the casino.
+    in_zone(&s, &a, "city");
+    let (st, r) = spin(&a, 5, "out").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("not_here"))
+    );
+    in_zone(&s, &a, "casino");
+    for bad in [0, 21] {
+        let (st, _) = spin(&a, bad, &format!("bad{bad}")).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "bet {bad}");
+    }
+    // A spin: the coins move by what it paid, and pressing twice plays once.
+    let before = coins(&s, &a).await;
+    let (st, r) = spin(&a, 5, "s1").await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let payout = r["payout"].as_i64().unwrap() as i32;
+    assert_eq!(r["outcome"]["reels"].as_array().unwrap().len(), 3);
+    assert_eq!(coins(&s, &a).await, before - 5 + payout);
+    let (_, again) = spin(&a, 5, "s1").await;
+    assert_eq!(again["duplicate"], true);
+    assert_eq!(coins(&s, &a).await, before - 5 + payout, "once");
+    // Roulette: red, and the payout agrees with the number.
+    let before = coins(&s, &a).await;
+    let (st, r) = post(
+        &a,
+        "/api/social/casino/roulette",
+        json!({ "bet": { "on": "red" }, "amount": 10, "key": format!("r1:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let n = r["outcome"]["number"].as_u64().unwrap() as u8;
+    let won = if commons_sim::casino::is_red(n) {
+        20
+    } else {
+        0
+    };
+    assert_eq!(r["payout"], won);
+    assert_eq!(coins(&s, &a).await, before - 10 + won);
+    let (st, _) = post(
+        &a,
+        "/api/social/casino/roulette",
+        json!({ "bet": { "on": "number", "n": 37 }, "amount": 10, "key": format!("r2:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    // The daily loss limit: today's loss so far plus the bet can't pass 300.
+    let (_, st0) = call(&s, "GET", "/api/social/casino", &a.token, None).await;
+    let lost = -st0["today"]["net"].as_i64().unwrap();
+    sqlx::query("INSERT INTO casino_rounds (player_id, game, bet, payout, outcome, key) VALUES ($1, 'slots', $2, 0, '{}', $3)")
+        .bind(a.id)
+        .bind((295 - lost) as i32)
+        .bind(format!("seed:{tag}"))
+        .execute(&s.db)
+        .await
+        .unwrap();
+    let (st, r) = spin(&a, 10, "over").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("daily_limit"))
+    );
+    let (st, _) = spin(&a, 5, "upto").await;
+    assert_eq!(st, StatusCode::OK, "up to the limit is fine");
+    // A break: closed to you for the day.
+    let (st, r) = post(&a, "/api/social/casino/break", json!({ "days": 1 })).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (st, r) = spin(&a, 1, "brk").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("on_a_break"))
+    );
+    let (_, st1) = call(&s, "GET", "/api/social/casino", &a.token, None).await;
+    assert!(
+        st1["break_until"].is_i64() && st1["can_play"] == false,
+        "{st1}"
+    );
+}

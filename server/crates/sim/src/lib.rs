@@ -4,6 +4,7 @@
 
 pub mod arena;
 pub mod bowling;
+pub mod casino;
 pub mod city;
 pub mod furniture;
 pub mod garden;

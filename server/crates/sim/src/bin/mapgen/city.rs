@@ -837,6 +837,12 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             k.spot("door:club_hall", 24, 18);
             k.spot("club_hall", 24, 19);
         }
+        // The Casino (ADR 0017): coins only, 16 and over.
+        "casino" => {
+            k.object("casino", 14, 7, 20, 11, "Casino");
+            k.spot("door:casino", 24, 18);
+            k.spot("casino", 24, 19);
+        }
         // The Concert Hall (ADR 0015), on the Theater block.
         "theater" => {
             k.object("concert_hall", 14, 7, 20, 11, "Concert Hall");
@@ -876,7 +882,9 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             "Library: every book in Project Gutenberg, in every language. Browse the wings, or ask at the desk"
                 .to_string()
         }
-        "casino" => "Casino: opening soon. Play money only, never real money".to_string(),
+        "casino" => {
+            "Casino: slots and roulette, coins only, never real money. 16 and over".to_string()
+        }
         "bowling" => "Bowling: four lanes inside; rent shoes at the counter".to_string(),
         "club_hall" => {
             "Club Hall: found a club, rent its room, and meet up with your members".to_string()

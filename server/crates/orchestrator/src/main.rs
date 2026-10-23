@@ -77,11 +77,12 @@ const PUBLIC_DOORS: &[&str] = &[
     "club_hall",
     "bowling",
     "concert_hall",
+    "casino",
 ];
 
 /// Zones served unless `COMMONS_ZONES` says otherwise: the city, homes, the
 /// public buildings, and the Library's hall and wings (ADR 0012).
-const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling,concert_hall";
+const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling,concert_hall,casino";
 
 /// A metro station, `metro_<key>` (ADR 0016): you come up its stairs.
 fn is_station(place: &str) -> bool {
@@ -252,6 +253,14 @@ async fn join(
     };
     if !state.zones.contains(&zone) {
         return Err(err(StatusCode::NOT_FOUND, "unknown_zone", "no such zone"));
+    }
+    // The casino is for 16 and over (ADR 0017), unless it's been opened to all.
+    if zone == "casino" && who.minor && !config::env_or("COMMONS_CASINO_MINORS", false) {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "age",
+            "The casino is for 16 and over.",
+        ));
     }
     let claims = JoinClaims {
         sub: who.sub,

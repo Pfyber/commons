@@ -3,6 +3,7 @@
 //! client, independent of the zone they're in.
 
 mod calls;
+mod casino;
 mod clublife;
 mod clubs;
 mod clubtown;

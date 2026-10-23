@@ -84,6 +84,9 @@ of the city's club lots (120 a week): its door leads into their room. Clubs
 plan events for everyone at public places (📅 What's on, at the Club Hall
 or in the 🛡 panel), and the Club Hall's leaderboard names the week's top
 three clubs, which win coins for their treasuries.
+The Casino (on the Casino block, 16 and over): slot machines, a roulette
+table and the cashier, for coins only. There's a daily loss limit of 300
+coins, and at the cashier you can take a break for a day or a week.
 The metro: nine stations around the city (look for the red M); at one,
 tap a station on the map to ride there, and anyone following you comes too.
 Houses have a yard stand by the front door: put things from your bag on
@@ -165,7 +168,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `API_BIND` / `ORCHESTRATOR_BIND` / `ZONE_BIND` | `0.0.0.0:8080/8081/8082` | each service |
 | `COMMONS_CLIENT_URL` | `http://localhost:5173` | api (magic-link URLs) |
 | `ZONE_PUBLIC_URL` | `ws://localhost:8082/ws` | orchestrator |
-| `COMMONS_ZONES` | `city,home,mall,bar,arcade,library`, the eight `library_<wing>`s, `club_hall,clubroom,bowling,concert_hall` | orchestrator |
+| `COMMONS_ZONES` | `city,home,mall,bar,arcade,library`, the eight `library_<wing>`s, `club_hall,clubroom,bowling,concert_hall,casino` | orchestrator |
 | `COMMONS_MAPS_DIR` | `assets/maps` | zone |
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |

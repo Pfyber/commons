@@ -13,6 +13,7 @@ import { clubObject } from "./clubart";
 import { concertObject } from "./concertart";
 import { HOUSE_OVERHANG, drawHouse } from "./houseart";
 import { metroObject } from "./metroart";
+import { casinoObject } from "./casinoart";
 
 export const TILE = 32;
 
@@ -2410,7 +2411,7 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       break;
     }
     default: {
-      const lib = libraryObject(o) ?? clubObject(o) ?? concertObject(o) ?? metroObject(o);
+      const lib = libraryObject(o) ?? clubObject(o) ?? concertObject(o) ?? metroObject(o) ?? casinoObject(o);
       if (lib) {
         c = lib.c;
         overhang = lib.overhang;

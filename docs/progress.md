@@ -1522,6 +1522,47 @@ Checked:
   train; both come up at the Lake station's stairs (291, 310); a moment
   later Bo is following Ada again.
 
+## The Casino, K1: slots and roulette (2026-10-23)
+
+ADR 0017. The Casino block now has a building, and inside it there is a
+casino floor (`casino` zone, 26×18).
+
+- **Coins only, never real money.** The server draws every outcome
+  (`commons_sim::casino`, using the OS's random numbers). Each round is
+  recorded in `casino_rounds`, with a unique key so a double press
+  doesn't play twice.
+- **The slots:**
+  - Six slot machines; bets of 1 to 20.
+  - Weighted reels.
+  - Three of a kind pays 5× to 250×; two cherries pay 2×.
+  - The return is 95.1 % (a test checks it).
+- **Roulette:**
+  - European, one zero; bets of 1 to 50.
+  - You can bet on red/black, odd/even, 1–18/19–36, a dozen or a single
+    number.
+  - The wheel animates to the drawn number.
+  - The return is 97.3 % on every bet.
+- **Care:**
+  - The casino is 16 and over: the orchestrator refuses the zone, and the
+    API refuses play, unless `COMMONS_CASINO_MINORS` is set.
+  - You can only play inside the casino.
+  - The most anyone can lose is 300 coins a day (UTC).
+  - At the cashier, "take a break" closes the casino to you for a day or
+    a week, and it can't be undone early.
+  - After 30 minutes inside, a reminder shows how today is going.
+
+Checked:
+- Sim tests for the return rates.
+- A social test covering age, presence, limits and breaks.
+- Mapgen reachability.
+- Client 89, clippy clean.
+- In the browser: Ada spins the slots twice (−5 each), wins 20 on red
+  at roulette (25 red), and reads the cashier's desk. A 12-year-old is
+  turned away at the door.
+
+Next: K2, blackjack. After that, K3: poker tables, a jackpot and
+cosmetic prizes.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

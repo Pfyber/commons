@@ -18,6 +18,7 @@ commons-sim.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 chrono.workspace = true
+rand.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true

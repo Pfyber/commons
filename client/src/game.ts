@@ -85,6 +85,7 @@ import type { ClubsPanel } from "./ui/clubs";
 import type { Concert } from "./concert";
 import type { YardPanel } from "./ui/homes";
 import type { MetroPanel } from "./ui/metro";
+import type { Casino, CagePanel, RoulettePanel, SlotsPanel } from "./ui/casino";
 import { YardStands } from "./world/yardstands";
 import type { ConcertPanel } from "./ui/concert";
 
@@ -166,6 +167,10 @@ export interface Ui {
   concertPanel: ConcertPanel;
   yard: YardPanel;
   metro: MetroPanel;
+  casino: Casino;
+  slots: SlotsPanel;
+  roulette: RoulettePanel;
+  cage: CagePanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -421,7 +426,7 @@ export class Game {
     // Indoors (the mall, the bar, the arcade, the library): the lights are
     // on, no weather, no birds, no wheels, no sprinting; the arcade and the
     // bowling alley are lit by neon.
-    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club") || zoneId === "bowling" || zoneId === "concert_hall";
+    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club") || zoneId === "bowling" || zoneId === "concert_hall" || zoneId === "casino";
     this.ambient = new Ambient(this.scene, map, indoors);
     this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade" || zoneId === "bowling");
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
@@ -600,6 +605,18 @@ export class Game {
     void ui.welcome.loadFounders().catch(() => {});
     // Club crests by names (asked afresh in each place).
     ui.clubs.forgetBadges();
+    // The Casino (ADR 0017): after half an hour's play, a gentle reminder.
+    if (zoneId === "casino") {
+      const since = performance.now();
+      const timer = window.setInterval(() => {
+        const mins = Math.round((performance.now() - since) / 60_000);
+        void ui.casino
+          .load()
+          .then((s) => this.hud.toast(`🕰️ You've been in the casino ${mins} minutes. Today: ${s.today.net >= 0 ? "+" : ""}${s.today.net} coins. Time for a stretch?`, 8000))
+          .catch(() => {});
+      }, 30 * 60_000);
+      this.disposers.push(() => window.clearInterval(timer));
+    }
     // The Concert Hall (ADR 0015): hear whoever's on stage; 🎤 by their name.
     if (zoneId === "concert_hall") {
       void ui.concert.enterHall().catch(() => {});
@@ -880,6 +897,26 @@ export class Game {
       case "club_events":
         walkUp();
         this.near(ui.clubsPanel, front, 8).showEvents();
+        return true;
+      // The Casino (ADR 0017): in through its doors (16 and over); inside,
+      // the slot machines, the roulette table and the cashier.
+      case "casino":
+        this.enter(front, "casino");
+        return true;
+      case "casino_exit":
+        this.goTo("city");
+        return true;
+      case "slot_machine":
+        walkUp();
+        this.near(ui.slots, front, 4).show();
+        return true;
+      case "roulette_table":
+        walkUp();
+        this.near(ui.roulette, front, 6).show();
+        return true;
+      case "casino_cage":
+        walkUp();
+        this.near(ui.cage, front, 5).show();
         return true;
       // A metro station (ADR 0016): down the stairs, and the map of the lines.
       case "metro_entrance": {

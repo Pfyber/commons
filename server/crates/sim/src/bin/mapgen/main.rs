@@ -6,6 +6,7 @@
 //! Deterministic: rerunning produces the same file. Hand-authored maps will
 //! replace this once `tools/mapedit` exists.
 
+mod casino;
 mod city;
 mod clubs;
 mod concert;
@@ -482,6 +483,7 @@ fn main() -> std::io::Result<()> {
     write("club_hall", &clubs::lobby())?;
     write("clubroom", &clubs::room())?;
     write("concert_hall", &concert::hall())?;
+    write("casino", &casino::floor())?;
     for wing in commons_sim::library::WINGS {
         write(&wing.zone(), &library::wing(&wing))?;
     }

@@ -16,6 +16,7 @@ import libReferenceUrl from "../../assets/maps/library_reference.json?url";
 import clubHallUrl from "../../assets/maps/club_hall.json?url";
 import clubRoomUrl from "../../assets/maps/clubroom.json?url";
 import concertHallUrl from "../../assets/maps/concert_hall.json?url";
+import casinoUrl from "../../assets/maps/casino.json?url";
 import bowlingUrl from "../../assets/maps/bowling.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
@@ -48,6 +49,7 @@ import { ClubsPanel } from "./ui/clubs";
 import { Concert } from "./concert";
 import { ConcertPanel } from "./ui/concert";
 import { MetroPanel, playRide, stationsOf } from "./ui/metro";
+import { CagePanel, Casino, RoulettePanel, SlotsPanel } from "./ui/casino";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -86,6 +88,7 @@ const MAP_URLS: Record<string, string> = {
   clubroom: clubRoomUrl,
   bowling: bowlingUrl,
   concert_hall: concertHallUrl,
+  casino: casinoUrl,
 };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
@@ -297,6 +300,8 @@ async function main() {
   // The clubhouses on the city's club lots (C3).
   void clubs.loadLots().catch(() => {});
   clubs.onToast = (t) => hud.toast(t, 6000);
+  const casino = new Casino(auth);
+  casino.onPlayed = () => void eco.load().catch(() => {});
   const concert = new Concert(auth, auth.player!.id, social);
   concert.onToast = (t) => hud.toast(t, 5000);
   const concertPanel = new ConcertPanel(concert, {
@@ -400,6 +405,10 @@ async function main() {
     concert,
     concertPanel,
     yard: new YardPanel(rent, eco, rentHost),
+    casino,
+    slots: new SlotsPanel(casino),
+    roulette: new RoulettePanel(casino),
+    cage: new CagePanel(casino),
     metro: new MetroPanel({
       map: () => {
         const g = game as Game | null;
@@ -497,7 +506,7 @@ async function main() {
             // Out of a club's room whose clubhouse stands on a lot: out of its door, in the city.
             const lot = from?.zoneId === "clubroom" && from.place.owner ? clubs.lotOf(from.place.owner) : null;
             if (z === "club_hall" && lot) return void travel({ zone: "city", arrive: `place:${lot}` });
-            const place = from && ["mall", "bar", "arcade", HALL, "club_hall", "bowling", "concert_hall"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
+            const place = from && ["mall", "bar", "arcade", HALL, "club_hall", "bowling", "concert_hall", "casino"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
             const arrive =
               (z === HALL && from && wingOfZone(from.zoneId)) || (z === "club_hall" && from?.zoneId === "clubroom")
                 ? `place:${from.zoneId}`

@@ -4517,3 +4517,89 @@ body.woozy #stage canvas {
     left: calc(50% - 230px);
   }
 }
+
+/* The Casino (ADR 0017): reels, the wheel, chips. */
+.panel.casino {
+  width: min(400px, calc(100vw - 24px));
+}
+
+.panel .slot-reels {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  background: #8f1f2b;
+  border: 3px solid #3b3a2e;
+  margin-bottom: 8px;
+}
+
+.panel .slot-reel {
+  width: 70px;
+  height: 70px;
+  display: grid;
+  place-items: center;
+  font-size: 40px;
+  background: #fff8e3;
+  border: 2px solid #3b3a2e;
+}
+
+.panel .slot-reel.spinning {
+  filter: blur(1px);
+  animation: reel-bob 0.12s linear infinite alternate;
+}
+
+@keyframes reel-bob {
+  to {
+    transform: translateY(3px);
+  }
+}
+
+.panel .casino-msg {
+  min-height: 1.4em;
+  font-weight: 700;
+  text-align: center;
+  margin: 6px 0;
+}
+
+.panel .casino-msg.win {
+  color: #b07a1a;
+  font-size: 17px;
+}
+
+.panel .pay-card {
+  font-size: 12px;
+}
+
+.panel canvas.wheel {
+  display: block;
+  margin: 0 auto 8px;
+  width: 170px;
+  height: 170px;
+}
+
+.panel button.small.red {
+  background: #c8553d;
+  color: #fff8e3;
+}
+
+.panel button.small.black {
+  background: #2b2723;
+  color: #fff8e3;
+}
+
+.panel button.small.on {
+  outline: 3px solid var(--leaf);
+  outline-offset: -3px;
+}
+
+.panel .tier-row input[type="number"] {
+  width: 64px;
+  font: inherit;
+  padding: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel .slot-reel.spinning {
+    animation: none;
+  }
+}
