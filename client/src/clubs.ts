@@ -58,6 +58,38 @@ export interface Post {
   at: number;
 }
 
+/** The weekly meetup: a weekday (0 Monday) and a minute of the day, UTC. */
+export interface Meetup {
+  dow: number;
+  minute: number;
+  /** Unix seconds: when the next one starts. */
+  next: number;
+  /** While one's on: when it ends. */
+  live_until: number | null;
+  /** Who's come to the one that's on. */
+  came: string[];
+  stay_mins: number;
+  reward: number;
+}
+
+export interface Goal {
+  key: string;
+  title: string;
+  progress: number;
+  target: number;
+  reward: number;
+  done: boolean;
+}
+
+/** C2: the meetup, the week's goals, the room's furniture. */
+export interface Life {
+  meetup: Meetup | null;
+  goals: Goal[];
+  /** Unix seconds: when this week's goals end. */
+  week_ends: number;
+  furniture: number;
+}
+
 /** A club as its members see it. */
 export interface Detail {
   club: PublicClub;
@@ -69,6 +101,7 @@ export interface Detail {
   tiers: ClubTier[];
   members: Member[];
   posts: Post[];
+  life: Life;
 }
 
 export interface Badge {
@@ -99,6 +132,8 @@ export class Clubs {
   private badgeListeners = new Set<() => void>();
   /** A club page changed for its members (a donation, a post, someone joining). */
   onClubChanged: (club: string, what: Record<string, unknown>) => void = () => {};
+  /** Something to tell the player (a goal reached). */
+  onToast: (text: string) => void = () => {};
 
   constructor(
     private auth: Auth,
@@ -110,6 +145,7 @@ export class Clubs {
       if (m.t !== "club") return;
       // Someone joining or leaving may change the crest by their name.
       for (const who of [m.joined, m.left]) if (typeof who === "string") this.forgetBadges(who);
+      if (typeof m.goal === "string") this.onToast(`${m.crest as string} ${m.name as string} reached a goal: “${m.goal}”. +${m.coins as number} coins for the treasury!`);
       void this.load().catch(() => {});
       this.onClubChanged(m.club as string, m);
     });
@@ -202,6 +238,11 @@ export class Clubs {
 
   pay(club: string) {
     return this.post<{ room: Room }>(`/api/social/clubs/${club}/pay`, {});
+  }
+
+  /** Sets the weekly meetup (UTC weekday and minute), or clears it (null). */
+  setMeetup(club: string, at: { dow: number; minute: number } | null) {
+    return this.post(`/api/social/clubs/${club}/meetup`, at ?? { dow: null, minute: null });
   }
 
   showBadge(club: string) {

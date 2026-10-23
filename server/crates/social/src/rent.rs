@@ -312,8 +312,16 @@ pub async fn release(state: &SocialState, lease: &Lease, reason: &str) -> ApiRes
     if ended == 0 {
         return Ok(0);
     }
-    // Nothing can be placed in a club room yet (C2), so nothing comes back.
-    let back: Vec<(i32, i64)> = if lease.club.is_some() {
+    // A club room's furniture goes back to each piece's placer.
+    let back: Vec<(i32, i64)> = if let Some(club) = lease.club {
+        crate::clublife::return_pieces(
+            &mut tx,
+            state,
+            club,
+            None,
+            &format!("release:{}", lease.id),
+        )
+        .await?;
         vec![]
     } else if slot_of(&lease.kind) == "home" {
         let rows = sqlx::query_as(

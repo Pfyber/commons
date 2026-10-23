@@ -397,7 +397,8 @@ export class Game {
     ui.minimap.setMap(map);
     this.fairyRing = spot(map, "fairy_ring");
     this.props = new Props(this.scene, map, ui.eco);
-    ui.bag.placeable = zoneId === "home" && place.owner === ui.social.selfId;
+    // Your own home, or your club's room (decorated together, ADR 0014 C2).
+    ui.bag.placeable = (zoneId === "home" && place.owner === ui.social.selfId) || zoneId === "clubroom";
     this.furniture = new Furniture(map);
     const screenObj = map.objects.find((o) => o.kind === "big_screen");
     if (screenObj) {
@@ -2395,7 +2396,7 @@ export class Game {
       return true;
     }
     const placed = this.props.objectAt(t.x, t.y);
-    if (placed && this.zoneId === "home") {
+    if (placed && (this.zoneId === "home" || this.zoneId === "clubroom")) {
       this.near(ui.menu, t).showWith(ui.eco.name(placed), "", [["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]]);
       return true;
     }

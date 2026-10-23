@@ -75,7 +75,12 @@ club room for 30 members costs 60). After that the club's treasury pays
 the rent, from what members chip in; if it can't, the room is given up
 after a grace period, but the club carries on. Owners and moderators
 invite friends; the board, roles and your club's crest by your name are
-on the club's page, and the stairs lead up to its room.
+on the club's page, and the stairs lead up to its room. Each club can set
+a weekly meetup (20 coins for staying 10 minutes of it in the room), works
+on four weekly goals that pay its treasury, can ring every member who's
+online with 📞 Call the club, and decorates its room from members' bags
+(each piece stays its owner's). `COMMONS_CLUB_SWEEP_SECS` (default 60)
+sets how often the club sweep runs; each run counts as a minute.
 Testing on a dev server: a wish at the wishing well (on the Town Hall's
 plaza) grants 10,000 coins, every time; real servers don't have it.
 🔊 or M toggles sound;

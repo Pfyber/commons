@@ -59,7 +59,8 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/stalls/take", post(crate::stalls::take))
         .route("/stalls/buy", post(crate::stalls::buy))
         .merge(crate::calls::routes())
-        .merge(crate::clubs::routes());
+        .merge(crate::clubs::routes())
+        .merge(crate::clublife::routes());
     let internal = Router::new()
         .route("/presence", post(presence))
         .route("/locate", get(locate))

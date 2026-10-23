@@ -285,7 +285,12 @@ async function main() {
       return g?.zoneId === "clubroom" ? (g.place.owner ?? null) : null;
     },
     toast: (t) => hud.toast(t, 4500),
+    hasPhone: () => eco.qty(PHONE) > 0,
+    callClub: (id) => calls.callClub(id),
   });
+  clubs.onToast = (t) => hud.toast(t, 6000);
+  // A meetup's reward (and anything else the gateway says changed your coins).
+  social.onPush((m) => m.t === "coins" && void eco.load().catch(() => {}));
   // The 🛡 button lights up while an invite waits or a club's rent is due.
   clubs.onChange(() => hud.setClubs(clubs.invites.length > 0 || clubs.mine.some((c) => c.room?.state === "grace")));
   void clubs.load().catch(() => {});
@@ -389,6 +394,7 @@ async function main() {
   const notifications = new NotificationsPanel(social, {
     ...friendActions,
     clubInvited: (id) => clubs.invites.some((i) => i.id === id),
+    goToClubRoom: (id) => void travel({ zone: "clubroom", owner: id }),
     answerClub: (id, accept) =>
       void clubs
         .answer(id, accept)

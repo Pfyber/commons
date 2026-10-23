@@ -1,22 +1,38 @@
 //! Homes (spec §8.2): a private instance of the `home` zone per player, where
 //! the owner places and picks up furniture. Placements persist through the
 //! economy service (which moves the item out of / back into the inventory)
-//! and block movement like any other prop.
+//! and block movement like any other prop. A club's room (`clubroom`, one
+//! instance per club, ADR 0014) works the same way for all its members: the
+//! economy service checks they're members and gives each piece back to
+//! whoever placed it.
 
 use super::Instance;
 use crate::econ::CallError;
 use commons_protocol::{ServerMsg, error_code};
 use commons_sim::TilePos;
 
+/// The zone whose instances are club rooms, owned by a club.
+pub(crate) const CLUB_ROOM: &str = "clubroom";
+
 impl Instance {
+    fn is_club_room(&self) -> bool {
+        self.zone.id == CLUB_ROOM
+    }
+
     pub(super) fn load_home(&self) {
         let (Some(econ), Some(owner)) = (self.economy.clone(), self.owner.clone()) else {
             return;
         };
+        let club = self.is_club_room();
         self.spawn_call(
             async move {
                 loop {
-                    match econ.home_objects(&owner).await {
+                    let r = if club {
+                        econ.club_objects(&owner).await
+                    } else {
+                        econ.home_objects(&owner).await
+                    };
+                    match r {
                         Err(CallError::Unavailable) => {
                             tokio::time::sleep(std::time::Duration::from_secs(3)).await
                         }
@@ -71,8 +87,13 @@ impl Instance {
             .collect()
     }
 
+    /// Whoever may arrange this place: a home's owner, or (checked again by
+    /// the economy service) anyone in a club's room, who got in as a member.
     fn check_owner(&mut self, id: u32) -> Option<String> {
         let player = self.avatars[&id].player_id.clone();
+        if self.is_club_room() {
+            return Some(player);
+        }
         if self.owner.as_deref() != Some(player.as_str()) {
             self.error(
                 id,
@@ -106,8 +127,14 @@ impl Instance {
             return;
         }
         let key = self.next_key("place");
+        let club = self.is_club_room().then(|| self.owner.clone()).flatten();
         self.spawn_call(
-            async move { econ.place(&owner, item, t.0, t.1, &key).await },
+            async move {
+                match club {
+                    Some(club) => econ.club_place(&club, &owner, item, t.0, t.1, &key).await,
+                    None => econ.place(&owner, item, t.0, t.1, &key).await,
+                }
+            },
             move |inst, r| {
                 inst.busy.remove(&t);
                 match r {
@@ -135,14 +162,37 @@ impl Instance {
             return;
         }
         let key = self.next_key("pickup");
+        let club = self.is_club_room().then(|| self.owner.clone()).flatten();
+        let me = owner.clone();
         self.spawn_call(
-            async move { econ.pickup(&owner, t.0, t.1, &key).await },
+            async move {
+                match club {
+                    Some(club) => econ.club_pickup(&club, &owner, t.0, t.1, &key).await,
+                    None => econ.pickup(&owner, t.0, t.1, &key).await.map(|applied| {
+                        crate::econ::ClubPickup {
+                            applied,
+                            to: owner.clone(),
+                        }
+                    }),
+                }
+            },
             move |inst, r| {
                 inst.busy.remove(&t);
                 match r {
-                    Ok(applied) => {
+                    Ok(p) => {
                         inst.set_object(t, 0);
-                        inst.send_granted(id, &applied);
+                        // Back in its placer's bag: tell them, if they're here.
+                        let to = if p.to == me {
+                            Some(id)
+                        } else {
+                            inst.avatars
+                                .iter()
+                                .find(|(_, a)| a.player_id == p.to)
+                                .map(|(i, _)| *i)
+                        };
+                        if let Some(to) = to {
+                            inst.send_granted(to, &p.applied);
+                        }
                     }
                     Err(e) => inst.economy_error(id, e),
                 }

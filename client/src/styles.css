@@ -4259,3 +4259,54 @@ body.woozy #stage canvas {
 .arena-stamina.low i {
   background: #b07bff;
 }
+
+/* Clubs C2: this week's meetup, goals, and the meetup form. */
+.panel .meetup.live {
+  background: #fff2c2;
+  border: 2px solid #e0a43a;
+  padding: 8px;
+  margin: 4px 0 8px;
+}
+
+.panel .meetup-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+}
+
+.panel .meetup-form select,
+.panel .meetup-form input {
+  font: inherit;
+  padding: 5px 6px;
+}
+
+.panel .goals {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel .goal {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  font-size: 14px;
+}
+
+.panel .goal .bar {
+  grid-column: 1 / -1;
+  height: 6px;
+  background: var(--paper-2);
+}
+
+.panel .goal .bar span {
+  display: block;
+  height: 100%;
+  background: #e0a43a;
+}
+
+.panel .goal.done .bar span {
+  background: var(--leaf);
+}

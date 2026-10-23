@@ -39,6 +39,14 @@ pub struct Applied {
     pub firsts: Vec<i32>,
 }
 
+/// A club-room piece picked up: the bag update, and whose bag it was.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ClubPickup {
+    #[serde(flatten)]
+    pub applied: Applied,
+    pub to: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Plot {
     pub x: i16,
@@ -349,6 +357,47 @@ impl EconomyClient {
     ) -> Result<Applied, CallError> {
         let body = serde_json::json!({ "owner": owner, "item": item, "x": x, "y": y, "key": key });
         self.call(reqwest::Method::POST, "/internal/home/place", Some(&body))
+            .await
+    }
+
+    /// Furniture in club `club`'s room (ADR 0014, C2).
+    pub async fn club_objects(&self, club: &str) -> Result<Vec<HomeObject>, CallError> {
+        self.call::<(), _>(
+            reqwest::Method::GET,
+            &format!("/internal/club/{}/objects", urlencode(club)),
+            None,
+        )
+        .await
+    }
+
+    /// A member puts a piece from their bag in the club's room.
+    pub async fn club_place(
+        &self,
+        club: &str,
+        player: &str,
+        item: u32,
+        x: u16,
+        y: u16,
+        key: &str,
+    ) -> Result<Applied, CallError> {
+        let body = serde_json::json!({ "club": club, "player": player, "item": item, "x": x, "y": y, "key": key });
+        self.call(reqwest::Method::POST, "/internal/club/place", Some(&body))
+            .await
+    }
+
+    /// Picks a piece up in a club room: it goes back to its placer's bag
+    /// (`to` says whose).
+    pub async fn club_pickup(
+        &self,
+        club: &str,
+        player: &str,
+        x: u16,
+        y: u16,
+        key: &str,
+    ) -> Result<ClubPickup, CallError> {
+        let body =
+            serde_json::json!({ "club": club, "player": player, "x": x, "y": y, "key": key });
+        self.call(reqwest::Method::POST, "/internal/club/pickup", Some(&body))
             .await
     }
 

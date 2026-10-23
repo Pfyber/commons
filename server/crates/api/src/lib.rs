@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod bottles;
+pub mod clubroom;
 pub mod cosmetics;
 pub mod devtools;
 pub mod economy;

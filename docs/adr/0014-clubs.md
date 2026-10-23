@@ -28,6 +28,15 @@ renting a room, and the rent itself keeps clubs meaningful.
 | Badge | Your club's crest by your name, for the club you choose to show. |
 | Board | Short posts for members, filtered like chat; the owner and moderators can remove any. |
 
+## C2: club life
+
+| Part | What |
+|---|---|
+| Meetup | The owner or a moderator sets one weekly hour (a weekday and a time, kept in UTC, shown in local time). Members get a reminder 30 minutes before and a notice when it starts. Whoever spends 10 minutes of that hour in the club room gets 20 coins, once per meetup. Attendance comes from the zones' presence reports, not from clients. |
+| Goals | Four a week (from Monday, UTC), the same for every club: come to the meetup together (as many members as the club has, up to 3), spend time together in the room (120 member-minutes), catch fish (15 between the members), and fill the treasury (donations worth a week's rent). Each one reached pays 10–15 coins into the treasury, once a week: an active club's rent partly pays itself. |
+| Club call | A members' button rings every member who's online into one call (up to eight), on the phone rules of ADR 0013: a phone each, nobody blocking anybody, the age rules. Club members needn't be friends with each other. |
+| Decorating | Members place furniture from their own bags in the club room, up to the room's tier (16 pieces, or 32 in a Big club room). A piece stays its placer's: they or a moderator can pick it up and it goes back to the placer's bag, as it does when they leave the club or the room is given up. |
+
 ## Care
 
 - Invites go only between friends; club boards and room chat are filtered

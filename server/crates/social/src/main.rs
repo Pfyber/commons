@@ -3,6 +3,7 @@
 //! client, independent of the zone they're in.
 
 mod calls;
+mod clublife;
 mod clubs;
 mod db;
 mod homes;
@@ -64,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(State::new(db, config::secret(), catalog));
     rent::spawn_sweeper(state.clone());
     calls::spawn_ring_timeouts(state.clone());
+    clublife::spawn_sweeper(state.clone());
     let app = routes::routes()
         .with_state(state)
         .merge(telemetry::routes(prom));

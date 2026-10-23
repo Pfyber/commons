@@ -39,9 +39,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/home/place", post(place))
         .route("/home/pickup", post(pickup))
         .route("/activity", post(activity))
+        .merge(crate::clubroom::routes())
 }
 
-fn service(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
+pub(crate) fn service(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
     let raw = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -52,11 +53,11 @@ fn service(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
     Ok(())
 }
 
-fn uuid(s: &str) -> ApiResult<Uuid> {
+pub(crate) fn uuid(s: &str) -> ApiResult<Uuid> {
     Uuid::parse_str(s).map_err(|_| ApiError::bad_request("bad_player", "not a player id"))
 }
 
-fn conflict(code: &'static str, msg: &str) -> ApiError {
+pub(crate) fn conflict(code: &'static str, msg: &str) -> ApiError {
     ApiError::new(StatusCode::CONFLICT, code, msg)
 }
 

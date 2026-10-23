@@ -271,6 +271,14 @@ export function describe(n: Notification): string {
       return `${who} invited you to join ${n.body.crest ?? "🛡"} ${n.body.club ?? "their club"}`;
     case "club_removed":
       return `You're no longer a member of ${n.body.club ?? "a club"}`;
+    case "club_meetup_soon":
+      return `${n.body.crest ?? "🛡"} ${n.body.club ?? "Your club"}'s meetup starts in half an hour, in the club room`;
+    case "club_meetup_now":
+      return `${n.body.crest ?? "🛡"} ${n.body.club ?? "Your club"}'s meetup has started: come up to the club room!`;
+    case "club_meetup_reward": {
+      const b = n.body as { club?: string; crest?: string; coins?: number };
+      return `${b.crest ?? "🛡"} Thanks for coming to ${b.club ?? "the meetup"}: +${b.coins ?? 20} coins`;
+    }
     case "rent_due": {
       const b = n.body as { what?: string; rent?: number; club?: string };
       if (b.club) return `Rent for ${b.what} is due: ${b.rent ?? "some"} coins from the treasury. Ask members to chip in, then pay at the Club Hall 🛡`;

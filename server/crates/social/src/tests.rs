@@ -1257,3 +1257,213 @@ async fn a_club_is_rented_shared_paid_for_together_and_handed_on() {
     let (st, _) = get(&b, format!("/api/social/clubs/{id}")).await;
     assert_eq!(st, StatusCode::NOT_FOUND);
 }
+
+// ---- club life (C2) -------------------------------------------------------------
+
+/// `p` is in club `club`'s room, as a zone would report it.
+fn in_room(s: &State, p: &P, club: &str) {
+    s.hub.set_location(
+        p.id,
+        crate::hub::Location {
+            zone: "clubroom".into(),
+            instance: 1,
+            owner: Some(club.to_string()),
+            label: "Club room".into(),
+        },
+        true,
+        chrono::Utc::now().timestamp_millis(),
+    );
+}
+
+async fn kinds(s: &Arc<State>, p: &P) -> Vec<String> {
+    let (_, n) = call(s, "GET", "/api/social/notifications", &p.token, None).await;
+    n.as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["kind"].as_str().unwrap().to_string())
+        .collect()
+}
+
+async fn grant(s: &State, p: &P, item: i32, n: i32, reason: &str, key: &str) {
+    let mut tx = s.db.begin().await.unwrap();
+    commons_api::economy::apply(
+        &mut tx,
+        &s.catalog,
+        p.id,
+        &[commons_api::economy::Op { item, delta: n }],
+        reason,
+        key,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_club_meets_up_reaches_its_goals_calls_together_and_keeps_its_furniture_straight() {
+    let Some(s) = state().await else { return };
+    let (a, b) = (player(&s).await, player(&s).await);
+    let tag = &a.name[1..7];
+    let post = |p: &P, path: String, body: Value| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move { call(&s, "POST", &path, &tok, Some(body)).await }
+    };
+    let (_, r) = post(
+        &a,
+        "/api/social/clubs/found".into(),
+        json!({ "name": format!("Larks {tag}"), "crest": "🌻", "color": "#e9b949" }),
+    )
+    .await;
+    let id = r["id"].as_str().unwrap().to_string();
+    let club = Uuid::parse_str(&id).unwrap();
+    befriend(&s, &a, &b).await;
+    post(
+        &a,
+        format!("/api/social/clubs/{id}/invite"),
+        json!({ "id": b.id.to_string() }),
+    )
+    .await;
+    post(
+        &b,
+        format!("/api/social/clubs/{id}/answer"),
+        json!({ "accept": true }),
+    )
+    .await;
+
+    // The meetup: staff set it. Started five minutes ago (UTC).
+    let now = chrono::Utc::now();
+    let start = now - chrono::Duration::minutes(5);
+    let dow = chrono::Datelike::weekday(&start).num_days_from_monday() as i16;
+    let minute = (chrono::Timelike::hour(&start) * 60 + chrono::Timelike::minute(&start)) as i16;
+    let (st, _) = post(
+        &b,
+        format!("/api/social/clubs/{id}/meetup"),
+        json!({ "dow": dow, "minute": minute }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "members don't set it");
+    let (st, r) = post(
+        &a,
+        format!("/api/social/clubs/{id}/meetup"),
+        json!({ "dow": dow, "minute": minute }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert!(r["meetup"]["live_until"].is_i64(), "it's on now: {r}");
+
+    // Both in the room for ten minutes: the start notice and the reward, once.
+    in_room(&s, &a, &id);
+    in_room(&s, &b, &id);
+    let (ca, cb) = (coins(&s, &a).await, coins(&s, &b).await);
+    crate::clublife::sweep_clubs(&s, now, 4, Some(club))
+        .await
+        .unwrap();
+    assert_eq!(coins(&s, &a).await, ca, "not yet: four minutes");
+    crate::clublife::sweep_clubs(&s, now, 6, Some(club))
+        .await
+        .unwrap();
+    crate::clublife::sweep_clubs(&s, now, 6, Some(club))
+        .await
+        .unwrap();
+    assert_eq!(coins(&s, &a).await, ca + 20);
+    assert_eq!(coins(&s, &b).await, cb + 20, "once each");
+    let k = kinds(&s, &b).await;
+    assert_eq!(k.iter().filter(|k| *k == "club_meetup_now").count(), 1);
+    assert!(k.contains(&"club_meetup_reward".to_string()));
+
+    // Goals: the meetup one is reached (two came); 32 member-minutes so far.
+    let treasury = |s: Arc<State>| async move {
+        sqlx::query_scalar::<_, i32>("SELECT treasury FROM clubs WHERE id = $1")
+            .bind(club)
+            .fetch_one(&s.db)
+            .await
+            .unwrap()
+    };
+    assert_eq!(treasury(s.clone()).await, 15);
+    // Time together (120 minutes), fish (15) and a week's rent in gifts.
+    crate::clublife::sweep_clubs(&s, now, 44, Some(club))
+        .await
+        .unwrap();
+    for i in 0..15 {
+        grant(&s, &a, 100, 1, "fishing", &format!("fish:{tag}:{i}")).await;
+    }
+    post(
+        &b,
+        format!("/api/social/clubs/{id}/donate"),
+        json!({ "coins": 25, "key": "g" }),
+    )
+    .await;
+    crate::clublife::sweep_clubs(&s, now, 1, Some(club))
+        .await
+        .unwrap();
+    crate::clublife::sweep_clubs(&s, now, 1, Some(club))
+        .await
+        .unwrap();
+    assert_eq!(
+        treasury(s.clone()).await,
+        15 + 15 + 10 + 25 + 10,
+        "each goal paid once"
+    );
+    let (_, d) = call(
+        &s,
+        "GET",
+        &format!("/api/social/clubs/{id}"),
+        &a.token,
+        None,
+    )
+    .await;
+    let goals = d["life"]["goals"].as_array().unwrap();
+    assert!(goals.iter().all(|g| g["done"] == true), "{goals:?}");
+    assert_eq!(d["life"]["meetup"]["came"].as_array().unwrap().len(), 2);
+
+    // The club call: everyone online with a phone is rung.
+    give_phone(&s, &a).await;
+    let (st, _) = post(&a, format!("/api/social/clubs/{id}/call"), json!({})).await;
+    assert_eq!(st, StatusCode::CONFLICT, "nobody who can pick up");
+    give_phone(&s, &b).await;
+    let mut rx = online(&s, &b);
+    let (st, r) = post(&a, format!("/api/social/clubs/{id}/call"), json!({})).await;
+    assert_eq!((st, r["rung"].as_i64()), (StatusCode::OK, Some(1)), "{r}");
+    assert!(pushed(&mut rx, "call_ring").is_some());
+    call(
+        &s,
+        "POST",
+        "/api/social/call/leave",
+        &a.token,
+        Some(json!({})),
+    )
+    .await;
+
+    // Furniture B lent the room goes back to B when B leaves.
+    sqlx::query(
+        "INSERT INTO club_objects (club_id, x, y, item_id, placed_by) VALUES ($1, 5, 5, 400, $2)",
+    )
+    .bind(club)
+    .bind(b.id)
+    .execute(&s.db)
+    .await
+    .unwrap();
+    let have = |s: Arc<State>, p: Uuid| async move {
+        sqlx::query_scalar::<_, i32>("SELECT coalesce(sum(qty), 0)::int FROM inventory WHERE player_id = $1 AND item_id = 400")
+            .bind(p)
+            .fetch_one(&s.db)
+            .await
+            .unwrap()
+    };
+    let before = have(s.clone(), b.id).await;
+    post(&b, format!("/api/social/clubs/{id}/leave"), json!({})).await;
+    assert_eq!(have(s.clone(), b.id).await, before + 1);
+    // And A's, when the club closes and the room is given up.
+    sqlx::query(
+        "INSERT INTO club_objects (club_id, x, y, item_id, placed_by) VALUES ($1, 6, 5, 400, $2)",
+    )
+    .bind(club)
+    .bind(a.id)
+    .execute(&s.db)
+    .await
+    .unwrap();
+    let before = have(s.clone(), a.id).await;
+    post(&a, format!("/api/social/clubs/{id}/leave"), json!({})).await;
+    assert_eq!(have(s.clone(), a.id).await, before + 1);
+}

@@ -223,6 +223,8 @@ export class NotificationsPanel extends Panel {
       /** Whether the invite into club `id` is still waiting for an answer. */
       clubInvited?(id: string): boolean;
       answerClub?(id: string, accept: boolean): void;
+      /** Up to the club's room (a meetup that's on). */
+      goToClubRoom?(id: string): void;
     },
   ) {
     super("Notifications", "notifications");
@@ -270,6 +272,7 @@ export class NotificationsPanel extends Panel {
           button("No thanks", () => this.actions.answerClub?.(club, false), "small"),
         );
       }
+      if (n.kind === "club_meetup_now" && club && Date.now() / 1000 - n.at < 3600) row.append(button("Go up", () => this.actions.goToClubRoom?.(club), "small primary-sm"));
       if (n === newestGift && this.waitingGifts > 0) row.append(button("Go home", () => this.actions.goHome(), "small"));
       this.body.append(row);
     }

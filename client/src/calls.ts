@@ -180,6 +180,13 @@ export class Calls {
     await this.join(p);
   }
 
+  /** The club call: rings every member of `club` who's online; how many were rung. */
+  async callClub(club: string): Promise<number> {
+    const p = await this.auth.send<Pass & { rung: number }>(`/api/social/clubs/${club}/call`, {});
+    await this.join(p);
+    return p.rung;
+  }
+
   /** Picks up (or turns down) the call ringing you. */
   async answer(accept: boolean): Promise<void> {
     const r = this.ringing;

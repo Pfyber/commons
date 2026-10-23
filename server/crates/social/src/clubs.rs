@@ -157,7 +157,7 @@ pub struct Club {
     pub treasury: i32,
 }
 
-async fn club(db: &PgPool, id: Uuid) -> ApiResult<Club> {
+pub(crate) async fn club(db: &PgPool, id: Uuid) -> ApiResult<Club> {
     sqlx::query_as(
         "SELECT id, name, crest, color, treasury FROM clubs WHERE id = $1 AND closed_at IS NULL",
     )
@@ -178,10 +178,82 @@ async fn role_of(db: &PgPool, club: Uuid, player: Uuid) -> ApiResult<Option<Stri
         .map_err(db_err)
 }
 
-async fn member_role(db: &PgPool, club: Uuid, player: Uuid) -> ApiResult<String> {
+pub(crate) async fn member_role(db: &PgPool, club: Uuid, player: Uuid) -> ApiResult<String> {
     role_of(db, club, player)
         .await?
         .ok_or_else(|| forbidden("not_member", "You're not in this club."))
+}
+
+/// Refuses anyone but the club's owner and moderators.
+pub(crate) async fn require_staff(db: &PgPool, club: Uuid, player: Uuid) -> ApiResult<()> {
+    match member_role(db, club, player).await?.as_str() {
+        "owner" | "mod" => Ok(()),
+        _ => Err(forbidden(
+            "not_staff",
+            "Only the club's owner and moderators can do that.",
+        )),
+    }
+}
+
+/// What the club's room costs a week (the smallest room's rent, with none).
+pub(crate) async fn weekly_rent(db: &PgPool, club: Uuid) -> ApiResult<i32> {
+    let tier = room_of(db, club).await?.map_or(1, |l| l.tier);
+    Ok(RENT.tier(ROOM, tier).map_or(25, |t| t.rent))
+}
+
+/// Coins the town gives the club (a goal reached): into the treasury, once per `key`.
+pub(crate) async fn reward_treasury(
+    conn: &mut PgConnection,
+    club: Uuid,
+    coins: i32,
+    reason: &str,
+    key: &str,
+) -> ApiResult<()> {
+    let fresh: Option<i64> = sqlx::query_scalar(
+        "INSERT INTO club_treasury_ledger (club_id, player_id, delta, reason, key) VALUES ($1, NULL, $2, $3, $4)
+         ON CONFLICT (key) DO NOTHING RETURNING id",
+    )
+    .bind(club)
+    .bind(coins)
+    .bind(reason)
+    .bind(key)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(db_err)?;
+    if fresh.is_some() {
+        sqlx::query("UPDATE clubs SET treasury = treasury + $2 WHERE id = $1")
+            .bind(club)
+            .bind(coins)
+            .execute(&mut *conn)
+            .await
+            .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+/// Takes `player` out of the club, their furniture in its room back to their bag.
+async fn drop_member(state: &SocialState, club: Uuid, player: Uuid) -> ApiResult<()> {
+    let mut tx = state.db.begin().await.map_err(db_err)?;
+    let left: i64 = sqlx::query_scalar("SELECT extract(epoch FROM now())::bigint")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    crate::clublife::return_pieces(
+        &mut tx,
+        state,
+        club,
+        Some(player),
+        &format!("club_left:{club}:{left}"),
+    )
+    .await?;
+    sqlx::query("DELETE FROM club_members WHERE club_id = $1 AND player_id = $2")
+        .bind(club)
+        .bind(player)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(())
 }
 
 /// A club's name, and its owner and moderators (who hear about its rent).
@@ -596,6 +668,7 @@ async fn detail(
             "id": pid, "author": author, "author_id": author_id.map(|a| a.to_string()),
             "text": text, "at": at,
         })).collect::<Vec<_>>(),
+        "life": crate::clublife::page(&state, &c, &members.iter().map(|m| m.0).collect::<Vec<_>>()).await?,
     })))
 }
 
@@ -753,12 +826,7 @@ async fn leave(
             .await
             .map_err(db_err)?;
     }
-    sqlx::query("DELETE FROM club_members WHERE club_id = $1 AND player_id = $2")
-        .bind(c.id)
-        .bind(me)
-        .execute(&state.db)
-        .await
-        .map_err(db_err)?;
+    drop_member(&state, c.id, me).await?;
     let rest: Vec<Uuid> = members.into_iter().filter(|m| *m != me).collect();
     tell_members(
         &state,
@@ -794,12 +862,7 @@ async fn remove(
             "You can't remove them from the club.",
         ));
     }
-    sqlx::query("DELETE FROM club_members WHERE club_id = $1 AND player_id = $2")
-        .bind(c.id)
-        .bind(who)
-        .execute(&state.db)
-        .await
-        .map_err(db_err)?;
+    drop_member(&state, c.id, who).await?;
     notify(
         &state,
         who,

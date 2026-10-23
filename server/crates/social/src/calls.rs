@@ -291,7 +291,7 @@ impl Calls {
 
 // ---- who may call whom --------------------------------------------------------------
 
-async fn has_phone(state: &SocialState, p: Uuid) -> ApiResult<bool> {
+pub(crate) async fn has_phone(state: &SocialState, p: Uuid) -> ApiResult<bool> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM inventory WHERE player_id = $1 AND item_id = $2 AND qty > 0)",
     )
@@ -624,7 +624,25 @@ async fn ring(
     {
         return Err(refuse("not_friends", "You can only call your friends."));
     }
-    if !has_phone(&state, to).await? {
+    let call = ring_into(&state, me, &claims.name, to, true).await?;
+    Ok(Json(
+        pass_with_members(&state, call, me, &claims.name).await?,
+    ))
+}
+
+/// Rings `to` into `me`'s call (opening one if need be), once the caller
+/// has checked they may (friends, or fellow club members): `to` needs a
+/// phone and to be online, and the blocks and age rules must allow them with
+/// everyone in the call. `limit`: count it towards the caller's ring limit
+/// (a club call counts once for everyone it rings).
+pub(crate) async fn ring_into(
+    state: &SocialState,
+    me: Uuid,
+    my_name: &str,
+    to: Uuid,
+    limit: bool,
+) -> ApiResult<Uuid> {
+    if !has_phone(state, to).await? {
         return Err(refuse("no_phone", "They don't have a phone yet."));
     }
     if !state.hub.online(to) {
@@ -636,9 +654,9 @@ async fn ring(
         Some(c) => state.calls.everyone(c),
         None => vec![me],
     };
-    may_join(&state, to, &with).await?;
+    may_join(state, to, &with).await?;
     // Only rings that reach someone count towards the limit.
-    if !state.ring_allowed(me) {
+    if limit && !state.ring_allowed(me) {
         return Err(ApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
             "slow_down",
@@ -664,21 +682,32 @@ async fn ring(
             ));
         }
     }
-    let members = names(&state, &state.calls.members(call)).await?;
+    let members = names(state, &state.calls.members(call)).await?;
     state.hub.send(
         to,
         &json!({
             "t": "call_ring", "call": call.to_string(),
-            "from_id": me.to_string(), "from_name": claims.name, "members": members,
+            "from_id": me.to_string(), "from_name": my_name, "members": members,
         }),
     );
     if fresh {
-        log_open(&state, me, call, "out", "unanswered", &[to], false).await;
+        log_open(state, me, call, "out", "unanswered", &[to], false).await;
     }
-    let mut out = pass(&state, call, me, &claims.name)?;
+    Ok(call)
+}
+
+/// The pass into `call` for `me`, with who's in it and who hosts it.
+pub(crate) async fn pass_with_members(
+    state: &SocialState,
+    call: Uuid,
+    me: Uuid,
+    my_name: &str,
+) -> ApiResult<Value> {
+    let members = names(state, &state.calls.members(call)).await?;
+    let mut out = pass(state, call, me, my_name)?;
     out["members"] = json!(members);
     out["host"] = json!(state.calls.host(call).map(|h| h.to_string()));
-    Ok(Json(out))
+    Ok(out)
 }
 
 #[derive(Deserialize)]

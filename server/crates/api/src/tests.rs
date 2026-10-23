@@ -3021,3 +3021,112 @@ mod devtools {
         assert_eq!(coins().await, before + 2 * crate::devtools::WELL_COINS);
     }
 }
+
+#[tokio::test]
+async fn club_rooms_are_arranged_by_members_and_pieces_go_back_to_their_placers() {
+    let Some(db) = db().await else { return };
+    let s = state(db.clone(), 1000).await;
+    let (owner, p, q, outsider) = (
+        player(&s).await,
+        player(&s).await,
+        player(&s).await,
+        player(&s).await,
+    );
+    let club: Uuid = sqlx::query_scalar(
+        "INSERT INTO clubs (name, crest, color, founded_by) VALUES ($1, '🌻', '#e9b949', $2) RETURNING id",
+    )
+    .bind(format!("Room test {}", &p.simple().to_string()[..8]))
+    .bind(owner)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    for (who, role) in [(owner, "owner"), (p, "member"), (q, "member")] {
+        sqlx::query("INSERT INTO club_members (club_id, player_id, role) VALUES ($1, $2, $3)")
+            .bind(club)
+            .bind(who)
+            .bind(role)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+    let chairs = |who: Uuid| {
+        let db = db.clone();
+        async move {
+            sqlx::query_scalar::<_, i32>("SELECT coalesce(sum(qty), 0)::int FROM inventory WHERE player_id = $1 AND item_id = 400")
+                .bind(who)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+        }
+    };
+    {
+        let mut tx = db.begin().await.unwrap();
+        apply(
+            &mut tx,
+            &s.catalog,
+            p,
+            &[Op {
+                item: 400,
+                delta: 2,
+            }],
+            "test",
+            &format!("{p}:chairs"),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+    let place = |who: Uuid, x: i16, key: &str| serde_json::json!({ "club": club.to_string(), "player": who.to_string(), "item": 400, "x": x, "y": 3, "key": format!("{who}:{key}") });
+    let (st, r) = call(&s, "/club/place", place(p, 3, "a")).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("no_room")),
+        "no room rented"
+    );
+    sqlx::query(
+        "INSERT INTO leases (kind, plot, player_id, club_id, tier, periods_paid, paid_until) VALUES ('club_room', $1, $2, $3, 1, 1, now() + interval '7 days')",
+    )
+    .bind(format!("clubroom:{club}"))
+    .bind(owner)
+    .bind(club)
+    .execute(&db)
+    .await
+    .unwrap();
+    let (st, r) = call(&s, "/club/place", place(outsider, 3, "b")).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("not_member"))
+    );
+    let before = chairs(p).await;
+    let (st, r) = call(&s, "/club/place", place(p, 3, "c")).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(chairs(p).await, before - 1, "out of the placer's bag");
+    let (st, _) = call(&s, "/club/place", place(p, 3, "d")).await;
+    assert_eq!(st, StatusCode::CONFLICT, "something's there");
+    let pick = |who: Uuid, key: &str| serde_json::json!({ "club": club.to_string(), "player": who.to_string(), "x": 3, "y": 3, "key": format!("{who}:{key}") });
+    let (st, r) = call(&s, "/club/pickup", pick(q, "e")).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("not_yours"))
+    );
+    let (st, r) = call(&s, "/club/pickup", pick(owner, "f")).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["to"], p.to_string(), "back to whoever placed it");
+    assert_eq!(chairs(p).await, before);
+    assert_eq!(chairs(owner).await, 0);
+    // A Club room holds 16 pieces.
+    for x in 0..16i16 {
+        sqlx::query("INSERT INTO club_objects (club_id, x, y, item_id, placed_by) VALUES ($1, $2, 9, 400, $3)")
+            .bind(club)
+            .bind(x)
+            .bind(owner)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+    let (st, r) = call(&s, "/club/place", place(p, 4, "g")).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("room_full"))
+    );
+}

@@ -1273,6 +1273,67 @@ browser:
 - The clubs run still passes.
 - No errors.
 
+## Clubs C2 · Club life: done (2026-10-23)
+
+ADR 0014, "C2: club life". Reasons to come back on a given day, together.
+
+- **The weekly meetup:**
+  - The owner or a moderator picks a weekday and a time. It's stored in
+    UTC and shown in local time.
+  - Members get a reminder 30 minutes before, and a notice when it starts
+    (with a "Go up" button).
+  - Anyone who spends 10 minutes of the hour in the club room gets 20
+    coins, once.
+  - Who's there comes from the zones' presence reports (the social hub),
+    never from clients.
+- **Goals each week** (from Monday, UTC):
+  - come to the meetup together (up to three members);
+  - 120 member-minutes in the room;
+  - 15 fish caught by members;
+  - donations worth a week's rent.
+
+  Each goal reached pays 10 to 15 coins into the treasury, once, and every
+  member gets a toast.
+- **The club call:** rings every member who's online into one call, under
+  the phone rules (a phone each, no blocks, the age rules, eight at most).
+  Club members don't have to be friends with each other. The call code now
+  shares one ring step (`calls::ring_into`) between friend calls and club
+  calls.
+- **Decorating together:**
+  - Members place furniture from their own bags (`club_objects`, migration
+    0034), up to the room's tier (16 pieces, or 32).
+  - A piece stays its placer's. They, the owner or a moderator can pick it
+    up, and it goes back to the placer's bag. It also goes back when they
+    leave or are removed, or when the room is given up.
+  - The zone treats a club room like a home for furniture; the api checks
+    membership, the cap and whose piece it is (`api/src/clubroom.rs`).
+- **The club page** has a "This week" section: the meetup (live, with who's
+  come), the meetup form for the owner and moderators, goal progress bars,
+  📞 Call the club, and the furniture count.
+- **Fixed from the merge:** the `styles.css` conflict resolution had lost
+  the closing brace of the club-badge rule. Every rule after it (the fork's
+  bowling, arena, pool and lighting styles, and C2's) didn't apply. A new
+  client test (`styles.test.ts`) fails on unbalanced braces.
+
+Checked:
+- Server: social 19, with the whole of club life (a meetup on now, the
+  reward once each, the start notice once, all four goals paid once, the
+  club call ringing, furniture back on leaving and on closing; the sweep
+  can be pointed at one club so parallel tests don't pay each other).
+  Also the meetup-time unit tests, API 46 (club furniture: no room,
+  outsiders, members, someone else's piece, the owner putting it back in
+  the placer's bag, the 16-piece cap), zone 58 and sim 49; clippy clean.
+- Client: 89 tests, including the stylesheet check, which fails on the
+  merge's version and passes now.
+- In the browser, with a 5-second club sweep, two members:
+  - A meetup that's on now: both go up and get 20 coins each, and the
+    meetup goal pays the treasury, with a toast.
+  - "This week" shows the live meetup, who's come, and the goals.
+  - 📞 Call the club rings Bo.
+  - Ada places a chair from her bag; Bo sees it but can't pick it up
+    ("That's someone else's").
+  - The bowling panel is styled again.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,
