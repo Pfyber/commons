@@ -21,7 +21,8 @@ fn walls(b: &mut Builder, w: u16, h: u16, door: (u16, u16)) {
 }
 
 /// The lobby: the front desk (found a club, see yours), the directory of
-/// clubs on the wall, the stairs up to the club rooms, armchairs to wait in.
+/// clubs on the wall, the week's leaderboard and the "What's on" board of
+/// club events (C3), the stairs up to the club rooms, armchairs to wait in.
 pub fn lobby() -> MapFile {
     let (w, h) = (32u16, 20u16);
     let mut b = Builder::new(w, h);
@@ -32,6 +33,16 @@ pub fn lobby() -> MapFile {
     b.rect(15, 9, 2, h - 10, "rug");
     b.rect(3, 11, 8, 5, "rug");
     b.object("club_directory", 6, 1, 6, 1, Some("Club directory"), true);
+    b.object(
+        "club_leaderboard",
+        14,
+        1,
+        4,
+        1,
+        Some("Clubs of the week"),
+        true,
+    );
+    b.object("club_events", 18, 1, 3, 1, Some("What's on"), true);
     b.object("club_desk", 12, 7, 8, 1, Some("Club desk"), true);
     b.object(
         "club_stairs",

@@ -1,5 +1,5 @@
 {
-  "_comment": "What can be rented, by tier. Rent is in coins per period (period_secs, default a week); a lease that can't be paid gets grace_secs before it ends. Coins only, never real money. `furniture` caps the pieces placed in a home; `listings` caps the goods on a stall; `members` caps a club (club rooms are paid from the club's treasury).",
+  "_comment": "What can be rented, by tier. Rent is in coins per period (period_secs, default a week); a lease that can't be paid gets grace_secs before it ends. Coins only, never real money. `furniture` caps the pieces placed in a home; `listings` caps the goods on a stall; `members` caps a club (club rooms are paid from the club's treasury); `lot` marks a clubhouse on one of the city's club lots.",
   "period_secs": 604800,
   "grace_secs": 259200,
   "kinds": {
@@ -29,7 +29,8 @@
       "name": "Club room",
       "tiers": [
         { "tier": 1, "name": "Club room", "rent": 25, "members": 12, "furniture": 16 },
-        { "tier": 2, "name": "Big club room", "rent": 60, "members": 30, "furniture": 32 }
+        { "tier": 2, "name": "Big club room", "rent": 60, "members": 30, "furniture": 32 },
+        { "tier": 3, "name": "Clubhouse", "rent": 120, "members": 40, "furniture": 40, "lot": true }
       ]
     }
   }

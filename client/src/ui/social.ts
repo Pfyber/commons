@@ -225,6 +225,8 @@ export class NotificationsPanel extends Panel {
       answerClub?(id: string, accept: boolean): void;
       /** Up to the club's room (a meetup that's on). */
       goToClubRoom?(id: string): void;
+      /** To a place in the city (a club event's). */
+      walkToSpot?(spot: string): void;
     },
   ) {
     super("Notifications", "notifications");
@@ -271,6 +273,10 @@ export class NotificationsPanel extends Panel {
           button("Join", () => this.actions.answerClub?.(club, true), "small primary-sm"),
           button("No thanks", () => this.actions.answerClub?.(club, false), "small"),
         );
+      }
+      const place = (n.body as { place?: string }).place;
+      if ((n.kind === "club_event_soon" || n.kind === "club_event_now") && place && Date.now() / 1000 - n.at < 7200) {
+        row.append(button("Show me", () => (this.hide(), this.actions.walkToSpot?.(place)), "small primary-sm"));
       }
       if (n.kind === "club_meetup_now" && club && Date.now() / 1000 - n.at < 3600) row.append(button("Go up", () => this.actions.goToClubRoom?.(club), "small primary-sm"));
       if (n === newestGift && this.waitingGifts > 0) row.append(button("Go home", () => this.actions.goHome(), "small"));

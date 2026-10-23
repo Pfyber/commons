@@ -9,6 +9,7 @@ import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 
 const TILE = 32;
 const O = "#3b3a2e";
+const P_WOOD = "#8a5a33";
 const PENNANTS = ["#c8553d", "#3f7a8a", "#e0a43a", "#6a9a4a", "#7d5ba6", "#d0679a", "#4a6fb0", "#2f8f6f"];
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -259,6 +260,142 @@ export function clubObject(o: MapObject): { c: HTMLCanvasElement; overhang: numb
       }
       if (o.label) text(ctx, o.label.toUpperCase(), w / 2, 66, "#fff8e3", bw - 6);
       return { c, overhang: 64 };
+    }
+    case "club_house": {
+      // A club lot (C3). Rented: the club's house, timber walls under a roof
+      // in the club's colour, its crest on a banner over the door and its
+      // name on a board. Free: a building site with a FOR RENT sign.
+      const top = 70;
+      const [c, ctx] = canvas(w, h + top);
+      const ft = top + h;
+      if (!o.club) {
+        // Dug earth inside stakes and string, planks, and the sign.
+        px(ctx, "#8a6a45", 24, top + 40, w - 48, h - 56);
+        px(ctx, "#a07a50", 28, top + 44, w - 56, h - 64);
+        for (let x = 24; x <= w - 24; x += 48) {
+          px(ctx, O, x - 2, top + 30, 4, 20);
+          px(ctx, "#c9a46a", x - 1, top + 31, 2, 18);
+        }
+        px(ctx, "#f2ead8", 24, top + 34, w - 48, 1);
+        for (let i = 0; i < 4; i++) {
+          px(ctx, O, 60, ft - 40 - i * 7, 90, 6);
+          px(ctx, "#c99a62", 61, ft - 39 - i * 7, 88, 4);
+        }
+        px(ctx, O, w / 2 - 3, top + 6, 6, 60);
+        px(ctx, P_WOOD, w / 2 - 2, top + 7, 4, 58);
+        px(ctx, O, w / 2 - 70, top - 30, 140, 40);
+        px(ctx, "#fff8e3", w / 2 - 68, top - 28, 136, 36);
+        text(ctx, "FOR RENT", w / 2, top - 18, "#8f3a2b", 130, 2);
+        text(ctx, "CLUB LOT", w / 2, top - 2, O, 130);
+        return { c, overhang: top };
+      }
+      const color = o.color ?? "#3f7a8a";
+      px(ctx, "rgba(0,0,0,0.18)", 14, ft - 8, w - 28, 8);
+      // Roof in the club's colour, with a darker ridge.
+      polygon(ctx, O, [
+        [6, 60],
+        [40, 10],
+        [w - 40, 10],
+        [w - 6, 60],
+      ]);
+      polygon(ctx, color, [
+        [11, 58],
+        [42, 13],
+        [w - 42, 13],
+        [w - 11, 58],
+      ]);
+      for (let y = 22; y < 58; y += 8) px(ctx, "rgba(0,0,0,0.12)", 24, y, w - 48, 2);
+      // Timber walls.
+      px(ctx, O, 18, 58, w - 36, ft - 58 - 6);
+      px(ctx, "#c99a62", 20, 60, w - 40, ft - 62 - 6);
+      for (let x = 28; x < w - 20; x += 12) px(ctx, "#b08550", x, 60, 1, ft - 66);
+      // Windows, warm.
+      for (const x of [44, 120, w - 160, w - 84]) {
+        px(ctx, O, x - 2, 88, 40, 36);
+        px(ctx, "#f6d98a", x, 90, 36, 32);
+        px(ctx, O, x + 17, 90, 2, 32);
+        px(ctx, O, x, 105, 36, 2);
+      }
+      // The door and the banner over it.
+      const dw = 64;
+      const dTop = ft - 84;
+      px(ctx, O, w / 2 - dw / 2 - 2, dTop - 2, dw + 4, ft - dTop - 4);
+      px(ctx, "#6e4b30", w / 2 - dw / 2, dTop, dw, ft - dTop - 6);
+      px(ctx, "#5a3a22", w / 2 - 1, dTop, 2, ft - dTop - 6);
+      px(ctx, "#f6d98a", w / 2 - dw / 2 + 6, dTop + 8, dw / 2 - 12, 18);
+      px(ctx, "#f6d98a", w / 2 + 6, dTop + 8, dw / 2 - 12, 18);
+      const bw = 52;
+      polygon(ctx, O, [
+        [w / 2 - bw / 2 - 1, 58],
+        [w / 2 + bw / 2 + 1, 58],
+        [w / 2 + bw / 2 + 1, dTop - 10],
+        [w / 2, dTop + 2],
+        [w / 2 - bw / 2 - 1, dTop - 10],
+      ]);
+      polygon(ctx, color, [
+        [w / 2 - bw / 2 + 1, 59],
+        [w / 2 + bw / 2 - 1, 59],
+        [w / 2 + bw / 2 - 1, dTop - 11],
+        [w / 2, dTop],
+        [w / 2 - bw / 2 + 1, dTop - 11],
+      ]);
+      if (o.sign) {
+        disc(ctx, "#fff8e3", w / 2, 80, 15);
+        disc(ctx, color, w / 2, 80, 13);
+        crest(ctx, o.sign, w / 2, 81, 18);
+      }
+      // The name board under the roof.
+      if (o.title) {
+        px(ctx, O, w / 2 - 120, 30, 240, 20);
+        px(ctx, "#fff8e3", w / 2 - 118, 32, 236, 16);
+        text(ctx, o.title.toUpperCase(), w / 2, 40, "#3b3a2e", 228, 2);
+      }
+      // Steps and lamps.
+      px(ctx, O, w / 2 - dw / 2 - 10, ft - 8, dw + 20, 8);
+      px(ctx, "#cfc5b1", w / 2 - dw / 2 - 9, ft - 7, dw + 18, 6);
+      for (const x of [w / 2 - dw / 2 - 22, w / 2 + dw / 2 + 16]) {
+        px(ctx, O, x + 2, dTop + 10, 3, ft - dTop - 16);
+        px(ctx, O, x - 2, dTop, 11, 12);
+        px(ctx, "#ffe9a8", x - 1, dTop + 1, 9, 10);
+      }
+      return { c, overhang: top };
+    }
+    case "club_leaderboard": {
+      // A gilt board: three podium steps and a cup over them.
+      const [c, ctx] = canvas(w, h + 40);
+      px(ctx, O, 2, 0, w - 4, c.height - 4);
+      px(ctx, "#2f3d5a", 3, 1, w - 6, c.height - 6);
+      px(ctx, O, w / 2 - 40, 2, 80, 10);
+      px(ctx, "#d8b45a", w / 2 - 39, 3, 78, 8);
+      text(ctx, "THIS WEEK", w / 2, 7, "#3b2a12", 74);
+      const steps: [number, number, string][] = [[w / 2 - 30, 22, "#c9c9c9"], [w / 2 - 10, 16, "#e9b949"], [w / 2 + 10, 28, "#c8813d"]];
+      for (const [x, y, col] of steps) {
+        px(ctx, O, x, y + 8, 20, c.height - y - 14);
+        px(ctx, col, x + 1, y + 9, 18, c.height - y - 16);
+      }
+      disc(ctx, O, w / 2, 18, 6);
+      disc(ctx, "#e9b949", w / 2, 18, 5);
+      px(ctx, "#e9b949", w / 2 - 2, 22, 4, 4);
+      return { c, overhang: 40 };
+    }
+    case "club_events": {
+      // A poster board: WHAT'S ON, and posters in club colours.
+      const [c, ctx] = canvas(w, h + 40);
+      px(ctx, O, 2, 0, w - 4, c.height - 4);
+      px(ctx, "#8a5a33", 3, 1, w - 6, c.height - 6);
+      px(ctx, "#f2ead8", 6, 12, w - 12, c.height - 20);
+      px(ctx, O, 6, 2, w - 12, 10);
+      px(ctx, "#c8553d", 7, 3, w - 14, 8);
+      text(ctx, "WHAT'S ON", w / 2, 7, "#fff8e3", w - 16);
+      for (let i = 0; i < 3; i++) {
+        const x = 10 + i * ((w - 20) / 3);
+        px(ctx, O, x, 16, 22, 26);
+        px(ctx, PENNANTS[(i * 3 + 1) % PENNANTS.length], x + 1, 17, 20, 24);
+        px(ctx, "#fff8e3", x + 4, 21, 14, 2);
+        px(ctx, "#fff8e3", x + 4, 25, 10, 2);
+        disc(ctx, "#c8553d", x + 11, 17, 2);
+      }
+      return { c, overhang: 40 };
     }
     case "club_board": {
       // A cork board with pinned notes.

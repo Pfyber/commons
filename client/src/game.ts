@@ -357,7 +357,8 @@ export class Game {
   /** Dancing next to you when you take on the AI bot at the Dance Off. */
   private danceBot: Avatar | null = null;
   /** A building we're walking to the door of, to go in once we get there. */
-  private entering: { door: TileXY; zone: string } | null = null;
+  /** Walking up to a door, to go through it (into `club`'s room, for a clubhouse). */
+  private entering: { door: TileXY; zone: string; club?: string } | null = null;
   /** When your own wooziness wears off. */
   private soberTimer = 0;
   private grove: Grove | null = null;
@@ -586,6 +587,11 @@ export class Game {
     void ui.welcome.loadFounders().catch(() => {});
     // Club crests by names (asked afresh in each place).
     ui.clubs.forgetBadges();
+    // The clubhouses on the club lots, as they change (C3).
+    if (zoneId === "city") {
+      this.dressLots(ui.clubs.lots);
+      this.disposers.push(ui.clubs.onLots((lots) => this.dressLots(lots)));
+    }
     this.disposers.push(ui.clubs.onBadges(() => this.applyClubBadges()));
     this.chess = new ChessPanel(document.body, () => this.selfId, {
       move: (table, uci) => this.socket?.send({ t: "GameMove", table, uci }),
@@ -643,6 +649,20 @@ export class Game {
   private applyFounders() {
     this.grove?.setFounders(this.ui.welcome.founders);
     for (const a of this.avatars.values()) a.setFounder(this.ui.welcome.founderNamed(a.info.name)?.no ?? null);
+  }
+
+  /** Puts each club's house (crest, colour, name) on the lot it rents. */
+  private dressLots(lots: import("./clubs").Lot[]) {
+    for (const o of this.scene.map.objects) {
+      if (o.kind !== "club_house") continue;
+      const c = lots.find((l) => l.lot === o.label)?.club ?? null;
+      if ((o.club ?? null) === (c?.id ?? null)) continue;
+      o.club = c?.id;
+      o.title = c?.name;
+      o.sign = c?.crest;
+      o.color = c?.color;
+      this.scene.redraw(o);
+    }
   }
 
   private applyClubBadges() {
@@ -820,6 +840,26 @@ export class Game {
         walkUp();
         this.near(ui.clubsPanel, front, 8).showDirectory();
         return true;
+      case "club_leaderboard":
+        walkUp();
+        this.near(ui.clubsPanel, front, 8).showLeaderboard();
+        return true;
+      case "club_events":
+        walkUp();
+        this.near(ui.clubsPanel, front, 8).showEvents();
+        return true;
+      case "club_house": {
+        // A club's house on its lot (C3): members go in; others are told whose it is.
+        const club = obj.club ? ui.clubs.club(obj.club) : null;
+        if (club) {
+          this.enterClubRoom({ x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h }, club.id);
+        } else if (obj.club) {
+          this.hud.toast(`🏠 ${obj.sign ?? ""} ${obj.title}'s clubhouse: members only. Their events are on the What's on board at the Club Hall.`, 5000);
+        } else {
+          this.hud.toast("🏗️ A club lot, free to rent: a club can build its clubhouse here (a Clubhouse, at the Club Hall's desk).", 5000);
+        }
+        return true;
+      }
       case "club_stairs":
         walkUp();
         this.near(ui.clubsPanel, front, 8).showRooms();
@@ -1059,6 +1099,17 @@ export class Game {
   }
 
   /** Walks to a building's door and goes in on arrival (or at once if already there). */
+  /** Into a club's room through its clubhouse's door on the lot (C3). */
+  private enterClubRoom(door: TileXY, club: string) {
+    const self = this.self;
+    if (!self) return;
+    if (cheb(self.destination, door) <= 1 && !self.moving) return this.ui.clubsPanel.goToRoom(club);
+    const spot = nearestWalkable(this.scene.map, door.x, door.y, 2);
+    if (!spot) return;
+    this.moveTo(spot, true);
+    this.entering = { door: spot, zone: "clubroom", club };
+  }
+
   private enter(door: TileXY, zone: string) {
     const self = this.self;
     if (!self) return;
@@ -1083,7 +1134,8 @@ export class Game {
     }
     if (self.moving) return;
     this.entering = null;
-    this.goTo(e.zone);
+    if (e.club) this.ui.clubsPanel.goToRoom(e.club);
+    else this.goTo(e.zone);
   }
 
   /** The Caretaker says something now and then when you're close by. */

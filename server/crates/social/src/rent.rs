@@ -371,6 +371,10 @@ pub async fn release(state: &SocialState, lease: &Lease, reason: &str) -> ApiRes
         .await?;
     }
     tx.commit().await.map_err(db_err)?;
+    // A clubhouse given up: its lot is free again for everyone to see.
+    if lease.plot.starts_with("lot:") {
+        crate::clubs::tell_lots(state);
+    }
     Ok(ops.iter().map(|o| o.delta).sum())
 }
 

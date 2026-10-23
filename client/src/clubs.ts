@@ -13,6 +13,8 @@ export type Room = Omit<Lease, "kind"> & { kind: "club_room"; members?: number |
 
 export interface ClubTier extends Tier {
   members: number;
+  /** A Clubhouse: on one of the city's club lots (C3). */
+  lot?: boolean;
 }
 
 export interface MyClub {
@@ -104,6 +106,53 @@ export interface Detail {
   life: Life;
 }
 
+/** A club lot in the city, and the club whose clubhouse stands on it (C3). */
+export interface Lot {
+  /** `lot:<bx>_<by>`: also the spot in front of it, and `door:<lot>`. */
+  lot: string;
+  name: string;
+  club: { id: string; name: string; crest: string; color: string } | null;
+}
+
+export interface Standing {
+  rank: number;
+  id: string;
+  name: string;
+  crest: string;
+  color: string;
+  points: number;
+  mine?: boolean;
+  /** Last week's clubs of the week: what they won. */
+  coins?: number;
+}
+
+export interface Leaderboard {
+  week_ends: number;
+  standings: Standing[];
+  last: Standing[];
+  awards: number[];
+}
+
+/** An event a club holds for everyone, at a public place (C3). */
+export interface ClubEvent {
+  id: number;
+  title: string;
+  /** A spot in the city. */
+  place: string;
+  place_name: string;
+  starts_at: number;
+  ends_at: number;
+  live: boolean;
+  club: { id: string; name: string; crest: string; color: string };
+  going: number;
+  /** Whether you're going. */
+  me: boolean;
+  /** Friends of yours who are going. */
+  friends: string[];
+  /** Whether you can call it off (the host club's owner or a moderator). */
+  staff: boolean;
+}
+
 export interface Badge {
   club: string;
   crest: string;
@@ -134,12 +183,20 @@ export class Clubs {
   onClubChanged: (club: string, what: Record<string, unknown>) => void = () => {};
   /** Something to tell the player (a goal reached). */
   onToast: (text: string) => void = () => {};
+  /** The clubhouses on the lots, as last heard. */
+  lots: Lot[] = [];
+  private lotListeners = new Set<(lots: Lot[]) => void>();
+  private eventListeners = new Set<() => void>();
+  /** Public places events can be held at. */
+  places: { key: string; name: string }[] = [];
 
   constructor(
     private auth: Auth,
     social: Social,
   ) {
     social.onPush((m) => {
+      if (m.t === "club_lots") void this.loadLots().catch(() => {});
+      if (m.t === "club_events") for (const f of this.eventListeners) f();
       // An invite or a removal changes the list too.
       if (m.t === "notify" && String((m.n as { kind?: string })?.kind).startsWith("club_")) void this.load().catch(() => {});
       if (m.t !== "club") return;
@@ -232,8 +289,57 @@ export class Clubs {
     return this.post(`/api/social/clubs/${club}/posts/${post}/delete`, {});
   }
 
-  rentRoom(club: string, tier: number) {
-    return this.post<{ room: Room }>(`/api/social/clubs/${club}/room`, { tier });
+  /** Rents (or moves) the club's room; a Clubhouse needs a club `lot`. */
+  async rentRoom(club: string, tier: number, lot?: string) {
+    const r = await this.post<{ room: Room }>(`/api/social/clubs/${club}/room`, lot ? { tier, lot } : { tier });
+    await this.loadLots().catch(() => {});
+    return r;
+  }
+
+  // ---- C3: clubhouses, the clubs of the week, events ----------------------
+
+  onLots(fn: (lots: Lot[]) => void): () => void {
+    this.lotListeners.add(fn);
+    return () => this.lotListeners.delete(fn);
+  }
+
+  async loadLots(): Promise<Lot[]> {
+    this.lots = (await this.auth.get<{ lots: Lot[] }>("/api/social/clubs/lots")).lots;
+    for (const f of this.lotListeners) f(this.lots);
+    return this.lots;
+  }
+
+  /** The lot a club's clubhouse stands on, if it has one. */
+  lotOf(club: string): string | null {
+    const plot = this.club(club)?.room?.plot;
+    return plot?.startsWith("lot:") ? plot : null;
+  }
+
+  leaderboard(): Promise<Leaderboard> {
+    return this.auth.get("/api/social/clubs/leaderboard");
+  }
+
+  onEvents(fn: () => void): () => void {
+    this.eventListeners.add(fn);
+    return () => this.eventListeners.delete(fn);
+  }
+
+  async events(): Promise<ClubEvent[]> {
+    const r = await this.auth.get<{ events: ClubEvent[]; places: { key: string; name: string }[] }>("/api/social/events");
+    this.places = r.places;
+    return r.events;
+  }
+
+  planEvent(club: string, title: string, place: string, startsAt: number, hours: number) {
+    return this.auth.send<{ id: number }>(`/api/social/clubs/${club}/events`, { title, place, starts_at: startsAt, hours });
+  }
+
+  cancelEvent(club: string, event: number) {
+    return this.auth.send(`/api/social/clubs/${club}/events/${event}/cancel`, {});
+  }
+
+  rsvp(event: number, going: boolean) {
+    return this.auth.send<{ going: number; me: boolean }>(`/api/social/events/${event}/rsvp`, { going });
   }
 
   pay(club: string) {

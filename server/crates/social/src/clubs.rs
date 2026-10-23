@@ -169,7 +169,7 @@ pub(crate) async fn club(db: &PgPool, id: Uuid) -> ApiResult<Club> {
 }
 
 /// Your role in a club, if you're in it.
-async fn role_of(db: &PgPool, club: Uuid, player: Uuid) -> ApiResult<Option<String>> {
+pub(crate) async fn role_of(db: &PgPool, club: Uuid, player: Uuid) -> ApiResult<Option<String>> {
     sqlx::query_scalar("SELECT role FROM club_members WHERE club_id = $1 AND player_id = $2")
         .bind(club)
         .bind(player)
@@ -296,6 +296,12 @@ async fn room_of(db: &PgPool, club: Uuid) -> ApiResult<Option<Lease>> {
 async fn cap_of(db: &PgPool, club: Uuid) -> ApiResult<i64> {
     let tier = room_of(db, club).await?.map_or(1, |l| l.tier);
     Ok(RENT.tier(ROOM, tier).and_then(|t| t.members).unwrap_or(12))
+}
+
+/// Tells everyone online that the clubhouses on the lots changed (so the
+/// city redraws them).
+pub(crate) fn tell_lots(state: &SocialState) {
+    state.hub.broadcast(&json!({ "t": "club_lots" }));
 }
 
 /// Tells every member something (live, if they're online).
@@ -557,7 +563,7 @@ async fn found(
             e
         }
     })?;
-    open_room(&mut tx, &state, id, me, 1).await?;
+    open_room(&mut tx, &state, id, me, 1, &format!("clubroom:{id}")).await?;
     tx.commit().await.map_err(db_err)?;
     Ok(Json(json!({ "id": id.to_string(), "name": name })))
 }
@@ -570,6 +576,7 @@ async fn open_room(
     club: Uuid,
     holder: Uuid,
     tier: i16,
+    plot: &str,
 ) -> ApiResult<Lease> {
     let t = RENT
         .tier(ROOM, tier)
@@ -580,7 +587,7 @@ async fn open_room(
          RETURNING {LEASE_COLS}"
     ))
     .bind(ROOM)
-    .bind(format!("clubroom:{club}"))
+    .bind(plot)
     .bind(holder)
     .bind(club)
     .bind(tier)
@@ -593,9 +600,8 @@ async fn open_room(
                 "has_room",
                 "Whoever holds the lease already rents a room for another club.",
             ),
-            Some("leases_club_open") | Some("leases_plot_open") => {
-                conflict("has_room", "The club has a room already.")
-            }
+            Some("leases_club_open") => conflict("has_room", "The club has a room already."),
+            Some("leases_plot_open") => lot_taken(),
             _ => db_err(e),
         },
     )?;
@@ -1075,6 +1081,34 @@ async fn delete_post(
 #[derive(Deserialize)]
 struct RoomReq {
     tier: i16,
+    /// For a Clubhouse: which club lot (`lot:<bx>_<by>`).
+    #[serde(default)]
+    lot: Option<String>,
+}
+
+/// The city's club lots (C3).
+pub static LOTS: std::sync::LazyLock<Vec<String>> =
+    std::sync::LazyLock::new(commons_sim::city::city_club_lots);
+
+fn lot_taken() -> ApiError {
+    conflict("lot_taken", "Another club has that lot.")
+}
+
+/// Where a room of tier `t` is: its club lot (a Clubhouse) or upstairs.
+fn plot_for(club: Uuid, t: &commons_sim::city::RentTier, lot: Option<&str>) -> ApiResult<String> {
+    if !t.lot {
+        return Ok(format!("clubroom:{club}"));
+    }
+    let lot = lot.ok_or_else(|| {
+        ApiError::bad_request("pick_lot", "Pick one of the club lots for the clubhouse.")
+    })?;
+    if !LOTS.iter().any(|l| l == lot) {
+        return Err(ApiError::bad_request(
+            "bad_lot",
+            "There's no such club lot.",
+        ));
+    }
+    Ok(lot.to_string())
 }
 
 /// The owner rents a room for the club (if it has none) or moves it to
@@ -1094,17 +1128,19 @@ async fn room(
     let new = RENT
         .tier(ROOM, req.tier)
         .ok_or_else(|| ApiError::bad_request("bad_tier", "There's no such room."))?;
+    let plot = plot_for(c.id, new, req.lot.as_deref())?;
     let mut tx = state.db.begin().await.map_err(db_err)?;
     let Some(lease) = room_of(&state.db, c.id).await? else {
-        let lease = open_room(&mut tx, &state, c.id, me, req.tier).await?;
+        let lease = open_room(&mut tx, &state, c.id, me, req.tier, &plot).await?;
         tx.commit().await.map_err(db_err)?;
+        tell_lots(&state);
         return Ok(Json(json!({ "room": lease.json() })));
     };
     if lease.state == "grace" {
         return Err(conflict("unpaid", "Pay this week's rent first."));
     }
     let old = lease.tier_info();
-    if new.tier == old.tier {
+    if new.tier == old.tier && plot == lease.plot {
         return Ok(Json(json!({ "room": lease.json() })));
     }
     if new.rent > old.rent {
@@ -1132,13 +1168,23 @@ async fn room(
             ));
         }
     }
-    sqlx::query("UPDATE leases SET tier = $2 WHERE id = $1")
+    sqlx::query("UPDATE leases SET tier = $2, plot = $3 WHERE id = $1")
         .bind(lease.id)
         .bind(new.tier)
+        .bind(&plot)
         .execute(&mut *tx)
         .await
-        .map_err(db_err)?;
+        .map_err(|e| {
+            if e.as_database_error().and_then(|d| d.constraint()) == Some("leases_plot_open") {
+                lot_taken()
+            } else {
+                db_err(e)
+            }
+        })?;
     tx.commit().await.map_err(db_err)?;
+    if plot != lease.plot {
+        tell_lots(&state);
+    }
     let lease = room_of(&state.db, c.id).await?.ok_or_else(not_found)?;
     Ok(Json(json!({ "room": lease.json() })))
 }

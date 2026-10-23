@@ -1467,3 +1467,295 @@ async fn a_club_meets_up_reaches_its_goals_calls_together_and_keeps_its_furnitur
     post(&a, format!("/api/social/clubs/{id}/leave"), json!({})).await;
     assert_eq!(have(s.clone(), a.id).await, before + 1);
 }
+
+// ---- clubs in the town (C3) --------------------------------------------------------
+
+#[tokio::test]
+async fn clubhouses_events_for_everyone_and_the_clubs_of_the_week() {
+    let Some(s) = state().await else { return };
+    let (a, b, c, d) = (
+        player(&s).await,
+        player(&s).await,
+        player(&s).await,
+        player(&s).await,
+    );
+    let tag = &a.name[1..7];
+    let post = |p: &P, path: String, body: Value| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move { call(&s, "POST", &path, &tok, Some(body)).await }
+    };
+    let (_, r) = post(
+        &a,
+        "/api/social/clubs/found".into(),
+        json!({ "name": format!("Owls {tag}"), "crest": "🦉", "color": "#3f7a8a" }),
+    )
+    .await;
+    let id = r["id"].as_str().unwrap().to_string();
+    let club = Uuid::parse_str(&id).unwrap();
+    befriend(&s, &a, &b).await;
+    post(
+        &a,
+        format!("/api/social/clubs/{id}/invite"),
+        json!({ "id": b.id.to_string() }),
+    )
+    .await;
+    post(
+        &b,
+        format!("/api/social/clubs/{id}/answer"),
+        json!({ "accept": true }),
+    )
+    .await;
+
+    // A clubhouse on a free lot: 120 a week, the difference this week (95).
+    let (_, lots) = call(&s, "GET", "/api/social/clubs/lots", &a.token, None).await;
+    let lot = lots["lots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["club"].is_null())
+        .expect("a free lot")["lot"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (st, r) = post(
+        &a,
+        format!("/api/social/clubs/{id}/room"),
+        json!({ "tier": 3 }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("pick_lot"))
+    );
+    let (st, _) = post(
+        &a,
+        format!("/api/social/clubs/{id}/room"),
+        json!({ "tier": 3, "lot": "lot:99_99" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    post(
+        &b,
+        format!("/api/social/clubs/{id}/donate"),
+        json!({ "coins": 95, "key": "h" }),
+    )
+    .await;
+    let (st, r) = post(
+        &a,
+        format!("/api/social/clubs/{id}/room"),
+        json!({ "tier": 3, "lot": lot }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["room"]["plot"], lot.as_str());
+    let (_, lots) = call(&s, "GET", "/api/social/clubs/lots", &d.token, None).await;
+    let here = lots["lots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["lot"] == lot.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(
+        here["club"]["name"],
+        format!("Owls {tag}"),
+        "everyone sees whose clubhouse it is"
+    );
+    // Nobody else can have it.
+    let (_, r) = post(
+        &c,
+        "/api/social/clubs/found".into(),
+        json!({ "name": format!("Foxes {tag}"), "crest": "🦊", "color": "#c8553d" }),
+    )
+    .await;
+    let other = r["id"].as_str().unwrap().to_string();
+    sqlx::query("UPDATE clubs SET treasury = 500 WHERE id = $1::uuid")
+        .bind(&other)
+        .execute(&s.db)
+        .await
+        .unwrap();
+    let (st, r) = post(
+        &c,
+        format!("/api/social/clubs/{other}/room"),
+        json!({ "tier": 3, "lot": lot }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("lot_taken"))
+    );
+
+    // Events: staff plan them, at public places or the club's own lot.
+    let soon = chrono::Utc::now() + chrono::Duration::minutes(10);
+    let plan = |p: &P, place: &str, title: &str| {
+        post(
+            p,
+            format!("/api/social/clubs/{id}/events"),
+            json!({ "title": title, "place": place, "starts_at": soon.timestamp(), "hours": 1 }),
+        )
+    };
+    let (st, _) = plan(&b, "stage", "Owl night").await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "members don't plan events");
+    let (st, r) = plan(&a, "the moon", "Owl night").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("bad_place"))
+    );
+    let (st, r) = plan(&a, "stage", "Owl night").await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let event = r["id"].as_i64().unwrap();
+    let (st, _) = plan(&a, &lot, "Open house").await;
+    assert_eq!(st, StatusCode::OK, "at the club's own lot");
+    // Anyone can go: D isn't in the club, nor anyone's friend.
+    let (st, r) = post(
+        &d,
+        format!("/api/social/events/{event}/rsvp"),
+        json!({ "going": true }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["going"].as_i64()),
+        (StatusCode::OK, Some(2)),
+        "the planner and D"
+    );
+    let (_, ev) = call(&s, "GET", "/api/social/events", &d.token, None).await;
+    let mine = ev["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == event)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (mine["me"].as_bool(), mine["place_name"].as_str()),
+        (Some(true), Some("the Fairground bandstand"))
+    );
+    assert_eq!(
+        mine["friends"].as_array().unwrap().len(),
+        0,
+        "only friends' names"
+    );
+
+    // Reminded 15 minutes before; at the start, those going and the members.
+    let now = chrono::Utc::now();
+    crate::clubtown::event_tick(&s, now).await.unwrap();
+    crate::clubtown::event_tick(&s, now).await.unwrap();
+    let k = kinds(&s, &d).await;
+    assert_eq!(k.iter().filter(|k| *k == "club_event_soon").count(), 1);
+    crate::clubtown::event_tick(&s, now + chrono::Duration::minutes(11))
+        .await
+        .unwrap();
+    crate::clubtown::event_tick(&s, now + chrono::Duration::minutes(12))
+        .await
+        .unwrap();
+    assert_eq!(
+        kinds(&s, &d)
+            .await
+            .iter()
+            .filter(|k| *k == "club_event_now")
+            .count(),
+        1
+    );
+    assert!(
+        kinds(&s, &b).await.contains(&"club_event_now".to_string()),
+        "members hear too"
+    );
+    // Calling one off tells those going.
+    let (_, ev) = call(&s, "GET", "/api/social/events", &d.token, None).await;
+    let house = ev["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["title"] == "Open house")
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    post(
+        &d,
+        format!("/api/social/events/{house}/rsvp"),
+        json!({ "going": true }),
+    )
+    .await;
+    let (st, _) = post(
+        &a,
+        format!("/api/social/clubs/{id}/events/{house}/cancel"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        kinds(&s, &d)
+            .await
+            .contains(&"club_event_cancelled".to_string())
+    );
+
+    // The clubs of the week: a week of its own (far off), where only this
+    // club has points; paid once.
+    let fake_now =
+        chrono::Utc::now() + chrono::Duration::days(7 * (500 + (a.id.as_u128() % 5000) as i64));
+    let last_week = crate::clublife::week_of(fake_now) - chrono::Duration::days(7);
+    sqlx::query("INSERT INTO club_goals_done (club_id, week, goal) VALUES ($1, $2, 'fish')")
+        .bind(club)
+        .bind(last_week)
+        .execute(&s.db)
+        .await
+        .unwrap();
+    let before: i32 = sqlx::query_scalar("SELECT treasury FROM clubs WHERE id = $1")
+        .bind(club)
+        .fetch_one(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        crate::clubtown::award_last_week(&s, fake_now)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        crate::clubtown::award_last_week(&s, fake_now)
+            .await
+            .unwrap(),
+        0,
+        "once"
+    );
+    let after: i32 = sqlx::query_scalar("SELECT treasury FROM clubs WHERE id = $1")
+        .bind(club)
+        .fetch_one(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(after, before + 30, "first place");
+    assert!(kinds(&s, &a).await.contains(&"club_award".to_string()));
+    let (st, lb) = call(&s, "GET", "/api/social/clubs/leaderboard", &a.token, None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        lb["standings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["mine"] == true),
+        "{lb}"
+    );
+
+    // Back down to a room upstairs: the lot is free again.
+    let (st, r) = post(
+        &a,
+        format!("/api/social/clubs/{id}/room"),
+        json!({ "tier": 1 }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (_, lots) = call(&s, "GET", "/api/social/clubs/lots", &d.token, None).await;
+    assert!(
+        lots["lots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["lot"] == lot.as_str())
+            .unwrap()["club"]
+            .is_null()
+    );
+    for (p, club) in [(&b, &id), (&a, &id), (&c, &other)] {
+        post(p, format!("/api/social/clubs/{club}/leave"), json!({})).await;
+    }
+}

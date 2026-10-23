@@ -119,7 +119,11 @@ fn present(state: &SocialState, club: Uuid, members: &[Uuid]) -> Vec<Uuid> {
 /// time together in the rooms, meetup reminders, notices and rewards, and
 /// goals reached. Returns how many clubs it looked at.
 pub async fn sweep_at(state: &SocialState, now: DateTime<Utc>, mins: i32) -> ApiResult<usize> {
-    sweep_clubs(state, now, mins, None).await
+    let n = sweep_clubs(state, now, mins, None).await?;
+    // C3: event reminders, and last week's clubs of the week.
+    crate::clubtown::event_tick(state, now).await?;
+    crate::clubtown::award_last_week(state, now).await?;
+    Ok(n)
 }
 
 /// `sweep_at` for one club only (`only`), or all of them.

@@ -380,6 +380,10 @@ pub struct RentTier {
     /// Club rooms: how many members the club can have.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub members: Option<i64>,
+    /// Club rooms: this tier is a clubhouse on one of the city's club lots
+    /// (ADR 0014, C3), not a room upstairs at the Club Hall.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lot: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -419,9 +423,38 @@ pub fn city_home_lots() -> Vec<String> {
     .home_lots()
 }
 
+/// The club lots of the real city (blocks of type `club_lot`), as
+/// `lot:<bx>_<by>` plot ids in grid order, for clubhouses (ADR 0014, C3).
+pub fn city_club_lots() -> Vec<String> {
+    City::from_json(
+        include_str!("../../../../assets/city/city.json"),
+        include_str!("../../../../assets/city/block_types.json"),
+    )
+    .expect("assets/city is valid")
+    .blocks()
+    .filter(|(_, t)| t.key == "club_lot")
+    .map(|(b, _)| club_lot_key(b))
+    .collect()
+}
+
+/// A club lot's plot id.
+pub fn club_lot_key(b: BlockId) -> String {
+    format!("lot:{}_{}", b.bx, b.by)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_club_lots_are_the_club_lot_blocks() {
+        let lots = city_club_lots();
+        assert_eq!(lots.len(), 5);
+        assert!(lots.iter().all(|l| l.starts_with("lot:")), "{lots:?}");
+        let rent = rent_catalog();
+        let house = rent.tier("club_room", 3).expect("a clubhouse tier");
+        assert!(house.lot && house.members > rent.tier("club_room", 2).unwrap().members);
+    }
 
     fn geo(block: u16) -> Geometry {
         Geometry {

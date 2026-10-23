@@ -4310,3 +4310,51 @@ body.woozy #stage canvas {
 .panel .goal.done .bar span {
   background: var(--leaf);
 }
+
+/* Clubs C3: what's on, the clubs of the week, choosing a club lot. */
+.panel .event {
+  border: 2px solid var(--paper-2);
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+
+.panel .event.live {
+  background: #fff2c2;
+  border-color: #e0a43a;
+}
+
+.panel .event-form,
+.panel .lot-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0 10px;
+}
+
+.panel .event-form input:not([type="time"]) {
+  flex: 1 1 100%;
+}
+
+.panel .event-form select,
+.panel .event-form input {
+  font: inherit;
+  padding: 5px 6px;
+}
+
+.panel .lot-pick {
+  flex-direction: column;
+  align-items: stretch;
+  background: var(--paper-2);
+  padding: 8px;
+}
+
+.panel .club-row .rank {
+  min-width: 26px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.panel .club-row.mine {
+  background: #fff2c2;
+}

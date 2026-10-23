@@ -5,6 +5,7 @@
 mod calls;
 mod clublife;
 mod clubs;
+mod clubtown;
 mod db;
 mod homes;
 mod hub;

@@ -65,6 +65,15 @@ impl Hub {
         self.0.lock().unwrap().sockets.contains_key(&player)
     }
 
+    /// Pushes a JSON message to everyone online (dropped where full).
+    pub fn broadcast(&self, msg: &serde_json::Value) {
+        let text = msg.to_string();
+        let h = self.0.lock().unwrap();
+        for tx in h.sockets.values().flat_map(|c| c.values()) {
+            let _ = tx.try_send(text.clone());
+        }
+    }
+
     /// Pushes a JSON message to every socket of `player` (dropped if full).
     pub fn send(&self, player: Uuid, msg: &serde_json::Value) {
         let text = msg.to_string();

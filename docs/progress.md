@@ -1334,6 +1334,69 @@ Checked:
     ("That's someone else's").
   - The bowling panel is styled again.
 
+## Clubs C3 · Clubs in the town: done (2026-10-23)
+
+ADR 0014, "C3: clubs in the town". Clubs now show in the city and bring
+everyone together.
+
+- **Clubhouses on the club lots:**
+  - A third tier, the Clubhouse (`rent.json` tier 3, `lot: true`): 40
+    members, 40 pieces of furniture, 120 coins a week from the treasury.
+  - The owner picks one of the city's five club lots. The lease's plot
+    becomes `lot:<bx>_<by>`, and the unique open-plot index means one club
+    per lot. Moving back down frees the lot, and so does the room being
+    given up.
+  - Each lot has a `club_house` footprint, drawn as a building site with a
+    FOR RENT sign while free. Once rented, it's the club's house: timber
+    walls, a roof in the club's colour, the crest on a banner over the
+    door, and the name on a board. Everyone online sees it change at once
+    (a `club_lots` push).
+  - Members go in through its door, and leaving the room brings them back
+    out of that door (the orchestrator accepts `place:lot:…` arrivals). For
+    anyone else the door says it's members only.
+- **Clubs of the week:**
+  - Points: 10 per goal reached, 5 per member at the meetup, 1 per 10
+    minutes together in the room.
+  - The leaderboard (in the Club Hall and the 🛡 panel) shows this week's
+    standings, your clubs, and last week's winners.
+  - When a week ends, the top three get 30, 20 and 10 coins in their
+    treasuries, once, and their owners and moderators are told
+    (`club_week_awards`, migration 0035).
+- **Events for everyone:**
+  - The owner and moderators plan events: a title (filtered like chat),
+    within the next two weeks, one or two hours long, at most three
+    planned at once.
+  - They're held at a public place: the Fairground bandstand or pitch, the
+    Arena, the Club Hall steps, the wishing well, or the club's own lot.
+  - Anyone can say "I'm going". They're reminded 15 minutes before; when
+    it starts, they and the host club's members are told, with "Show me".
+  - Cancelling tells those going.
+  - Only a count of who's going is shown, plus your friends' names.
+- **Care (ADR 0014 updated):** events only happen at public places, where
+  everyone can already meet, so club rooms stay members-only and nothing
+  new opens to strangers.
+- **The Club Hall** has two new boards: Clubs of the week (a podium) and
+  What's on (posters).
+
+Checked:
+- Server: social 21, including a C3 test: picking a lot, a taken lot, a
+  made-up lot, members can't plan, a made-up place, planning at the
+  bandstand and at the club's lot, a non-member going, the reminder and
+  start once each, members told, cancelling, the week's award paid once,
+  the leaderboard, and moving down freeing the lot.
+- Also a test that every event place and lot is a real spot in the city,
+  and one for the orchestrator's lot-door check; sim 50, with the
+  clubhouse tier and the five lots; API 46, zone 58; clippy clean;
+  client 89.
+- In the browser:
+  - Ada moves her club into a Clubhouse from the lot picker, and Cy's
+    city redraws it at once.
+  - Ada walks there, goes in through the door, and comes back out of it.
+  - Cy is told it's members only.
+  - Ada plans a fishing contest at the bandstand; Cy finds it on What's
+    on and says he's going ("2 going").
+  - The leaderboard and the Club Hall's new boards.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

@@ -287,7 +287,10 @@ async function main() {
     toast: (t) => hud.toast(t, 4500),
     hasPhone: () => eco.qty(PHONE) > 0,
     callClub: (id) => calls.callClub(id),
+    walkToSpot: (s) => walkToSpot(s),
   });
+  // The clubhouses on the city's club lots (C3).
+  void clubs.loadLots().catch(() => {});
   clubs.onToast = (t) => hud.toast(t, 6000);
   // A meetup's reward (and anything else the gateway says changed your coins).
   social.onPush((m) => m.t === "coins" && void eco.load().catch(() => {}));
@@ -395,6 +398,7 @@ async function main() {
     ...friendActions,
     clubInvited: (id) => clubs.invites.some((i) => i.id === id),
     goToClubRoom: (id) => void travel({ zone: "clubroom", owner: id }),
+    walkToSpot: (s) => walkToSpot(s),
     answerClub: (id, accept) =>
       void clubs
         .answer(id, accept)
@@ -461,6 +465,9 @@ async function main() {
           // library). Out of a library wing, you're back at its door in the hall.
           onTravel: (z) => {
             const from = game as Game | null;
+            // Out of a club's room whose clubhouse stands on a lot: out of its door, in the city.
+            const lot = from?.zoneId === "clubroom" && from.place.owner ? clubs.lotOf(from.place.owner) : null;
+            if (z === "club_hall" && lot) return void travel({ zone: "city", arrive: `place:${lot}` });
             const place = from && ["mall", "bar", "arcade", HALL, "club_hall", "bowling"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
             const arrive =
               (z === HALL && from && wingOfZone(from.zoneId)) || (z === "club_hall" && from?.zoneId === "clubroom")

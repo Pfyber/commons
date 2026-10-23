@@ -163,7 +163,7 @@ pub fn city() -> MapFile {
             "orchard" => orchard(&mut k),
             "woods" => woods(&mut k),
             "meadow" => meadow(&mut k),
-            "club_lot" => club_lot(&mut k),
+            "club_lot" => club_lot(&mut k, id),
             "home" => homes(&mut k, id),
             "fairground" => fairground(&mut k),
             "arena" => arena(&mut k),
@@ -704,9 +704,18 @@ fn arena(k: &mut Blk) {
     k.scatter(ax + aw + 1, 3, N - 3, N - 3, 6, &["tree", "bush"]);
 }
 
-/// A fenced lot waiting for a club.
-fn club_lot(k: &mut Blk) {
+/// A fenced lot a club can rent for its clubhouse (ADR 0014, C3). The
+/// `club_house` object is the clubhouse's footprint: drawn as a building
+/// site while the lot is free, and as the club's house, under its banner,
+/// once a club rents it. Its door (`door:lot:<bx>_<by>`) leads into the
+/// club's room.
+fn club_lot(k: &mut Blk, block: BlockId) {
     k.lawn();
+    let lot = commons_sim::city::club_lot_key(block);
+    k.object("club_house", 14, 14, 20, 10, &lot);
+    k.spot(&format!("door:{lot}"), 24, 24);
+    k.spot(&lot, 24, 25);
+    k.rect(22, 25, 4, 16, "path");
     for i in 6..42u16 {
         if !(22..26).contains(&i) {
             k.decor(i, 6, "fence");
@@ -722,7 +731,7 @@ fn club_lot(k: &mut Blk) {
         43,
         1,
         1,
-        "Club lot: one day a club can rent this land for its own clubhouse",
+        "Club lot: a club can rent this land for its clubhouse, at the Club Hall's desk",
     );
     k.scatter(3, 3, 6, N - 3, 5, &["tree", "bush"]);
     k.scatter(42, 3, N - 3, N - 3, 5, &["tree", "bush"]);

@@ -79,8 +79,13 @@ on the club's page, and the stairs lead up to its room. Each club can set
 a weekly meetup (20 coins for staying 10 minutes of it in the room), works
 on four weekly goals that pay its treasury, can ring every member who's
 online with 📞 Call the club, and decorates its room from members' bags
-(each piece stays its owner's). `COMMONS_CLUB_SWEEP_SECS` (default 60)
-sets how often the club sweep runs; each run counts as a minute.
+(each piece stays its owner's). Bigger clubs can rent a Clubhouse on one
+of the city's club lots (120 a week): its door leads into their room. Clubs
+plan events for everyone at public places (📅 What's on, at the Club Hall
+or in the 🛡 panel), and the Club Hall's leaderboard names the week's top
+three clubs, which win coins for their treasuries. `COMMONS_CLUB_SWEEP_SECS`
+(default 60) sets how often the club sweep runs; each run counts as a
+minute.
 Testing on a dev server: a wish at the wishing well (on the Town Hall's
 plaza) grants 10,000 coins, every time; real servers don't have it.
 🔊 or M toggles sound;
