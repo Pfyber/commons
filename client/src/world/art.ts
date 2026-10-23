@@ -11,6 +11,7 @@ import { decodeLook } from "./look";
 import { LIBRARY_GROUND, drawLibraryGround, libraryDecor, libraryObject } from "./libraryart";
 import { clubObject } from "./clubart";
 import { concertObject } from "./concertart";
+import { HOUSE_OVERHANG, drawHouse } from "./houseart";
 
 export const TILE = 32;
 
@@ -1184,36 +1185,11 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       break;
     }
     case "house": {
-      // A small house from above: a hipped roof with a chimney over the
-      // front wall, two windows and a door (homes open in a later step).
-      const look = hash(o.x, o.y, 73);
-      // Painted by its resident, or as built.
-      const painted = o.style ? FACADES[o.style] : undefined;
-      const walls = painted?.[0] ?? ["#f1e4cc", "#e8d6c4", "#dfe6e8", "#efe2b8", "#e2dbec"][look % 5];
-      const roofs = painted?.[1] ?? ["#b5544a", "#4f6d8a", "#5d8a4e", "#8a5d8a", "#c27a3c", "#7a6a5a"][(look >>> 4) % 6];
-      [c, ctx] = makeCanvas(w, h + 32);
-      overhang = 32;
-      const H = h + 32;
-      const eave = Math.round(H * 0.55);
-      px(ctx, "rgba(0,0,0,0.15)", 4, H - 6, w - 12, 6);
-      px(ctx, P.outline, 8, eave - 4, w - 16, H - eave);
-      px(ctx, walls, 10, eave - 2, w - 20, H - eave - 4);
-      polygon(ctx, P.outline, [[2, eave], [18, 4], [w - 18, 4], [w - 2, eave]]);
-      polygon(ctx, roofs, [[5, eave - 2], [20, 7], [w - 20, 7], [w - 5, eave - 2]]);
-      ctx.fillStyle = "rgba(0,0,0,0.10)";
-      for (let y = 16; y < eave - 6; y += 9) ctx.fillRect(10, y, w - 20, 2);
-      px(ctx, "rgba(0,0,0,0.3)", 2, eave - 3, w - 4, 3);
-      px(ctx, P.outline, w - 52, 0, 14, 22);
-      px(ctx, "#a0675a", w - 50, 2, 10, 18);
-      const wy = eave + 8;
-      for (const x of [22, w - 42]) {
-        px(ctx, P.outline, x, wy, 20, 18);
-        px(ctx, "#9fc3d6", x + 2, wy + 2, 16, 14);
-        px(ctx, P.outline, x + 9, wy + 2, 2, 14);
-      }
-      px(ctx, P.outline, w / 2 - 10, H - 40, 20, 36);
-      px(ctx, roofs, w / 2 - 8, H - 38, 16, 34);
-      px(ctx, "#f6c343", w / 2 + 3, H - 22, 2, 2);
+      // A house in the home blocks (world/houseart.ts), in its paint if its
+      // resident has done it up.
+      [c, ctx] = makeCanvas(w, h + HOUSE_OVERHANG);
+      overhang = HOUSE_OVERHANG;
+      drawHouse(ctx, o, w, h, o.style ? FACADES[o.style] : undefined);
       break;
     }
     case "city_gate": {

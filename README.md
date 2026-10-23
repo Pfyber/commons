@@ -84,6 +84,9 @@ of the city's club lots (120 a week): its door leads into their room. Clubs
 plan events for everyone at public places (📅 What's on, at the Club Hall
 or in the 🛡 panel), and the Club Hall's leaderboard names the week's top
 three clubs, which win coins for their treasuries.
+Houses have a yard stand by the front door: put things from your bag on
+it (2, 4 or 6, by the house's tier) at your own price, and anyone walking
+past sees them on the counter and can buy them.
 The Concert Hall (on the Theater block): take the stage at the microphone
 and everyone in the hall hears you, and only you, for up to an hour (16
 and over; listeners get listen-only voice passes and a volume slider).

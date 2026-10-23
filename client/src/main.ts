@@ -33,7 +33,7 @@ import { Town } from "./town";
 import { Gov } from "./gov";
 import { CityMapPanel } from "./ui/citymap";
 import { ReportPanel, StoryPanel, TownHallPanel } from "./ui/gov";
-import { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
+import { ApartmentsPanel, PostOfficePanel, StallPanel, YardPanel } from "./ui/homes";
 import { DirectoryPanel, ShopPanel } from "./ui/mall";
 import { Minimap } from "./ui/minimap";
 import { FoundersPanel, WelcomePanel } from "./ui/welcome";
@@ -398,6 +398,7 @@ async function main() {
     clubsPanel,
     concert,
     concertPanel,
+    yard: new YardPanel(rent, eco, rentHost),
   };
   ui.catalogue.reader = reader;
   // The Caretaker's tasks chip, until you're a founder (or the season closes).

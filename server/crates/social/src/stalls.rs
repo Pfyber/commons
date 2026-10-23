@@ -3,8 +3,12 @@
 //! the seller's bag while on show and come back if taken down or when the
 //! stall's lease ends. Coins only.
 //!
-//! Players: `GET /api/social/stalls`, `POST /api/social/stalls/{claim,put,
-//! take,buy}`.
+//! A house has a yard stand too, by its front door: the same goods on show,
+//! on the home lease (up to its tier's `listings`). Apartments have no yard.
+//!
+//! Players: `GET /api/social/stalls`, `GET /api/social/yards`,
+//! `POST /api/social/stalls/{claim,put,take,buy}` (`put` with `at: "yard"`
+//! for the yard stand).
 
 use crate::State as SocialState;
 use crate::rent::{self, lease_of, open_leases};
@@ -25,6 +29,38 @@ type S = State<Arc<SocialState>>;
 
 fn conflict(code: &'static str, msg: &str) -> ApiError {
     ApiError::new(StatusCode::CONFLICT, code, msg)
+}
+
+/// Every house's yard stand that has something on it: whose, and what.
+pub async fn yards(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_json::Value>> {
+    let (me, _) = me(&state, &headers)?;
+    let leases = open_leases(&state.db, &["home"]).await.map_err(db_err)?;
+    let goods = sqlx::query(
+        "SELECT s.id, s.lease_id, s.item_id, s.qty, s.price FROM stall_listings s
+         JOIN leases l ON l.id = s.lease_id
+         WHERE l.state <> 'ended' AND l.kind = 'home' ORDER BY s.id",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?;
+    let yards: Vec<_> = leases
+        .iter()
+        .filter_map(|(l, name)| {
+            let on: Vec<_> = goods
+                .iter()
+                .filter(|g| g.get::<i64, _>("lease_id") == l.id)
+                .map(|g| {
+                    json!({ "id": g.get::<i64, _>("id"), "item": g.get::<i32, _>("item_id"),
+                            "qty": g.get::<i32, _>("qty"), "price": g.get::<i32, _>("price") })
+                })
+                .collect();
+            (!on.is_empty() || l.player == me).then(|| {
+                json!({ "lot": l.plot, "owner": l.player.to_string(), "name": name,
+                        "mine": l.player == me, "listings": l.tier_info().listings, "goods": on })
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "yards": yards })))
 }
 
 /// Every stall: who has it and what's on it.
@@ -89,6 +125,9 @@ pub struct ListReq {
     qty: i32,
     price: i32,
     key: String,
+    /// "stall" (your market stall, the default) or "yard" (your house's yard stand).
+    #[serde(default)]
+    at: Option<String>,
 }
 
 /// Puts goods from your bag on your stall.
@@ -113,10 +152,23 @@ pub async fn put(
     {
         return Err(ApiError::bad_request("bad_item", "That can't be sold."));
     }
-    let lease = lease_of(&state.db, me, "stall")
-        .await
-        .map_err(db_err)?
-        .ok_or_else(|| conflict("no_stall", "Rent a stall first."))?;
+    let lease = if req.at.as_deref() == Some("yard") {
+        lease_of(&state.db, me, "home")
+            .await
+            .map_err(db_err)?
+            .filter(|l| l.kind == "home")
+            .ok_or_else(|| {
+                conflict(
+                    "no_yard",
+                    "A yard stand stands in front of a house; apartments have no yard.",
+                )
+            })?
+    } else {
+        lease_of(&state.db, me, "stall")
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| conflict("no_stall", "Rent a stall first."))?
+    };
     let mut tx = state.db.begin().await.map_err(db_err)?;
     // Lock the lease so two listings can't both squeeze into the last place.
     sqlx::query("SELECT id FROM leases WHERE id = $1 FOR UPDATE")
@@ -131,9 +183,14 @@ pub async fn put(
         .map_err(db_err)?;
     let cap = lease.tier_info().listings.unwrap_or(0);
     if on >= cap {
+        let what = if lease.kind == "home" {
+            format!("{}'s yard stand", lease.tier_info().name)
+        } else {
+            lease.tier_info().name.clone()
+        };
         return Err(conflict(
             "stall_full",
-            &format!("Your {} has room for {cap} things.", lease.tier_info().name),
+            &format!("Your {what} has room for {cap} things."),
         ));
     }
     let applied = apply(
@@ -283,17 +340,21 @@ pub async fn buy(
         &format!("{key}:seller"),
     )
     .await?;
-    sqlx::query("UPDATE stall_listings SET qty = qty - $2 WHERE id = $1")
-        .bind(req.id)
-        .bind(req.qty)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
-    sqlx::query("DELETE FROM stall_listings WHERE id = $1 AND qty = 0")
-        .bind(req.id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_err)?;
+    // The last of them: the listing goes (a count of 0 isn't allowed).
+    if req.qty == have {
+        sqlx::query("DELETE FROM stall_listings WHERE id = $1")
+            .bind(req.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    } else {
+        sqlx::query("UPDATE stall_listings SET qty = qty - $2 WHERE id = $1")
+            .bind(req.id)
+            .bind(req.qty)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
     let what = state
         .catalog

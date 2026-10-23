@@ -1442,6 +1442,53 @@ Checked:
   - 🎤 shows by Ada's name, and the board reads her name.
   - She steps down and both are off.
 
+## Nicer houses, and yard stands (2026-10-23)
+
+- **Houses redrawn** (`client/src/world/houseart.ts`):
+  - A hipped roof of shingle rows, lit on one slope and shaded on the
+    other, with a ridge cap, a trim board along the eaves and its shadow
+    on the wall.
+  - A brick chimney with a cap, and on some houses a dormer window.
+  - Clapboard walls with corner boards on a stone foundation.
+  - Four-pane windows with frames and sills; some have shutters, some
+    flower boxes.
+  - A panelled front door with a glazed top, under a little porch roof,
+    with a step, a lamp and the house number.
+  - Flowering shrubs at the corners.
+  - Each detail comes from its own hash of the house's place, so
+    neighbours differ. Paint from "Decorate outside" still sets the walls
+    and roof.
+- **Yard stands:**
+  - Every house has a spot by its front door (`yard_stand`, between the
+    yard ornament and the door).
+  - From the door menu ("Your yard stand 🧺"), the owner puts things from
+    their bag on it at their own price: 2, 4 or 6 by the house's tier
+    (`listings` in `rent.json`). Apartments have no yard.
+  - A wooden stand appears under a striped awning, with what's for sale
+    standing on the counter as item pictures and a chalk board with the
+    cheapest price.
+  - Anyone passing taps it to buy: coins to the owner, who's told.
+  - It's the market stalls' code, on the home lease (`stall_listings`).
+    `GET /api/social/yards`, and `put` with `at: "yard"`.
+  - Moving out, or the lease ending, puts what's left back in the bag.
+- **Fixed:** buying the last one of anything from a stall failed (the
+  count went to 0 before the listing was removed, against the table's
+  `qty > 0` rule). It affected market stalls since C4 too. Now the listing
+  goes.
+
+Checked:
+- Server: social 24, with a yard-stand test: no house means no yard; the
+  Cottage's two places; everyone sees the stand; buying one and the last
+  one; coins to the owner and a notice; moving out gives back what's
+  left. Also sim 50 (the 168 stand spots generated) and clippy clean;
+  client 89.
+- In the browser:
+  - Ada moves into a house and puts a minnow and a tulip on her stand from
+    the door menu; they stand on the counter, with the price board.
+  - Bo walks by, taps the stand, and buys the minnow, the last one
+    (200 → 194 coins); it leaves the counter.
+  - A street of the new houses, each different.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

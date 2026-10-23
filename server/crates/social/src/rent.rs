@@ -336,6 +336,26 @@ pub async fn release(state: &SocialState, lease: &Lease, reason: &str) -> ApiRes
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
+        // And whatever was on the house's yard stand.
+        let mut rows: Vec<(i32, i64)> = rows;
+        let yard: Vec<(i32, i64)> = sqlx::query_as(
+            "SELECT item_id, sum(qty)::bigint FROM stall_listings WHERE lease_id = $1 GROUP BY item_id",
+        )
+        .bind(lease.id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        sqlx::query("DELETE FROM stall_listings WHERE lease_id = $1")
+            .bind(lease.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        for (item, n) in yard {
+            match rows.iter_mut().find(|r| r.0 == item) {
+                Some(r) => r.1 += n,
+                None => rows.push((item, n)),
+            }
+        }
         rows
     } else {
         let rows = sqlx::query_as(

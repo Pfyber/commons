@@ -1858,3 +1858,123 @@ async fn one_performer_on_stage_everyone_in_the_hall_listens() {
     assert_eq!(r["left"], true);
     assert!(s.concert.get(1).is_none());
 }
+
+// ---- yard stands -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_yard_stand_sells_from_the_front_of_a_house_and_gives_back_on_moving_out() {
+    let Some(s) = state().await else { return };
+    let (a, b) = (player(&s).await, player(&s).await);
+    let tag = &a.name[1..7];
+    let lot = give_home(&s, &a).await;
+    grant(&s, &a, 100, 3, "fishing", &format!("yard:{tag}")).await;
+    let put = |p: &P, qty: i32, key: &str| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        let key = format!("{key}:{tag}");
+        async move {
+            call(
+                &s,
+                "POST",
+                "/api/social/stalls/put",
+                &tok,
+                Some(json!({ "item": 100, "qty": qty, "price": 7, "key": key, "at": "yard" })),
+            )
+            .await
+        }
+    };
+    // No house, no yard.
+    let (st, r) = put(&b, 1, "b").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("no_yard"))
+    );
+    let (st, r) = put(&a, 2, "a1").await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    put(&a, 1, "a2").await;
+    // A Cottage's stand holds two things.
+    grant(&s, &a, 101, 1, "fishing", &format!("yard2:{tag}")).await;
+    let (st, r) = call(
+        &s,
+        "POST",
+        "/api/social/stalls/put",
+        &a.token,
+        Some(
+            json!({ "item": 101, "qty": 1, "price": 3, "key": format!("a3:{tag}"), "at": "yard" }),
+        ),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("stall_full"))
+    );
+    // Everyone sees what's on it, by the house.
+    let (_, y) = call(&s, "GET", "/api/social/yards", &b.token, None).await;
+    let mine = y["yards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["lot"] == lot.as_str())
+        .expect("the yard")
+        .clone();
+    assert_eq!(mine["goods"].as_array().unwrap().len(), 2);
+    assert_eq!(mine["name"], a.name.as_str());
+    // B buys one: coins to A, the fish to B.
+    let id = mine["goods"][0]["id"].as_i64().unwrap();
+    let (ca, cb) = (coins(&s, &a).await, coins(&s, &b).await);
+    let (st, r) = call(
+        &s,
+        "POST",
+        "/api/social/stalls/buy",
+        &b.token,
+        Some(json!({ "id": id, "qty": 1, "key": format!("buy:{tag}") })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!((coins(&s, &a).await, coins(&s, &b).await), (ca + 7, cb - 7));
+    assert!(kinds(&s, &a).await.contains(&"stall_sale".to_string()));
+    // The last one of something: the listing goes from the stand.
+    let last = mine["goods"][1]["id"].as_i64().unwrap();
+    let (st, r) = call(
+        &s,
+        "POST",
+        "/api/social/stalls/buy",
+        &b.token,
+        Some(json!({ "id": last, "qty": 1, "key": format!("buy2:{tag}") })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "buying the last one: {r}");
+    let (_, y) = call(&s, "GET", "/api/social/yards", &b.token, None).await;
+    let left = y["yards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["lot"] == lot.as_str())
+        .unwrap()["goods"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(left, 1);
+    // Moving out: what's left on the stand comes back to the bag.
+    let fish = |p: Uuid| {
+        let db = s.db.clone();
+        async move {
+            sqlx::query_scalar::<_, i32>("SELECT coalesce(sum(qty), 0)::int FROM inventory WHERE player_id = $1 AND item_id = 100")
+                .bind(p)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(fish(a.id).await, 0, "all three on the stand");
+    let (st, r) = call(
+        &s,
+        "POST",
+        "/api/social/rent/end",
+        &a.token,
+        Some(json!({ "slot": "home" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(fish(a.id).await, 1, "the one not sold");
+}

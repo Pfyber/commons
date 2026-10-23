@@ -54,6 +54,7 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/rent/pay", post(crate::rent::pay))
         .route("/rent/end", post(crate::rent::end))
         .route("/stalls", get(crate::stalls::list))
+        .route("/yards", get(crate::stalls::yards))
         .route("/stalls/claim", post(crate::stalls::claim))
         .route("/stalls/put", post(crate::stalls::put))
         .route("/stalls/take", post(crate::stalls::take))

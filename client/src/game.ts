@@ -83,6 +83,8 @@ import { LibraryRoom } from "./world/libraryroom";
 import type { Clubs } from "./clubs";
 import type { ClubsPanel } from "./ui/clubs";
 import type { Concert } from "./concert";
+import type { YardPanel } from "./ui/homes";
+import { YardStands } from "./world/yardstands";
 import type { ConcertPanel } from "./ui/concert";
 
 /** Error codes from server/crates/protocol (error_code). */
@@ -161,6 +163,7 @@ export interface Ui {
   clubsPanel: ClubsPanel;
   concert: Concert;
   concertPanel: ConcertPanel;
+  yard: YardPanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -319,6 +322,8 @@ export class Game {
   private petLife: PetLife;
   private endingTest = false;
   private houseFronts: HouseFronts | null = null;
+  /** The yard stands by the houses' front doors. */
+  private yardStands: YardStands | null = null;
   /** Garden plots, watered or not, as last seen (to show a can being used). */
   private wateredSeen = new Map<string, boolean>();
   private clerk: Clerk | null = null;
@@ -469,6 +474,7 @@ export class Game {
     this.showToys();
     if (zoneId === "city") {
       this.houseFronts = new HouseFronts(this.scene, map, ui.goods);
+      this.yardStands = new YardStands(this.scene, map, ui.rent, ui.eco);
       void ui.goods.loadHouses().catch(() => {});
     }
     // In through your own front door: a pet out with you is home.
@@ -721,6 +727,7 @@ export class Game {
       const pet = this.ui.pets.mine;
       const actions: [string, () => void][] = [["Go inside", () => this.goTo("home")]];
       actions.push(["Decorate outside 🎨", () => this.near(this.ui.decorate, door, 6).show()]);
+      actions.push(["Your yard stand 🧺", () => this.near(this.ui.yard, door, 6).openFor(lot)]);
       if (pet?.out) actions.push([`Bring ${pet.name} home`, () => void this.petLife.bringHome().catch(() => {})]);
       else if (pet) actions.push([`Take ${pet.name} for a walk 🐾`, () => void this.petLife.takeOut().catch(() => {})]);
       menu.showWith("Your home", "", actions);
@@ -2483,6 +2490,17 @@ export class Game {
       return true;
     }
     const placed = this.props.objectAt(t.x, t.y);
+    // A house's yard stand, when there's something on it (or it's yours).
+    const stand = map.objects.find((o) => o.kind === "yard_stand" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 1 && t.y <= o.y);
+    const yard = stand?.label ? this.yardStands?.yardAt(stand.label) : null;
+    if (stand?.label && yard && (yard.goods.length || yard.mine)) {
+      if (cheb(self.destination, { x: stand.x, y: stand.y }) > 2) {
+        const spot = nearestWalkable(map, stand.x, stand.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.yard, stand, 4).openFor(stand.label);
+      return true;
+    }
     if (placed && (this.zoneId === "home" || this.zoneId === "clubroom")) {
       this.near(ui.menu, t).showWith(ui.eco.name(placed), "", [["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]]);
       return true;
@@ -3219,6 +3237,7 @@ export class Game {
     this.caretaker?.destroy();
     this.petLife.destroy();
     this.houseFronts?.destroy();
+    this.yardStands?.destroy();
     this.ui.decorate.hide();
     this.clerk?.destroy();
     this.libraryRoom?.destroy();

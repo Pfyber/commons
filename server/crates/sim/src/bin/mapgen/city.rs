@@ -749,6 +749,9 @@ fn homes(k: &mut Blk, block: BlockId) {
         let door = (x + w / 2, y + h);
         k.spot(&format!("door:{lot}"), door.0, door.1);
         k.object("postbox", door.0 + 3, door.1, 1, 1, &lot);
+        // The yard stand by the front door: drawn when its owner puts
+        // something on it (it's walked past, not into: a marker).
+        k.marker("yard_stand", door.0 - 3, door.1, 2, 1, Some(&lot));
     };
     for i in 0..3u16 {
         let x0 = 3 + i * 15;

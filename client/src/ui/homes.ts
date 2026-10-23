@@ -5,6 +5,7 @@ import type { Economy } from "../economy";
 import type { Homes } from "../homes";
 import { type Lease, type Rent, type Tier, leaseStatus } from "../rent";
 import { Panel, button, el } from "./panels";
+import { itemIconUrl } from "../world/items";
 
 export interface PostOfficeHost {
   /** Walks to a named spot on the city map ("door:b0_3:5", "apartments"). */
@@ -252,6 +253,96 @@ export class StallPanel extends Panel {
     this.body.append(
       form,
       button("Put on show", () => this.act(this.rent.put(Number(pick.value), Number(qty.value), Number(price.value)), "🧺 On show!"), "primary"),
+    );
+  }
+}
+
+
+/** A house's yard stand (by its front door): buy what's on it, or, if it's
+ * yours, put things from your bag on it at your own price. */
+export class YardPanel extends Panel {
+  private lot = "";
+  private msg = el("p", "error");
+
+  constructor(
+    private rent: Rent,
+    private eco: Economy,
+    private host: PostOfficeHost,
+  ) {
+    super("Yard stand", "stall yard");
+    rent.onChange(() => this.open && this.render());
+  }
+
+  openFor(lot: string) {
+    this.lot = lot;
+    this.msg.textContent = "";
+    this.show();
+    void Promise.all([this.rent.load(), this.rent.loadYards()]).catch(() => {});
+  }
+
+  private act(p: Promise<unknown>, done?: string) {
+    this.msg.textContent = "";
+    p.then(() => {
+      void this.eco.load().catch(() => {});
+      if (done) this.host.toast(done);
+    }).catch((e) => (this.msg.textContent = errText(e)));
+  }
+
+  render() {
+    this.body.replaceChildren();
+    const y = this.rent.yardAt(this.lot);
+    const mine = y?.mine ?? (this.rent.home?.plot === this.lot && this.rent.home?.kind === "home");
+    this.titleEl.textContent = mine ? "🧺 Your yard stand" : `🧺 ${y?.name ?? "A"}'s yard stand`;
+    const goods = y?.goods ?? [];
+    if (!goods.length) this.body.append(el("p", "empty", mine ? "Nothing on your stand yet. Put things from your bag on it, at your own price: anyone walking past can buy them." : "Nothing on the stand right now."));
+    for (const g of goods) {
+      const row = el("div", "row");
+      const img = el("img", "icon");
+      const item = this.eco.items.get(g.item);
+      if (item) img.src = itemIconUrl(item.key, item.kind);
+      row.append(img, el("span", "name", `${this.eco.name(g.item)} ×${g.qty}`), el("span", "price", `${g.price} each`));
+      if (mine) row.append(button("Take back", () => this.act(this.rent.take(g.id)), "small"));
+      else row.append(button("Buy 1", () => this.act(this.rent.buy(g.id, 1), `🧺 Bought ${this.eco.name(g.item)} from ${y?.name}.`), "small primary-sm"));
+      this.body.append(row);
+    }
+    if (mine) this.putForm(y?.listings ?? this.rent.home?.listings ?? 0, goods.length);
+    this.body.append(this.msg);
+  }
+
+  /** Pick something from your bag, how many and the price. */
+  private putForm(cap: number, on: number) {
+    this.body.append(el("h3", "", "Put something on the stand"));
+    if (on >= cap) {
+      this.body.append(el("p", "hint", `Your stand is full (${cap} things). A bigger house has a bigger stand; ask at the Post Office.`));
+      return;
+    }
+    const pick = el("select", "stall-item");
+    for (const [id, qty] of this.eco.inventory) {
+      if (qty <= 0 || id === 1 || this.eco.items.get(id)?.meta.account_bound) continue;
+      const o = el("option", "", `${this.eco.name(id)} (you have ${qty})`);
+      o.value = String(id);
+      pick.append(o);
+    }
+    if (!pick.options.length) {
+      this.body.append(el("p", "hint", "Your bag is empty. Catch, grow or find something first."));
+      return;
+    }
+    const qty = el("input", "stall-qty");
+    qty.type = "number";
+    qty.min = "1";
+    qty.value = "1";
+    const price = el("input", "stall-price");
+    price.type = "number";
+    price.min = "1";
+    price.max = "9999";
+    price.value = "10";
+    for (const i of [qty, price]) i.onkeydown = (e) => e.stopPropagation();
+    const form = el("div", "stall-form");
+    form.append(pick, el("label", "", "how many"), qty, el("label", "", "coins each"), price);
+    this.body.append(
+      form,
+      button("Put it out", () => this.act(this.rent.put(Number(pick.value), Number(qty.value), Number(price.value), "yard"), "🧺 On your stand! Passers-by can see it."), "primary"),
+      el("p", "hint", `${on} of ${cap} places taken. When you move out, whatever's left comes back to your bag.`),
     );
   }
 }
