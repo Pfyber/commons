@@ -157,6 +157,56 @@ export function casinoObject(o: MapObject): { c: HTMLCanvasElement; overhang: nu
       }
       return { c, overhang: 16 };
     }
+    case "blackjack_table": {
+      // A half-moon of green baize on a wooden rail: the dealer's side at the
+      // back with a chip tray and the shoe, five betting spots round the curve.
+      const [c, ctx] = canvas(w, h + 16);
+      const cx = w / 2;
+      const top = 8;
+      px(ctx, "rgba(0,0,0,0.22)", 8, c.height - 8, w - 16, 8);
+      ctx.fillStyle = O;
+      ctx.beginPath();
+      ctx.ellipse(cx, top, w / 2 - 2, c.height - top - 6, 0, 0, Math.PI);
+      ctx.fill();
+      ctx.fillStyle = "#6e4b30";
+      ctx.beginPath();
+      ctx.ellipse(cx, top, w / 2 - 3, c.height - top - 8, 0, 0, Math.PI);
+      ctx.fill();
+      ctx.fillStyle = "#2f6f4a";
+      ctx.beginPath();
+      ctx.ellipse(cx, top, w / 2 - 10, c.height - top - 16, 0, 0, Math.PI);
+      ctx.fill();
+      px(ctx, O, 4, top - 4, w - 8, 6);
+      px(ctx, "#6e4b30", 5, top - 3, w - 10, 4);
+      // The chip tray and the shoe.
+      px(ctx, O, cx - 24, top + 2, 48, 9);
+      const chips = ["#c8553d", "#2b2723", "#5d8a4e", "#e0a43a", "#4f6fb0", "#fff8e3"];
+      chips.forEach((col, i) => px(ctx, col, cx - 22 + i * 8, top + 3, 6, 7));
+      px(ctx, O, w - 40, top + 3, 16, 12);
+      px(ctx, "#8f1f2b", w - 39, top + 4, 14, 10);
+      px(ctx, "#fff8e3", w - 37, top + 5, 6, 8);
+      // Five betting spots round the curve, and two cards dealt on one.
+      for (let i = 0; i < 5; i++) {
+        const a = Math.PI * (0.15 + (i / 4) * 0.7);
+        const x = cx + Math.cos(a) * (w / 2 - 28);
+        const y = top + Math.sin(a) * (c.height - top - 34);
+        ctx.strokeStyle = "#d8e8c8";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(Math.round(x) + 0.5, Math.round(y) + 0.5, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        if (i === 2) {
+          px(ctx, O, x - 9, y - 6, 9, 13);
+          px(ctx, "#fff8e3", x - 8, y - 5, 7, 11);
+          px(ctx, "#c8553d", x - 6, y - 2, 3, 3);
+          px(ctx, O, x - 3, y - 7, 9, 13);
+          px(ctx, "#fff8e3", x - 2, y - 6, 7, 11);
+          px(ctx, O, x, y - 3, 3, 3);
+        }
+      }
+      text(ctx, "BLACKJACK PAYS 3 TO 2", cx, top + 26, GOLD, w - 40);
+      return { c, overhang: 16 };
+    }
     case "casino_cage": {
       // The cashier's window: brass bars, a counter, stacks of coins.
       const [c, ctx] = canvas(w, h + 40);

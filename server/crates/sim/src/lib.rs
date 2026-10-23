@@ -3,6 +3,7 @@
 //! integer costs, fixed neighbour order, explicit tie-breaking.
 
 pub mod arena;
+pub mod blackjack;
 pub mod bowling;
 pub mod casino;
 pub mod city;

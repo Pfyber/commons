@@ -1,6 +1,7 @@
 //! The Casino (ADR 0017): its own zone behind its doors on the Casino block.
 //! Six slot machines along the back wall, the roulette table in the middle
-//! on a red carpet, the cashier's desk (the rules, the limits, today's play,
+//! on a red carpet with a blackjack table either side (numbered from the
+//! left, as `social::tables` numbers them), the cashier's desk (the rules, the limits, today's play,
 //! taking a break), little tables to sit at, and the way out.
 
 use super::Builder;
@@ -27,6 +28,8 @@ pub fn floor() -> MapFile {
         b.object("slot_machine", 2 + i * 3, 2, 2, 2, Some("Slots"), true);
     }
     b.object("roulette_table", 8, 8, 8, 3, Some("Roulette"), true);
+    b.object("blackjack_table", 2, 8, 5, 3, Some("Blackjack"), true);
+    b.object("blackjack_table", 18, 8, 5, 3, Some("Blackjack"), true);
     b.object("casino_cage", 20, 2, 4, 2, Some("Cashier"), true);
     for (x, y) in [(4u16, 13u16), (20, 13)] {
         b.decor(x, y, "bar_table");

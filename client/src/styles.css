@@ -4610,3 +4610,140 @@ body.woozy #stage canvas {
   color: #b07a1a;
   margin: 4px 0 8px;
 }
+
+/* The Casino's shared tables (ADR 0017, K2): chips, cards, seats. */
+.panel .table-clock {
+  text-align: center;
+  font-weight: 700;
+  margin: 2px 0 6px;
+}
+
+.panel .table-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.panel .chip-tag {
+  font-size: 12px;
+  padding: 2px 6px;
+  background: #f1e6c8;
+  border: 2px solid #3b3a2e;
+}
+
+.panel .chip-tag.mine {
+  background: #e7f0d6;
+  border-color: var(--leaf);
+}
+
+.panel .dealer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #2f6f4a;
+  color: #fff8e3;
+  border: 3px solid #3b3a2e;
+}
+
+.panel .seats {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.panel .seat {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 2px solid #c9bb95;
+  background: #fffaf0;
+}
+
+.panel .seat.turn {
+  border-color: #e0a43a;
+  background: #fff1cf;
+}
+
+.panel .seat-name {
+  font-weight: 700;
+  min-width: 72px;
+}
+
+.panel .seat-name.mine {
+  color: var(--leaf);
+}
+
+.panel .seat-bet {
+  font-size: 12px;
+}
+
+.panel .seat-result {
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.panel .seat-result.win {
+  color: #b07a1a;
+}
+
+.panel .cards {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.panel .card {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 34px;
+  padding: 0 2px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #2b2723;
+  background: #fff8e3;
+  border: 2px solid #3b3a2e;
+  border-radius: 3px;
+}
+
+.panel .card.red {
+  color: #c8553d;
+}
+
+.panel .card.back {
+  background: repeating-linear-gradient(45deg, #8f1f2b 0 4px, #b8323f 4px 8px);
+}
+
+.panel .cards .total {
+  font-size: 12px;
+  white-space: nowrap;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.panel .wheel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.panel .wheel-row canvas.wheel {
+  width: 140px;
+  height: 140px;
+  margin: 0;
+  flex: none;
+}
+
+.panel .wheel-side {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel .wheel-side .table-clock {
+  text-align: left;
+}

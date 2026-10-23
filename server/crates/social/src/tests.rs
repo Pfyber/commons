@@ -2045,30 +2045,6 @@ async fn the_casino_is_for_grown_ups_inside_it_within_limits_and_lets_you_take_a
     let (_, again) = spin(&a, 5, "s1").await;
     assert_eq!(again["duplicate"], true);
     assert_eq!(coins(&s, &a).await, before - 5 + payout, "once");
-    // Roulette: red, and the payout agrees with the number.
-    let before = coins(&s, &a).await;
-    let (st, r) = post(
-        &a,
-        "/api/social/casino/roulette",
-        json!({ "bet": { "on": "red" }, "amount": 10, "key": format!("r1:{tag}") }),
-    )
-    .await;
-    assert_eq!(st, StatusCode::OK, "{r}");
-    let n = r["outcome"]["number"].as_u64().unwrap() as u8;
-    let won = if commons_sim::casino::is_red(n) {
-        20
-    } else {
-        0
-    };
-    assert_eq!(r["payout"], won);
-    assert_eq!(coins(&s, &a).await, before - 10 + won);
-    let (st, _) = post(
-        &a,
-        "/api/social/casino/roulette",
-        json!({ "bet": { "on": "number", "n": 37 }, "amount": 10, "key": format!("r2:{tag}") }),
-    )
-    .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST);
     // The daily loss limit: today's loss so far plus the bet can't pass 300.
     let (_, st0) = call(&s, "GET", "/api/social/casino", &a.token, None).await;
     let lost = -st0["today"]["net"].as_i64().unwrap();
@@ -2099,4 +2075,227 @@ async fn the_casino_is_for_grown_ups_inside_it_within_limits_and_lets_you_take_a
         st1["break_until"].is_i64() && st1["can_play"] == false,
         "{st1}"
     );
+}
+
+#[tokio::test]
+async fn casino_tables_are_played_together_roulette_and_blackjack() {
+    use crate::tables::{BETTING_MS, DEAL_MS, DONE_MS, SPIN_MS, now_ms, tick};
+    let Some(s) = state().await else { return };
+    let (a, b) = (player(&s).await, player(&s).await);
+    let tag = &a.name[1..7];
+    for p in [&a, &b] {
+        grant(&s, p, 1, 1000, "test", &format!("tables:{}", &p.name[1..7])).await;
+        in_zone(&s, p, "casino");
+    }
+    let post = |p: &P, path: &str, body: Value| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        let path = format!("/api/social/casino/{path}");
+        async move { call(&s, "POST", &path, &tok, Some(body)).await }
+    };
+    let view = |p: &P| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move {
+            call(&s, "GET", "/api/social/casino/tables", &tok, None)
+                .await
+                .1
+        }
+    };
+
+    // Roulette: both put chips down on the same round.
+    let (ca, cb) = (coins(&s, &a).await, coins(&s, &b).await);
+    let (st, r) = post(
+        &a,
+        "roulette/bet",
+        json!({ "bet": { "on": "red" }, "amount": 10, "key": format!("ra:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["roulette"]["phase"], "betting");
+    let (st, _) = post(
+        &a,
+        "roulette/bet",
+        json!({ "bet": { "on": "red" }, "amount": 10, "key": format!("ra:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "pressed twice");
+    let (st, r) = post(
+        &b,
+        "roulette/bet",
+        json!({ "bet": { "on": "number", "n": 17 }, "amount": 5, "key": format!("rb:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(
+        r["roulette"]["chips"].as_array().unwrap().len(),
+        2,
+        "once each: {r}"
+    );
+    assert_eq!(coins(&s, &a).await, ca - 10, "the chip's on the table");
+    let (st, _) = post(
+        &b,
+        "roulette/bet",
+        json!({ "bet": { "on": "red" }, "amount": 50, "key": format!("rb2:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, r) = post(
+        &b,
+        "roulette/bet",
+        json!({ "bet": { "on": "red" }, "amount": 50, "key": format!("rb3:{tag}") }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("round_max"))
+    );
+    // One says spin: it waits for the other; both have: it spins.
+    let (_, r) = post(&a, "roulette/spin", json!({})).await;
+    assert_eq!(r["roulette"]["phase"], "betting");
+    let (_, r) = post(&b, "roulette/spin", json!({})).await;
+    assert_eq!(r["roulette"]["phase"], "spinning");
+    let (st, r) = post(
+        &a,
+        "roulette/bet",
+        json!({ "bet": { "on": "odd" }, "amount": 5, "key": format!("late:{tag}") }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("no_more_bets"))
+    );
+    tick(&s, now_ms() + SPIN_MS + 1).await;
+    let r = view(&a).await;
+    assert_eq!(r["roulette"]["phase"], "open");
+    let n = r["roulette"]["last"]["number"].as_u64().unwrap() as u8;
+    let red = commons_sim::casino::is_red(n);
+    assert_eq!(coins(&s, &a).await, ca - 10 + if red { 20 } else { 0 });
+    let b_won = if n == 17 { 180 } else { 0 } + if red { 100 } else { 0 };
+    assert_eq!(coins(&s, &b).await, cb - 55 + b_won);
+    // Alone, betting closes when time's up.
+    post(
+        &a,
+        "roulette/bet",
+        json!({ "bet": { "on": "even" }, "amount": 1, "key": format!("solo:{tag}") }),
+    )
+    .await;
+    tick(&s, now_ms() + BETTING_MS + 1).await;
+    assert_eq!(view(&a).await["roulette"]["phase"], "spinning");
+    tick(&s, now_ms() + BETTING_MS + SPIN_MS + 2).await;
+
+    // Blackjack: two seats, two bets, the hand's dealt; turns in seat order.
+    let (ca, cb) = (coins(&s, &a).await, coins(&s, &b).await);
+    let (st, r) = post(&a, "blackjack/sit", json!({ "table": 0, "seat": 0 })).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (st, r) = post(&b, "blackjack/sit", json!({ "table": 0, "seat": 0 })).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("taken"))
+    );
+    post(&b, "blackjack/sit", json!({ "table": 0, "seat": 2 })).await;
+    let (st, r) = post(
+        &a,
+        "blackjack/bet",
+        json!({ "amount": 10, "key": format!("ba:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["blackjack"][0]["phase"], "betting", "waiting for b");
+    let (_, r) = post(
+        &b,
+        "blackjack/bet",
+        json!({ "amount": 10, "key": format!("bb:{tag}") }),
+    )
+    .await;
+    let t = &r["blackjack"][0];
+    assert!(t["phase"] == "playing" || t["phase"] == "done", "{t}");
+    if t["phase"] == "playing" {
+        assert_eq!(
+            t["dealer"]["cards"].as_array().unwrap().len(),
+            1,
+            "the hole card's face down"
+        );
+        assert_eq!(t["dealer"]["hidden"], 1);
+    }
+    // Play it out: whoever's turn it is stands; the other can't move for them.
+    for _ in 0..4 {
+        let t = view(&a).await["blackjack"][0].clone();
+        if t["phase"] != "playing" {
+            break;
+        }
+        let (on, off) = if t["turn"] == 0 { (&a, &b) } else { (&b, &a) };
+        let (st, r) = post(off, "blackjack/act", json!({ "action": "stand" })).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not_your_turn"))
+        );
+        let (st, r) = post(on, "blackjack/act", json!({ "action": "stand" })).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+    }
+    let t = view(&a).await["blackjack"][0].clone();
+    assert_eq!(t["phase"], "done", "{t}");
+    let paid = |i: usize| t["seats"][i]["result"]["paid"].as_i64().unwrap() as i32;
+    assert_eq!(coins(&s, &a).await, ca - 10 + paid(0));
+    assert_eq!(coins(&s, &b).await, cb - 10 + paid(2));
+    assert!(
+        t["dealer"]["total"].as_u64().unwrap() >= 17,
+        "the dealer draws to 17: {t}"
+    );
+    // The felt clears for the next hand.
+    tick(&s, now_ms() + DONE_MS + 1).await;
+    let t = view(&a).await["blackjack"][0].clone();
+    assert_eq!(
+        (t["phase"].as_str(), t["seats"][0]["bet"].as_i64()),
+        (Some("betting"), Some(0))
+    );
+
+    // Leaving the casino with a bet not yet dealt: it comes back, the seat's free.
+    let ca = coins(&s, &a).await;
+    post(
+        &a,
+        "blackjack/bet",
+        json!({ "amount": 7, "key": format!("leave:{tag}") }),
+    )
+    .await;
+    assert_eq!(coins(&s, &a).await, ca - 7);
+    in_zone(&s, &a, "city");
+    tick(&s, now_ms()).await;
+    assert_eq!(coins(&s, &a).await, ca, "refunded");
+    in_zone(&s, &a, "casino");
+    assert!(view(&a).await["blackjack"][0]["seats"][0].is_null());
+    // b alone: dealt once the wait's over.
+    let cb = coins(&s, &b).await;
+    post(
+        &b,
+        "blackjack/bet",
+        json!({ "amount": 4, "key": format!("solo:{tag}") }),
+    )
+    .await;
+    let t = view(&b).await["blackjack"][0].clone();
+    assert!(t["phase"] != "betting", "alone, it's dealt at once: {t}");
+    // Timing out stands for you.
+    if t["phase"] == "playing" {
+        tick(&s, now_ms() + crate::tables::TURN_MS + 1).await;
+    }
+    let t = view(&b).await["blackjack"][0].clone();
+    assert_eq!(t["phase"], "done", "{t}");
+    assert_eq!(
+        coins(&s, &b).await,
+        cb - 4 + t["seats"][2]["result"]["paid"].as_i64().unwrap() as i32
+    );
+    let _ = DEAL_MS;
+
+    // A restart mid-round gives the bets back.
+    tick(&s, now_ms() + DONE_MS + 1).await;
+    let cb = coins(&s, &b).await;
+    post(
+        &b,
+        "roulette/bet",
+        json!({ "bet": { "on": "red" }, "amount": 9, "key": format!("crash:{tag}") }),
+    )
+    .await;
+    assert_eq!(coins(&s, &b).await, cb - 9);
+    crate::tables::refund_unsettled(&s, Some(b.id)).await;
+    assert_eq!(coins(&s, &b).await, cb);
 }

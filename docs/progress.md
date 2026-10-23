@@ -1592,6 +1592,49 @@ Checked:
 - In the browser, Market station to Lake station: 48 s on foot, 15 s on
   the city bike.
 
+## The Casino, K2: tables everyone shares (2026-10-23)
+
+ADR 0017. The casino is social now: alone or together, like a real
+casino.
+
+- **Roulette:**
+  - One wheel per casino instance. Everyone bets on the same spin and
+    sees everyone else's chips.
+  - "Spin!" goes when every player who has bet has pressed it (alone, at
+    once), or 20 s after the first chip.
+  - Everyone watches the same spin land; while the wheel spins, the
+    betting buttons step aside.
+- **Blackjack:**
+  - Two tables (`blackjack_table`), five seats each. Players sit, bet,
+    and the hand is dealt when everyone seated has bet (or 15 s after the
+    first bet). Turns go in seat order: hit, stand or double, 20 s each.
+  - The dealer's hole card stays face down until the players are done;
+    the dealer stands on 17 and blackjack pays 3:2.
+  - Cards, totals and results show for every seat; anyone can watch.
+- **Big wins** are announced to the whole floor as a toast.
+- **The coins:** a table bet is charged when it's placed (an unsettled
+  round, so the daily limit counts it) and settled when the round ends.
+  Unsettled rounds are refunded at startup. Leaving the casino gives back
+  a bet that hasn't been dealt yet.
+- **Code and data:** `commons_sim::blackjack` holds the rules (tested);
+  `social::tables` holds the state, timers and pushes. Migration 0038
+  adds `settled` and allows the `blackjack` game.
+
+Checked:
+- Server: blackjack rules tests, plus a two-player table test (a shared
+  spin, the ready rule, the round cap, no bets after the spin starts,
+  turns, the hidden hole card, payouts, timeouts, leaving, refunds). It
+  passed 25 runs in a row. Clippy clean, client 89.
+- In the browser, Ada and Bo:
+  - Roulette: each saw the other's chips. Ada's button read "Waiting for
+    1 more…" until Bo pressed Spin. The wheel landed on 35 black for
+    both; Bo won 20 and Ada lost 10.
+  - Blackjack, table 2: both sat down; the hand was dealt once both had
+    bet; the hole card was face down. Bo's blackjack paid +25 and was
+    announced to the room.
+
+Next: K3, poker between players, a jackpot and cosmetics.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

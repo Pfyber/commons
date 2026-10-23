@@ -84,8 +84,9 @@ of the city's club lots (120 a week): its door leads into their room. Clubs
 plan events for everyone at public places (📅 What's on, at the Club Hall
 or in the 🛡 panel), and the Club Hall's leaderboard names the week's top
 three clubs, which win coins for their treasuries.
-The Casino (on the Casino block, 16 and over): slot machines, a roulette
-table and the cashier, for coins only. There's a daily loss limit of 300
+The Casino (on the Casino block, 16 and over): slot machines, a shared
+roulette wheel (everyone in the room bets on the same spin), two blackjack
+tables of five seats against the dealer, and the cashier, for coins only. There's a daily loss limit of 300
 coins, and at the cashier you can take a break for a day or a week.
 The metro: nine stations around the city (look for the red M); at one,
 tap a station on the map to ride there, and anyone following you comes too.

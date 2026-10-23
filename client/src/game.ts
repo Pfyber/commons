@@ -85,7 +85,7 @@ import type { ClubsPanel } from "./ui/clubs";
 import type { Concert } from "./concert";
 import type { YardPanel } from "./ui/homes";
 import type { MetroPanel } from "./ui/metro";
-import type { Casino, CagePanel, RoulettePanel, SlotsPanel } from "./ui/casino";
+import type { BlackjackPanel, Casino, CagePanel, RoulettePanel, SlotsPanel } from "./ui/casino";
 import { YardStands } from "./world/yardstands";
 import type { ConcertPanel } from "./ui/concert";
 
@@ -170,6 +170,7 @@ export interface Ui {
   casino: Casino;
   slots: SlotsPanel;
   roulette: RoulettePanel;
+  blackjack: BlackjackPanel;
   cage: CagePanel;
 }
 
@@ -899,7 +900,7 @@ export class Game {
         this.near(ui.clubsPanel, front, 8).showEvents();
         return true;
       // The Casino (ADR 0017): in through its doors (16 and over); inside,
-      // the slot machines, the roulette table and the cashier.
+      // the slot machines, the shared tables (roulette, blackjack) and the cashier.
       case "casino":
         this.enter(front, "casino");
         return true;
@@ -914,6 +915,16 @@ export class Game {
         walkUp();
         this.near(ui.roulette, front, 6).show();
         return true;
+      case "blackjack_table": {
+        // Tables are numbered from the left, as the server numbers them.
+        const n = this.scene.map.objects
+          .filter((o) => o.kind === "blackjack_table")
+          .sort((a, b) => a.x - b.x)
+          .indexOf(obj);
+        walkUp();
+        this.near(ui.blackjack.at(Math.max(0, n)), front, 6).show();
+        return true;
+      }
       case "casino_cage":
         walkUp();
         this.near(ui.cage, front, 5).show();

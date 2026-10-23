@@ -49,7 +49,7 @@ import { ClubsPanel } from "./ui/clubs";
 import { Concert } from "./concert";
 import { ConcertPanel } from "./ui/concert";
 import { MetroPanel, playRide, stationsOf } from "./ui/metro";
-import { CagePanel, Casino, RoulettePanel, SlotsPanel } from "./ui/casino";
+import { BlackjackPanel, CagePanel, Casino, RoulettePanel, SlotsPanel, Tables } from "./ui/casino";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -302,6 +302,10 @@ async function main() {
   clubs.onToast = (t) => hud.toast(t, 6000);
   const casino = new Casino(auth);
   casino.onPlayed = () => void eco.load().catch(() => {});
+  // The shared tables: live from the server; big wins told to the whole floor.
+  const tables = new Tables(auth, auth.player!.id, social);
+  tables.onCheer = (t) => hud.toast(t, 5000);
+  tables.onCoins = () => void eco.load().catch(() => {});
   const concert = new Concert(auth, auth.player!.id, social);
   concert.onToast = (t) => hud.toast(t, 5000);
   const concertPanel = new ConcertPanel(concert, {
@@ -407,7 +411,8 @@ async function main() {
     yard: new YardPanel(rent, eco, rentHost),
     casino,
     slots: new SlotsPanel(casino),
-    roulette: new RoulettePanel(casino),
+    roulette: new RoulettePanel(casino, tables),
+    blackjack: new BlackjackPanel(casino, tables),
     cage: new CagePanel(casino),
     metro: new MetroPanel({
       map: () => {

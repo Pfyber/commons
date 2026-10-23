@@ -1,5 +1,6 @@
-//! The Casino, K1 (ADR 0017): slots and roulette against the house, coins
-//! only, never real money. Every outcome is drawn here (the OS's random
+//! The Casino (ADR 0017): the slot machines, the rules and limits, and
+//! taking a break; the shared tables (roulette, blackjack) are in `tables`.
+//! Coins only, never real money. Every outcome is drawn here (the OS's random
 //! numbers through `commons_sim::casino`) and every round recorded.
 //!
 //! Care: 16 and over unless `COMMONS_CASINO_MINORS` is on; only from inside
@@ -16,7 +17,7 @@ use axum::{Json, Router};
 use commons_api::economy::{COIN, EconError, Op, apply};
 use commons_api::error::{ApiError, ApiResult};
 use commons_common::config;
-use commons_sim::casino::{self, Bet};
+use commons_sim::casino;
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -47,12 +48,11 @@ pub fn routes() -> Router<Arc<SocialState>> {
     Router::new()
         .route("/casino", get(status))
         .route("/casino/slots", post(slots))
-        .route("/casino/roulette", post(roulette))
         .route("/casino/break", post(take_break))
 }
 
 /// Today so far (UTC): how much was bet and won.
-async fn today(state: &SocialState, me: Uuid) -> ApiResult<(i64, i64)> {
+pub(crate) async fn today(state: &SocialState, me: Uuid) -> ApiResult<(i64, i64)> {
     sqlx::query_as(
         "SELECT coalesce(sum(bet), 0)::bigint, coalesce(sum(payout), 0)::bigint FROM casino_rounds
          WHERE player_id = $1 AND at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'",
@@ -64,7 +64,10 @@ async fn today(state: &SocialState, me: Uuid) -> ApiResult<(i64, i64)> {
 }
 
 /// Why `me` can't play right now, if they can't.
-async fn why_not(state: &SocialState, me: Uuid) -> ApiResult<Option<(&'static str, String)>> {
+pub(crate) async fn why_not(
+    state: &SocialState,
+    me: Uuid,
+) -> ApiResult<Option<(&'static str, String)>> {
     let minor: bool = sqlx::query_scalar(
         "SELECT (extract(year FROM now())::int - a.birth_year - 1) < 16
          FROM players p JOIN accounts a ON a.id = p.account_id WHERE p.id = $1",
@@ -114,7 +117,11 @@ async fn status(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
         "can_play": why.is_none(),
         "why": why.map(|w| w.1),
         "today": { "bet": bet, "won": won, "net": won - bet, "loss_left": (DAILY_LOSS - (bet - won)).max(0) },
-        "limits": { "slots": casino::SLOT_BET, "roulette": casino::ROULETTE_BET, "daily_loss": DAILY_LOSS },
+        "limits": {
+            "slots": casino::SLOT_BET, "roulette": casino::ROULETTE_BET,
+            "roulette_round": crate::tables::ROUND_MAX,
+            "blackjack": commons_sim::blackjack::BET, "daily_loss": DAILY_LOSS,
+        },
         "slots": { "symbols": casino::SYMBOLS, "three": casino::THREE, "two_cherries": 2 },
         "break_until": break_until,
     })))
@@ -211,7 +218,7 @@ async fn slots(
     headers: HeaderMap,
     Json(req): Json<SlotsReq>,
 ) -> ApiResult<Json<Value>> {
-    let (me, _) = me(&state, &headers)?;
+    let (me, claims) = me(&state, &headers)?;
     let r = play(
         &state,
         me,
@@ -229,47 +236,27 @@ async fn slots(
         },
     )
     .await?;
-    Ok(Json(r))
-}
-
-#[derive(Deserialize)]
-struct RouletteReq {
-    bet: Bet,
-    amount: i32,
-    key: String,
-}
-
-/// One spin of the roulette wheel.
-async fn roulette(
-    State(state): S,
-    headers: HeaderMap,
-    Json(req): Json<RouletteReq>,
-) -> ApiResult<Json<Value>> {
-    let (me, _) = me(&state, &headers)?;
-    if !req.bet.valid() {
-        return Err(ApiError::bad_request(
-            "bad_bet",
-            "That's not a bet on this table.",
-        ));
+    // A big win: the whole floor hears.
+    let pays = r["outcome"]["pays"].as_i64().unwrap_or(0);
+    if pays >= 20
+        && r["duplicate"] != true
+        && let Some(l) = state.hub.location(me).filter(|l| l.zone == ZONE)
+    {
+        let reels: Vec<&str> = r["outcome"]["reels"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        crate::tables::cheer(
+            &state,
+            l.instance,
+            format!(
+                "🎰 {} hit {} for {} coins!",
+                claims.name,
+                reels.join(" "),
+                r["payout"]
+            ),
+        );
     }
-    let bet = req.bet;
-    let r = play(
-        &state,
-        me,
-        "roulette",
-        req.amount,
-        casino::ROULETTE_BET,
-        &req.key,
-        || {
-            let n = casino::wheel(rand::rng().random());
-            let pays = bet.pays(n);
-            (
-                pays,
-                json!({ "number": n, "red": casino::is_red(n), "bet": bet, "pays": pays }),
-            )
-        },
-    )
-    .await?;
     Ok(Json(r))
 }
 
