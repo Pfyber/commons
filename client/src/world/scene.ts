@@ -164,7 +164,7 @@ export class Scene {
     const s = new Sprite(texture);
     s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
     // The dance floor lies flat: people stand on it, not behind it.
-    s.zIndex = p.o.kind === "dance_floor" ? p.o.y * TILE + 1 : (p.o.y + p.o.h) * TILE - 1;
+    s.zIndex = p.o.kind === "dance_floor" || p.o.kind === "concert_stage" ? p.o.y * TILE + 1 : (p.o.y + p.o.h) * TILE - 1;
     this.sorted.addChild(s);
     p.sprite = s;
     if (p.o.item) {

@@ -85,6 +85,16 @@ impl Hub {
         }
     }
 
+    /// Everyone the zones report in `zone`'s instance `instance`.
+    pub fn in_zone(&self, zone: &str, instance: u16) -> Vec<Uuid> {
+        let h = self.0.lock().unwrap();
+        h.locations
+            .iter()
+            .filter(|(_, l)| l.zone == zone && l.instance == instance)
+            .map(|(p, _)| *p)
+            .collect()
+    }
+
     pub fn location(&self, player: Uuid) -> Option<Location> {
         self.0.lock().unwrap().locations.get(&player).cloned()
     }

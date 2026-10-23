@@ -1397,6 +1397,51 @@ Checked:
     on and says he's going ("2 going").
   - The leaderboard and the Club Hall's new boards.
 
+## The Concert Hall: done (2026-10-23)
+
+ADR 0015. One player on stage, everyone in the hall listening: sing, play,
+tell a story or host a quiz.
+
+- **The hall:**
+  - A cream music hall with a marquee, on the Theater block (until now a
+    placeholder).
+  - Inside (`concert_hall` zone): a velvet backdrop whose board reads LIVE
+    and the performer's name, the stage boards with footlights that light
+    up during a set, a microphone stand, speakers, and rows of seats either
+    side of an aisle.
+  - Clubs can hold events there: it's one of the C3 places.
+- **The stage** (`social/src/concert.rs`), one per hall instance:
+  - At the microphone, anyone 16 or over takes the stage while it's free,
+    for up to an hour, and walks up onto it. 🎤 shows by their name.
+  - The set ends when they step down, leave the hall, or the hour is up
+    (checked every 5 seconds). The gateway then removes them from the
+    voice room through LiveKit's room service.
+- **Who hears whom:**
+  - The performer's pass may talk. Everyone else in the hall gets a new
+    listen-only pass (`voice::listen_token`: `canPublish: false`, no
+    sources), so LiveKit itself refuses anything they send.
+  - Passes are only given to players the zones report in that hall.
+  - Listeners get a volume slider and mute.
+- **Care:** listening follows ADR 0013's age rules between the performer
+  and each listener. With `COMMONS_VOICE_MINORS` off, under-16s see who's
+  on stage but hear no live voice. A block either way also means no pass.
+
+Checked:
+- Server: social 23 (who may take the stage: not from outside the hall,
+  not under 16, one at a time; listening: only in the hall, not for
+  under-16s yet; walking out ends the set, the hour ends it, stepping down
+  ends it; the hall told each time). Also the stage's unit test, common's
+  listen-only pass test (`canPublish` false), and mapgen (the stage, the
+  mic and the seats reachable); clippy clean; client 89.
+- In the browser, with a real LiveKit server and fake microphones:
+  - Ada takes the stage at the mic and walks onto it.
+  - Bo, in the hall, is put on listen-only at once and receives her audio
+    track.
+  - Bo's microphone is refused by LiveKit ("insufficient permissions"),
+    and Ada's room shows Bo with no tracks.
+  - 🎤 shows by Ada's name, and the board reads her name.
+  - She steps down and both are off.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

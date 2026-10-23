@@ -83,7 +83,11 @@ online with 📞 Call the club, and decorates its room from members' bags
 of the city's club lots (120 a week): its door leads into their room. Clubs
 plan events for everyone at public places (📅 What's on, at the Club Hall
 or in the 🛡 panel), and the Club Hall's leaderboard names the week's top
-three clubs, which win coins for their treasuries. `COMMONS_CLUB_SWEEP_SECS`
+three clubs, which win coins for their treasuries.
+The Concert Hall (on the Theater block): take the stage at the microphone
+and everyone in the hall hears you, and only you, for up to an hour (16
+and over; listeners get listen-only voice passes and a volume slider).
+`COMMONS_CLUB_SWEEP_SECS`
 (default 60) sets how often the club sweep runs; each run counts as a
 minute.
 Testing on a dev server: a wish at the wishing well (on the Town Hall's
@@ -156,7 +160,7 @@ assets/city/            the city grid and block catalog (ADR 0010)
 | `API_BIND` / `ORCHESTRATOR_BIND` / `ZONE_BIND` | `0.0.0.0:8080/8081/8082` | each service |
 | `COMMONS_CLIENT_URL` | `http://localhost:5173` | api (magic-link URLs) |
 | `ZONE_PUBLIC_URL` | `ws://localhost:8082/ws` | orchestrator |
-| `COMMONS_ZONES` | `city,home,mall,bar,arcade,library`, the eight `library_<wing>`s, `club_hall,clubroom,bowling` | orchestrator |
+| `COMMONS_ZONES` | `city,home,mall,bar,arcade,library`, the eight `library_<wing>`s, `club_hall,clubroom,bowling,concert_hall` | orchestrator |
 | `COMMONS_MAPS_DIR` | `assets/maps` | zone |
 | `DATABASE_URL` | `postgres://commons:commons@localhost:5432/commons` | api |
 | `TEST_DATABASE_URL` | `…/commons_test` | api tests |

@@ -16,7 +16,7 @@
     { "key": "woods", "name": "Woods", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
     { "key": "meadow", "name": "Meadow", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
     { "key": "lake", "name": "Lake", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
-    { "key": "theater", "name": "Theater", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": true },
+    { "key": "theater", "name": "Concert Hall", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": true },
     { "key": "fairground", "name": "Fairground", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": true },
     { "key": "gallery", "name": "Gallery", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
     { "key": "casino", "name": "Casino", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },

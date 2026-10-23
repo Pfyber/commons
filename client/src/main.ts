@@ -15,6 +15,7 @@ import libArtsUrl from "../../assets/maps/library_arts.json?url";
 import libReferenceUrl from "../../assets/maps/library_reference.json?url";
 import clubHallUrl from "../../assets/maps/club_hall.json?url";
 import clubRoomUrl from "../../assets/maps/clubroom.json?url";
+import concertHallUrl from "../../assets/maps/concert_hall.json?url";
 import bowlingUrl from "../../assets/maps/bowling.json?url";
 import { Economy } from "./economy";
 import { Game, type Ui } from "./game";
@@ -44,6 +45,8 @@ import { Calls, PHONE } from "./calls";
 import { IncomingCall, PhonePanel } from "./ui/phone";
 import { Clubs } from "./clubs";
 import { ClubsPanel } from "./ui/clubs";
+import { Concert } from "./concert";
+import { ConcertPanel } from "./ui/concert";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -81,6 +84,7 @@ const MAP_URLS: Record<string, string> = {
   club_hall: clubHallUrl,
   clubroom: clubRoomUrl,
   bowling: bowlingUrl,
+  concert_hall: concertHallUrl,
 };
 const ERR_REPLACED = 6;
 const ERR_VERSION = 3;
@@ -292,6 +296,12 @@ async function main() {
   // The clubhouses on the city's club lots (C3).
   void clubs.loadLots().catch(() => {});
   clubs.onToast = (t) => hud.toast(t, 6000);
+  const concert = new Concert(auth, auth.player!.id, social);
+  concert.onToast = (t) => hud.toast(t, 5000);
+  const concertPanel = new ConcertPanel(concert, {
+    walkOnStage: () => void (game as Game | null)?.walkToSpot("stage_spot"),
+    toast: (t) => hud.toast(t, 4500),
+  });
   // A meetup's reward (and anything else the gateway says changed your coins).
   social.onPush((m) => m.t === "coins" && void eco.load().catch(() => {}));
   // The 🛡 button lights up while an invite waits or a club's rent is due.
@@ -386,6 +396,8 @@ async function main() {
     phone,
     clubs,
     clubsPanel,
+    concert,
+    concertPanel,
   };
   ui.catalogue.reader = reader;
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
@@ -468,7 +480,7 @@ async function main() {
             // Out of a club's room whose clubhouse stands on a lot: out of its door, in the city.
             const lot = from?.zoneId === "clubroom" && from.place.owner ? clubs.lotOf(from.place.owner) : null;
             if (z === "club_hall" && lot) return void travel({ zone: "city", arrive: `place:${lot}` });
-            const place = from && ["mall", "bar", "arcade", HALL, "club_hall", "bowling"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
+            const place = from && ["mall", "bar", "arcade", HALL, "club_hall", "bowling", "concert_hall"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
             const arrive =
               (z === HALL && from && wingOfZone(from.zoneId)) || (z === "club_hall" && from?.zoneId === "clubroom")
                 ? `place:${from.zoneId}`

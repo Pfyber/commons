@@ -82,6 +82,8 @@ import type { PhonePanel } from "./ui/phone";
 import { LibraryRoom } from "./world/libraryroom";
 import type { Clubs } from "./clubs";
 import type { ClubsPanel } from "./ui/clubs";
+import type { Concert } from "./concert";
+import type { ConcertPanel } from "./ui/concert";
 
 /** Error codes from server/crates/protocol (error_code). */
 const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION_MISMATCH: 3 };
@@ -157,6 +159,8 @@ export interface Ui {
   phone: PhonePanel;
   clubs: Clubs;
   clubsPanel: ClubsPanel;
+  concert: Concert;
+  concertPanel: ConcertPanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -409,7 +413,7 @@ export class Game {
     // Indoors (the mall, the bar, the arcade, the library): the lights are
     // on, no weather, no birds, no wheels, no sprinting; the arcade and the
     // bowling alley are lit by neon.
-    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club") || zoneId === "bowling";
+    const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club") || zoneId === "bowling" || zoneId === "concert_hall";
     this.ambient = new Ambient(this.scene, map, indoors);
     this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade" || zoneId === "bowling");
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
@@ -587,6 +591,12 @@ export class Game {
     void ui.welcome.loadFounders().catch(() => {});
     // Club crests by names (asked afresh in each place).
     ui.clubs.forgetBadges();
+    // The Concert Hall (ADR 0015): hear whoever's on stage; 🎤 by their name.
+    if (zoneId === "concert_hall") {
+      void ui.concert.enterHall().catch(() => {});
+      this.disposers.push(ui.concert.onChange(() => this.showStage()));
+      this.disposers.push(() => void ui.concert.leaveHall());
+    }
     // The clubhouses on the club lots, as they change (C3).
     if (zoneId === "city") {
       this.dressLots(ui.clubs.lots);
@@ -642,6 +652,7 @@ export class Game {
       a.setAway(info.away);
       a.setFounder(this.ui.welcome.founderNamed(info.name)?.no ?? null);
       a.setClub(this.ui.clubs.badgeOf(info.name));
+      if (this.zoneId === "concert_hall") a.setPerforming(this.ui.concert.stage?.name === info.name);
       this.avatars.set(info.id, a);
     }
   }
@@ -649,6 +660,18 @@ export class Game {
   private applyFounders() {
     this.grove?.setFounders(this.ui.welcome.founders);
     for (const a of this.avatars.values()) a.setFounder(this.ui.welcome.founderNamed(a.info.name)?.no ?? null);
+  }
+
+  /** Lights the stage with the performer's name, and 🎤 by theirs. */
+  private showStage() {
+    const s = this.ui.concert.stage;
+    for (const o of this.scene.map.objects) {
+      if (o.kind !== "concert_stage" && o.kind !== "concert_curtain") continue;
+      if ((o.title ?? null) === (s?.name ?? null)) continue;
+      o.title = s?.name;
+      this.scene.redraw(o);
+    }
+    for (const a of this.avatars.values()) a.setPerforming(!!s && a.info.name === s.name);
   }
 
   /** Puts each club's house (crest, colour, name) on the lot it rents. */
@@ -847,6 +870,18 @@ export class Game {
       case "club_events":
         walkUp();
         this.near(ui.clubsPanel, front, 8).showEvents();
+        return true;
+      // The Concert Hall (ADR 0015): in through its doors; inside, the stage.
+      case "concert_hall":
+        this.enter(front, "concert_hall");
+        return true;
+      case "concert_exit":
+        this.goTo("city");
+        return true;
+      case "concert_mic":
+      case "concert_curtain":
+        if (cheb(self.destination, front) > 3 && obj.kind === "concert_mic") this.walkTo(front);
+        this.near(ui.concertPanel, { x: 14, y: 6 }, 9).show();
         return true;
       case "club_house": {
         // A club's house on its lot (C3): members go in; others are told whose it is.

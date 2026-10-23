@@ -32,6 +32,7 @@ pub const PLACES: &[(&str, &str)] = &[
     ("arena", "the Arena"),
     ("club_hall", "the Club Hall steps"),
     ("well", "the wishing well"),
+    ("concert_hall", "the Concert Hall"),
 ];
 /// How far ahead an event can be planned.
 pub const PLAN_DAYS: i64 = 14;

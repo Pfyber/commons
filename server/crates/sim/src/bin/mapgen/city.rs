@@ -813,6 +813,12 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             k.spot("door:club_hall", 24, 18);
             k.spot("club_hall", 24, 19);
         }
+        // The Concert Hall (ADR 0015), on the Theater block.
+        "theater" => {
+            k.object("concert_hall", 14, 7, 20, 11, "Concert Hall");
+            k.spot("door:concert_hall", 24, 18);
+            k.spot("concert_hall", 24, 19);
+        }
         "bowling" => {
             k.object("bowling_alley", 16, 9, 16, 9, "Bowling");
             k.spot("door:bowling", 24, 18);
@@ -833,6 +839,9 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
     let sign = match key {
         "town_hall" => "Town Hall: the town's votes and proposals".to_string(),
         "gallery" => "Gallery: paint on the easels outside; the gallery opens soon".to_string(),
+        "theater" => {
+            "Concert Hall: take the stage and everyone inside hears you".to_string()
+        }
         "cinema" => "Cinema: the big screen plays outside; the cinema opens soon".to_string(),
         "arcade" => {
             "Arcade: pong, light cycles, racers, a dance-off and more inside; word games out here"

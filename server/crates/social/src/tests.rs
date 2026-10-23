@@ -1759,3 +1759,102 @@ async fn clubhouses_events_for_everyone_and_the_clubs_of_the_week() {
         post(p, format!("/api/social/clubs/{club}/leave"), json!({})).await;
     }
 }
+
+// ---- the Concert Hall (ADR 0015) ------------------------------------------------------
+
+/// `p` is in the Concert Hall's instance `instance` (or out in the city).
+fn at_hall(s: &State, p: &P, instance: Option<u16>) {
+    s.hub.set_location(
+        p.id,
+        crate::hub::Location {
+            zone: if instance.is_some() {
+                "concert_hall"
+            } else {
+                "city"
+            }
+            .into(),
+            instance: instance.unwrap_or(1),
+            owner: None,
+            label: "Concert Hall".into(),
+        },
+        true,
+        chrono::Utc::now().timestamp_millis(),
+    );
+}
+
+#[tokio::test]
+async fn one_performer_on_stage_everyone_in_the_hall_listens() {
+    let Some(s) = state().await else { return };
+    let (a, b, outside) = (player(&s).await, player(&s).await, player(&s).await);
+    let kid = player_born(&s, chrono::Datelike::year(&chrono::Utc::now()) - 12).await;
+    for p in [&a, &b, &kid] {
+        at_hall(&s, p, Some(1));
+    }
+    at_hall(&s, &outside, None);
+    let mut rx = online(&s, &b);
+    let post = |p: &P, path: &str| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        let path = path.to_string();
+        async move { call(&s, "POST", &path, &tok, Some(json!({}))).await }
+    };
+
+    let (st, r) = post(&outside, "/api/social/concert/stage").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("not_in_hall"))
+    );
+    let (st, r) = post(&kid, "/api/social/concert/stage").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("age")),
+        "16 and over"
+    );
+    let (st, r) = post(&b, "/api/social/concert/listen").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("nobody"))
+    );
+
+    // A takes the stage; the hall hears about it.
+    let (st, r) = post(&a, "/api/social/concert/stage").await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert!(r["token"].is_string());
+    assert_eq!(
+        pushed(&mut rx, "concert").unwrap()["stage"]["name"],
+        a.name.as_str()
+    );
+    let (st, r) = post(&b, "/api/social/concert/stage").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("taken")),
+        "one at a time"
+    );
+    // B listens (a listen-only pass); the kid can't hear live voice yet.
+    let (st, r) = post(&b, "/api/social/concert/listen").await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (st, _) = post(&kid, "/api/social/concert/listen").await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    let (_, k) = call(&s, "GET", "/api/social/concert", &kid.token, None).await;
+    assert!(
+        k["why_not_hear"].is_string() && k["why_not_perform"].is_string(),
+        "{k}"
+    );
+    let (st, _) = post(&outside, "/api/social/concert/listen").await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "only those in the hall");
+
+    // A walks out: the set ends, the hall is told, the stage is free.
+    at_hall(&s, &a, None);
+    crate::concert::tick(&s, commons_common::now_unix()).await;
+    assert!(pushed(&mut rx, "concert").unwrap()["stage"].is_null());
+    assert!(s.concert.get(1).is_none());
+    // B's set: an hour at most; stepping down ends it too.
+    let (st, _) = post(&b, "/api/social/concert/stage").await;
+    assert_eq!(st, StatusCode::OK);
+    crate::concert::tick(&s, commons_common::now_unix() + crate::concert::SET_SECS).await;
+    assert!(s.concert.get(1).is_none(), "the hour is up");
+    post(&b, "/api/social/concert/stage").await;
+    let (_, r) = post(&b, "/api/social/concert/leave").await;
+    assert_eq!(r["left"], true);
+    assert!(s.concert.get(1).is_none());
+}

@@ -4358,3 +4358,21 @@ body.woozy #stage canvas {
 .panel .club-row.mine {
   background: #fff2c2;
 }
+
+/* The Concert Hall's stage panel (ADR 0015). */
+.panel .concert-live {
+  font-weight: 700;
+  font-size: 16px;
+  margin: 2px 0 6px;
+}
+
+.panel .concert-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.panel .concert-volume input[type="range"] {
+  flex: 1;
+}

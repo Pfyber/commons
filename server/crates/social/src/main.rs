@@ -6,6 +6,7 @@ mod calls;
 mod clublife;
 mod clubs;
 mod clubtown;
+mod concert;
 mod db;
 mod homes;
 mod hub;
@@ -32,6 +33,8 @@ pub struct State {
     pub calls: calls::Calls,
     /// Where calls' voices go; `None`: the phone lines are down.
     pub livekit: Option<commons_common::voice::LiveKit>,
+    /// Who's on the Concert Hall's stages (ADR 0015).
+    pub concert: concert::Stages,
     dm_limits: Mutex<HashMap<Uuid, Bucket>>,
     ring_limits: Mutex<HashMap<Uuid, Bucket>>,
     started: Instant,
@@ -46,6 +49,7 @@ impl State {
             hub: hub::Hub::default(),
             calls: calls::Calls::default(),
             livekit: commons_common::voice::LiveKit::from_env(),
+            concert: concert::Stages::default(),
             dm_limits: Mutex::new(HashMap::new()),
             ring_limits: Mutex::new(HashMap::new()),
             started: routes::started(),
@@ -67,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
     rent::spawn_sweeper(state.clone());
     calls::spawn_ring_timeouts(state.clone());
     clublife::spawn_sweeper(state.clone());
+    concert::spawn_ticker(state.clone());
     let app = routes::routes()
         .with_state(state)
         .merge(telemetry::routes(prom));

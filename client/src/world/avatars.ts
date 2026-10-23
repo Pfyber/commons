@@ -295,6 +295,25 @@ export class Avatar {
     }
   }
 
+  /** On the Concert Hall's stage (ADR 0015): 🎤 by the name. */
+  setPerforming(on: boolean) {
+    let mark = this.nameEl.querySelector<HTMLSpanElement>(".performing");
+    if (!on) {
+      if (mark) {
+        mark.remove();
+        this.nameW = 0;
+      }
+      return;
+    }
+    if (!mark) {
+      mark = document.createElement("span");
+      mark.className = "performing";
+      mark.textContent = "🎤";
+      this.nameEl.appendChild(mark);
+      this.nameW = 0;
+    }
+  }
+
   /** A library book open in their hands (ReadingShown; 0: closed), and 📖 by the name. */
   setReading(book: number) {
     this.reading = book;

@@ -115,6 +115,31 @@ impl LiveKit {
     /// listen, nothing else. Good for `ttl_secs` to connect; LiveKit keeps
     /// the connection once made.
     pub fn token(&self, room: &str, identity: &str, name: &str, now: u64, ttl_secs: u64) -> String {
+        self.pass(room, identity, name, now, ttl_secs, true)
+    }
+
+    /// A pass into `room` that may only listen: LiveKit refuses anything
+    /// it sends (the Concert Hall's audience, ADR 0015).
+    pub fn listen_token(
+        &self,
+        room: &str,
+        identity: &str,
+        name: &str,
+        now: u64,
+        ttl_secs: u64,
+    ) -> String {
+        self.pass(room, identity, name, now, ttl_secs, false)
+    }
+
+    fn pass(
+        &self,
+        room: &str,
+        identity: &str,
+        name: &str,
+        now: u64,
+        ttl_secs: u64,
+        talk: bool,
+    ) -> String {
         self.sign(json!({
             "iss": self.key,
             "sub": identity,
@@ -124,10 +149,10 @@ impl LiveKit {
             "video": {
                 "room": room,
                 "roomJoin": true,
-                "canPublish": true,
+                "canPublish": talk,
                 "canSubscribe": true,
                 "canPublishData": false,
-                "canPublishSources": ["microphone"],
+                "canPublishSources": if talk { json!(["microphone"]) } else { json!([]) },
             },
         }))
     }
@@ -213,5 +238,30 @@ mod tests {
             mac.verify_slice(&URL_SAFE_NO_PAD.decode(parts[2]).unwrap())
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn a_listen_pass_can_hear_but_never_talk() {
+        let lk = LiveKit {
+            url: "ws://x".into(),
+            key: "devkey".into(),
+            secret: "secret".into(),
+        };
+        let video = |t: String| -> serde_json::Value {
+            let c: serde_json::Value = serde_json::from_slice(
+                &URL_SAFE_NO_PAD
+                    .decode(t.split('.').nth(1).unwrap())
+                    .unwrap(),
+            )
+            .unwrap();
+            c["video"].clone()
+        };
+        let stage = video(lk.token("concert-1", "p1", "Ana", 1_000_000, 120));
+        assert_eq!(stage["canPublish"], true);
+        let seat = video(lk.listen_token("concert-1", "p2", "Bo", 1_000_000, 120));
+        assert_eq!(seat["canPublish"], false);
+        assert_eq!(seat["canPublishSources"], serde_json::json!([]));
+        assert_eq!(seat["canSubscribe"], true);
+        assert_eq!(seat["room"], "concert-1");
     }
 }

@@ -10,6 +10,7 @@ import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 import { decodeLook } from "./look";
 import { LIBRARY_GROUND, drawLibraryGround, libraryDecor, libraryObject } from "./libraryart";
 import { clubObject } from "./clubart";
+import { concertObject } from "./concertart";
 
 export const TILE = 32;
 
@@ -2432,7 +2433,7 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       break;
     }
     default: {
-      const lib = libraryObject(o) ?? clubObject(o);
+      const lib = libraryObject(o) ?? clubObject(o) ?? concertObject(o);
       if (lib) {
         c = lib.c;
         overhang = lib.overhang;

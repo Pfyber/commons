@@ -69,11 +69,19 @@ struct Located {
 }
 
 /// Public buildings with a door onto the city (a `door:<name>` spot there).
-const PUBLIC_DOORS: &[&str] = &["mall", "bar", "arcade", "library", "club_hall", "bowling"];
+const PUBLIC_DOORS: &[&str] = &[
+    "mall",
+    "bar",
+    "arcade",
+    "library",
+    "club_hall",
+    "bowling",
+    "concert_hall",
+];
 
 /// Zones served unless `COMMONS_ZONES` says otherwise: the city, homes, the
 /// public buildings, and the Library's hall and wings (ADR 0012).
-const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling";
+const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling,concert_hall";
 
 /// A club lot's id, `lot:<bx>_<by>` (ADR 0014, C3).
 fn is_club_lot(place: &str) -> bool {

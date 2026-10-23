@@ -491,14 +491,19 @@ async fn log_end(state: &SocialState, player: Uuid, left: &Left, status: Option<
 /// Asks LiveKit to cut `who` off `call`'s room (best effort: they may not
 /// have connected yet).
 async fn kick(state: &SocialState, call: Uuid, who: Uuid) {
+    remove_from_room(state, &format!("call-{call}"), who).await;
+}
+
+/// Asks LiveKit's room service to cut `who` off from voice room `room`
+/// (best effort: they may not be connected).
+pub(crate) async fn remove_from_room(state: &SocialState, room: &str, who: Uuid) {
     let Some(lk) = &state.livekit else { return };
-    let room = format!("call-{call}");
     let res = reqwest::Client::new()
         .post(format!(
             "{}/twirp/livekit.RoomService/RemoveParticipant",
             lk.http_url()
         ))
-        .bearer_auth(lk.admin_token(&room, commons_common::now_unix()))
+        .bearer_auth(lk.admin_token(room, commons_common::now_unix()))
         .json(&json!({ "room": room, "identity": who.to_string() }))
         .timeout(Duration::from_secs(5))
         .send()

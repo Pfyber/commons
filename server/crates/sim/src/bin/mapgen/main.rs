@@ -8,6 +8,7 @@
 
 mod city;
 mod clubs;
+mod concert;
 mod leisure;
 mod library;
 mod mall;
@@ -480,6 +481,7 @@ fn main() -> std::io::Result<()> {
     write("library", &library::hall())?;
     write("club_hall", &clubs::lobby())?;
     write("clubroom", &clubs::room())?;
+    write("concert_hall", &concert::hall())?;
     for wing in commons_sim::library::WINGS {
         write(&wing.zone(), &library::wing(&wing))?;
     }
