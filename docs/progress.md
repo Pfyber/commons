@@ -1489,6 +1489,39 @@ Checked:
     (200 → 194 coins); it leaves the counter.
   - A street of the new houses, each different.
 
+## The metro (2026-10-23)
+
+ADR 0016. Nine stations spread around the city: the Market, North, East,
+South and West Homes, and the Orchard, Woods, Lake and Meadow corners.
+
+- **The stations:** entrances on the blocks' south sidewalks
+  (`metro_entrance`, mapgen `STATIONS`), with green railings, stairs
+  going down, and a red M sign with the name. Each has an arrival spot
+  (`door:metro_<key>`). The city map marks them with a red M.
+- **The map:** at an entrance, the city with the Ring line and two Cross
+  lines, every station named, "you are here" pulsing. Tap a station, or
+  its button, to ride.
+- **The ride:**
+  - A dark tunnel with lamps streaking past, a little two-car train with
+    faces in its round windows, and a "Next stop: …" sign. It takes
+    about 1.5 seconds and honours reduced motion.
+  - Meanwhile the city is re-joined at the station
+    (`arrive: place:metro_<key>`; the orchestrator accepts only `metro_`
+    plus lowercase letters there).
+  - `goTo(zone, arrive)` now passes the arrival point through, so doors
+    that know where you come out (the metro) say so.
+- **Followers:** whoever follows you rides too (`Going`/`Went` carry the
+  station), comes up at the same stairs, and follows you on again.
+
+Checked:
+- Orchestrator: a station-arrival test.
+- Mapgen: every station reachable, in the city's reachability check.
+- Client 89, clippy clean.
+- In the browser: Ada and Bo are friends and Bo follows Ada. At the
+  Market station Ada opens the map and rides to the Lake; both see the
+  train; both come up at the Lake station's stairs (291, 310); a moment
+  later Bo is following Ada again.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

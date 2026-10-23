@@ -84,6 +84,7 @@ import type { Clubs } from "./clubs";
 import type { ClubsPanel } from "./ui/clubs";
 import type { Concert } from "./concert";
 import type { YardPanel } from "./ui/homes";
+import type { MetroPanel } from "./ui/metro";
 import { YardStands } from "./world/yardstands";
 import type { ConcertPanel } from "./ui/concert";
 
@@ -164,6 +165,7 @@ export interface Ui {
   concert: Concert;
   concertPanel: ConcertPanel;
   yard: YardPanel;
+  metro: MetroPanel;
 }
 
 /** What the Caretaker lets slip about the park's secret places. */
@@ -397,7 +399,8 @@ export class Game {
     private events: {
       onWelcome(): void;
       onDisconnect(reason: CloseReason): void;
-      onTravel(zone: string): void;
+      /** Through a door to `zone`; `arrive` where to come out, if the door says (a metro station). */
+      onTravel(zone: string, arrive?: string): void;
       /** Knock on someone's home: visit them if they've invited you. */
       onVisit(owner: string): void;
     },
@@ -878,6 +881,17 @@ export class Game {
         walkUp();
         this.near(ui.clubsPanel, front, 8).showEvents();
         return true;
+      // A metro station (ADR 0016): down the stairs, and the map of the lines.
+      case "metro_entrance": {
+        const key = this.scene.map.objects
+          .filter((s) => s.kind === "spot" && s.label?.startsWith("metro_"))
+          .sort((a, b) => Math.hypot(a.x - obj.x, a.y - obj.y) - Math.hypot(b.x - obj.x, b.y - obj.y))[0]?.label;
+        if (!key) return true;
+        const at = { x: obj.x + obj.w, y: obj.y };
+        if (cheb(self.destination, at) > 2) this.walkTo(at);
+        this.near(ui.metro, at, 4).openAt(key);
+        return true;
+      }
       // The Concert Hall (ADR 0015): in through its doors; inside, the stage.
       case "concert_hall":
         this.enter(front, "concert_hall");
@@ -1141,6 +1155,11 @@ export class Game {
   }
 
   /** Walks to a building's door and goes in on arrival (or at once if already there). */
+  /** Rides the metro to station `key` (`metro_lake`): followers come too. */
+  rideMetro(key: string) {
+    this.goTo("city", `place:${key}`);
+  }
+
   /** Into a club's room through its clubhouse's door on the lot (C3). */
   private enterClubRoom(door: TileXY, club: string) {
     const self = this.self;
@@ -1220,7 +1239,7 @@ export class Game {
       if (name) carried.followers.set(name, until);
     }
     if (this.followers.size) this.socket?.send({ t: "Going", zone, arrive: arrive ?? "" });
-    this.events.onTravel(zone);
+    this.events.onTravel(zone, arrive);
   }
 
   /** Who we followed in through a door: once they're here too, follow on. */

@@ -4376,3 +4376,144 @@ body.woozy #stage canvas {
 .panel .concert-volume input[type="range"] {
   flex: 1;
 }
+
+/* The metro (ADR 0016): the map of the lines, and the ride underground. */
+.panel.metro {
+  width: min(460px, calc(100vw - 24px));
+}
+
+.panel .metro-map {
+  width: 100%;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+  cursor: pointer;
+  border: 2px solid var(--ink, #3b3a2e);
+}
+
+.panel .metro-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.metro-ride {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+  background: #1d1a24;
+  overflow: hidden;
+}
+
+.metro-ride.on {
+  opacity: 1;
+}
+
+.metro-ride.off {
+  opacity: 0;
+  transition: opacity 0.35s ease-in;
+}
+
+.metro-ride .tunnel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 180px;
+  transform: translateY(-50%);
+  background: linear-gradient(#2c2836 0 20%, #3a3546 20% 80%, #2c2836 80%);
+  border-top: 6px solid #4a4458;
+  border-bottom: 6px solid #4a4458;
+}
+
+/* Lamps on the tunnel wall streaking past. */
+.metro-ride .lights {
+  position: absolute;
+  inset: 16px 0 auto 0;
+  height: 10px;
+  background: repeating-linear-gradient(90deg, #ffe9a8 0 18px, transparent 18px 140px);
+  opacity: 0.85;
+  animation: metro-lights 0.35s linear infinite;
+}
+
+.metro-ride .train {
+  position: absolute;
+  bottom: 22px;
+  left: 0;
+  width: 460px;
+  image-rendering: pixelated;
+  animation: metro-train 1.5s cubic-bezier(0.55, 0.1, 0.35, 1) forwards, metro-bob 0.18s ease-in-out infinite alternate;
+}
+
+.metro-ride .next-stop {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 150px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font: 600 20px "Pixelify Sans", sans-serif;
+  color: #3b3a2e;
+  background: #fff8e3;
+  border: 3px solid #3b3a2e;
+  animation: metro-sign 1.5s ease-out forwards;
+}
+
+.metro-ride .next-stop .m {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #c8553d;
+  color: #fff8e3;
+  border: 2px solid #3b3a2e;
+}
+
+@keyframes metro-lights {
+  to {
+    background-position: -140px 0;
+  }
+}
+
+@keyframes metro-train {
+  from {
+    transform: translateX(-480px);
+  }
+  to {
+    transform: translateX(calc(100vw + 40px));
+  }
+}
+
+@keyframes metro-bob {
+  to {
+    margin-bottom: 2px;
+  }
+}
+
+@keyframes metro-sign {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  20%,
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metro-ride .lights,
+  .metro-ride .train {
+    animation: none;
+  }
+  .metro-ride .train {
+    left: calc(50% - 230px);
+  }
+}

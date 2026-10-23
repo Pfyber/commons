@@ -84,6 +84,8 @@ of the city's club lots (120 a week): its door leads into their room. Clubs
 plan events for everyone at public places (📅 What's on, at the Club Hall
 or in the 🛡 panel), and the Club Hall's leaderboard names the week's top
 three clubs, which win coins for their treasuries.
+The metro: nine stations around the city (look for the red M); at one,
+tap a station on the map to ride there, and anyone following you comes too.
 Houses have a yard stand by the front door: put things from your bag on
 it (2, 4 or 6, by the house's tier) at your own price, and anyone walking
 past sees them on the counter and can buy them.

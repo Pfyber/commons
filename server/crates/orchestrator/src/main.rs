@@ -83,6 +83,13 @@ const PUBLIC_DOORS: &[&str] = &[
 /// public buildings, and the Library's hall and wings (ADR 0012).
 const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling,concert_hall";
 
+/// A metro station, `metro_<key>` (ADR 0016): you come up its stairs.
+fn is_station(place: &str) -> bool {
+    place
+        .strip_prefix("metro_")
+        .is_some_and(|k| (1..=16).contains(&k.len()) && k.bytes().all(|b| b.is_ascii_lowercase()))
+}
+
 /// A club lot's id, `lot:<bx>_<by>` (ADR 0014, C3).
 fn is_club_lot(place: &str) -> bool {
     place.strip_prefix("lot:").is_some_and(|r| {
@@ -220,7 +227,8 @@ async fn join(
     // Leaving somewhere through a door: step out of that door (best effort).
     // `arrive` is a public place (`place:mall`; a library wing, back into the
     // hall; a club room, back into the Club Hall, or out of a clubhouse's door
-    // on its lot, `place:lot:3_1`), a home's owner, or "home" for your own.
+    // on its lot, `place:lot:3_1`; up a metro station's stairs,
+    // `place:metro_lake`), a home's owner, or "home" for your own.
     let arrive = match req.arrive.as_deref() {
         Some(a) if zone == "library" => a
             .strip_prefix("place:")
@@ -229,7 +237,8 @@ async fn join(
         Some("place:clubroom") if zone == "club_hall" => Some("clubroom".to_string()),
         Some(a) if zone == "city" => match a.strip_prefix("place:") {
             Some(place) => {
-                (PUBLIC_DOORS.contains(&place) || is_club_lot(place)).then(|| place.to_string())
+                (PUBLIC_DOORS.contains(&place) || is_club_lot(place) || is_station(place))
+                    .then(|| place.to_string())
             }
             None => {
                 let owner = if a == "home" { who.sub.as_str() } else { a };
@@ -295,7 +304,15 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_club_lot;
+    use super::{is_club_lot, is_station};
+
+    #[test]
+    fn metro_stations_are_stations_only() {
+        assert!(is_station("metro_lake"));
+        for bad in ["metro_", "metro_Lake", "metro_a1", "lake", "metro_../x"] {
+            assert!(!is_station(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn club_lot_doors_are_lots_only() {

@@ -47,6 +47,7 @@ import { Clubs } from "./clubs";
 import { ClubsPanel } from "./ui/clubs";
 import { Concert } from "./concert";
 import { ConcertPanel } from "./ui/concert";
+import { MetroPanel, playRide, stationsOf } from "./ui/metro";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -399,6 +400,13 @@ async function main() {
     concert,
     concertPanel,
     yard: new YardPanel(rent, eco, rentHost),
+    metro: new MetroPanel({
+      map: () => {
+        const g = game as Game | null;
+        return g?.zoneId === "city" ? g.scene.map : null;
+      },
+      ride: (to) => (game as Game | null)?.rideMetro(to.key),
+    }),
   };
   ui.catalogue.reader = reader;
   // The Caretaker's tasks chip, until you're a founder (or the season closes).
@@ -476,8 +484,16 @@ async function main() {
           // Out of a door into the city: you come out of that door (a
           // house, or a public place: the mall, the bar, the arcade, the
           // library). Out of a library wing, you're back at its door in the hall.
-          onTravel: (z) => {
+          onTravel: (z, given) => {
             const from = game as Game | null;
+            // The metro: a short ride underground, then up the stairs at the station.
+            if (given?.startsWith("place:metro_") && from) {
+              const key = given.slice("place:".length);
+              const to = stationsOf(from.scene.map).find((s) => s.key === key);
+              const ride = playRide(to?.name ?? "the next station");
+              void Promise.all([travel({ zone: z, arrive: given }), ride.arrived]).finally(() => ride.done());
+              return;
+            }
             // Out of a club's room whose clubhouse stands on a lot: out of its door, in the city.
             const lot = from?.zoneId === "clubroom" && from.place.owner ? clubs.lotOf(from.place.owner) : null;
             if (z === "club_hall" && lot) return void travel({ zone: "city", arrive: `place:${lot}` });

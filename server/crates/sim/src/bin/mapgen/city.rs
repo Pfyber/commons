@@ -130,6 +130,20 @@ impl Blk<'_> {
     }
 }
 
+/// The metro's stations (ADR 0016): the block, a key and a name. A cross
+/// through the middle and the four corners, so nowhere is far from one.
+pub const STATIONS: &[(u8, u8, &str, &str)] = &[
+    (3, 3, "market", "Market"),
+    (3, 0, "north", "North Homes"),
+    (6, 3, "east", "East Homes"),
+    (3, 6, "south", "South Homes"),
+    (0, 3, "west", "West Homes"),
+    (1, 1, "orchard", "Orchard"),
+    (5, 1, "woods", "Woods"),
+    (5, 5, "lake", "Lake"),
+    (1, 5, "meadow", "Meadow"),
+];
+
 pub fn city() -> MapFile {
     let city = City::from_json(CITY, TYPES).expect("assets/city is invalid");
     let geo = city.geometry;
@@ -171,6 +185,13 @@ pub fn city() -> MapFile {
         }
         // Every block names itself on its south sidewalk.
         k.object("signpost", 21, N - 2, 1, 1, &t.name);
+        // A metro station's entrance beside the signpost on some (ADR 0016):
+        // stairs down to the underground; you come up at `door:metro_<key>`.
+        if let Some((_, _, key, name)) = STATIONS.iter().find(|s| (s.0, s.1) == (id.bx, id.by)) {
+            k.object("metro_entrance", 25, N - 2, 2, 2, name);
+            k.spot(&format!("door:metro_{key}"), 27, N - 2);
+            k.spot(&format!("metro_{key}"), 27, N - 2);
+        }
     }
 
     let spawn = geo.block_origin(city.spawn_block);

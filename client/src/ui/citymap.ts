@@ -152,6 +152,23 @@ export class CityMapPanel extends Panel {
         ctx.fillText(name, cx, cy + 0.5 * dpr);
       }),
     );
+    // Metro stations (ADR 0016): a little red M.
+    for (const o of map.objects) {
+      if (o.kind !== "metro_entrance") continue;
+      const x = (o.x + 1) * k;
+      const y = (o.y + 1) * k;
+      ctx.fillStyle = "#3b3a2e";
+      ctx.beginPath();
+      ctx.arc(x, y, 7 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#c8553d";
+      ctx.beginPath();
+      ctx.arc(x, y, 5.5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff8e3";
+      ctx.font = `bold ${Math.round(8 * dpr)}px "Pixelify Sans", sans-serif`;
+      ctx.fillText("M", x, y + 0.5 * dpr);
+    }
     if (w.home) drawHome(ctx, (w.home.x + 0.5) * k, (w.home.y + 0.5) * k, 6 * dpr);
     drawYou(ctx, (here.x + 0.5) * k, (here.y + 0.5) * k, 4 * dpr, performance.now());
     this.label.textContent = `You're at: ${placeName(here.x, here.y)}`;
