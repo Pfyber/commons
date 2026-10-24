@@ -2533,6 +2533,9 @@ export class Game {
         this.socket?.send({ t: "FishHit" });
         return;
       }
+      // Catching a fish (reeling in, or your catch flopping on the bank): a
+      // tap that misses doesn't walk you off, which would end the fishing.
+      if (this.flops.has(this.selfId) || this.ui.reel.active) return;
       const t = this.scene.screenToTile(e.global.x, e.global.y);
       if (this.tapBall(e.global.x, e.global.y)) return;
       if (this.tapPet(e.global.x, e.global.y)) return;

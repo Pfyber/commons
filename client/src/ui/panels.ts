@@ -686,6 +686,11 @@ export class ReelGame {
     document.body.appendChild(this.el);
   }
 
+  /** Whether a bite is being reeled in right now. */
+  get active(): boolean {
+    return !this.el.hidden;
+  }
+
   private pos(t: number) {
     // Back and forth from one end, quicker the rarer the fish.
     const s = (t - this.start) / 1000;
