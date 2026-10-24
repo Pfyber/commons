@@ -49,6 +49,8 @@ export class DanceMusic {
     // Schedule a little ahead, a few times a second.
     const pump = () => {
       if (!this.ctx) return;
+      // Muted mid-dance: the music stops.
+      if (this.muted()) return this.stop();
       while (next < steps && t0 + next * SIXTEENTH < this.ctx.currentTime + 0.4) {
         this.play(next, t0 + next * SIXTEENTH, bass);
         next++;

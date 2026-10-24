@@ -8,7 +8,7 @@
 // inharmonic modes for a few milliseconds. Each comes in a few variants,
 // rendered once, and plays through a touch of room echo.
 
-import { audio } from "../activities/jam";
+import { audio, setNotesMuted } from "../activities/jam";
 
 let muted = false;
 let out: GainNode | null = null;
@@ -18,6 +18,8 @@ let noise: AudioBuffer | null = null;
 /** Mirrors the HUD's sound toggle. */
 export function setSfxMuted(m: boolean) {
   muted = m;
+  // The instruments (the fairground's, the bandstand's) go quiet too.
+  setNotesMuted(m);
   if (out) out.gain.value = m ? 0 : 1;
   if (m) {
     skate.stop();

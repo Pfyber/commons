@@ -44,10 +44,16 @@ function noiseBuffer(a: AudioContext): AudioBuffer {
 }
 let noise: AudioBuffer | null = null;
 
+/** The HUD's sound toggle: muted, nobody's notes play (yours or anyone's nearby). */
+let notesMuted = false;
+export function setNotesMuted(m: boolean) {
+  notesMuted = m;
+}
+
 /** Plays one note at audio time `when` with loudness `vol` (0–1). */
 export function playNote(instrument: number, pitch: number, when: number, vol: number) {
+  if (notesMuted || vol <= 0.01) return;
   const a = audio();
-  if (vol <= 0.01) return;
   const out = a.createGain();
   out.connect(a.destination);
   const freq = (base: number) => base * 2 ** (SCALE[pitch] / 12);
