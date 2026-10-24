@@ -459,6 +459,9 @@ export class Game {
   ) {
     this.hud = ui.hud;
     this.scene = new Scene(app, map);
+    // Hidden till we're in it: the camera starts at the map's corner (on the
+    // city's houses), and showing that for a frame or two flashes a stranger's street.
+    this.scene.world.visible = false;
     this.waterMap = waterMapOf(map);
     ui.minimap.setMap(map);
     this.fairyRing = spot(map, "fairy_ring");
@@ -3371,6 +3374,7 @@ export class Game {
     if (self) {
       self.update(serverNow, wallNow);
       this.scene.follow(self.pos);
+      this.scene.world.visible = true;
       this.ui.minimap.update(self.pos, self.moving ? self.destination : null, wallNow);
     }
     for (const a of this.avatars.values()) a.update(serverNow, wallNow);
