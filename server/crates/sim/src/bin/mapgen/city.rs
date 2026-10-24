@@ -416,8 +416,8 @@ fn pond(k: &mut Blk) {
     k.scatter(3, 3, N - 3, N - 3, 13, &["tree", "bush", "willow"]);
 }
 
-/// The Lake: the Little Island across stepping stones from the pier, and
-/// the campfire circle on the south-west shore.
+/// The Lake: the Little Island across stepping stones from the pier, the
+/// boat hire by the pier, and the campfire circle on the south-west shore.
 fn lake(k: &mut Blk) {
     k.lawn();
     water(k, 24.0, 22.0, 19.0, 16.0);
@@ -454,6 +454,19 @@ fn lake(k: &mut Blk) {
         k.clear(x, 15, 1, 1, "stones");
         x += 1;
     }
+    // The boat hire: a hut on the bank by the pier, rowboats tied up on the
+    // water beside it, where hired boats set out (and people are set down on
+    // the pier when the hire's up), and the lake's bounds for the boats.
+    k.clear(26, 40, 4, 3, "grass");
+    k.object("boat_hire", 26, 40, 3, 2, "Boat hire");
+    for x in 19..23 {
+        k.decor(x, 36, "none");
+        k.decor(x, 37, "none");
+    }
+    k.marker("boat_moored", 19, 36, 2, 1, None);
+    k.spot("boat_launch", 22, 36);
+    k.spot("boat_dock", 23, 36);
+    k.marker("boat_lake", 4, 5, 41, 35, None);
     // The campfire: logs to sit on, and a question to talk about.
     let (fx, fy) = (9u16, 41u16);
     k.clear(fx - 2, fy - 2, 5, 5, "sand");
@@ -956,6 +969,8 @@ fn check_reachable(map: &MapFile, city: &City) {
     let mut lots = 0;
     for o in &map.objects {
         let ok = match o.kind.as_str() {
+            // Boats set out on the water, a step from the pier.
+            "spot" if o.label.as_deref() == Some("boat_launch") => near(o.x, o.y, 1),
             "spot" | "grove_slot" => near(o.x, o.y, if o.kind == "spot" { 0 } else { 1 }),
             "house" => {
                 lots += 1;
@@ -979,6 +994,46 @@ fn check_reachable(map: &MapFile, city: &City) {
                 .iter()
                 .any(|o| o.kind == "spot" && o.label.as_deref() == Some(door.as_str())),
             "no door for lot {lot}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_boat_hire_sits_by_the_pier_with_boats_on_the_lake() {
+        let map = city();
+        let grid = map.grid();
+        let find = |kind: &str, label: Option<&str>| {
+            map.objects
+                .iter()
+                .find(|o| o.kind == kind && (label.is_none() || o.label.as_deref() == label))
+                .unwrap_or_else(|| panic!("{kind} {label:?}"))
+        };
+        let water = map.ground_legend.iter().position(|g| g == "water").unwrap() as u8;
+        let wet =
+            |x: u16, y: u16| map.ground[y as usize * map.width as usize + x as usize] == water;
+        let launch = find("spot", Some("boat_launch"));
+        let dock = find("spot", Some("boat_dock"));
+        let hut = find("boat_hire", None);
+        let moored = find("boat_moored", None);
+        let lake = find("boat_lake", None);
+        assert!(wet(launch.x, launch.y), "boats set out on the water");
+        assert!(wet(moored.x, moored.y) && wet(moored.x + 1, moored.y));
+        assert!(grid.walkable(dock.x, dock.y), "the dock's on the pier");
+        assert!(launch.x.abs_diff(dock.x) <= 1 && launch.y.abs_diff(dock.y) <= 1);
+        assert!(
+            (lake.x..lake.x + lake.w).contains(&launch.x)
+                && (lake.y..lake.y + lake.h).contains(&launch.y)
+        );
+        // From the hut's front to the dock, on foot.
+        let front = (hut.x + 1, hut.y + hut.h);
+        assert!(commons_sim::find_path(&grid, front, (dock.x, dock.y), 100_000).is_some());
+        assert!(
+            hut.x.abs_diff(dock.x).max(hut.y.abs_diff(dock.y)) <= 8,
+            "hired by the pier"
         );
     }
 }

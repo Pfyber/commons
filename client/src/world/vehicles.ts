@@ -6,11 +6,20 @@
 
 import type { Texture } from "pixi.js";
 import { toTexture } from "./art";
+import { rowboatCanvas } from "./boatart";
 
 const O = "#3b3a2e";
 
 /** Set on a test ride (the mall's track). */
 export const TEST_RIDE = 0x80;
+
+/** The Lake's rowboats (`commons_protocol::boat`): the captain's vehicle
+ * (the boat drawn under them) and the passenger in seat n's (`BOAT_PASSENGER + n`). */
+export const BOAT_CAPTAIN = 6;
+export const BOAT_PASSENGER = 7;
+export const BOAT_SEATS = 3;
+/** Rowing speed, tenths of a tile a second. */
+export const BOAT_SPEED_X10 = 64;
 
 /** Riding speeds in tenths of a tile a second (`commons_sim::vehicles`). */
 const SPEED_X10: Record<number, number> = { 1: 88, 2: 108, 3: 128, 4: 140, 5: 96 };
@@ -27,6 +36,11 @@ export function rideSpeed(code: number): number {
 
 /** How a rider sits on each vehicle: lifted by `lift` px, in which pose. */
 export const RIDE_POSE: Record<number, { lift: number; pose: "walk" | "stand" | "sit" }> = {
+  // In a rowboat, everyone sits.
+  6: { lift: 2, pose: "sit" },
+  7: { lift: 2, pose: "sit" },
+  8: { lift: 2, pose: "sit" },
+  9: { lift: 2, pose: "sit" },
   1: { lift: 3, pose: "walk" },
   2: { lift: 4, pose: "stand" },
   3: { lift: 7, pose: "sit" },
@@ -150,7 +164,7 @@ export function vehicleTexture(code: number, frame: 0 | 1 = 0): Texture {
   const key = `${code & ~TEST_RIDE}:${frame}`;
   let t = textures.get(key);
   if (!t) {
-    t = toTexture(vehicleCanvas(code, frame));
+    t = toTexture(code === BOAT_CAPTAIN ? rowboatCanvas(frame) : vehicleCanvas(code, frame));
     textures.set(key, t);
   }
   return t;

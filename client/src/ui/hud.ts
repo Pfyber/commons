@@ -46,6 +46,7 @@ export class Hud {
   private toastTimer = 0;
   private tasksEl: HTMLButtonElement;
   private followEl: HTMLDivElement;
+  private boatEl: HTMLDivElement;
   private moodBtn!: HTMLButtonElement;
   private chatPlaceholder = "";
   private booksBtn!: HTMLButtonElement;
@@ -72,6 +73,7 @@ export class Hud {
       </div>
       <button type="button" class="pill btn tasks-chip" hidden></button>
       <div class="pill follow-chip" hidden><span></span><button type="button">Stop</button></div>
+      <div class="pill boat-chip" hidden><span></span><button type="button">Go ashore</button></div>
       <div class="toast" role="status" hidden></div>
       <div class="bottom">
         <div class="log" aria-live="polite"></div>
@@ -89,6 +91,7 @@ export class Hud {
     this.coinsEl = root.querySelector(".coins")!;
     this.tasksEl = root.querySelector(".tasks-chip")!;
     this.followEl = root.querySelector(".follow-chip")!;
+    this.boatEl = root.querySelector(".boat-chip")!;
     this.tasksEl.onclick = () => h.onTasks();
     root.querySelector<HTMLButtonElement>(".map-btn")!.onclick = () => h.onMap();
     root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
@@ -239,6 +242,16 @@ export class Hud {
     if (text === null) return;
     this.followEl.querySelector("span")!.textContent = text;
     const b = this.followEl.querySelector("button")!;
+    b.textContent = buttonLabel;
+    b.onclick = () => onButton?.();
+  }
+
+  /** "🚣 Your rowboat · 12 min · Go ashore" while you're in a boat; null hides it. */
+  setBoat(text: string | null, buttonLabel = "Go ashore", onButton?: () => void) {
+    this.boatEl.hidden = text === null;
+    if (text === null) return;
+    this.boatEl.querySelector("span")!.textContent = text;
+    const b = this.boatEl.querySelector("button")!;
     b.textContent = buttonLabel;
     b.onclick = () => onButton?.();
   }

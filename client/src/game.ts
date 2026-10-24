@@ -17,7 +17,7 @@ import { ArenaShow } from "./activities/arena";
 import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
 import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
-import { FOLLOW, type MoodPicker, type OfferCard, STOP_FOLLOW, TOGETHER } from "./activities/together";
+import { BOAT, FOLLOW, type MoodPicker, type OfferCard, STOP_FOLLOW, TOGETHER } from "./activities/together";
 import type { BottlesPanel, WishPanel } from "./ui/dream";
 import type { WardrobePanel } from "./ui/wardrobe";
 import { Critters } from "./ambient/critters";
@@ -54,7 +54,7 @@ import type { DecoratePanel } from "./ui/exterior";
 import { HouseFronts } from "./world/housefronts";
 import { CARDS, wrappedTexture } from "./world/goods";
 import { EMOTES } from "./world/avatars";
-import { rideSpeed } from "./world/vehicles";
+import { BOAT_CAPTAIN, BOAT_SEATS, BOAT_SPEED_X10, rideSpeed } from "./world/vehicles";
 import { itemIconUrl } from "./world/items";
 import { PetLife, petTitle } from "./ambient/petlife";
 import { PET_SOUNDS } from "./world/pets";
@@ -251,6 +251,42 @@ const LOW_REACH = new Set(["bookcase", "stack_sign"]);
 const cheb = (a: TileXY, b: TileXY) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const SITTING = 1;
 const SEAT_GROUND = 0xffffffff;
+/**
+ * The lake rowboats go on (server: `boats::Lake`): the water inside the map's
+ * `boat_lake` bounds, open; everything else blocked. Null with no lake.
+ */
+function waterMapOf(map: ZoneMap): ZoneMap | null {
+  const area = map.objects.find((o) => o.kind === "boat_lake");
+  const water = map.ground_legend.indexOf("water");
+  if (!area || water < 0) return null;
+  const collision = map.collision.map((_, i) => {
+    const x = i % map.width;
+    const y = Math.floor(i / map.width);
+    const inside = x >= area.x && x < area.x + area.w && y >= area.y && y < area.y + area.h;
+    return inside && map.ground[i] === water ? 0 : 1;
+  });
+  return { ...map, collision, streets: undefined };
+}
+
+/** Whether `a` comes before `b`, element by element. */
+function lexLess(a: number[], b: number[]): boolean {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i];
+  return false;
+}
+
+/** The open tile of `m` nearest `p` within `radius` (mirror of the server's `boats::nearest`). */
+function nearestWater(m: ZoneMap, p: TileXY, radius: number): TileXY | null {
+  let best: { key: number[]; t: TileXY } | null = null;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (!walkable(m, p.x + dx, p.y + dy)) continue;
+      const key = [Math.max(Math.abs(dx), Math.abs(dy)), Math.abs(dx) + Math.abs(dy), dy, dx];
+      if (!best || lexLess(key, best.key)) best = { key, t: { x: p.x + dx, y: p.y + dy } };
+    }
+  }
+  return best?.t ?? null;
+}
+
 /** Spectators further than this from a table stop following its game. */
 const WATCH_RANGE = 12;
 /** Names are drawn for the nearest few avatars only, to keep crowds readable. */
@@ -296,6 +332,11 @@ export class Game {
   private lastKeySend = 0;
   /** Walks we've predicted and sent, oldest first, awaiting the server's echo. */
   private sentMoves: { x: number; y: number; at: number }[] = [];
+  /** The rowboat we're in (as the server says: `BoatState`), and the lake's water to row on. */
+  private boat: { captain: number; until: number; seats: number[] } | null = null;
+  private waterMap: ZoneMap | null = null;
+  private boatChipAt = 0;
+  private boatNagAt = 0;
   /**
    * Sprinting (outdoors): a direction key pressed twice in quick succession,
    * a tile tapped twice, or tiles tapped one after another quickly. It lasts
@@ -413,6 +454,7 @@ export class Game {
   ) {
     this.hud = ui.hud;
     this.scene = new Scene(app, map);
+    this.waterMap = waterMapOf(map);
     ui.minimap.setMap(map);
     this.fairyRing = spot(map, "fairy_ring");
     this.props = new Props(this.scene, map, ui.eco);
@@ -1373,6 +1415,8 @@ export class Game {
       this.hud.toast(name ? `👣 You lost sight of ${name}.` : "👣 You lost sight of them.", 3000);
       return;
     }
+    // Out on the lake (them, or us): wait on the bank till they're back.
+    if (this.boat || (them.info.vehicle ?? 0) >= BOAT_CAPTAIN) return;
     const goal = them.destination;
     // Keep up: run when they run, or when we've fallen behind.
     const now = this.socket?.clock.now() ?? 0;
@@ -1461,6 +1505,11 @@ export class Game {
 
   private together(a: number, b: number, kind: number) {
     if (kind === FOLLOW) return this.followStarted(a, b);
+    if (kind === BOAT) {
+      this.avatars.get(a)?.flash("🚣");
+      this.avatars.get(b)?.flash("🚣");
+      return;
+    }
     const t = TOGETHER[kind];
     if (!t) return;
     const pa = this.avatars.get(a);
@@ -2005,8 +2054,11 @@ export class Game {
           this.hud.toast(`+${m.added} ${name}${m.first ? " · new in your album!" : ""}`, 3500);
         }
         break;
+      case "BoatState":
+        this.boatState(m.captain, m.until, m.seats);
+        break;
       case "Error":
-        if (m.code === ERR.NO_PATH) this.hud.toast("Can't get there from here.");
+        if (m.code === ERR.NO_PATH) this.hud.toast(this.boat ? "Can't row there: try nearer the water." : "Can't get there from here.");
         else if (TOAST_CODES.has(m.code)) this.hud.toast(m.message.charAt(0).toUpperCase() + m.message.slice(1) + ".");
         else if (m.code !== ERR.REPLACED && m.code !== ERR.UNAUTHORIZED && m.code !== ERR.VERSION_MISMATCH) {
           console.warn("server error", m.code, m.message);
@@ -2230,6 +2282,17 @@ export class Game {
   private moveTo(t: TileXY, marker: boolean) {
     const self = this.self;
     if (!this.socket || !self) return;
+    // In a rowboat: the captain rows; passengers go where the boat goes.
+    if (this.boat) {
+      if (this.boat.captain === this.selfId) return this.rowTo(t, marker);
+      const wall = performance.now();
+      if (wall - this.boatNagAt > 2500) {
+        this.boatNagAt = wall;
+        const who = this.avatars.get(this.boat.captain)?.info.name ?? "The captain";
+        this.hud.toast(`🚣 ${who}'s rowing. Tap "Hop off" when you're by the bank.`, 3000);
+      }
+      return;
+    }
     // Mid-game at a bowling lane (or mid-fight in the arena) you stay put until you leave it.
     if (this.bowlingNow() || this.arena?.players.includes(this.selfId)) {
       const wall = performance.now();
@@ -2284,6 +2347,70 @@ export class Game {
     this.sentMoves.push({ x: t.x, y: t.y, at: wall });
     this.socket.send({ t: "MoveTo", x: t.x, y: t.y, sprint: this.sprint });
     if (marker) this.scene.showTarget(t);
+  }
+
+  // ---- the Lake's rowboats ---------------------------------------------------------
+
+  /** The boat hire: a rowboat for a while, for a few coins. */
+  private boatMenu(at: TileXY) {
+    if (this.boat) return void this.hud.toast("🚣 You're out in a boat already.", 3000);
+    this.near(this.ui.menu, at, 6).showWith("🚣 Boat hire", "A rowboat for 15 minutes, 10 coins. Invite up to 3 friends aboard and row them round the lake.", [
+      ["Hire a rowboat (10 coins)", () => this.socket?.send({ t: "Boat", op: 1 })],
+    ]);
+  }
+
+  /** Rows (as captain) toward `t`, or the water nearest it; the server does the same. */
+  private rowTo(t: TileXY, marker: boolean) {
+    const self = this.self;
+    const water = this.waterMap;
+    if (!self || !this.socket || !water) return;
+    const goal = nearestWater(water, t, 4);
+    if (!goal) return void this.hud.toast("🚣 Row up to the bank, then tap \"Go ashore\".", 3000);
+    const now = this.socket.clock.now();
+    const cur = self.currentMotion;
+    const sp = cur ? splice(cur, now) : null;
+    let start: TileXY;
+    let t0 = now;
+    if (sp) {
+      start = sp.next;
+      t0 = sp.tPrev;
+    } else {
+      start = cur && now <= cur.t0 ? cur.path[0] : self.destination;
+    }
+    const full = route(water, start, goal);
+    if (!full) return void this.hud.toast("Can't row there.", 2500);
+    if (sp) full.unshift(sp.prev);
+    if (full.length >= 2) self.setMotion({ path: compress(full), t0, speedX10: BOAT_SPEED_X10, sprintIn: 0 }, now);
+    const wall = performance.now();
+    this.sentMoves = this.sentMoves.filter((s) => wall - s.at < 3000);
+    this.sentMoves.push({ x: goal.x, y: goal.y, at: wall });
+    this.socket.send({ t: "MoveTo", x: t.x, y: t.y, sprint: false });
+    if (marker) this.scene.showTarget(goal);
+  }
+
+  /** The server says which boat we're in (captain 0: none). */
+  private boatState(captain: number, until: number, seats: number[]) {
+    const was = this.boat;
+    this.boat = captain ? { captain, until, seats } : null;
+    if (this.boat && !was) {
+      if (this.following !== null) this.stopFollowing(false);
+      const who = this.avatars.get(captain)?.info.name ?? "their";
+      this.hud.toast(captain === this.selfId ? "🚣 Your rowboat! Tap the water to row, and tap a friend to ask them aboard." : `🚣 You're aboard ${who}'s boat. Enjoy the ride!`, 5000);
+    } else if (this.boat && was && captain === this.selfId && seats.length > was.seats.length) {
+      const name = this.avatars.get(seats[seats.length - 1])?.info.name;
+      if (name) this.hud.toast(`🚣 ${name} climbed aboard.`, 3000);
+    }
+    if (!this.boat && was) this.hud.toast("🚣 Back on dry land.", 3000);
+    this.showBoatChip();
+  }
+
+  private showBoatChip() {
+    const b = this.boat;
+    if (!b) return this.hud.setBoat(null);
+    const mins = Math.max(0, Math.ceil((b.until - (this.socket?.clock.now() ?? 0)) / 60_000));
+    const out = () => this.socket?.send({ t: "Boat", op: 2 });
+    if (b.captain === this.selfId) this.hud.setBoat(`🚣 Your rowboat · ${b.seats.length}/${BOAT_SEATS} aboard · ${mins} min left`, "Go ashore", out);
+    else this.hud.setBoat(`🚣 In ${this.avatars.get(b.captain)?.info.name ?? "a"}'s boat · ${mins} min left`, "Hop off", out);
   }
 
   private bindInput() {
@@ -2388,6 +2515,8 @@ export class Game {
       if (this.tapCaretaker(e.global.x, e.global.y)) return;
       if (this.tapClerk(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
+      // In a rowboat, a tap is where to row (rowTo finds the water by it).
+      if (this.boat) return this.moveTo(t, true);
       // Taking your own steps ends following someone.
       if (this.following !== null) this.stopFollowing(true);
       if (this.tapGift(t)) return;
@@ -2490,6 +2619,16 @@ export class Game {
       const them = a.info.id;
       // Reading something: see what, and open the same book.
       if (a.reading) actions.unshift(["📖 What are they reading?", () => this.ui.bookCard.showBook(a.reading, null)]);
+      // Our rowboat has a free seat: ask them aboard.
+      if (this.boat?.captain === this.selfId && this.boat.seats.length < BOAT_SEATS && (a.info.vehicle ?? 0) < BOAT_CAPTAIN) {
+        actions.unshift([
+          "🚣 Invite aboard",
+          () => {
+            this.socket?.send({ t: "Offer", to: them, kind: BOAT });
+            this.hud.toast(`🚣 You invited ${name} aboard…`, 3000);
+          },
+        ]);
+      }
       if (this.following === them) actions.unshift(["👣 Stop following", () => this.stopFollowing(true)]);
       else actions.unshift([friend ? "👣 Follow" : "👣 Ask to follow", () => this.askToFollow(them, name, !!friend)]);
       for (const [kind, t] of Object.entries(TOGETHER)) {
@@ -2595,6 +2734,16 @@ export class Game {
       const at = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
       if (obj.kind === "town_hall") void this.near(ui.townhall, at, 8).openAt({ kind: "list" });
       else this.near(ui.story, at).show();
+      return true;
+    }
+    // The boat hire on the Lake (and the boats tied up by the pier).
+    if (obj && (obj.kind === "boat_hire" || obj.kind === "boat_moored")) {
+      const front = obj.kind === "boat_hire" ? { x: obj.x + 1, y: obj.y + obj.h } : (spot(map, "boat_dock") ?? { x: obj.x, y: obj.y });
+      if (cheb(self.destination, front) > 3) {
+        const at = nearestWalkable(map, front.x, front.y, 2);
+        if (at) this.moveTo(at, true);
+      }
+      this.boatMenu(front);
       return true;
     }
     if (obj && (obj.kind === "lantern_stand" || obj.kind === "bottles" || obj.kind === "campfire")) {
@@ -3175,9 +3324,11 @@ export class Game {
     const cur = self.currentMotion;
     const sp = cur ? splice(cur, now) : null;
     const from = sp ? sp.next : cur && now <= cur.t0 ? cur.path[0] : self.destination;
+    // Rowing, the keys steer over the water.
+    const ground = this.boat?.captain === this.selfId && this.waterMap ? this.waterMap : this.scene.map;
     const target =
-      stepTarget(this.scene.map, from, dx, dy, steps) ??
-      (dx && dy ? stepTarget(this.scene.map, from, dx, 0, steps) ?? stepTarget(this.scene.map, from, 0, dy, steps) : null);
+      stepTarget(ground, from, dx, dy, steps) ??
+      (dx && dy ? stepTarget(ground, from, dx, 0, steps) ?? stepTarget(ground, from, 0, dy, steps) : null);
     if (!target) return;
     this.lastKeyDir = dirKey;
     this.lastKeySend = wallNow;
@@ -3237,6 +3388,10 @@ export class Game {
     this.danceFloor(serverNow);
     this.checkEntering();
     this.sky.update(wallNow, this.daynight.dark > 0.5);
+    if (this.boat && wallNow > this.boatChipAt) {
+      this.boatChipAt = wallNow + 5000;
+      this.showBoatChip();
+    }
     if (this.following !== null && wallNow > this.followCheckAt) {
       this.followCheckAt = wallNow + 350;
       this.followStep();
@@ -3329,6 +3484,7 @@ export class Game {
     this.campfire?.destroy();
     this.sky.destroy();
     this.ui.offer.hide();
+    this.hud.setBoat(null);
     this.hud.setFollow(null);
     document.body.classList.remove("in-nook");
     this.hud.setChatHint(null);

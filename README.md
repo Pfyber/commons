@@ -88,6 +88,9 @@ The Casino (on the Casino block, 16 and over): slot machines, a shared
 roulette wheel (everyone in the room bets on the same spin), two blackjack
 tables of five seats against the dealer, and the cashier, for coins only. There's a daily loss limit of 300
 coins, and at the cashier you can take a break for a day or a week.
+Rowboats on the Lake: hire one at the blue BOATS hut by the pier (10
+coins for 15 minutes), tap a friend to invite them aboard (up to 3), tap
+the water to row, and "Go ashore" by any bank.
 The metro: nine stations around the city (look for the red M); at one,
 tap a station on the map to ride there, and anyone following you comes too.
 Houses have a yard stand by the front door: put things from your bag on

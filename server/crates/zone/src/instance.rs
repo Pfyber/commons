@@ -12,6 +12,7 @@
 mod arcade;
 mod arena;
 mod bar;
+mod boats;
 mod bowling;
 mod fishing;
 mod garden;
@@ -283,6 +284,9 @@ pub struct Instance {
     lures: Vec<fishing::Lure>,
     /// The lucky crate (outdoors only).
     lucky: lucky::Lucky,
+    /// The lake rowboats go on, where the map has one, and the boats out on it.
+    lake: Option<boats::Lake>,
+    boats: Vec<boats::Boat>,
     /// The bowling alley's lanes, in map order.
     lanes: Vec<bowling::Lane>,
     /// The gladiator arena, if the map has one.
@@ -378,6 +382,7 @@ impl Instance {
                 }
             })
             .collect();
+        let lake = boats::Lake::from_map(&zone.map);
         Instance {
             grid: zone.grid.clone(),
             zone,
@@ -399,6 +404,8 @@ impl Instance {
             pool,
             lures: Vec::new(),
             lucky: lucky::Lucky::new(),
+            lake,
+            boats: Vec::new(),
             lanes,
             arena: arena_obj,
             cabinets,
@@ -542,6 +549,7 @@ impl Instance {
             self.arcade_tick(now);
             self.garden_tick(now);
             self.lucky_tick(now);
+            self.boat_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
             self.stats.record_tick(elapsed);
@@ -774,6 +782,10 @@ impl Instance {
     }
 
     fn remove(&mut self, id: u32) {
+        if self.avatars.contains_key(&id) {
+            let now = self.clock.now_ms();
+            self.boat_leave(id, now);
+        }
         self.follows.retain(|&f, &mut l| f != id && l != id);
         self.leave_seat(id);
         self.stop_fishing(id, false);
@@ -821,8 +833,21 @@ impl Instance {
         {
             a.interactions = (a.interactions + 1).min(MAX_INTERACTIONS_PER_REPORT);
         }
+        // In a boat: no sitting, fishing or gardening over the side.
+        if self.aboard(id)
+            && matches!(
+                msg,
+                ClientMsg::Sit { .. }
+                    | ClientMsg::FishCast { .. }
+                    | ClientMsg::ThrowLure { .. }
+                    | ClientMsg::PlotAction { .. }
+            )
+        {
+            return self.error(id, error_code::NOT_ALLOWED, "not from the boat");
+        }
         match msg {
             ClientMsg::MoveTo { x, y, sprint } => self.move_to(id, (x, y), sprint, now),
+            ClientMsg::Boat { op } => self.boat_op(id, op, now),
             ClientMsg::Emote { emote: e } => {
                 let a = self.avatars.get_mut(&id).unwrap();
                 // Free emotes, or playing with a toy you own.
@@ -927,6 +952,13 @@ impl Instance {
     fn move_to(&mut self, id: u32, target: TilePos, sprint: bool, now: u32) {
         // Fighting in the arena: the fight moves you, nothing else.
         if self.arena_fighting(id) {
+            return;
+        }
+        // In a boat the captain rows; passengers go where the boat goes.
+        if self.is_captain(id) {
+            return self.row_to(id, target, now);
+        }
+        if self.aboard(id) {
             return;
         }
         let a = self.avatars.get_mut(&id).unwrap();

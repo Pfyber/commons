@@ -1635,6 +1635,64 @@ Checked:
 
 Next: K3, poker between players, a jackpot and cosmetics.
 
+## Rowboats on the Lake (2026-10-24)
+
+Hire a rowboat at the Lake and take up to three friends round it.
+
+- **The boat hire:**
+  - A blue clapboard hut (`boat_hire`) on the bank by the pier, with a
+    rowboat tied up beside it (`boat_moored`).
+  - Tap the hut and "Hire a rowboat": 10 coins for 15 minutes, charged
+    through the economy (`boat_hire`). The boat sets out from the water
+    by the pier (`boat_launch`).
+- **Aboard:**
+  - The captain taps a friend and picks "🚣 Invite aboard". This uses
+    `together::BOAT`, offered and accepted like a hug; the friend gets a
+    "Climb aboard 🚣" card. There are three seats.
+- **Rowing:**
+  - The captain taps the water (or uses the keys) to row at 6.4 tiles a
+    second. Tapping land rows to the water nearest it.
+  - Boats go over the lake's own water only (`Lake::water`: the water
+    inside the `boat_lake` bounds). The server and the client find the
+    same route.
+  - Passengers get the captain's very walk, so the boat moves as one. A
+    passenger can't steer.
+- **Getting out:**
+  - By any bank, "Go ashore" sets everyone down on a tile each; a
+    passenger can "Hop off" alone.
+  - When the hire runs out, or the captain leaves, everyone is set down
+    on the pier.
+- **How it looks:**
+  - The captain's `vehicle` is the boat: a red-and-cream rowboat, with
+    oars that dip as they row. Passengers sit along it, names spread out.
+  - Everyone aboard bobs gently, and the boat leaves ripples behind.
+  - A chip shows "🚣 Your rowboat · 2/3 aboard · 12 min left", with Go
+    ashore or Hop off.
+- **Rules:** no sitting, fishing or gardening from the boat. Anyone
+  following a rower waits on the bank.
+- **Protocol v26:** `Boat { op }`, `BoatState`, `together::BOAT`, and
+  `boat::*`.
+
+Checked:
+- Zone tests:
+  - A captain with three friends (a fourth doesn't fit). Passengers
+    can't steer; the boat moves as one; tapping land rows to the water by
+    it. Going ashore mid-lake is refused, and at the bank everyone lands
+    on a tile each.
+  - A passenger hops off. Boarding is refused from too far away. The
+    hire running out puts everyone on the pier, and so does the captain
+    leaving.
+- Mapgen: the hut, the launch and dock, and the moored boat are where
+  they should be.
+- Clippy clean, client 89.
+- In the browser, Ada, Bo and Cy:
+  - Ada hires a boat (100 → 90 coins); Bo and Cy climb aboard from their
+    cards (vehicles 6, 7, 8). Bo's tap only brings up "Ada's rowing".
+  - All three row out to the middle of the lake together; "Go ashore"
+    out there says "Row up to the bank first".
+  - Back at the pier, everyone is ashore on their own tile and the chip
+    is gone.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

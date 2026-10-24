@@ -105,7 +105,7 @@ export class Scene {
     this.rows = Math.ceil(map.height / CHUNK);
     this.placed = map.objects
       // Drawn elsewhere, or invisible.
-      .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot" && o.kind !== "arena" && o.kind !== "yard_stand")
+      .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot" && o.kind !== "arena" && o.kind !== "yard_stand" && o.kind !== "boat_lake")
       .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, extras: [] }));
     this.resize();
   }

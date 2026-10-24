@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 25;
+pub const PROTOCOL_VERSION: u16 = 26;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -166,6 +166,9 @@ message_enum! {
         43 ArenaAct { act: u8 }
         /// Open a lucky crate from your bag.
         44 OpenCrate {}
+        /// The Lake's rowboats (`boat::*` op): rent one at the boat hire, or
+        /// get out (the captain takes everyone ashore; a passenger hops off).
+        45 Boat { op: u8 }
     }
 }
 
@@ -301,6 +304,10 @@ message_enum! {
         43 LuckyFound { id: u32, x: u16, y: u16 }
         /// Your lucky crate held `coins`.
         44 LuckyOpened { coins: u16 }
+        /// The boat you're in (sent to everyone aboard): its captain, who
+        /// sits where (`seats`, front to back), and the instance time the
+        /// hire runs out. `captain` 0: you're ashore again.
+        45 BoatState { captain: u32, until: u32, seats: Vec<u32> }
     }
 }
 
@@ -351,7 +358,28 @@ pub mod together {
     pub const STOP_FOLLOW: u8 = 5;
     /// A game of rock paper scissors (see `rps`); anyone may be asked.
     pub const RPS: u8 = 6;
-    pub const MAX: u8 = RPS;
+    /// Come aboard my boat (`boat`): only from a captain with a free seat.
+    pub const BOAT: u8 = 7;
+    pub const MAX: u8 = BOAT;
+}
+
+/// The Lake's rowboats: hired at the boat hire by the pier, rowed by their
+/// captain with up to `SEATS` passengers aboard.
+pub mod boat {
+    /// `Boat.op`.
+    pub const RENT: u8 = 1;
+    pub const ASHORE: u8 = 2;
+    /// What a hire costs, and how long it lasts.
+    pub const PRICE: i32 = 10;
+    pub const HIRE_MS: u32 = 15 * 60_000;
+    /// Passengers, besides the captain.
+    pub const SEATS: usize = 3;
+    /// Rowing speed, in tenths of a tile a second.
+    pub const SPEED_X10: u8 = 64;
+    /// `EntityInfo.vehicle` of the captain (the boat drawn under them), and of
+    /// the passenger in seat `n` (`PASSENGER + n`, front to back from 0).
+    pub const CAPTAIN: u8 = 6;
+    pub const PASSENGER: u8 = 7;
 }
 
 /// `Drink.kind`.

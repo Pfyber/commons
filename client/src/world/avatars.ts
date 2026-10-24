@@ -9,7 +9,7 @@ import { type Motion, type TileXY, headingAt, posAt, sprintingAt } from "./motio
 import type { Scene } from "./scene";
 import { moodIcon } from "../activities/together";
 import { Follower, type PetSprite } from "./pets";
-import { RIDE_POSE, vehicleTexture } from "./vehicles";
+import { BOAT_CAPTAIN, BOAT_PASSENGER, RIDE_POSE, vehicleTexture } from "./vehicles";
 import { heldCanTexture } from "./goods";
 
 export const EMOTES: Record<number, { icon: string; label: string }> = {
@@ -64,6 +64,11 @@ const FISHING = 2;
 const SKATEBOARD = 5;
 /** Rods by `tool` code: the plain one, cherrywood, carbon, golden. */
 const ROD_COLORS = [0x7a5230, 0xa0473f, 0x2f3440, 0xf2c94c];
+/** In a rowboat: where each passenger seat is (px from the captain), and
+ * the boat's middle (it's drawn round that, bow toward where they face). */
+const SEAT_X = [11, 33, -33];
+const BOAT_MID = 11;
+
 /** On wheels: a puff of dust this often, each lasting this long. */
 const PUFF_EVERY_MS = 70;
 const PUFF_MS = 420;
@@ -646,6 +651,11 @@ export class Avatar {
           : robot?.pop
             ? 1
             : 0;
+    // Afloat: passengers sit along the boat; everyone aboard bobs on the water.
+    const afloat = vehicle >= BOAT_CAPTAIN;
+    const seat = vehicle >= BOAT_PASSENGER ? vehicle - BOAT_PASSENGER : -1;
+    if (seat >= 0) leanX += SEAT_X[seat] ?? 0;
+    const wave = afloat ? Math.round(Math.sin(wallNow / 450)) : 0;
     const feetX = x * TILE + TILE / 2 + leanX;
     // Seated avatars sit on the bench's slats, drawn just in front of it.
     const feetY = y * TILE + TILE - (sitting ? 6 : 4) + leanY;
@@ -657,7 +667,7 @@ export class Avatar {
     // Asleep on their feet, in whole pixels only (no tilting or stretching):
     // a slow breath sinks them a pixel and back; every few seconds they sag
     // a pixel lower still, then jerk awake a pixel up for a blink, and settle.
-    this.sprite.position.set(Math.round(feetX + sway), Math.round(feetY + bob - (fighting?.lift ?? 0)));
+    this.sprite.position.set(Math.round(feetX + sway), Math.round(feetY + bob + wave - (fighting?.lift ?? 0)));
     // The robot turns on the beat: every four beats it faces the other way.
     this.sprite.scale.x = robot && Math.floor(beat / 4) % 2 === 1 ? -this.facing : this.facing;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
@@ -666,13 +676,14 @@ export class Avatar {
     this.drawFist(feetX, Math.round(feetY + bob), wallNow);
     this.drawBook(feetX, Math.round(feetY + bob));
     this.drawPhone(feetX, Math.round(feetY + bob));
-    this.updateWheels(ride ? vehicle : 0, feetX, feetY, walking, wallNow);
-    this.drawTrail(walking && !!vehicle, feetX, feetY, wallNow);
+    this.updateWheels(ride && seat < 0 ? vehicle : 0, feetX, feetY + wave, walking, wallNow);
+    this.drawTrail(walking && !!vehicle && seat < 0, feetX, feetY, wallNow, afloat);
     this.updateCan(feetX, feetY, wallNow);
     this.updatePet({ x, y }, wallNow);
 
     // DOM label above the head.
-    const s = this.scene.tileToScreen(x + 0.5, y + 1 - 4 / TILE - 34 / TILE);
+    // Afloat, names spread along the boat (the front seat's a little higher, clear of the captain's).
+    const s = this.scene.tileToScreen(x + 0.5 + (seat >= 0 ? (SEAT_X[seat] ?? 0) / TILE : 0), y + 1 - 4 / TILE - 34 / TILE - (seat === 0 ? 12 / TILE : 0));
     this.label.style.transform = `translate3d(${Math.round(s.x)}px, ${Math.round(s.y)}px, 0)`;
     this.nameEl.hidden = !this.showName;
     if (this.bubble && wallNow > this.bubbleUntil) {
@@ -875,6 +886,14 @@ export class Avatar {
     }
     const w = this.wheels;
     w.visible = true;
+    if (code === BOAT_CAPTAIN) {
+      // The rowboat round everyone aboard, the oars dipping as they row.
+      w.texture = vehicleTexture(code, moving ? ((Math.floor(now / 300) % 2) as 0 | 1) : 0);
+      w.position.set(Math.round(feetX + BOAT_MID), Math.round(feetY + 8));
+      w.scale.x = this.facing;
+      w.zIndex = feetY + 0.6;
+      return;
+    }
     w.texture = vehicleTexture(code, moving ? ((Math.floor(now / 50) % 2) as 0 | 1) : 0);
     w.position.set(Math.round(feetX), Math.round(feetY + 3));
     w.scale.x = this.facing;
@@ -886,20 +905,27 @@ export class Avatar {
    * Riding fast: little puffs of dust left behind the wheels, fading and
    * spreading, and a couple of streaks just behind the rider while moving.
    */
-  private drawTrail(moving: boolean, feetX: number, feetY: number, now: number) {
+  private drawTrail(moving: boolean, feetX: number, feetY: number, now: number, water = false) {
     const g = this.trail.clear();
     if (moving && now - this.lastPuff > PUFF_EVERY_MS && !REDUCED_MOTION) {
       this.lastPuff = now;
-      this.puffs.push({ x: feetX - this.facing * 9, y: feetY + 2, at: now, dir: -this.facing });
+      // A boat leaves its wake behind the stern; wheels kick up dust behind them.
+      const back = water ? BOAT_MID - this.facing * 46 : -this.facing * 9;
+      this.puffs.push({ x: feetX + back, y: feetY + (water ? 6 : 2), at: now, dir: -this.facing });
     }
-    this.puffs = this.puffs.filter((p) => now - p.at < PUFF_MS);
+    this.puffs = this.puffs.filter((p) => now - p.at < (water ? PUFF_MS * 2 : PUFF_MS));
     if (!this.puffs.length && !moving) return;
     for (const p of this.puffs) {
-      const t = (now - p.at) / PUFF_MS;
+      const t = (now - p.at) / (water ? PUFF_MS * 2 : PUFF_MS);
+      if (water) {
+        // Ripples spreading on the water.
+        g.ellipse(Math.round(p.x + p.dir * t * 4), Math.round(p.y), 3 + t * 9, 1 + t * 2).stroke({ color: 0xeaf6ff, alpha: 0.8 * (1 - t), width: 1 });
+        continue;
+      }
       const r = 2 + t * 4;
       g.circle(Math.round(p.x + p.dir * t * 6), Math.round(p.y - t * 4), r).fill({ color: 0xb8ab8c, alpha: 0.7 * (1 - t) });
     }
-    if (moving && !REDUCED_MOTION) {
+    if (moving && !water && !REDUCED_MOTION) {
       // Streaks behind, at chest and knee height, flickering a little.
       const back = -this.facing;
       const flick = Math.floor(now / 60) % 2;

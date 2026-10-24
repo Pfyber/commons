@@ -101,6 +101,12 @@ impl Instance {
             Some(_) if outdoors != test => ride & !vehicles::TEST_RIDE,
             _ => 0,
         };
+        // In a boat, you're seen in the boat (your wheels wait ashore).
+        let vehicle = if a.vehicle >= commons_protocol::boat::CAPTAIN {
+            a.vehicle
+        } else {
+            vehicle
+        };
         a.ride = ride;
         if commons_protocol::NPC_LOOKS.contains(&look)
             || (a.look == look && a.style == style && a.pet == pet && a.vehicle == vehicle)
@@ -127,7 +133,7 @@ impl Instance {
     }
 
     /// Everyone nearby sees avatar `id` as it is now.
-    fn look_changed(&mut self, id: u32) {
+    pub(super) fn look_changed(&mut self, id: u32) {
         let a = &self.avatars[&id];
         let msg = ServerMsg::LookChanged {
             id,
@@ -155,6 +161,7 @@ impl Instance {
         let range = match kind {
             together::FOLLOW | together::STOP_FOLLOW => FOLLOW_RANGE,
             together::RPS => RPS_RANGE,
+            together::BOAT => super::boats::BOARD_RANGE,
             _ => TOGETHER_RANGE,
         };
         match (self.avatars.get(&a), self.avatars.get(&b)) {
@@ -170,7 +177,19 @@ impl Instance {
         if !(1..=together::MAX).contains(&kind) || to == id || !self.avatars.contains_key(&to) {
             return;
         }
-        if !self
+        // Come aboard: only from a captain with a seat free, to someone ashore.
+        if kind == together::BOAT {
+            let free = self
+                .boats
+                .iter()
+                .any(|b| b.captain == id && b.seats.len() < commons_protocol::boat::SEATS);
+            if !free {
+                return self.error(id, error_code::NOT_ALLOWED, "no free seat in your boat");
+            }
+            if self.aboard(to) {
+                return self.error(id, error_code::NOT_ALLOWED, "they're in a boat already");
+            }
+        } else if !self
             .avatars
             .get_mut(&id)
             .unwrap()
@@ -209,6 +228,10 @@ impl Instance {
         }
         if kind == together::RPS {
             return self.rps_start(from, id, now);
+        }
+        // `from`'s boat: climb aboard.
+        if kind == together::BOAT {
+            return self.board(from, id, now);
         }
         // `from` asked to walk after `id`.
         if kind == together::FOLLOW {

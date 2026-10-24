@@ -20,6 +20,8 @@ export const TOGETHER: Record<number, { icon: string; offer: string; verb: strin
 /** `together::FOLLOW` / `STOP_FOLLOW`: walking after someone. */
 export const FOLLOW = 4;
 export const STOP_FOLLOW = 5;
+/** `together::BOAT`: come aboard my rowboat. */
+export const BOAT = 7;
 
 export const moodIcon = (m: number) => (m > 0 ? (MOODS.find((x) => x.id === m)?.icon ?? "") : "");
 
@@ -37,14 +39,14 @@ export class OfferCard {
 
   show(name: string, kind: number, accept: () => void) {
     const t = TOGETHER[kind];
-    if (!t && kind !== FOLLOW) return;
+    if (!t && kind !== FOLLOW && kind !== BOAT) return;
     this.el.replaceChildren();
     const text = document.createElement("span");
-    text.textContent = kind === FOLLOW ? `👣 ${name} would like to follow you around` : `${t.icon} ${name} offers you ${t.verb}`;
+    text.textContent = kind === FOLLOW ? `👣 ${name} would like to follow you around` : kind === BOAT ? `🚣 ${name} invites you aboard their rowboat` : `${t.icon} ${name} offers you ${t.verb}`;
     const yes = document.createElement("button");
     yes.type = "button";
     yes.className = "primary-sm";
-    yes.textContent = kind === FOLLOW ? "Sure, come along" : kind === 1 ? "Hug back" : kind === 2 ? "Slap it ✋" : kind === 6 ? "Let's play ✊" : "Dance!";
+    yes.textContent = kind === FOLLOW ? "Sure, come along" : kind === BOAT ? "Climb aboard 🚣" : kind === 1 ? "Hug back" : kind === 2 ? "Slap it ✋" : kind === 6 ? "Let's play ✊" : "Dance!";
     yes.onclick = () => {
       accept();
       this.hide();

@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 25;
+export const PROTOCOL_VERSION = 26;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -249,6 +249,7 @@ export type ClientMsg =
   | { t: "ArenaMove"; dir: number }
   | { t: "ArenaAct"; act: number }
   | { t: "OpenCrate" }
+  | { t: "Boat"; op: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -450,6 +451,10 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
     case "OpenCrate":
       w.u8(44);
       break;
+    case "Boat":
+      w.u8(45);
+      w.u8(m.op);
+      break;
   }
   return w.finish();
 }
@@ -588,6 +593,9 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 44:
       m = { t: "OpenCrate" };
       break;
+    case 45:
+      m = { t: "Boat", op: r.u8() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -640,6 +648,7 @@ export type ServerMsg =
   | { t: "LuckyShown"; x: number; y: number; moves: number }
   | { t: "LuckyFound"; id: number; x: number; y: number }
   | { t: "LuckyOpened"; coins: number }
+  | { t: "BoatState"; captain: number; until: number; seats: number[] }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -947,6 +956,12 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(44);
       w.u16(m.coins);
       break;
+    case "BoatState":
+      w.u8(45);
+      w.u32(m.captain);
+      w.u32(m.until);
+      w.vec(m.seats, (x) => w.u32(x));
+      break;
   }
   return w.finish();
 }
@@ -1087,6 +1102,9 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 44:
       m = { t: "LuckyOpened", coins: r.u16() };
+      break;
+    case 45:
+      m = { t: "BoatState", captain: r.u32(), until: r.u32(), seats: r.vec(() => r.u32()) };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);
