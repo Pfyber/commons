@@ -686,9 +686,12 @@ export class ReelGame {
     document.body.appendChild(this.el);
   }
 
-  /** Whether a bite is being reeled in right now. */
+  /** When "Reel in!" was last pressed (the bar hides at once, but the click's release comes after). */
+  hitAt = -Infinity;
+
+  /** Whether a bite is being reeled in right now, or was just now (its click still finishing). */
   get active(): boolean {
-    return !this.el.hidden;
+    return !this.el.hidden || performance.now() - this.hitAt < 700;
   }
 
   private pos(t: number) {
@@ -735,6 +738,7 @@ export class ReelGame {
 
   private hit() {
     if (!this.done) return;
+    this.hitAt = performance.now();
     // In the zone (a hair of slack at its edges): the closer to its middle the better.
     const d = Math.abs(this.pos(performance.now()) - 0.5);
     const w = this.tier.sweet + 0.008;
