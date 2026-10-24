@@ -113,11 +113,17 @@ impl Instance {
         {
             return;
         }
+        let repace = a.vehicle != vehicle;
         a.look = look;
         a.style = style;
         a.pet = pet;
         a.vehicle = vehicle;
         self.look_changed(id);
+        // On or off wheels mid-walk: the rest of the walk at the new pace.
+        if repace {
+            let now = self.clock.now_ms();
+            self.repace(id, now);
+        }
     }
 
     /// The tools avatar `id` uses and the kit it owns, from the API.
@@ -600,6 +606,44 @@ mod tests {
                 _ => None,
             })
             .unwrap()
+    }
+
+    #[test]
+    fn getting_on_wheels_mid_walk_speeds_up_the_rest_of_it() {
+        use commons_sim::vehicles::speed_x10;
+        let bike = speed_x10(3).unwrap();
+        let mut inst = instance_for(Arc::new(ZoneDef::new(
+            crate::instance::OUTDOORS.into(),
+            map(64, 32),
+            None,
+        )));
+        let _a = connect(&mut inst, 1, "a", (20, 12));
+        crate::instance::tests::place(&mut inst, 1, (2, 2));
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::MoveTo {
+                x: 60,
+                y: 2,
+                sprint: false,
+            },
+        });
+        let walk = inst.avatars[&1].motion.clone().unwrap();
+        assert_eq!(walk.speed_x10, WALK_SPEED_X10);
+        // A few steps on, the bike: the same walk, at the bike's pace.
+        let later = walk.t0 + 1500;
+        inst.step(later);
+        let now = inst.clock.now_ms().max(later);
+        inst.wear(1, 0, 0, 0, 3);
+        let ride = inst.avatars[&1].motion.clone().expect("still going");
+        assert_eq!(ride.speed_x10, bike);
+        assert_eq!(ride.path.last(), Some(&(60, 2)), "to the same place");
+        assert!(ride.path[0].0 >= 2 && !ride.is_done(now));
+        // And off it again: back to walking.
+        inst.wear(1, 0, 0, 0, 0);
+        assert_eq!(
+            inst.avatars[&1].motion.as_ref().unwrap().speed_x10,
+            WALK_SPEED_X10
+        );
     }
 
     #[test]

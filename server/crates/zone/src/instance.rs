@@ -971,6 +971,36 @@ impl Instance {
             state::FISHING => self.stop_fishing(id, false),
             _ => {}
         }
+        self.walk(id, target, sprint, now);
+    }
+
+    /// Re-plans the walk `id` is on, to the same place, at the pace it should
+    /// go now (got on or off something to ride mid-walk). Kept: what it meant
+    /// to do on arrival.
+    pub(super) fn repace(&mut self, id: u32, now: u32) {
+        let Some(a) = self.avatars.get(&id) else {
+            return;
+        };
+        let Some(target) = a
+            .motion
+            .as_ref()
+            .filter(|m| !m.is_done(now))
+            .and_then(|m| m.path.last().copied())
+        else {
+            return;
+        };
+        if self.aboard(id) || self.arena_fighting(id) {
+            return;
+        }
+        let pending = a.pending;
+        self.walk(id, target, false, now);
+        if let Some(a) = self.avatars.get_mut(&id) {
+            a.pending = pending;
+        }
+    }
+
+    /// Walks `id` to `target` from wherever its walk is now, at its pace.
+    fn walk(&mut self, id: u32, target: TilePos, sprint: bool, now: u32) {
         let grid = &self.grid;
         let outdoors = self.zone.id == OUTDOORS;
         let a = self.avatars.get_mut(&id).unwrap();
