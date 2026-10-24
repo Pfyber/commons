@@ -8,6 +8,9 @@ import { type MapObject, type ZoneMap, groundAt } from "./map";
 import type { TileXY } from "./motion";
 
 const CHUNK = 16;
+/** Indoors: how far (tiles) the north wall's art stands above the top row, and the HUD's height (screen px). */
+const WALL_ABOVE = 1.5;
+const HUD_PX = 72;
 /** Decor drawn flat on the ground. */
 const FLAT = new Set(["blanket", "lilypad", "mushrooms"]);
 /** Decor that sways in the wind. */
@@ -345,14 +348,20 @@ export class Scene {
     };
   }
 
-  /** Centres on `p`, but stops at the map edge; a map smaller than the screen is centred. */
+  /**
+   * Centres on `p`, but stops at the map edge; a map smaller than the screen
+   * is centred. Indoors, the north wall stands up above the room's top row
+   * (and the HUD sits across the top of the screen), so the camera may look
+   * that far above the map too: the wall shows whole, clear of the HUD.
+   */
   follow(p: TileXY) {
     const { width, height } = this.app.screen;
     const span = TILE * this.scale;
-    const axis = (at: number, size: number, view: number) =>
-      size <= view ? size / 2 : Math.min(Math.max(at + 0.5, view / 2), size - view / 2);
+    const axis = (at: number, size: number, view: number, before = 0) =>
+      size + before <= view ? (size - before) / 2 : Math.min(Math.max(at + 0.5, view / 2 - before), size - view / 2);
+    const above = this.map.streets ? 0 : WALL_ABOVE + HUD_PX / span;
     const cx = axis(p.x, this.map.width, width / span);
-    const cy = axis(p.y, this.map.height, height / span);
+    const cy = axis(p.y, this.map.height, height / span, above);
     this.cam = { x: cx - 0.5, y: cy - 0.5 };
     // Snap to the device pixel grid so every art pixel lands on whole pixels.
     const res = this.app.renderer.resolution;
