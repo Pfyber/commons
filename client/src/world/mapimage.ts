@@ -60,10 +60,12 @@ const OBJECTS: Record<string, string> = {
   mall_directory: "#3f7a8a",
   mall_exit: "#3f7a8a",
   stall: "#c27a3c",
+  boat_hire: "#4f86b0",
 };
 
 /** Kinds that aren't drawn at all: markers and tiny props. */
-const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront"]);
+// (`boat_lake` only marks the water the rowboats go on; `boat_moored` sits on it.)
+const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "boat_lake", "boat_moored", "yard_stand"]);
 
 export function mapImage(map: ZoneMap): HTMLCanvasElement {
   const c = document.createElement("canvas");

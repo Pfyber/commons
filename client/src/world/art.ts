@@ -2304,22 +2304,6 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       }
       break;
     }
-    case "fitting_room": {
-      // A booth with a curtain, and a little "Changing" sign.
-      [c, ctx] = makeCanvas(w, h + 40);
-      overhang = 40;
-      const top = 40;
-      px(ctx, P.outline, 4, top - 30, w - 8, h + 28);
-      px(ctx, P.wood, 6, top - 28, w - 12, h + 24);
-      px(ctx, P.outline, 12, top - 18, w - 24, h + 14);
-      px(ctx, "#7a4a8c", 14, top - 16, w - 28, h + 12);
-      for (let x = 18; x < w - 16; x += 10) px(ctx, "#9a6aac", x, top - 16, 3, h + 12);
-      px(ctx, "#f6c343", 14, top - 18, w - 28, 2);
-      px(ctx, P.outline, w / 2 - 26, top - 40, 52, 14);
-      px(ctx, "#fff6e0", w / 2 - 25, top - 39, 50, 12);
-      label(ctx, "Changing", w / 2, top - 33, "#5a3b2b", 7);
-      break;
-    }
     case "shop_exit": {
       // The open door: daylight and a doormat.
       [c, ctx] = makeCanvas(w, h + 16);
