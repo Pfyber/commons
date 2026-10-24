@@ -413,6 +413,7 @@ async function main() {
     slots: new SlotsPanel(casino),
     roulette: new RoulettePanel(casino, tables),
     blackjack: new BlackjackPanel(casino, tables),
+    tables,
     cage: new CagePanel(casino),
     metro: new MetroPanel({
       map: () => {

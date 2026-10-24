@@ -87,7 +87,12 @@ struct Wheel {
     ready: HashSet<Uuid>,
     /// The last number, and who won what on it.
     last: Option<(u8, Vec<(String, i32)>)>,
+    /// The numbers that came up, newest first (the board by the table).
+    history: std::collections::VecDeque<u8>,
 }
+
+/// How many past numbers the table's board shows.
+pub const HISTORY: usize = 12;
 
 struct Seat {
     player: Uuid,
@@ -128,6 +133,19 @@ struct Table {
 struct Floor {
     wheel: Wheel,
     tables: [Table; BJ_TABLES],
+    /// Bumped on every change, so a client can tell a late reply from news.
+    seq: u64,
+}
+
+impl Floor {
+    /// A fresh floor. Its `seq` starts at the clock, so it keeps rising
+    /// across restarts and clients never take news for a stale reply.
+    fn new() -> Floor {
+        Floor {
+            seq: now_ms(),
+            ..Floor::default()
+        }
+    }
 }
 
 /// Every casino instance's floor. One lock: the casino is small, and the
@@ -347,6 +365,7 @@ fn wheel_json(w: &Wheel) -> Value {
             "player": c.player.to_string(), "name": c.name, "bet": c.bet, "amount": c.amount,
         })).collect::<Vec<_>>(),
         "ready": w.ready.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+        "history": w.history,
         "last": w.last.as_ref().map(|(n, won)| json!({
             "number": n, "red": casino::is_red(*n),
             "winners": won.iter().map(|(name, coins)| json!({ "name": name, "coins": coins })).collect::<Vec<_>>(),
@@ -387,11 +406,13 @@ fn floor_json(instance: u16, f: &Floor) -> Value {
         "t": "casino_tables", "instance": instance,
         "roulette": wheel_json(&f.wheel),
         "blackjack": f.tables.iter().map(table_json).collect::<Vec<_>>(),
+        "seq": f.seq,
         "now": now_ms(),
     })
 }
 
-fn announce(state: &SocialState, instance: u16, f: &Floor) {
+fn announce(state: &SocialState, instance: u16, f: &mut Floor) {
+    f.seq += 1;
     let msg = floor_json(instance, f);
     for p in state.hub.in_zone(ZONE, instance) {
         state.hub.send(p, &msg);
@@ -431,7 +452,7 @@ async fn view(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
         return Ok(Json(json!({ "t": "casino_tables", "instance": null })));
     };
     let mut floors = state.tables.0.lock().await;
-    let f = floors.entry(instance).or_default();
+    let f = floors.entry(instance).or_insert_with(Floor::new);
     Ok(Json(floor_json(instance, f)))
 }
 
@@ -459,7 +480,7 @@ async fn roulette_bet(
     }
     let key = our_key(me, &req.key)?;
     let mut floors = state.tables.0.lock().await;
-    let f = floors.entry(instance).or_default();
+    let f = floors.entry(instance).or_insert_with(Floor::new);
     if key_used(&state, &key).await? {
         return Ok(Json(floor_json(instance, f)));
     }
@@ -513,7 +534,7 @@ async fn roulette_ready(State(state): S, headers: HeaderMap) -> ApiResult<Json<V
     let (me, _) = me(&state, &headers)?;
     let instance = floor_of(&state, me).await?;
     let mut floors = state.tables.0.lock().await;
-    let f = floors.entry(instance).or_default();
+    let f = floors.entry(instance).or_insert_with(Floor::new);
     let w = &mut f.wheel;
     if !w.chips.iter().any(|c| c.player == me) {
         return Err(conflict("no_chips", "Put a chip down first."));
@@ -561,6 +582,8 @@ async fn land(state: &SocialState, instance: u16, w: &mut Wheel, number: u8) {
     let mut winners: Vec<(String, i32)> = won.into_values().collect();
     winners.sort_by_key(|w| std::cmp::Reverse(w.1));
     w.last = Some((number, winners));
+    w.history.push_front(number);
+    w.history.truncate(HISTORY);
     w.ready.clear();
     w.spin = Spin::Open;
 }
@@ -583,7 +606,7 @@ async fn sit(
         return Err(ApiError::bad_request("bad_seat", "There's no such seat."));
     }
     let mut floors = state.tables.0.lock().await;
-    let f = floors.entry(instance).or_default();
+    let f = floors.entry(instance).or_insert_with(Floor::new);
     for (i, t) in f.tables.iter_mut().enumerate() {
         for (j, s) in t.seats.iter_mut().enumerate() {
             if let Some(seat) = s
@@ -631,7 +654,7 @@ async fn stand_up(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>>
         return Ok(Json(json!({})));
     };
     let mut floors = state.tables.0.lock().await;
-    let f = floors.entry(instance).or_default();
+    let f = floors.entry(instance).or_insert_with(Floor::new);
     for t in f.tables.iter_mut() {
         leave_seat(&state, t, me).await;
         advance(&state, instance, t, now_ms()).await;
@@ -691,7 +714,7 @@ async fn bj_bet(
     }
     let key = our_key(me, &req.key)?;
     let mut floors = state.tables.0.lock().await;
-    let f = floors.entry(instance).or_default();
+    let f = floors.entry(instance).or_insert_with(Floor::new);
     if key_used(&state, &key).await? {
         return Ok(Json(floor_json(instance, f)));
     }
@@ -743,7 +766,7 @@ async fn act(
     let (me, _) = me(&state, &headers)?;
     let instance = floor_of(&state, me).await?;
     let mut floors = state.tables.0.lock().await;
-    let f = floors.entry(instance).or_default();
+    let f = floors.entry(instance).or_insert_with(Floor::new);
     let Some(t) = f
         .tables
         .iter_mut()

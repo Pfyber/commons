@@ -155,6 +155,15 @@ export function casinoObject(o: MapObject): { c: HTMLCanvasElement; overhang: nu
           px(ctx, red ? "#c8553d" : "#2b2723", x + 1, y + 1, 10, 16);
         }
       }
+      // The dozens, and the even-money boxes (1-18, even, red, black, odd, 19-36).
+      for (let d = 0; d < 3; d++) {
+        px(ctx, "#d8e8c8", 90 + d * 52, 82, 51, 8);
+        px(ctx, "#2f6f4a", 91 + d * 52, 83, 49, 6);
+      }
+      for (let i = 0; i < 6; i++) {
+        px(ctx, "#d8e8c8", 90 + i * 26, 91, 25, 8);
+        px(ctx, i === 2 ? "#c8553d" : i === 3 ? "#2b2723" : "#2f6f4a", 91 + i * 26, 92, 23, 6);
+      }
       return { c, overhang: 16 };
     }
     case "blackjack_table": {

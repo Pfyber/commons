@@ -67,6 +67,29 @@ or with whoever else is there, as in a real casino.
 - **Big wins are told to the whole floor:** a slots line of 20× or more,
   a straight-up roulette number, a blackjack.
 
+### The roulette table, as a real one
+
+The roulette table plays like the one in a casino, together:
+
+- **The felt:**
+  - The window shows the layout: 0, the numbers, the dozens and the
+    even-money boxes. Tap a box to put your chip there.
+  - Every player's chips show on the felt in their own colour (the same
+    on every screen), with a list of who's playing and their totals.
+  - "Same bet" backs a friend's latest bet with your chip.
+- **The board:** the last 12 numbers, newest first.
+- **The room:** the table shows the chips on its own felt and the ball
+  racing round the wheel, so anyone walking by can watch. After a spin, a
+  marker shows the number that came up.
+- **The croupier** behind the table calls the game: "Place your bets,
+  please!", "Last bets…", "No more bets!", "17, black! Ada wins 360!".
+  Winners get a 🎉 over their heads. Tap the croupier for tips, and for
+  the table.
+- **Fresh state:** every table update carries a sequence number. A
+  client ignores a reply that left the server before news it has already
+  had, so a late "Spin!" reply can't roll the wheel back and hide a
+  win.
+
 Later: **K3** poker between players
 (the house takes a small cut, collusion flags to the Caretaker), a jackpot
 pool, big wins on the town board, casino-only cosmetics.

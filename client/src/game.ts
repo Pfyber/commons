@@ -8,7 +8,7 @@ import { JamPanel, beatTime, playNote } from "./activities/jam";
 import type { WordPanel } from "./activities/word";
 import { Cat } from "./ambient/cat";
 import { Caretaker } from "./ambient/caretaker";
-import { ATTENDANT, BARTENDER, Clerk, FISHERMAN, LIBRARIAN, SHOE_GUY } from "./ambient/clerk";
+import { ATTENDANT, BARTENDER, CROUPIER, Clerk, FISHERMAN, LIBRARIAN, SHOE_GUY } from "./ambient/clerk";
 import { ArcadePanel, BEAT_MS, BOT as ARCADE_BOT, PLAYING as ARCADE_PLAYING } from "./activities/arcade";
 import { PrizePanel } from "./ui/prizes";
 import { PoolPanel } from "./activities/pool";
@@ -85,7 +85,8 @@ import type { ClubsPanel } from "./ui/clubs";
 import type { Concert } from "./concert";
 import type { YardPanel } from "./ui/homes";
 import type { MetroPanel } from "./ui/metro";
-import type { BlackjackPanel, Casino, CagePanel, RoulettePanel, SlotsPanel } from "./ui/casino";
+import type { BlackjackPanel, Casino, CagePanel, RoulettePanel, SlotsPanel, Tables } from "./ui/casino";
+import { RouletteFx } from "./world/roulettefx";
 import { YardStands } from "./world/yardstands";
 import type { ConcertPanel } from "./ui/concert";
 
@@ -171,6 +172,8 @@ export interface Ui {
   slots: SlotsPanel;
   roulette: RoulettePanel;
   blackjack: BlackjackPanel;
+  /** The casino's shared tables, live from the server. */
+  tables: Tables;
   cage: CagePanel;
 }
 
@@ -337,6 +340,8 @@ export class Game {
   private waterMap: ZoneMap | null = null;
   private boatChipAt = 0;
   private boatNagAt = 0;
+  /** The roulette table in the room: chips, the ball, the croupier's calls. */
+  private rouletteFx: RouletteFx | null = null;
   /**
    * Sprinting (outdoors): a direction key pressed twice in quick succession,
    * a tile tapped twice, or tiles tapped one after another quickly. It lasts
@@ -547,6 +552,21 @@ export class Game {
     }
     const bar = map.objects.find((o) => o.kind === "bar_counter");
     if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
+    // The Casino's croupier, behind the roulette table, calls the game for
+    // everyone; the chips and the ball show on the table itself.
+    const wheel = map.objects.find((o) => o.kind === "roulette_table");
+    if (wheel) {
+      this.clerk = new Clerk(map, wheel, this.scene, labels, CROUPIER);
+      const fx = new RouletteFx(this.scene, wheel, ui.tables, {
+        say: (t) => this.clerk?.say(t),
+        cheer: (name) => {
+          for (const a of this.avatars.values()) if (a.info.name === name) a.flash("🎉");
+        },
+      });
+      this.rouletteFx = fx;
+      void ui.tables.load().catch(() => {});
+      this.disposers.push(() => fx.destroy());
+    }
     // What you read shows in your hands; books stay in the library unless
     // they're borrowed.
     // On a call: the phone at your ear, for everyone to see.
@@ -1097,6 +1117,8 @@ export class Game {
     if (fisher && this.fisherman) this.openFisherman(fisher);
     const desk = map.objects.find((o) => o.kind === "circulation_desk");
     if (desk) this.near(this.ui.catalogue, { x: desk.x + Math.floor(desk.w / 2), y: desk.y + desk.h }, 8).show();
+    const wheel = map.objects.find((o) => o.kind === "roulette_table");
+    if (wheel) this.near(this.ui.roulette, { x: wheel.x + Math.floor(wheel.w / 2), y: wheel.y + wheel.h }, 8).show();
     return true;
   }
 
@@ -3381,6 +3403,7 @@ export class Game {
       this.caretakerChat(wallNow);
     }
     this.clerk?.update(Date.now(), wallNow);
+    this.rouletteFx?.update();
     if (this.libraryRoom) {
       this.libraryRoom.update(performance.now());
       this.libraryArrived();

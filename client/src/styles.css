@@ -4770,3 +4770,149 @@ body.woozy #stage canvas {
   margin: var(--px2);
   cursor: pointer;
 }
+
+/* The roulette felt (K2): everyone's chips in their colours, the last numbers. */
+.panel .table-players {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.panel .table-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel .table-player .mine {
+  font-weight: 700;
+}
+
+.panel button.tiny {
+  padding: 1px 6px;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.panel .chip-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid #3b3a2e;
+  flex: none;
+}
+
+.panel .history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.panel .history .num {
+  min-width: 18px;
+  padding: 1px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  color: #fff8e3;
+  border: 1px solid #3b3a2e;
+}
+
+.panel .history .num:first-child {
+  outline: 2px solid #e0a43a;
+}
+
+.panel .num.red,
+.panel .cell.red {
+  background: #c8553d;
+}
+
+.panel .num.black,
+.panel .cell.black {
+  background: #2b2723;
+}
+
+.panel .num.green,
+.panel .cell.green {
+  background: #2f8f4f;
+}
+
+.panel .felt {
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  background: #2f6f4a;
+  border: 3px solid #6e4b30;
+  margin: 6px 0;
+}
+
+.panel .felt-numbers {
+  display: grid;
+  grid-template-columns: 24px repeat(12, 1fr);
+  grid-template-rows: repeat(3, 26px);
+  gap: 2px;
+}
+
+.panel .felt-row {
+  display: flex;
+  gap: 2px;
+}
+
+.panel .felt-row .cell {
+  flex: 1;
+  height: 24px;
+}
+
+.panel .felt .cell {
+  position: relative;
+  padding: 0;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff8e3;
+  border: 1px solid #d8e8c8;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.panel .felt .cell.out {
+  background: transparent;
+}
+
+.panel .felt .cell.out.red {
+  background: #c8553d;
+}
+
+.panel .felt .cell.out.black {
+  background: #2b2723;
+}
+
+.panel .felt .cell.zero {
+  grid-row: 1 / span 3;
+}
+
+.panel .felt .cell:hover {
+  outline: 2px solid #f2c94c;
+  outline-offset: -2px;
+}
+
+.panel .felt.locked .cell {
+  cursor: default;
+}
+
+.panel .felt .cell .stack {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  gap: 1px;
+}
+
+.panel .felt .cell .stack .chip-dot {
+  width: 7px;
+  height: 7px;
+  border-width: 1px;
+}

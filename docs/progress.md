@@ -1693,6 +1693,43 @@ Checked:
   - Back at the pier, everyone is ashore on their own tile and the chip
     is gone.
 
+## The Casino: a roulette table like a real one (2026-10-24)
+
+ADR 0017. Roulette was already one shared spin; now it looks and feels
+like playing it together.
+
+- **The felt in the window:**
+  - Tap a box to put a chip there. Everyone's chips show on it in their
+    colour.
+  - A list of who's playing, each with their colour, their total and ✓
+    once they've said Spin. "Same bet" copies a friend's latest bet.
+  - A board of the last 12 numbers (`history`, kept by `social::tables`).
+- **The table in the room:** chips piled on the felt in each player's
+  colour; the ball racing round the wheel while it spins; then a marker
+  with the number. The table art now draws the dozens and the
+  even-money boxes.
+- **The croupier:** a `CROUPIER` clerk behind the table who calls the
+  game for everyone: bets open, last bets, no more bets, the number and
+  who won. Winners get 🎉. Tapping the croupier gives tips and opens the
+  table.
+- **Fix:** table state now carries a `seq`, which starts from the clock
+  so it keeps rising across restarts. A late reply to your own "Spin!"
+  could arrive after the wheel had started and roll it back, so your
+  client missed the landing and didn't refresh your coins (the server
+  had paid you). Stale states are now ignored.
+
+Checked:
+- Server table test: the history board.
+- Client tests: a stale reply is ignored and the landing still pays;
+  player colours and totals. 91 in all; clippy clean.
+- In the browser, Ada and Bo:
+  - Ada puts 10 on 17; Bo sees "Place your bets, please!" from the
+    croupier, presses "Same bet" (his 10 joins hers on 17) and adds 5 on
+    red. Both see two colours on 17.
+  - The croupier calls "No more bets!", then "17, black! Bo wins 360,
+    Ada wins 360!".
+  - Coins match the database in every run.
+
 ## Next: M5 · Crowds
 
 Instancing, orchestrator routing by population, crowd LOD, slow mode,

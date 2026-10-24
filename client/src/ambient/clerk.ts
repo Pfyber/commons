@@ -17,6 +17,7 @@ export const ATTENDANT_ID = 0xfffffff6;
 export const FISHERMAN_ID = 0xfffffff7;
 export const LIBRARIAN_ID = 0xfffffff8;
 export const SHOE_GUY_ID = 0xfffffff9;
+export const CROUPIER_ID = 0xfffffffb;
 const LEG_MS = 9000;
 const SPEED_X10 = 10;
 /** A waistcoat, glasses and a ponytail. */
@@ -29,6 +30,20 @@ const TIPS = [
   "That would suit you!",
   "Outfits at the back, hats in the middle, accessories by the door.",
 ];
+
+/** The Casino's croupier, behind the roulette table: a waistcoat and a bow-tie air. */
+export const CROUPIER: Keeper = {
+  id: CROUPIER_ID,
+  name: "Croupier 🎩",
+  look: encodeLook({ hue: 0, skin: 3, hair: 2, hat: 0, hatHue: 0, style: 3, accessory: 1, outfit: 7 }),
+  hellos: ["Welcome to the wheel! Chips on the felt, everyone plays the same spin.", "Good evening! Join the table, there's always room."],
+  tips: [
+    "Everyone at the table bets on the same spin. When you've all said 'Spin!', round it goes.",
+    "A single number pays 35 to 1. Feeling lucky?",
+    "Like someone's hunch? 'Same bet' puts your chip next to theirs.",
+    "Red, black, odd or even pay even money. The zero is the house's.",
+  ],
+};
 
 /** Who stands behind a counter, and what they say. */
 export interface Keeper {

@@ -162,6 +162,45 @@ export interface WheelState {
   chips: Chip[];
   ready: string[];
   last: { number: number; red: boolean; winners: { name: string; coins: number }[] } | null;
+  /** The numbers that came up, newest first. */
+  history: number[];
+}
+
+/** Chip colours, one per player at the table (in the order they joined the spin). */
+export const CHIP_COLORS = ["#e05a47", "#4f86d8", "#f2c94c", "#5fb36b", "#b06fd8", "#ef8bb5", "#5ec8c8", "#f08a3c"];
+
+/** Someone with chips down on this spin. */
+export interface TablePlayer {
+  id: string;
+  name: string;
+  color: string;
+  total: number;
+  ready: boolean;
+  last: RouletteBet;
+}
+
+/** Everyone with chips on the wheel's spin, each with their colour (the same on every screen). */
+export function playersOf(w: WheelState | null): TablePlayer[] {
+  const out: TablePlayer[] = [];
+  for (const c of w?.chips ?? []) {
+    let p = out.find((x) => x.id === c.player);
+    if (!p) {
+      p = { id: c.player, name: c.name, color: CHIP_COLORS[out.length % CHIP_COLORS.length], total: 0, ready: w!.ready.includes(c.player), last: c.bet };
+      out.push(p);
+    }
+    p.total += c.amount;
+    p.last = c.bet;
+  }
+  return out;
+}
+
+export function sameBet(a: RouletteBet, b: RouletteBet): boolean {
+  return a.on === b.on && ("n" in a ? a.n : -1) === ("n" in b ? b.n : -1);
+}
+
+/** "red", "black" or "green": the pocket's colour. */
+export function pocketColour(n: number): "red" | "black" | "green" {
+  return n === 0 ? "green" : RED.has(n) ? "red" : "black";
 }
 
 export interface CardFace {
@@ -199,6 +238,8 @@ export interface Floor {
   instance: number | null;
   roulette: WheelState;
   blackjack: TableState[];
+  /** Bumped on every change: an older one (a slow reply) is ignored. */
+  seq: number;
   now: number;
 }
 
@@ -239,6 +280,8 @@ export class Tables {
 
   private take(f: Floor) {
     if (f.instance === null) return;
+    // A reply that left the server before news we've already had: stale.
+    if (this.floor && this.floor.instance === f.instance && f.seq < this.floor.seq) return;
     const had = this.floor;
     this.floor = f;
     this.skew = f.now - Date.now();
@@ -345,7 +388,6 @@ const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 
  */
 export class RoulettePanel extends Panel {
   private amount = 10;
-  private bet: RouletteBet = { on: "red" };
   private angle = 0;
   private canvas = el("canvas", "wheel");
   private msg = el("p", "casino-msg");
@@ -410,8 +452,12 @@ export class RoulettePanel extends Panel {
     this.body.replaceChildren();
     const s = this.casino.status;
     const w = this.wheel;
+    const self = this.tables.selfId;
+    const spinning = w?.phase === "spinning";
+    const canPlay = !s || s.can_play;
     this.draw();
-    // The wheel, and beside it the clock, everyone's chips and the last spin.
+    // The wheel; beside it the clock, who's playing (each in their colour)
+    // and the board of the last numbers.
     const top = el("div", "wheel-row");
     const side = el("div", "wheel-side");
     top.append(this.canvas, side);
@@ -419,92 +465,108 @@ export class RoulettePanel extends Panel {
     side.append(this.clock);
     this.clock.textContent =
       w?.phase === "betting" ? `Place your bets: ${secsLeft(this.tables, w.closes)} s`
-      : w?.phase === "spinning" ? "No more bets: the wheel's spinning…"
-      : "The table's open: put a chip down to start a round.";
-    // Everyone's chips.
-    const chips = el("div", "table-chips");
-    for (const c of w?.chips ?? []) {
-      const mine = c.player === this.tables.selfId;
-      chips.append(el("span", mine ? "chip-tag mine" : "chip-tag", `${c.name}: ${c.amount} on ${betName(c.bet)}${w?.ready.includes(c.player) ? " ✓" : ""}`));
+      : spinning ? "No more bets: the wheel's spinning…"
+      : "The table's open: put a chip down to start a spin.";
+    const players = playersOf(w);
+    if (players.length) {
+      const list = el("div", "table-players");
+      for (const p of players) {
+        const row = el("div", "table-player");
+        const dot = el("span", "chip-dot");
+        dot.style.background = p.color;
+        row.append(dot, el("span", p.id === self ? "mine" : "", `${p.id === self ? "You" : p.name} · ${p.total}${p.ready ? " ✓" : ""}`));
+        // Back a friend's hunch: the same bet, with your chip.
+        if (p.id !== self && !spinning && canPlay) row.append(button("Same bet", () => void this.place(p.last), "tiny"));
+        list.append(row);
+      }
+      side.append(list);
     }
-    if (w?.chips.length) side.append(chips);
-    if (w?.last && w.phase !== "spinning") {
-      const l = w.last;
-      const colour = l.number === 0 ? "green" : l.red ? "red" : "black";
-      const won = l.winners.length ? l.winners.map((x) => `${x.name} +${x.coins}`).join(", ") : "nobody this time";
-      side.append(el("p", "hint", `Last spin: ${l.number} ${colour}. Won: ${won}.`));
+    if (w?.history.length) {
+      const board = el("div", "history");
+      for (const n of w.history) board.append(el("span", `num ${pocketColour(n)}`, String(n)));
+      side.append(board);
     }
-    if (s && !s.can_play) {
-      this.body.append(el("p", "hint warn", s.why ?? "You can't play just now."));
+    if (w?.last && !spinning && !players.length) {
+      const won = w.last.winners.length ? w.last.winners.map((x) => `${x.name} +${x.coins}`).join(", ") : "nobody this time";
+      side.append(el("p", "hint", `Last spin: ${w.last.number} ${pocketColour(w.last.number)}. Won: ${won}.`));
+    }
+    if (!canPlay) {
+      this.body.append(el("p", "hint warn", s?.why ?? "You can't play just now."));
       return;
     }
     // While it spins, everyone just watches.
-    const spinning = w?.phase === "spinning";
     if (spinning) {
-      this.body.append(this.msg);
+      this.body.append(this.felt(w, players, true), this.msg);
       this.body.scrollTop = 0;
       return;
     }
-    const pick = (b: RouletteBet) => {
-      this.bet = b;
-      this.render();
-    };
-    const same = (b: RouletteBet) => JSON.stringify(b) === JSON.stringify(this.bet);
-    const row1 = el("div", "tier-row");
-    for (const b of [{ on: "red" }, { on: "black" }, { on: "odd" }, { on: "even" }, { on: "low" }, { on: "high" }] as RouletteBet[]) {
-      const btn = button(betName(b), () => pick(b), same(b) ? "small on" : "small");
-      if (b.on === "red") btn.classList.add("red");
-      if (b.on === "black") btn.classList.add("black");
-      row1.append(btn);
-    }
-    const row2 = el("div", "tier-row");
-    for (const n of [1, 2, 3]) {
-      const b: RouletteBet = { on: "dozen", n };
-      row2.append(button(betName(b), () => pick(b), same(b) ? "small on" : "small"));
-    }
-    const num = el("input");
-    num.type = "number";
-    num.min = "0";
-    num.max = "36";
-    num.placeholder = "0–36";
-    num.value = this.bet.on === "number" ? String(this.bet.n) : "";
-    num.onkeydown = (e) => e.stopPropagation();
-    num.onchange = () => {
-      const n = Math.max(0, Math.min(36, Number(num.value) | 0));
-      pick({ on: "number", n });
-    };
-    row2.append(el("span", "hint", "or one number:"), num);
     const [lo, hi] = s?.limits.roulette ?? [1, 50];
     const amounts = el("div", "tier-row");
+    amounts.append(el("span", "hint", "Chip:"));
     for (const a of [1, 5, 10, 25, 50].filter((a) => a >= lo && a <= hi)) {
       amounts.append(button(`${a}`, () => ((this.amount = a), this.render()), a === this.amount ? "small on chip" : "small chip"));
     }
-    const pays = this.bet.on === "number" ? "35:1" : this.bet.on === "dozen" ? "2:1" : "1:1";
-    const place = button(`Put ${this.amount} on ${betName(this.bet)} (pays ${pays})`, () => void this.place(place), "primary");
-    place.disabled = spinning;
-    const mine = (w?.chips ?? []).filter((c) => c.player === this.tables.selfId);
-    const others = new Set((w?.chips ?? []).map((c) => c.player).filter((p) => p !== this.tables.selfId));
-    const ready = w?.ready.includes(this.tables.selfId);
-    const go = button(ready ? `Waiting for ${others.size} more…` : others.size ? "Spin! (when everyone's ready)" : "Spin!", () => void this.ready(go), "");
-    go.disabled = spinning || !mine.length || !!ready;
-    const row3 = el("div", "tier-row");
-    row3.append(place, go);
-    this.body.append(el("p", "hint", "Bet on:"), row1, row2, el("p", "hint", "Coins:"), amounts, row3, this.msg);
+    const mine = (w?.chips ?? []).filter((c) => c.player === self);
+    const others = players.filter((p) => p.id !== self && !p.ready).length;
+    const ready = w?.ready.includes(self);
+    const go = button(ready ? `Waiting for ${others} more…` : others ? "Spin! (when everyone's ready)" : "Spin!", () => void this.ready(go), "primary");
+    go.disabled = !mine.length || !!ready;
+    this.body.append(amounts, this.felt(w, players, false), el("p", "hint", "Tap the felt to put a chip down: a number pays 35:1, a dozen 2:1, the outside boxes 1:1."), go, this.msg);
     this.foot.textContent = `${todayLine(s)} · Up to ${s?.limits.roulette_round ?? 100} a spin · One zero: every bet returns 97.3%.`;
     this.body.append(this.foot);
   }
 
-  private async place(btn: HTMLButtonElement) {
-    btn.disabled = true;
+  /** The betting layout: tap a box to put a chip on it; everyone's chips show on it in their colours. */
+  private felt(w: WheelState | null, players: TablePlayer[], locked: boolean): HTMLElement {
+    const felt = el("div", locked ? "felt locked" : "felt");
+    const colour = new Map(players.map((p) => [p.id, p.color]));
+    const cell = (b: RouletteBet, label: string, cls: string) => {
+      const c = button(label, () => !locked && void this.place(b), `cell ${cls}`);
+      const on = (w?.chips ?? []).filter((x) => sameBet(x.bet, b));
+      if (on.length) {
+        const stack = el("span", "stack");
+        const seen = new Set<string>();
+        for (const x of on) {
+          if (seen.has(x.player)) continue;
+          seen.add(x.player);
+          const dot = el("span", "chip-dot");
+          dot.style.background = colour.get(x.player) ?? "#fff";
+          stack.append(dot);
+        }
+        c.append(stack);
+        c.title = on.map((x) => `${x.name}: ${x.amount}`).join(", ");
+        c.classList.add("has-chips");
+      }
+      return c;
+    };
+    const numbers = el("div", "felt-numbers");
+    numbers.append(cell({ on: "number", n: 0 }, "0", "zero green"));
+    for (let r = 0; r < 3; r++) {
+      for (let k = 0; k < 12; k++) {
+        const n = k * 3 + (3 - r);
+        numbers.append(cell({ on: "number", n }, String(n), pocketColour(n)));
+      }
+    }
+    const dozens = el("div", "felt-row");
+    for (const n of [1, 2, 3]) dozens.append(cell({ on: "dozen", n }, betName({ on: "dozen", n }), "out"));
+    const outside = el("div", "felt-row");
+    for (const b of [{ on: "low" }, { on: "even" }, { on: "red" }, { on: "black" }, { on: "odd" }, { on: "high" }] as RouletteBet[]) {
+      outside.append(cell(b, b.on === "red" || b.on === "black" ? "◆" : betName(b), `out ${b.on === "red" ? "red" : b.on === "black" ? "black" : ""}`));
+    }
+    felt.append(numbers, dozens, outside);
+    return felt;
+  }
+
+  private async place(b: RouletteBet) {
     try {
-      await this.tables.rouletteBet(this.bet, this.amount);
+      await this.tables.rouletteBet(b, this.amount);
       this.msg.textContent = "";
       await this.casino.load().catch(() => {});
     } catch (e) {
       this.msg.textContent = errText(e);
       this.msg.className = "casino-msg";
     }
-    this.render();
+    if (this.open) this.render();
   }
 
   private async ready(btn: HTMLButtonElement) {

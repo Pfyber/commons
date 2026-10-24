@@ -2169,6 +2169,7 @@ async fn casino_tables_are_played_together_roulette_and_blackjack() {
     let r = view(&a).await;
     assert_eq!(r["roulette"]["phase"], "open");
     let n = r["roulette"]["last"]["number"].as_u64().unwrap() as u8;
+    assert_eq!(r["roulette"]["history"], json!([n]), "on the board");
     let red = commons_sim::casino::is_red(n);
     assert_eq!(coins(&s, &a).await, ca - 10 + if red { 20 } else { 0 });
     let b_won = if n == 17 { 180 } else { 0 } + if red { 100 } else { 0 };
