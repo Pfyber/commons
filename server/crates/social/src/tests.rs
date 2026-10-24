@@ -2300,3 +2300,60 @@ async fn casino_tables_are_played_together_roulette_and_blackjack() {
     crate::tables::refund_unsettled(&s, Some(b.id)).await;
     assert_eq!(coins(&s, &b).await, cb);
 }
+
+#[tokio::test]
+async fn a_club_can_be_founded_straight_into_a_clubhouse() {
+    let Some(s) = state().await else { return };
+    let a = player(&s).await;
+    let tag = &a.name[1..7];
+    grant(&s, &a, 1, 500, "test", &format!("clubhouse:{tag}")).await;
+    let found = |body: Value| {
+        let s = s.clone();
+        let tok = a.token.clone();
+        async move { call(&s, "POST", "/api/social/clubs/found", &tok, Some(body)).await }
+    };
+    let (_, lots) = call(&s, "GET", "/api/social/clubs/lots", &a.token, None).await;
+    let Some(lot) = lots["lots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["club"].is_null())
+        .map(|l| l["lot"].as_str().unwrap().to_string())
+    else {
+        return; // every lot taken by other tests just now
+    };
+    // A Clubhouse needs its lot, and a real one.
+    let base =
+        json!({ "name": format!("Moles {tag}"), "crest": "🦉", "color": "#3f7a8a", "tier": 3 });
+    let (st, r) = found(base.clone()).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("pick_lot"))
+    );
+    let mut bad = base.clone();
+    bad["lot"] = json!("lot:99_99");
+    let (st, _) = found(bad).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    // On a free lot: the founder pays the first week (120), and it stands there.
+    let before = coins(&s, &a).await;
+    let mut ok = base.clone();
+    ok["lot"] = json!(lot);
+    let (st, r) = found(ok).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(coins(&s, &a).await, before - 120);
+    let (_, lots) = call(&s, "GET", "/api/social/clubs/lots", &a.token, None).await;
+    let here = lots["lots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["lot"] == lot.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(here["club"]["name"], format!("Moles {tag}"));
+    // (Free the lot again for the other tests.)
+    sqlx::query("UPDATE leases SET state = 'ended' WHERE plot = $1")
+        .bind(&lot)
+        .execute(&s.db)
+        .await
+        .unwrap();
+}

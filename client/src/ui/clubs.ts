@@ -86,7 +86,8 @@ export class ClubsPanel extends Panel {
   private msg = el("p", "error");
   private loading = 0;
   /** The founding form's choices, kept while you look around. */
-  private form = { name: "", crest: "", color: "" };
+  private form = { name: "", crest: "", color: "", tier: 0, lot: "" };
+  private lotsAsked = false;
 
   constructor(
     private clubs: Clubs,
@@ -241,9 +242,53 @@ export class ClubsPanel extends Panel {
         button(`Found a club${tier ? ` (first week's rent: ${tier.rent} coins)` : ""}`, () => this.go({ kind: "found" }), c.mine.length ? "small" : "primary"),
       );
     } else this.body.append(el("p", "hint", `You're in ${c.max} clubs, the most anyone can be in.`));
+    this.body.append(this.clubhousePitch());
     const more = el("div", "tier-row");
     more.append(button("📅 What's on", () => this.showEvents(), "small"), button("🏆 Clubs of the week", () => this.showLeaderboard(), "small"), button("Club directory", () => this.showDirectory(), "small"));
     this.body.append(more);
+  }
+
+  /** "🏠 Clubhouses": what they are, how many lots are free, and the way to one. */
+  private clubhousePitch(): HTMLElement {
+    const c = this.clubs;
+    const box = el("div", "clubhouse-pitch");
+    const house = c.tiers.find((t) => t.lot);
+    if (!house) return box;
+    if (!c.lots.length && !this.lotsAsked) {
+      this.lotsAsked = true;
+      void c
+        .loadLots()
+        .then(() => this.open && this.view.kind === "list" && this.render())
+        .catch(() => {});
+    }
+    const free = c.lots.filter((l) => !l.club).length;
+    box.append(
+      el("h3", "", "🏠 Clubhouses"),
+      el(
+        "p",
+        "hint",
+        `A ${house.name} is your club's own building on one of the city's club lots, its door leading into your room: up to ${house.members} members, ${house.rent} coins a week, and everyone walking past sees your banner.${c.lots.length ? ` ${free} of ${c.lots.length} lots free.` : ""}`,
+      ),
+    );
+    const row = el("div", "tier-row");
+    for (const club of c.mine.filter((m) => m.role === "owner" && !m.room?.plot?.startsWith("lot:"))) {
+      row.append(
+        button(`Move ${club.crest} ${club.name} into one`, () => {
+          this.showClub(club.id);
+          this.pickLot(club.id, house);
+        }, "small primary-sm"),
+      );
+    }
+    if (c.mine.length < c.max) {
+      row.append(
+        button("Found a club with a clubhouse", () => {
+          this.form.tier = house.tier;
+          this.go({ kind: "found" });
+        }, c.mine.length ? "small" : "small primary-sm"),
+      );
+    }
+    if (row.childElementCount) box.append(row);
+    return box;
   }
 
   private renderFound() {
@@ -251,15 +296,40 @@ export class ClubsPanel extends Panel {
     const f = this.form;
     if (!f.crest) f.crest = c.crests[Math.floor(Math.random() * c.crests.length)] ?? "🛡";
     if (!f.color) f.color = c.colors[Math.floor(Math.random() * c.colors.length)] ?? "#3f7a8a";
-    const tier = c.tiers[0];
+    const tier = c.tiers.find((t) => t.tier === f.tier) ?? c.tiers[0];
     this.titleEl.textContent = "🛡 Found a club";
     this.body.append(
       el(
         "p",
         "",
-        `Clubs are rented, never bought: founding one rents a ${tier?.name ?? "club room"} at the Club Hall for its members (up to ${tier?.members ?? 12}). You pay the first week, ${tier?.rent ?? "?"} coins; after that the club's treasury pays, from what members chip in.`,
+        `Clubs are rented, never bought. You pay the first week, ${tier?.rent ?? "?"} coins; after that the club's treasury pays, from what members chip in.`,
       ),
     );
+    // Where it starts: a room upstairs at the Club Hall, or a Clubhouse in the city.
+    const where = el("div", "rows");
+    for (const t of c.tiers.filter((t) => t === c.tiers[0] || t.lot)) {
+      const label = t.lot
+        ? `🏠 A ${t.name}: its own building on a club lot in the city · up to ${t.members} members · ${t.rent}/week`
+        : `🚪 A ${t.name} upstairs at the Club Hall · up to ${t.members} members · ${t.rent}/week`;
+      where.append(button(label, () => ((f.tier = t.tier), this.render()), t === tier ? "small on" : "small"));
+    }
+    this.body.append(el("h3", "", "Where"), where);
+    if (tier?.lot) {
+      if (!c.lots.length) void c.loadLots().then(() => this.open && this.render()).catch(() => {});
+      const free = c.lots.filter((l) => !l.club);
+      if (!free.some((l) => l.lot === f.lot)) f.lot = "";
+      const lots = el("div", "rows");
+      if (!free.length) lots.append(el("p", "hint", c.lots.length ? "Every club lot is taken just now: start in a club room, and move when one's free." : "Looking at the lots…"));
+      for (const l of free) {
+        const row = el("div", "row");
+        row.append(
+          button(`${l.lot === f.lot ? "✓ " : ""}${l.name}`, () => ((f.lot = l.lot), this.render()), l.lot === f.lot ? "small on" : "small"),
+          button("Show me", () => (this.hide(), this.host.walkToSpot(l.lot)), "small"),
+        );
+        lots.append(row);
+      }
+      this.body.append(el("p", "hint", "Pick its lot:"), lots);
+    }
     const preview = el("div", "club-preview");
     const showPreview = () => preview.replaceChildren(crestEl(f, true), el("strong", "", f.name.trim() || "Your club"));
     showPreview();
@@ -293,9 +363,9 @@ export class ClubsPanel extends Panel {
     const go = button(`Found it (${cost} coins)`, () => {
       this.msg.textContent = "";
       go.disabled = true;
-      c.found(f.name.trim(), f.crest, f.color)
+      c.found(f.name.trim(), f.crest, f.color, tier?.tier, tier?.lot ? f.lot : undefined)
         .then((r) => {
-          this.form = { name: "", crest: "", color: "" };
+          this.form = { name: "", crest: "", color: "", tier: 0, lot: "" };
           void this.eco.load().catch(() => {});
           this.host.toast(`🛡 ${r.name} is founded, and its room is yours for a week. Invite your friends!`);
           this.showClub(r.id);
@@ -308,6 +378,9 @@ export class ClubsPanel extends Panel {
     if (this.eco.coins < cost) {
       go.disabled = true;
       this.msg.textContent = `You need ${cost} coins for the first week's rent.`;
+    } else if (tier?.lot && !f.lot) {
+      go.disabled = true;
+      this.msg.textContent = "Pick a lot for the clubhouse.";
     }
     this.body.append(preview, name, el("h3", "", "Crest"), crests, el("h3", "", "Colour"), colors, go, button("Back", () => this.showList(), "small"));
     window.setTimeout(() => name.focus(), 0);

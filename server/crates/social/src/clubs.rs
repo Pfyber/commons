@@ -466,10 +466,16 @@ struct FoundReq {
     name: String,
     crest: String,
     color: String,
+    /// Which room to start in (default: a club room upstairs); a Clubhouse
+    /// needs its club `lot`.
+    #[serde(default)]
+    tier: Option<i16>,
+    #[serde(default)]
+    lot: Option<String>,
 }
 
-/// Founds a club: names it, and rents its first week in a club room, paid by
-/// the founder into the new treasury.
+/// Founds a club: names it, and rents its first week in a club room (or a
+/// Clubhouse on a club lot), paid by the founder into the new treasury.
 async fn found(
     State(state): S,
     headers: HeaderMap,
@@ -508,8 +514,10 @@ async fn found(
         ));
     }
     let tier = RENT
-        .tier(ROOM, 1)
-        .ok_or_else(|| ApiError::bad_request("bad_tier", "No club rooms to rent."))?;
+        .tier(ROOM, req.tier.unwrap_or(1))
+        .ok_or_else(|| ApiError::bad_request("bad_tier", "There's no such room to rent."))?;
+    // A Clubhouse: a real lot, checked before anything's made.
+    plot_for(Uuid::nil(), tier, req.lot.as_deref())?;
     let mut tx = state.db.begin().await.map_err(db_err)?;
     let id: Uuid = match sqlx::query_scalar(
         "INSERT INTO clubs (name, crest, color, founded_by) VALUES ($1, $2, $3, $4) RETURNING id",
@@ -555,16 +563,20 @@ async fn found(
             conflict(
                 "not_enough_coins",
                 format!(
-                    "A club room is {} coins a week: not enough coins yet.",
-                    tier.rent
+                    "A {} is {} coins a week: not enough coins yet.",
+                    tier.name, tier.rent
                 ),
             )
         } else {
             e
         }
     })?;
-    open_room(&mut tx, &state, id, me, 1, &format!("clubroom:{id}")).await?;
+    let plot = plot_for(id, tier, req.lot.as_deref())?;
+    open_room(&mut tx, &state, id, me, tier.tier, &plot).await?;
     tx.commit().await.map_err(db_err)?;
+    if tier.lot {
+        tell_lots(&state);
+    }
     Ok(Json(json!({ "id": id.to_string(), "name": name })))
 }
 

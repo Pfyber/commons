@@ -253,8 +253,11 @@ export class Clubs {
     return r;
   }
 
-  found(name: string, crest: string, color: string) {
-    return this.post<{ id: string; name: string }>("/api/social/clubs/found", { name, crest, color });
+  /** Founds a club in a room of `tier` (default: a club room); a Clubhouse needs its `lot`. */
+  async found(name: string, crest: string, color: string, tier?: number, lot?: string) {
+    const r = await this.post<{ id: string; name: string }>("/api/social/clubs/found", { name, crest, color, ...(tier ? { tier } : {}), ...(lot ? { lot } : {}) });
+    if (lot) await this.loadLots().catch(() => {});
+    return r;
   }
 
   invite(club: string, friend: string) {
