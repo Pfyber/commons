@@ -515,25 +515,76 @@ body {
 }
 
 .chess-board .sq {
+  position: relative;
   border: 0;
   padding: 0;
   min-width: 0;
   min-height: 0;
-  font-size: clamp(20px, 7vw, 30px);
+  font-size: clamp(22px, 7.5vw, 32px);
   line-height: 1;
   display: grid;
   place-items: center;
   cursor: default;
   color: #2b2a24;
-  font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", system-ui, sans-serif;
+  font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", system-ui, sans-serif;
 }
 
 .chess-board .light {
-  background: #efe3c8;
+  background: #f0d9b5;
 }
 
 .chess-board .dark {
-  background: #b58863;
+  background: #b07a52;
+}
+
+/* White: cream with a dark outline and a soft shadow; black: near-black with a light rim. */
+.chess-board .sq.w {
+  color: #fffaf0;
+  text-shadow:
+    -1px -1px 0 #2b2723,
+    1px -1px 0 #2b2723,
+    -1px 1px 0 #2b2723,
+    1px 1px 0 #2b2723,
+    0 2px 0 rgba(43, 39, 35, 0.45);
+}
+
+.chess-board .sq.b {
+  color: #2b2723;
+  text-shadow:
+    -1px -1px 0 rgba(255, 248, 227, 0.55),
+    1px -1px 0 rgba(255, 248, 227, 0.55),
+    0 2px 0 rgba(43, 39, 35, 0.35);
+}
+
+/* Coordinates in the corners of the edge squares. */
+.chess-board .sq[data-file]::after,
+.chess-board .sq[data-rank]::before {
+  position: absolute;
+  font: 700 9px/1 var(--font, sans-serif);
+  text-shadow: none;
+  pointer-events: none;
+}
+
+.chess-board .sq[data-file]::after {
+  content: attr(data-file);
+  right: 2px;
+  bottom: 2px;
+}
+
+.chess-board .sq[data-rank]::before {
+  content: attr(data-rank);
+  left: 2px;
+  top: 2px;
+}
+
+.chess-board .light[data-file]::after,
+.chess-board .light[data-rank]::before {
+  color: #b07a52;
+}
+
+.chess-board .dark[data-file]::after,
+.chess-board .dark[data-rank]::before {
+  color: #f0d9b5;
 }
 
 .chess-board .last {
@@ -2292,8 +2343,8 @@ img.px-icon,
 
 .chess-board {
   border: 0;
-  box-shadow: var(--frame);
-  margin: var(--px);
+  box-shadow: var(--frame), 0 0 0 6px #6e4b30, 0 0 0 8px #3b3a2e;
+  margin: 10px;
 }
 
 .reel .bar {

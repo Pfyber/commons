@@ -150,7 +150,15 @@ export class ChessPanel {
         if (lastSquares.includes(sq)) cell.classList.add("last");
         if (sq === this.selected) cell.classList.add("sel");
         if (targets.has(sq)) cell.classList.add("target");
-        cell.textContent = piece ? GLYPH[piece] : "";
+        // Solid shapes for both sides, coloured by side (the hollow white
+        // glyphs were thin outlines, hard to see); text style, not emoji.
+        if (piece) {
+          cell.textContent = `${GLYPH[piece.toLowerCase()]}︎`;
+          cell.classList.add(piece === piece.toUpperCase() ? "w" : "b");
+        }
+        // Coordinates along the near edges.
+        if (r === 7) cell.dataset.file = "abcdefgh"[file];
+        if (f === 0) cell.dataset.rank = String(rank + 1);
         cell.setAttribute("aria-label", `${sq}${piece ? " " + piece : ""}`);
         const mine = this.myTurn() && legalFrom.has(sq);
         if (mine) cell.classList.add("movable");
