@@ -5884,14 +5884,90 @@ body.pb-playing canvas {
   color: color-mix(in srgb, var(--tc) 75%, #000);
 }
 .pb-slot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
   font-size: 12px;
   padding: 2px 4px;
   background: rgba(255, 255, 255, 0.6);
+}
+.pb-slot-name {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .pb-slot.open {
+  color: var(--muted);
+}
+.pb-slot.bot .pb-slot-name {
+  font-style: italic;
+}
+.pb-bot-btn {
+  flex: none;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 18px;
+}
+.pb-mode {
+  margin: 0;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--ink);
+}
+.pb-mode.warn {
+  color: #c0392b;
+}
+
+/* Bot difficulty (the arena, the Splat Yard): Easy · Medium · Hard. */
+.bot-level {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bot-level-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bot-level-title {
+  font-size: 12px;
+  font-weight: bold;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.bot-level-btn {
+  flex: 1;
+  padding: 3px 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+.bot-level-btn.on {
+  opacity: 1;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.bot-level-btn.l0.on {
+  background: #3fa45a;
+}
+.bot-level-btn.l1.on {
+  background: #d99a1e;
+}
+.bot-level-btn.l2.on {
+  background: #c8323f;
+}
+.bot-level-btn:disabled {
+  cursor: default;
+}
+.bot-level-btn:disabled:not(.on) {
+  opacity: 0.4;
+}
+.bot-level-blurb {
+  font-size: 11px;
   color: var(--muted);
   text-align: center;
 }
@@ -5925,6 +6001,22 @@ body.pb-playing canvas {
   place-items: center;
   background: rgba(20, 14, 30, 0.45);
   pointer-events: none;
+}
+/* The arena's champion: a banner up top, under the crowns, the parade to be watched below it. */
+.pb-results.ar-results-low {
+  inset: 120px auto auto 16px;
+  display: block;
+  background: none;
+}
+.pb-results.ar-results-low .pb-results-card {
+  padding: 8px 14px;
+}
+.pb-results.ar-results-low .pb-results-card h2 {
+  font-size: 22px;
+}
+.pb-results.ar-results-low .pb-results-score {
+  margin: 2px 0 6px;
+  font-size: 13px;
 }
 .pb-results-card {
   min-width: min(360px, calc(100vw - 32px));
@@ -6140,5 +6232,395 @@ body.pb-touch-mode .pb-feed {
   }
   .pb-help {
     display: none;
+  }
+}
+
+/* ---- The arena: Crown of the Colosseum (activities/arena.ts) ------------------ */
+
+.ar-hud {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  color: #fff6e0;
+  text-shadow: 0 2px 0 rgba(20, 12, 28, 0.7);
+}
+.ar-hud[hidden],
+.ar-lobby[hidden],
+.ar-self[hidden],
+.ar-hint[hidden],
+.ar-touch[hidden],
+.ar-btn[hidden],
+.ar-yield[hidden] {
+  display: none !important;
+}
+
+/* The crowns along the top: each gladiator, their colour, crowns and health. */
+.ar-crowns {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.ar-round {
+  padding: 2px 12px;
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: #ffe14f;
+  background: rgba(30, 18, 10, 0.88);
+  box-shadow: var(--frame-thin);
+}
+.ar-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.ar-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 92px;
+  padding: 4px 8px 5px;
+  background: rgba(30, 18, 10, 0.88);
+  box-shadow:
+    var(--frame),
+    inset 0 3px 0 var(--c);
+}
+.ar-chip b {
+  font-size: 12px;
+  color: var(--c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+.ar-chip.me b {
+  text-decoration: underline;
+}
+.ar-chip.down {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+.ar-cr i {
+  font-style: normal;
+  font-size: 13px;
+  color: #4a3a2a;
+}
+.ar-cr i.on {
+  color: #ffd23f;
+  text-shadow: 0 0 6px #ffd23f;
+}
+.ar-hp {
+  display: block;
+  height: 4px;
+  background: #3a3046;
+}
+.ar-hp i {
+  display: block;
+  height: 100%;
+  background: var(--c);
+}
+
+.ar-feed {
+  top: 110px;
+}
+
+/* Your bars, bottom middle: health, stamina, rage (and what you hold). */
+.ar-self {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 220px auto auto;
+  grid-auto-flow: dense;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(30, 18, 10, 0.88);
+  box-shadow: var(--frame), var(--drop);
+}
+.ar-bar {
+  position: relative;
+  grid-column: 1;
+  height: 10px;
+  background: #3a3046;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.ar-bar i {
+  display: block;
+  height: 100%;
+  transition: width 0.12s;
+}
+.ar-bar span {
+  position: absolute;
+  inset: 0;
+  font-size: 9px;
+  line-height: 10px;
+  text-align: center;
+  letter-spacing: 1px;
+}
+.ar-bar.hp {
+  height: 16px;
+}
+.ar-bar.hp i {
+  background: linear-gradient(#ff7a8a, #e8384f);
+}
+.ar-bar.hp span {
+  font-size: 12px;
+  line-height: 16px;
+}
+.ar-bar.st {
+  height: 6px;
+}
+.ar-bar.st i {
+  background: #7ee05a;
+}
+.ar-bar.st.low i {
+  background: #ffd23f;
+}
+.ar-bar.st.winded {
+  height: 10px;
+  animation: pb-blink 0.4s steps(2) infinite;
+}
+.ar-bar.st.winded i {
+  background: #9fd3ee;
+}
+.ar-bar.rage i {
+  background: linear-gradient(90deg, #8a4fff, #c77dff);
+}
+.ar-bar.rage.full i {
+  background: linear-gradient(90deg, #ffd23f, #ff6a3f, #c77dff);
+  animation: ar-glow 0.6s ease-in-out infinite alternate;
+}
+@keyframes ar-glow {
+  to {
+    filter: brightness(1.5);
+  }
+}
+.ar-hold {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  font-size: 26px;
+  text-align: center;
+}
+.ar-hold small {
+  display: block;
+  font-size: 10px;
+}
+.ar-fury {
+  grid-column: 3;
+  grid-row: 1 / span 3;
+  font-size: 12px;
+  color: #ff9a3f;
+}
+.ar-hint {
+  position: absolute;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.ar-yield {
+  position: absolute;
+  right: 12px;
+  bottom: 214px;
+  pointer-events: auto;
+}
+
+/* By touch: big round buttons on the right, under the right thumb. */
+.ar-touch {
+  position: absolute;
+  right: 14px;
+  bottom: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  grid-template-areas:
+    "special throw"
+    "block roll"
+    "attack attack";
+  gap: 10px;
+  justify-items: center;
+  align-items: end;
+  pointer-events: auto;
+}
+.ar-btn {
+  width: 62px;
+  height: 62px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  font-size: 26px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(30, 18, 10, 0.75);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.4),
+    0 4px 0 rgba(0, 0, 0, 0.45);
+  touch-action: none;
+  user-select: none;
+}
+.ar-btn.attack {
+  grid-area: attack;
+  width: 92px;
+  height: 92px;
+  font-size: 40px;
+  background: rgba(150, 40, 40, 0.8);
+}
+.ar-btn.block {
+  grid-area: block;
+}
+.ar-btn.roll {
+  grid-area: roll;
+}
+.ar-btn.throw {
+  grid-area: throw;
+}
+.ar-btn.special {
+  grid-area: special;
+  background: rgba(110, 50, 170, 0.85);
+  animation: ar-glow 0.6s ease-in-out infinite alternate;
+}
+.ar-btn.held {
+  transform: scale(0.9);
+  box-shadow:
+    0 0 0 4px #ffe14f,
+    0 1px 0 rgba(0, 0, 0, 0.45);
+}
+.ar-btn.attack.charging {
+  box-shadow:
+    0 0 0 4px #ff9a3f,
+    0 0 22px #ff9a3f;
+}
+body.pb-touch-mode .ar-self {
+  bottom: auto;
+  top: 10px;
+  left: 10px;
+  transform: scale(0.75);
+  transform-origin: top left;
+}
+body.pb-touch-mode .ar-yield {
+  bottom: auto;
+  top: 12px;
+  right: 12px;
+}
+
+/* The sign's card: the four places, join, fight. */
+.ar-lobby {
+  position: fixed;
+  top: 70px;
+  right: 12px;
+  z-index: 6;
+  width: min(340px, calc(100vw - 24px));
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--frame), var(--drop);
+}
+.ar-lobby-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ar-close {
+  padding: 2px 8px;
+}
+.ar-lobby-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ar-places {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ar-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--c) 14%, var(--paper));
+  box-shadow: inset 3px 0 0 var(--c);
+}
+.ar-place.open {
+  color: var(--muted);
+}
+.ar-place.me {
+  font-weight: bold;
+}
+.ar-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--c);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+.ar-place-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ar-place.bot {
+  font-style: italic;
+}
+.ar-bot-btn {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.ar-mode {
+  margin: 0;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--ink);
+}
+.ar-place-crowns {
+  margin-left: auto;
+  color: #c99a1a;
+}
+.ar-lobby-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ar-lobby-actions .primary {
+  flex: 1;
+}
+.ar-how {
+  margin: 0;
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .ar-chip {
+    min-width: 70px;
+    padding: 3px 5px;
+  }
+  .ar-chip b {
+    max-width: 70px;
+    font-size: 11px;
+  }
+  .ar-self {
+    grid-template-columns: 150px auto auto;
+  }
+  .ar-lobby {
+    top: auto;
+    bottom: 64px;
+    right: 50%;
+    transform: translateX(50%);
+    width: calc(100vw - 20px);
   }
 }

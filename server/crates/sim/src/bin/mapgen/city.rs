@@ -163,6 +163,11 @@ pub fn city() -> MapFile {
     });
     b.rect(0, 0, size, size, "road");
 
+    // Each block's name by where it is (for the Market's signposts).
+    let names: std::collections::HashMap<(i32, i32), String> = city
+        .blocks()
+        .map(|(id, t)| ((id.bx as i32, id.by as i32), t.name.clone()))
+        .collect();
     for (id, t) in city.blocks() {
         let o = geo.block_origin(id);
         let mut k = Blk {
@@ -173,7 +178,13 @@ pub fn city() -> MapFile {
         };
         sidewalk(&mut k);
         match t.key.as_str() {
-            "market" => market(&mut k),
+            "market" => {
+                market(&mut k);
+                let (bx, by) = (id.bx as i32, id.by as i32);
+                market_extras(&mut k, &|dx, dy| {
+                    names.get(&(bx + dx, by + dy)).cloned().unwrap_or_default()
+                });
+            }
             "park" => park(&mut k),
             "pond" => pond(&mut k),
             "lake" => lake(&mut k),
@@ -184,6 +195,7 @@ pub fn city() -> MapFile {
             "home" => homes(&mut k, id),
             "fairground" => fairground(&mut k),
             "arena" => arena(&mut k),
+            "arcade" => fun_corner(&mut k),
             _ => landmark(&mut k, &t.key, &t.name),
         }
         // Where bugs and mushrooms turn up in the green blocks (ADR 0019).
@@ -501,7 +513,7 @@ fn market(k: &mut Blk) {
         37,
         1,
         1,
-        "Welcome to Commons! Here: the Commons Mall, north side · North: the Park with the Founders' Grove and chess · South: the Pond and its pier · West: the Library and the Town Hall · East: the Cinema and the Casino",
+        "Welcome to Commons! Here: the Commons Mall, north side · All round the Market: the Pond (north), the Arena, the Splat Yard paintball, the Arcade, the Café with pool, Bowling, the Fairground and the Town Hall · Further out: the Park, the Library, the Museum and the Cinema",
     );
     // The corners: willows over round flowerbeds (north), fairy rings of
     // mushrooms (south).
@@ -1117,8 +1129,13 @@ fn fairground(k: &mut Blk) {
 /// and the sand in the middle, where the fighters face off along the middle
 /// row. The sign by the north gate is where you step up to fight.
 fn arena(k: &mut Blk) {
-    k.lawn();
-    let (ax, ay, aw, ah) = (13u16, 14u16, 22u16, 15u16);
+    // The whole block's desert: sand, a paved way to each gate.
+    for y in 2..N - 2 {
+        for x in 2..N - 2 {
+            k.ground(x, y, "sand");
+        }
+    }
+    let (ax, ay, aw, ah) = (11u16, 12u16, 26u16, 17u16);
     k.rect(ax, ay, aw, ah, "plaza");
     k.rect(ax + 2, ay + 2, aw - 4, ah - 4, "sand");
     let gate = ax + aw / 2 - 1;
@@ -1134,21 +1151,310 @@ fn arena(k: &mut Blk) {
     }
     // The ring itself (invisible: it marks where the fight is).
     k.marker("arena", ax, ay, aw, ah, Some("Arena"));
+    // Two stone pillars on the sand, to dodge round (or be slammed into),
+    // and four spike plates that rise in turn (see commons_sim::arena). The
+    // sand inside is 24×15: all of it mirrored, side to side and top to bottom.
+    let (sx, sy) = (ax + 1, ay + 1);
+    for (px, py) in [(5u16, 7u16), (17, 7)] {
+        k.object("arena_pillar", sx + px, sy + py, 2, 2, "Pillar");
+    }
+    for (px, py) in [(11u16, 1u16), (11, 12), (1, 6), (21, 6)] {
+        k.marker("arena_spikes", sx + px, sy + py, 2, 2, None);
+    }
     k.object("arena_sign", gate + 3, ay - 2, 2, 1, "Arena");
     k.spot("arena", gate, ay - 1);
-    // Paths in at both gates.
-    k.rect(gate, 2, 2, ay - 2, "path");
-    k.rect(gate, ay + ah, 2, N - 2 - (ay + ah), "path");
+    // Flagstone ways in at both gates.
+    k.rect(gate, 2, 2, ay - 2, "plaza");
+    k.rect(gate, ay + ah, 2, N - 2 - (ay + ah), "plaza");
+    // The grand south entrance: an archway over the way in (its two piers
+    // solid, the way under it open), a red carpet out from it, and on a dais
+    // beside the carpet Caesar with two legionaries: talk to Caesar to fight.
+    k.marker("arena_gate", gate - 3, ay + ah + 1, 8, 2, Some("The Arena"));
+    for (px, py) in [
+        (gate - 3, ay + ah + 1),
+        (gate - 2, ay + ah + 1),
+        (gate + 3, ay + ah + 1),
+        (gate + 4, ay + ah + 1),
+    ] {
+        for dy in 0..2 {
+            let i = k.b.i(k.ox + px, k.oy + py + dy);
+            k.b.solid[i] = true;
+        }
+    }
+    k.marker("arena_carpet", gate - 1, ay + ah + 3, 4, 7, None);
+    k.object("arena_court", gate + 5, ay + ah + 3, 5, 2, "Caesar");
+    k.spot("caesar", gate + 7, ay + ah + 5);
     k.object(
         "signpost",
-        gate + 3,
-        ay + ah + 1,
+        gate - 4,
+        ay + ah + 4,
         1,
         1,
-        "Arena: step up at the sign by the north gate to fight the bot or another player",
+        "The Arena: talk to Caesar (on his dais by the red carpet) to join the games. Duel, three-way or a four-gladiator brawl; bots if you like",
     );
-    k.scatter(3, 3, ax - 1, N - 3, 6, &["tree", "bush"]);
-    k.scatter(ax + aw + 1, 3, N - 3, N - 3, 6, &["tree", "bush"]);
+    // An oasis in the north-west corner: a pool, palms round it, reeds.
+    for y in 3..9u16 {
+        for x in 3..10u16 {
+            let (dx, dy) = ((x as f32 - 6.0) / 3.2, (y as f32 - 5.8) / 2.6);
+            let d = dx * dx + dy * dy;
+            if d < 1.0 {
+                k.ground(x, y, "water");
+            } else if d < 1.6 {
+                k.ground(x, y, "grass");
+            }
+        }
+    }
+    for (x, y) in [(2u16, 4u16), (9, 3), (10, 7), (3, 9), (8, 9)] {
+        k.decor(x, y, "palm");
+    }
+    for (x, y) in [(3u16, 7u16), (9, 5)] {
+        k.decor(x, y, "reeds");
+    }
+    // The desert's bits and pieces, on open sand, clear of the ways through.
+    let open = |k: &Blk, x: u16, y: u16| -> bool {
+        let i = k.b.i(k.ox + x, k.oy + y);
+        k.b.decor[i] == 0 && !k.b.solid[i] && [g("sand"), g("soil")].contains(&k.b.ground[i])
+    };
+    let clear_of_ways = |x: u16, y: u16| {
+        !(gate.saturating_sub(1)..=gate + 2).contains(&x)
+            && !(ax.saturating_sub(1)..=ax + aw).contains(&x)
+            || y < ay.saturating_sub(3)
+            || y > ay + ah + 1
+    };
+    for y in 3..N - 3 {
+        for x in 3..N - 3 {
+            if !open(k, x, y) || !clear_of_ways(x, y) {
+                continue;
+            }
+            // Nothing right against the arena's walls.
+            if x + 1 >= ax && x <= ax + aw && y + 1 >= ay && y <= ay + ah {
+                continue;
+            }
+            let h = k.hash(x, y, 41) % 1000;
+            let kind = match h {
+                0..=18 => "cactus",
+                19..=42 => "cactus_small",
+                43..=80 => "dry_shrub",
+                81..=89 => "bones",
+                90..=99 => "rock",
+                100..=107 => "palm",
+                108..=112 => "amphora",
+                _ => continue,
+            };
+            k.decor(x, y, kind);
+        }
+    }
+    // Clay pots and torches by the north gate, either side.
+    for (x, y) in [(gate - 2, ay - 2), (gate + 3, ay - 3)] {
+        k.decor(x, y, "amphora");
+    }
+    for (x, y) in [
+        (gate - 1, ay - 1),
+        (gate + 2, ay - 1),
+        (gate - 1, ay + ah),
+        (gate + 2, ay + ah),
+    ] {
+        k.decor(x, y, "lantern");
+    }
+    // A palm or two by each gate's way, for shade.
+    for (x, y) in [
+        (gate - 3, 4),
+        (gate + 4, 7),
+        (gate - 3, ay + ah + 3),
+        (gate + 4, ay + ah + 6),
+    ] {
+        let i = k.b.i(k.ox + x, k.oy + y);
+        if k.b.decor[i] == 0 && !k.b.solid[i] {
+            k.decor(x, y, "palm");
+        }
+    }
+}
+
+/// The Arcade and the Splat Yard side by side, a promenade in front of
+/// both: neon and paint. Outside the arcade, the word games and benches;
+/// outside the yard, its crates, hay, drums and tyres (splattered); snack
+/// carts and lanterns between; and on the lawn behind, a little obstacle
+/// course to run round.
+fn fun_corner(k: &mut Blk) {
+    k.lawn();
+    k.rect(2, 16, 44, 10, "plaza");
+    // The way down to the street, flower beds along the promenade's edge.
+    k.rect(22, 26, 4, 20, "path");
+    for x in [4u16, 9, 14, 30, 35, 40] {
+        k.rect(x, 26, 3, 1, "flowers");
+    }
+    // Paint on the paving, in the teams' colours (the Splat Yard's side), and
+    // a glowing pad in the middle.
+    for (x, y, team) in [
+        (29u16, 20u16, "blue"),
+        (33, 22, "red"),
+        (38, 20, "blue"),
+        (42, 22, "red"),
+        (31, 24, "red"),
+        (36, 24, "blue"),
+    ] {
+        k.marker("pb_spawn", x, y, 1, 1, Some(team));
+    }
+    k.marker("pb_pad", 23, 21, 2, 2, None);
+    k.object("arcade_hall", 3, 7, 16, 9, "Arcade");
+    k.spot("door:arcade", 11, 16);
+    k.spot("arcade_hall", 11, 17);
+    k.object("paintball_hall", 25, 6, 20, 10, "Splat Yard");
+    k.spot("door:paintball", 35, 16);
+    k.spot("paintball", 35, 17);
+    // The arcade's side: the word games, benches, signs.
+    k.object("arcade", 5, 18, 3, 1, "");
+    k.bench(14, 18, 3);
+    k.bench(5, 23, 3);
+    k.object(
+        "signpost",
+        3,
+        17,
+        1,
+        1,
+        "Arcade: pong, light cycles, racers, a dance-off and more inside; word games out here",
+    );
+    // The yard's side: its kit piled up, splattered.
+    k.object("pb_crate", 40, 18, 1, 1, "");
+    k.object("pb_crate", 41, 18, 1, 1, "");
+    k.object("pb_crate", 41, 17, 1, 1, "");
+    k.object("pb_hay", 43, 19, 2, 1, "");
+    k.object("pb_drum", 28, 18, 1, 1, "");
+    k.object("pb_tires", 44, 23, 1, 1, "");
+    k.object("pb_tires", 43, 23, 1, 1, "");
+    k.object(
+        "signpost",
+        45,
+        17,
+        1,
+        1,
+        "Splat Yard: paintball inside, Blue against Red, three a side. First to ten!",
+    );
+    // Snack carts in the middle, lanterns along the front.
+    k.object("market_cart", 20, 18, 2, 1, "Snacks");
+    k.object("market_cart", 26, 23, 2, 1, "Snacks");
+    for x in (4..45u16).step_by(5) {
+        k.decor(x, 25, "lantern");
+    }
+    // Behind, on the lawn: a little course to run round (bunkers, a hay
+    // wall, tyres, a hedge to hide in), and benches to watch from.
+    for (kind, x, y, w, h) in [
+        ("pb_snake", 6u16, 30u16, 4u16, 1u16),
+        ("pb_x", 12, 33, 2, 2),
+        ("pb_hay", 7, 36, 2, 1),
+        ("pb_tires", 15, 30, 1, 1),
+        ("pb_tires", 16, 30, 1, 1),
+        ("pb_drum", 10, 39, 1, 1),
+        ("pb_hedge", 15, 37, 2, 2),
+        ("pb_snake", 32, 31, 1, 4),
+        ("pb_crate", 36, 34, 1, 1),
+        ("pb_crate", 37, 34, 1, 1),
+        ("pb_hay", 39, 38, 2, 1),
+        ("pb_x", 34, 39, 2, 2),
+    ] {
+        k.object(kind, x, y, w, h, "");
+    }
+    k.bench(18, 42, 3);
+    k.bench(28, 42, 3);
+    k.scatter(2, 27, N - 2, N - 3, 9, &["tree", "bush", "bush"]);
+}
+
+/// Round the Market, so there's always something going on and you can
+/// find the fun next door: signposts at each way out naming what's that way
+/// (the blocks all round the Market are where the games are), lanterns
+/// along the garden path that glow after dark, and picnic blankets on the
+/// lawn to sit on.
+fn market_extras(k: &mut Blk, name: &dyn Fn(i32, i32) -> String) {
+    const C: f32 = 23.5;
+    let near_free = |k: &Blk, x: u16, y: u16| -> Option<(u16, u16)> {
+        for r in 0..4i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx > 1
+                        && ny > 1
+                        && nx < N as i32 - 2
+                        && ny < N as i32 - 2
+                        && k.free(nx as u16, ny as u16)
+                    {
+                        return Some((nx as u16, ny as u16));
+                    }
+                }
+            }
+        }
+        None
+    };
+    let signs: [(u16, u16, String); 4] = [
+        (
+            23,
+            3,
+            format!(
+                "North: {}  ·  NW: {}  ·  NE: {}",
+                name(0, -1),
+                name(-1, -1),
+                name(1, -1)
+            ),
+        ),
+        (
+            4,
+            19,
+            format!(
+                "West: {}  ·  NW: {}  ·  SW: {}",
+                name(-1, 0),
+                name(-1, -1),
+                name(-1, 1)
+            ),
+        ),
+        (
+            43,
+            19,
+            format!(
+                "East: {}  ·  NE: {}  ·  SE: {}",
+                name(1, 0),
+                name(1, -1),
+                name(1, 1)
+            ),
+        ),
+        (
+            28,
+            44,
+            format!(
+                "South: {}  ·  SW: {}  ·  SE: {}",
+                name(0, 1),
+                name(-1, 1),
+                name(1, 1)
+            ),
+        ),
+    ];
+    for (x, y, text) in signs {
+        if let Some((sx, sy)) = near_free(k, x, y) {
+            k.object("signpost", sx, sy, 1, 1, &text);
+        }
+    }
+    // Lanterns round the garden path (inside it, or else just outside).
+    for i in 0..16 {
+        let a = i as f32 / 16.0 * std::f32::consts::TAU + 0.2;
+        for r in [17.7f32, 20.6] {
+            let (x, y) = (
+                (C + a.cos() * r).round() as u16,
+                (C + a.sin() * r).round() as u16,
+            );
+            if k.free(x, y) {
+                k.decor(x, y, "lantern");
+                break;
+            }
+        }
+    }
+    // Picnic blankets on the lawn between the roundabout and the path.
+    for a in [0.8f32, 2.35, 3.95, 5.5] {
+        let (x, y) = (
+            (C + a.cos() * 16.4).round() as u16,
+            (C + a.sin() * 16.4).round() as u16,
+        );
+        if let Some((bx, by)) = near_free(k, x, y) {
+            k.decor(bx, by, "blanket");
+        }
+    }
 }
 
 /// A fenced lot a club can rent for its clubhouse (ADR 0014, C3). The

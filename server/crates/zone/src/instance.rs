@@ -349,12 +349,7 @@ impl Instance {
             .iter()
             .find(|o| o.kind == "pool_table")
             .map(|o| pool::Table::new((o.x, o.y)));
-        let arena_obj = zone
-            .map
-            .objects
-            .iter()
-            .find(|o| o.kind == "arena")
-            .map(arena::Arena::new);
+        let arena_obj = arena::Arena::new(&zone.map.objects);
         let yard = paintball::Yard::new(&zone.map.objects);
         let lanes = zone
             .map
@@ -925,10 +920,15 @@ impl Instance {
             ClientMsg::BowlJoin { lane, vs_bot } => self.bowl_join(id, lane, vs_bot, now),
             ClientMsg::BowlLeave { lane } => self.bowl_leave(id, lane),
             ClientMsg::BowlRoll { lane, aim, power } => self.bowl_roll(id, lane, aim, power, now),
-            ClientMsg::ArenaJoin { vs_bot } => self.arena_join(id, vs_bot, now),
+            ClientMsg::ArenaJoin {} => self.arena_join(id, now),
             ClientMsg::ArenaLeave {} => self.arena_leave(id),
-            ClientMsg::ArenaMove { dir } => self.arena_move(id, dir),
-            ClientMsg::ArenaAct { act } => self.arena_act(id, act, now),
+            ClientMsg::ArenaStart { bots } => self.arena_start(id, bots, now),
+            ClientMsg::ArenaBot { slot, on } => self.arena_bot(id, slot, on, now),
+            ClientMsg::ArenaLevel { level } => self.arena_level(id, level, now),
+            ClientMsg::PbBot { slot, on } => self.pb_bot(id, slot, on, now),
+            ClientMsg::PbLevel { level } => self.pb_level(id, level, now),
+            ClientMsg::ArenaMove { x, y, aim } => self.arena_move(id, x, y, aim, now),
+            ClientMsg::ArenaAct { act, aim } => self.arena_act(id, act, aim, now),
             ClientMsg::PbJoin { team } => self.pb_join(id, team, now),
             ClientMsg::PbLeave {} => self.pb_leave(id),
             ClientMsg::PbStart { bots } => self.pb_start(id, bots, now),
@@ -966,8 +966,9 @@ impl Instance {
     }
 
     fn move_to(&mut self, id: u32, target: TilePos, sprint: bool, now: u32) {
-        // Fighting in the arena: the fight moves you, nothing else.
-        if self.arena_fighting(id) || self.pb_playing(id) {
+        // Fighting in the arena (or out on the paintball field): the match
+        // moves you, nothing else. And nobody walks into the arena mid-match.
+        if self.arena_fighting(id) || self.pb_playing(id) || self.arena_closed(target) {
             return;
         }
         // In a boat the captain rows; passengers go where the boat goes.

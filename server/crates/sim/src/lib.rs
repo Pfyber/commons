@@ -9,6 +9,7 @@ pub mod casino;
 pub mod city;
 pub mod furniture;
 pub mod garden;
+pub mod level;
 pub mod library;
 pub mod mall;
 pub mod map;

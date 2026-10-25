@@ -18,6 +18,7 @@ import { casinoObject } from "./casinoart";
 import { boatObject } from "./boatart";
 import { museumObject } from "./museumart";
 import { paintballObject, splat as paintSplat } from "./paintballart";
+import { arenaObject } from "./arenaart";
 
 export const TILE = 32;
 
@@ -851,6 +852,138 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       px(ctx, P.lampGlow, 4, 3, 8, 10);
       px(ctx, "#fff6d0", 6, 5, 4, 5);
       px(ctx, P.outline, 2, 0, 12, 3);
+      break;
+    }
+    case "palm": {
+      // A palm: a curving, ringed trunk, fronds drooping all round, coconuts.
+      [c, ctx] = makeCanvas(56, 76);
+      oval(ctx, "rgba(0,0,0,0.2)", 28, 72, 14, 3);
+      const lean = v === 1 ? -1 : 1;
+      for (let k = 0; k < 44; k += 3) {
+        const t = k / 44;
+        const x = 28 + lean * Math.round(Math.sin(t * 1.6) * 7);
+        const y = 71 - k;
+        px(ctx, P.outline, x - 3, y - 3, 7, 4);
+        px(ctx, k % 6 ? "#a87a4a" : "#8a5f36", x - 2, y - 2, 5, 3);
+        px(ctx, "#c49a66", x - 2, y - 2, 2, 1);
+      }
+      const tx = 28 + lean * Math.round(Math.sin(1.6) * 7);
+      const ty = 26;
+      const greens = ["#4f9a3a", "#5fb04a", "#3f8030"];
+      for (let i = 0; i < 7; i++) {
+        const ang = -Math.PI / 2 + (i - 3) * 0.55;
+        for (let k = 2; k < 19; k++) {
+          const droop = (k * k) / 40;
+          const x = tx + Math.cos(ang) * k * 1.3;
+          const y = ty + Math.sin(ang) * k * 0.8 + droop;
+          px(ctx, P.outline, x - 1, y - 1, 4, 4);
+        }
+        for (let k = 2; k < 19; k++) {
+          const droop = (k * k) / 40;
+          const x = tx + Math.cos(ang) * k * 1.3;
+          const y = ty + Math.sin(ang) * k * 0.8 + droop;
+          px(ctx, greens[i % 3], x, y, 2, 2);
+          if (k % 3 === 0) px(ctx, "#7ccf5a", x, y - 1, 1, 1);
+        }
+      }
+      circle(ctx, P.outline, tx - 3, ty + 4, 3);
+      circle(ctx, "#6b4a2a", tx - 3, ty + 4, 2);
+      circle(ctx, P.outline, tx + 3, ty + 5, 3);
+      circle(ctx, "#6b4a2a", tx + 3, ty + 5, 2);
+      break;
+    }
+    case "cactus": {
+      // A saguaro: a ribbed column, an arm or two, spines, sometimes a flower.
+      [c, ctx] = makeCanvas(32, 54);
+      oval(ctx, "rgba(0,0,0,0.2)", 16, 51, 9, 2);
+      const col = (x: number, y: number, w: number, h: number) => {
+        px(ctx, P.outline, x - 1, y, w + 2, h);
+        px(ctx, P.outline, x, y - 1, w, h + 1);
+        px(ctx, "#4f9a4a", x, y, w, h);
+        px(ctx, "#6fbf5a", x + 1, y, 2, h);
+        px(ctx, "#3a7a36", x + w - 2, y, 2, h);
+        for (let yy = y + 3; yy < y + h - 1; yy += 4) {
+          px(ctx, "#f4ecd8", x - 1, yy, 1, 1);
+          px(ctx, "#f4ecd8", x + w, yy + 2, 1, 1);
+        }
+      };
+      col(12, 8, 8, 43);
+      // Its arms: out, then up.
+      const left = v !== 2;
+      const right = v !== 1;
+      if (left) {
+        px(ctx, P.outline, 5, 27, 8, 6);
+        px(ctx, "#4f9a4a", 6, 28, 7, 4);
+        col(4, 16, 5, 15);
+      }
+      if (right) {
+        px(ctx, P.outline, 19, 21, 8, 6);
+        px(ctx, "#4f9a4a", 19, 22, 7, 4);
+        col(23, 11, 5, 14);
+      }
+      if (v === 0) {
+        px(ctx, "#ff6a8a", 14, 5, 4, 3);
+        px(ctx, "#ffd23f", 15, 6, 2, 1);
+      }
+      break;
+    }
+    case "cactus_small": {
+      // A barrel cactus: round and ribbed, spiny, a pink bloom on top.
+      [c, ctx] = makeCanvas(32, 22);
+      oval(ctx, "rgba(0,0,0,0.2)", 16, 20, 9, 2);
+      oval(ctx, P.outline, 16, 13, 9, 8);
+      oval(ctx, "#5aa84a", 16, 13, 8, 7);
+      for (const x of [11, 16, 21]) px(ctx, "#3f8a3a", x, 7, 1, 12);
+      px(ctx, "#86cf6a", 12, 8, 2, 4);
+      for (let i = 0; i < 8; i++) px(ctx, "#f4ecd8", 9 + ((i * 5) % 15), 8 + ((i * 3) % 10), 1, 1);
+      px(ctx, v === 1 ? "#ffd23f" : "#ff6aa8", 14, 4, 5, 3);
+      px(ctx, "#ffffff", 16, 4, 1, 1);
+      break;
+    }
+    case "dry_shrub": {
+      // A dry desert shrub: twiggy, sun-bleached.
+      [c, ctx] = makeCanvas(32, 20);
+      oval(ctx, "rgba(0,0,0,0.15)", 16, 18, 10, 2);
+      for (let i = 0; i < 9; i++) {
+        const ang = -Math.PI + (i / 8) * Math.PI;
+        for (let k = 0; k < 9; k++) px(ctx, i % 2 ? "#a88a5a" : "#8a6e44", 16 + Math.cos(ang) * k * 1.2, 17 + Math.sin(ang) * k * 1.1, 1, 1);
+        px(ctx, "#c9b07a", 16 + Math.cos(ang) * 10, 17 + Math.sin(ang) * 9.5, 2, 1);
+      }
+      if (v === 2) px(ctx, "#d9a0b0", 15, 9, 2, 2);
+      break;
+    }
+    case "bones": {
+      // Bleached bones half in the sand: a skull and a couple of long bones.
+      [c, ctx] = makeCanvas(32, 14);
+      px(ctx, P.outline, 6, 4, 9, 7);
+      px(ctx, "#efe6d0", 7, 5, 7, 5);
+      px(ctx, P.outline, 8, 7, 2, 2);
+      px(ctx, P.outline, 11, 7, 2, 2);
+      px(ctx, "#c9bea6", 8, 10, 5, 1);
+      px(ctx, P.outline, 17, 9, 11, 3);
+      px(ctx, "#efe6d0", 18, 10, 9, 1);
+      px(ctx, "#efe6d0", 17, 9, 2, 3);
+      px(ctx, "#efe6d0", 26, 9, 2, 3);
+      if (v !== 1) {
+        px(ctx, P.outline, 19, 3, 3, 6);
+        px(ctx, "#efe6d0", 20, 4, 1, 4);
+      }
+      break;
+    }
+    case "amphora": {
+      // Clay pots: a tall amphora and a squat one beside it.
+      [c, ctx] = makeCanvas(32, 34);
+      oval(ctx, "rgba(0,0,0,0.2)", 16, 31, 12, 2);
+      oval(ctx, P.outline, 13, 19, 7, 11);
+      oval(ctx, "#c4703f", 13, 19, 6, 10);
+      oval(ctx, "#e08a52", 11, 16, 2, 5);
+      px(ctx, P.outline, 10, 5, 7, 4);
+      px(ctx, "#a85a32", 11, 6, 5, 3);
+      px(ctx, "#2b2233", 10, 18, 7, 1);
+      px(ctx, "#f4d8a8", 10, 20, 7, 1);
+      oval(ctx, P.outline, 23, 25, 6, 6);
+      oval(ctx, v === 1 ? "#8a6a4a" : "#b85a36", 23, 25, 5, 5);
+      px(ctx, "#f4d8a8", 19, 24, 9, 1);
       break;
     }
     case "daisies": {
@@ -2568,7 +2701,7 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
     }
     default: {
       const lib: { c: HTMLCanvasElement; overhang: number; left?: number } | null =
-        libraryObject(o) ?? clubObject(o) ?? concertObject(o) ?? metroObject(o) ?? casinoObject(o) ?? boatObject(o) ?? museumObject(o) ?? paintballObject(o);
+        libraryObject(o) ?? clubObject(o) ?? concertObject(o) ?? metroObject(o) ?? casinoObject(o) ?? boatObject(o) ?? museumObject(o) ?? paintballObject(o) ?? arenaObject(o);
       if (lib) {
         c = lib.c;
         overhang = lib.overhang;

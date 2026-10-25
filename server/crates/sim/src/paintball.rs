@@ -407,6 +407,77 @@ impl Ball {
     }
 }
 
+/// How a bot plays, by level (`crate::level`): how quick it is to open
+/// fire on someone it sees, how steady its aim and how well it leads a
+/// runner, how far it sees, how long its bursts and breathers, how often it
+/// rolls out of a ball's way, how fast it moves, how far it goes for a
+/// power-up.
+struct Skill {
+    /// Before it shoots at someone new (ms: base, plus up to).
+    react: (f64, f64),
+    /// Aim drift: how much each shot, at most.
+    wobble: (f64, f64),
+    sight: f64,
+    /// How much of a runner's run it aims ahead.
+    lead: f64,
+    /// Shots a burst (base, plus up to), and the breather after (ms: base, plus up to).
+    burst: (u8, f64),
+    pause: (f64, f64),
+    /// Slower than the gun allows, between shots in a burst (ms: base, plus up to).
+    slack: (f64, f64),
+    /// Its chance of rolling out of a ball's way.
+    dodge: f64,
+    /// Of full speed.
+    speed: f64,
+    pad_r: f64,
+    /// Back off to this far when it's down to its last hit.
+    wary: f64,
+}
+
+fn skill(level: u8) -> Skill {
+    match level {
+        crate::level::EASY => Skill {
+            react: (700.0, 650.0),
+            wobble: (0.5, 0.55),
+            sight: 10.0,
+            lead: 0.15,
+            burst: (2, 2.0),
+            pause: (1100.0, 1000.0),
+            slack: (170.0, 260.0),
+            dodge: 0.04,
+            speed: 0.78,
+            pad_r: 8.0,
+            wary: 6.5,
+        },
+        crate::level::HARD => Skill {
+            react: (170.0, 170.0),
+            wobble: (0.15, 0.16),
+            sight: 14.5,
+            lead: 1.0,
+            burst: (4, 3.0),
+            pause: (380.0, 380.0),
+            slack: (20.0, 80.0),
+            dodge: 0.7,
+            speed: 0.98,
+            pad_r: 17.0,
+            wary: 10.0,
+        },
+        _ => Skill {
+            react: (380.0, 380.0),
+            wobble: (0.3, 0.32),
+            sight: 13.0,
+            lead: 0.8,
+            burst: (3, 3.0),
+            pause: (650.0, 700.0),
+            slack: (60.0, 160.0),
+            dodge: 0.3,
+            speed: 0.92,
+            pad_r: 14.0,
+            wary: 9.0,
+        },
+    }
+}
+
 /// What a bot is up to.
 #[derive(Debug, Clone, Default)]
 pub struct Ai {
@@ -593,6 +664,8 @@ pub struct Match {
     pub pads: Vec<Pad>,
     /// The winners when it's over (`BLUE`, `RED`, 2: a draw).
     pub winner: u8,
+    /// How good the bots are (`crate::level`), picked in the lobby.
+    pub level: u8,
     next_bot_shot: u16,
     match_point: [bool; 2],
 }
@@ -635,6 +708,7 @@ impl Match {
             balls: Vec::new(),
             pads,
             winner: 2,
+            level: crate::level::MEDIUM,
             next_bot_shot: 0,
             match_point: [false; 2],
         }
@@ -661,23 +735,25 @@ impl Match {
         self.slots.iter().filter(|&&s| s != 0 && !is_bot(s)).count()
     }
 
-    /// `id` takes a place on `team` (`2`: whichever has room). In the lobby,
-    /// a free place; in a match, a bot's (the bot steps aside). Returns
-    /// whether they're in.
+    /// `id` takes a place on `team` (`2`: whichever has room): a free one,
+    /// else a bot's (the bot steps aside). The first to sign up in the lobby
+    /// gets bots in all the other places (to take out, or put back, with
+    /// `set_bot`). Returns whether they're in.
     pub fn join(&mut self, id: u32, team: u8, now: u32) -> bool {
         if let Some(s) = self.slot_of(id) {
-            // Already in: switching sides in the lobby.
+            // Already in: switching sides in the lobby (with a bot, if it takes one's place, swapping over).
             if self.status != LOBBY || team == 2 || team_of_slot(s) == team {
                 return true;
             }
-            if let Some(f) = self.free_slot(team, false) {
-                self.slots[s] = 0;
+            if let Some(f) = self.free_slot(team, true) {
+                let had_bot = is_bot(self.slots[f]);
+                self.slots[s] = if had_bot { BOT_BASE + s as u32 } else { 0 };
                 self.slots[f] = id;
             }
             return true;
         }
         let in_match = matches!(self.status, COUNTDOWN | PLAYING);
-        let pick = |m: &Match, t: u8| m.free_slot(t, in_match);
+        let pick = |m: &Match, t: u8| m.free_slot(t, true);
         let s = match team {
             BLUE | RED => pick(self, team),
             _ => {
@@ -694,6 +770,13 @@ impl Match {
         let Some(s) = s else { return false };
         let old = self.slots[s];
         self.slots[s] = id;
+        if self.status == LOBBY && self.humans() == 1 {
+            for k in 0..SLOTS {
+                if self.slots[k] == 0 {
+                    self.slots[k] = BOT_BASE + k as u32;
+                }
+            }
+        }
         if in_match {
             let t = team_of_slot(s);
             if let Some(i) = self.index(old) {
@@ -719,6 +802,36 @@ impl Match {
         })
     }
 
+    /// In the lobby, someone with a place puts a bot in place `slot` (`on`) or
+    /// takes it out. Returns whether anything changed.
+    pub fn set_bot(&mut self, by: u32, slot: usize, on: bool) -> bool {
+        if self.status != LOBBY || self.slot_of(by).is_none() || slot >= SLOTS {
+            return false;
+        }
+        match (on, self.slots[slot]) {
+            (true, 0) => self.slots[slot] = BOT_BASE + slot as u32,
+            (false, s) if is_bot(s) => self.slots[slot] = 0,
+            _ => return false,
+        }
+        true
+    }
+
+    /// In the lobby, someone with a place picks how good the bots are.
+    /// Returns whether it changed.
+    pub fn set_level(&mut self, by: u32, level: u8) -> bool {
+        let level = crate::level::clamp(level);
+        if self.status != LOBBY || self.slot_of(by).is_none() || self.level == level {
+            return false;
+        }
+        self.level = level;
+        true
+    }
+
+    /// Whether each side has someone (a player or a bot): a match can start.
+    pub fn sides_filled(&self) -> bool {
+        (0..3).any(|i| self.slots[i] != 0) && (3..6).any(|i| self.slots[i] != 0)
+    }
+
     /// `id` leaves: in a match, a bot takes their place (or, with no one
     /// left, it's called off).
     pub fn leave(&mut self, id: u32, now: u32) {
@@ -726,6 +839,11 @@ impl Match {
         let in_match = matches!(self.status, COUNTDOWN | PLAYING);
         self.slots[s] = 0;
         if !in_match {
+            // Nobody left in the lobby: the bots go too (and the level's back to medium).
+            if self.humans() == 0 {
+                self.clear_bots();
+                self.level = crate::level::MEDIUM;
+            }
             return;
         }
         if self.humans() == 0 {
@@ -747,17 +865,24 @@ impl Match {
         }
     }
 
+    /// Back to the lobby: the same places (bots and all) for a rematch, unless nobody's left.
     fn back_to_lobby(&mut self) {
         self.status = LOBBY;
         self.players.clear();
         self.balls.clear();
+        if self.humans() == 0 {
+            self.clear_bots();
+        }
+        for p in self.pads.iter_mut() {
+            p.kind = 0;
+        }
+    }
+
+    fn clear_bots(&mut self) {
         for s in self.slots.iter_mut() {
             if is_bot(*s) {
                 *s = 0;
             }
-        }
-        for p in self.pads.iter_mut() {
-            p.kind = 0;
         }
     }
 
@@ -773,7 +898,7 @@ impl Match {
                     self.slots[s] = BOT_BASE + s as u32;
                 }
             }
-        } else if !(0..3).any(|i| self.slots[i] != 0) || !(3..6).any(|i| self.slots[i] != 0) {
+        } else if !self.sides_filled() {
             return false;
         }
         self.players = (0..SLOTS)
@@ -1264,6 +1389,7 @@ impl Match {
             return;
         }
         let me = self.players[i].clone();
+        let sk = skill(self.level);
         // Who can it see?
         let target = self
             .players
@@ -1274,7 +1400,8 @@ impl Match {
                     && (!q.hidden || (q.x - me.x).hypot(q.y - me.y) < REVEAL_R)
             })
             .filter(|q| {
-                (q.x - me.x).hypot(q.y - me.y) < 13.0 && self.field.clear_line(me.x, me.y, q.x, q.y)
+                (q.x - me.x).hypot(q.y - me.y) < sk.sight
+                    && self.field.clear_line(me.x, me.y, q.x, q.y)
             })
             .min_by(|a, b| {
                 let da = (a.x - me.x).hypot(a.y - me.y);
@@ -1286,7 +1413,7 @@ impl Match {
         match &target {
             Some(t) if ai.target != Some(t.id) => {
                 ai.target = Some(t.id);
-                ai.react_at = now + 380 + (rng() * 380.0) as u32;
+                ai.react_at = now + (sk.react.0 + rng() * sk.react.1) as u32;
             }
             None => ai.target = None,
             _ => {}
@@ -1302,7 +1429,7 @@ impl Match {
                 ai.strafe_until = now + 500 + (rng() * 900.0) as u32;
             }
             // Keep a fighting distance; back off when hurt and the other isn't.
-            let want = if me.hp == 1 && t.hp > 1 { 9.0 } else { 5.5 };
+            let want = if me.hp == 1 && t.hp > 1 { sk.wary } else { 5.5 };
             let radial = ((d - want) / 2.0).clamp(-1.0, 1.0);
             mx = ux * radial - uy * ai.strafe;
             my = uy * radial + ux * ai.strafe;
@@ -1311,7 +1438,7 @@ impl Match {
             let pad = self
                 .pads
                 .iter()
-                .filter(|p| p.kind != 0 && (p.x - me.x).hypot(p.y - me.y) < 14.0)
+                .filter(|p| p.kind != 0 && (p.x - me.x).hypot(p.y - me.y) < sk.pad_r)
                 .min_by(|a, b| {
                     (a.x - me.x)
                         .hypot(a.y - me.y)
@@ -1371,12 +1498,13 @@ impl Match {
         }
         let ai_wobble = {
             let ai = &mut self.players[i].ai;
-            ai.wobble = (ai.wobble * 0.6 + (rng() - 0.5) * 0.3).clamp(-0.32, 0.32);
+            ai.wobble =
+                (ai.wobble * 0.6 + (rng() - 0.5) * sk.wobble.0).clamp(-sk.wobble.1, sk.wobble.1);
             ai.wobble
         };
         if threat
             && can_dash
-            && rng() < 0.3
+            && rng() < sk.dodge
             && let Some(e) = self.dash(me.id, now)
         {
             evs.push(e);
@@ -1385,7 +1513,7 @@ impl Match {
         let speed = if now < p.dash_until {
             DASH_SPEED
         } else {
-            SPEED * 0.92
+            SPEED * sk.speed
         };
         let (dx, dy) = if now < p.dash_until && len < 0.1 {
             (p.aim.cos(), p.aim.sin())
@@ -1403,7 +1531,7 @@ impl Match {
         // Aim (leading a little) and shoot.
         if let Some(t) = &target {
             let d = (t.x - p.x).hypot(t.y - p.y);
-            let lead = d / BALL_SPEED * 0.8;
+            let lead = d / BALL_SPEED * sk.lead;
             let (ax, ay) = (t.x + t.vx * lead, t.y + t.vy * lead);
             let moving = (t.vx.hypot(t.vy) > 1.0) as u8 as f64;
             let aim = (ay - p.y).atan2(ax - p.x) + ai_wobble * (0.6 + moving);
@@ -1414,13 +1542,13 @@ impl Match {
                 } else {
                     // Bursts of three to five, then a breather.
                     if p.ai.burst == 0 {
-                        p.ai.burst = 3 + (rng() * 3.0) as u8;
+                        p.ai.burst = sk.burst.0 + (rng() * sk.burst.1) as u8;
                     }
                     p.ai.burst -= 1;
                     let gap = if p.ai.burst == 0 {
-                        650 + (rng() * 700.0) as u32
+                        (sk.pause.0 + rng() * sk.pause.1) as u32
                     } else {
-                        p.fire_ms(now) + 60 + (rng() * 160.0) as u32
+                        p.fire_ms(now) + (sk.slack.0 + rng() * sk.slack.1) as u32
                     };
                     p.ai.next_fire = now + gap;
                     p.last_fire = now.saturating_sub(1000);
@@ -1641,6 +1769,99 @@ mod tests {
     }
 
     #[test]
+    fn the_lobby_gets_bots_to_take_out_or_put_back() {
+        let mut m = Match::new(field());
+        assert!(m.join(7, BLUE, 0));
+        assert_eq!(
+            m.slots.iter().filter(|&&s| is_bot(s)).count(),
+            5,
+            "bots everywhere else"
+        );
+        // Out with the red bots: no one on red, so no match.
+        for k in 3..6 {
+            assert!(m.set_bot(7, k, false));
+        }
+        assert!(!m.set_bot(9, 1, false), "only those in can");
+        assert!(!m.start(7, false, 0));
+        // One back: a 3 v 1.
+        assert!(m.set_bot(7, 4, true));
+        assert!(!m.set_bot(7, 4, true), "already there");
+        // Someone else comes for red: they take a free place, not the bot's.
+        assert!(m.join(8, RED, 0));
+        assert_eq!(m.slot_of(8), Some(3));
+        // And a third, for blue: a bot steps aside.
+        assert!(m.join(9, BLUE, 0));
+        assert_eq!(m.slots.iter().filter(|&&s| is_bot(s)).count(), 2);
+        // Switching sides.
+        assert!(m.join(9, RED, 0));
+        assert_eq!(team_of_slot(m.slot_of(9).unwrap()), RED);
+        assert_eq!(m.slots.iter().filter(|&&s| s != 0).count(), 5);
+        // The level: picked by those in, in the lobby.
+        assert!(m.set_level(7, crate::level::HARD));
+        assert!(!m.set_level(42, crate::level::EASY));
+        assert!(m.start(7, false, 0));
+        assert_eq!(m.players.len(), 5);
+        assert!(!m.set_level(7, crate::level::EASY), "not mid-match");
+        // Everyone gone: the bots go, the level's back to medium.
+        let mut m = Match::new(field());
+        m.join(7, BLUE, 0);
+        m.set_level(7, crate::level::EASY);
+        m.leave(7, 0);
+        assert!(m.slots.iter().all(|&s| s == 0));
+        assert_eq!(m.level, crate::level::MEDIUM);
+    }
+
+    #[test]
+    fn harder_bots_hit_harder() {
+        // One red bot against someone standing about in the open: how often it gets them.
+        let outs = |level: u8| {
+            let mut total = 0;
+            for seed in 0..4u64 {
+                let mut m = Match::new(field());
+                m.join(1, BLUE, 0);
+                for k in [0, 1, 2, 4, 5] {
+                    m.set_bot(1, k, false);
+                }
+                m.set_level(1, level);
+                assert!(m.start(1, false, 0));
+                let mut s = 7 + seed * 104_729;
+                let mut r = move || {
+                    s = s
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (s >> 11) as f64 / (1u64 << 53) as f64
+                };
+                let mut now = 0;
+                while now < COUNTDOWN_MS + 60_000 {
+                    now += 100;
+                    let me = m.players.iter_mut().find(|p| p.id == 1).unwrap();
+                    if !me.out {
+                        me.x = 12.0;
+                        me.y = 6.0;
+                    }
+                    total += m
+                        .step(now, 100, &mut r)
+                        .0
+                        .iter()
+                        .filter(|e| e.kind == ev::OUT)
+                        .count();
+                }
+            }
+            total
+        };
+        let (easy, medium, hard) = (
+            outs(crate::level::EASY),
+            outs(crate::level::MEDIUM),
+            outs(crate::level::HARD),
+        );
+        eprintln!("PB LEVELS: easy {easy}, medium {medium}, hard {hard}");
+        assert!(
+            easy < medium && medium < hard,
+            "easy {easy}, medium {medium}, hard {hard}"
+        );
+    }
+
+    #[test]
     fn lobby_fills_with_bots_and_counts_down() {
         let mut m = Match::new(field());
         assert!(m.join(7, BLUE, 0));
@@ -1659,7 +1880,10 @@ mod tests {
         let mut m = Match::new(field());
         m.join(1, BLUE, 0);
         m.join(2, RED, 0);
-        m.start(1, false, 0);
+        for k in 0..SLOTS {
+            m.set_bot(1, k, false);
+        }
+        assert!(m.start(1, false, 0));
         let mut r = rng();
         m.step(COUNTDOWN_MS, 100, &mut r);
         let t0 = COUNTDOWN_MS + 2000;

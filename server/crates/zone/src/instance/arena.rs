@@ -1,13 +1,14 @@
-//! The gladiator arena in the park: a walled ring you walk into, where two
-//! fight on the sand for anyone about to see. One match at a time, against
-//! the bot or another player. The fight itself is `commons_sim::arena`
-//! (side on, along one line); here, it's laid along the middle row of the
-//! sand: the fighters' own avatars are put there when it starts and moved
-//! with it (their walking otherwise held), and everyone who can see the
+//! The gladiator arena in the park: Crown of the Colosseum, four
+//! gladiators (bots in the empty places), last one standing takes the
+//! round's crown, three crowns wins. The fighting itself is
+//! `commons_sim::arena`; here it's put on the map: the fighters' own avatars
+//! go onto the sand (their walking held: they move with the match), anyone
+//! standing in the ring when a round begins is shown out through the gate
+//! (and kept out till the match is done), and everyone who can see the
 //! ring gets an `ArenaState` every tick and an `ArenaEvent` for each blow.
 
 use super::Instance;
-use commons_protocol::{ArenaFighter, ServerMsg, arena, state};
+use commons_protocol::{ArenaFighter, ArenaGift, ServerMsg, state};
 use commons_sim::TilePos;
 use commons_sim::arena as sim;
 use commons_sim::map::MapObject;
@@ -15,88 +16,136 @@ use rand::Rng;
 
 #[derive(Debug, Clone)]
 pub(super) struct Arena {
-    /// The ring (tiles).
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
-    a: u32,
-    b: u32,
-    status: u8,
-    fight: sim::Fight,
+    m: sim::Match,
+    /// The sand's top-left corner (map tiles), and the whole ring (walls too).
+    origin: (u16, u16),
+    ring: (u16, u16, u16, u16),
+    /// Outside the north gate: where bystanders are shown out to, and where
+    /// fighters come back out after.
+    gate: TilePos,
+    dirty: bool,
 }
 
 impl Arena {
-    pub(super) fn new(o: &MapObject) -> Self {
-        Arena {
-            x: o.x,
-            y: o.y,
-            w: o.w,
-            h: o.h,
-            a: 0,
-            b: 0,
-            status: arena::EMPTY,
-            fight: sim::Fight::new(0),
-        }
+    pub(super) fn new(objects: &[MapObject]) -> Option<Arena> {
+        let (ring, origin) = sim::Ring::from_map(objects)?;
+        let a = objects.iter().find(|o| o.kind == "arena")?;
+        let gate = objects
+            .iter()
+            .find(|o| o.kind == "spot" && o.label.as_deref() == Some("arena"))
+            .map(|o| (o.x, o.y))
+            .unwrap_or((a.x + a.w / 2, a.y.saturating_sub(1)));
+        Some(Arena {
+            m: sim::Match::new(ring),
+            origin,
+            ring: (a.x, a.y, a.w, a.h),
+            gate,
+            dirty: true,
+        })
     }
 
-    /// The tile a fighter stands on at floor position `x` (on the middle row of the sand).
-    fn tile_at(&self, x: f64) -> TilePos {
-        let (left, right) = ((self.x + 3) as f64, (self.x + self.w - 4) as f64);
+    /// The map tile under arena point (x, y).
+    fn tile(&self, x: f64, y: f64) -> TilePos {
         (
-            (left + x / sim::W * (right - left)).round() as u16,
-            self.y + self.h / 2,
+            self.origin.0 + x.max(0.0) as u16,
+            self.origin.1 + y.max(0.0) as u16,
         )
     }
 
-    fn side(&self, id: u32) -> Option<usize> {
-        if self.status != arena::PLAYING {
-            None
-        } else if self.a == id {
-            Some(0)
-        } else if self.b == id {
-            Some(1)
-        } else {
-            None
-        }
+    fn inside(&self, t: TilePos) -> bool {
+        let (x, y, w, h) = self.ring;
+        t.0 >= x && t.1 >= y && t.0 < x + w && t.1 < y + h
     }
 
     fn state(&self, now: u32) -> ServerMsg {
+        let m = &self.m;
         ServerMsg::ArenaState {
-            a: self.a,
-            b: self.b,
-            status: self.status,
+            status: m.status,
             now,
-            ends: self.fight.ends,
-            fighters: self
-                .fight
-                .f
+            phase_ms: m.phase_end.saturating_sub(now),
+            round: m.round,
+            fire: (m.fire(now) * 1000.0).round() as u16,
+            spikes: (0..m.ring.spikes.len())
+                .map(|k| m.spike_phase(k, now).0)
+                .collect(),
+            slots: m.slots.to_vec(),
+            crowns: m.crowns.to_vec(),
+            fighters: m
+                .fighters
                 .iter()
                 .map(|f| ArenaFighter {
-                    x: (f.x * 10.0).round() as u16,
-                    facing: (f.facing > 0) as u8,
-                    hp: f.hp,
+                    id: f.id,
+                    x: x100(f.x),
+                    y: x100(f.y),
+                    aim: sim::aim_to_u16(f.aim),
+                    hp: f.hp.max(0.0).ceil().min(255.0) as u8,
                     stamina: f.stamina.round().clamp(0.0, 100.0) as u8,
+                    rage: f.rage.floor().clamp(0.0, 100.0) as u8,
                     act: f.act,
-                    act_at: f.act_at,
-                    blocking: f.blocking,
-                    flinch_until: f.flinch_until,
+                    act_ms: now.saturating_sub(f.act_at).min(65_535) as u16,
+                    charge: (f.charge * 100.0).round() as u8,
+                    flags: f.flags(now),
+                    holding: f.holding,
+                    fix: f.fix,
                 })
                 .collect(),
+            gifts: m
+                .gifts
+                .iter()
+                .map(|g| ArenaGift {
+                    kind: g.kind,
+                    x: x100(g.x),
+                    y: x100(g.y),
+                    lands_ms: g.lands.saturating_sub(now).min(65_535) as u16,
+                })
+                .collect(),
+            winner: m.winner,
+            level: m.level,
         }
+    }
+}
+
+fn x100(v: f64) -> u16 {
+    (v * 100.0).round().clamp(0.0, 65_535.0) as u16
+}
+
+fn from100(v: u16) -> f64 {
+    v as f64 / 100.0
+}
+
+fn event_msg(e: &sim::Event) -> ServerMsg {
+    let v = |x: f64| ((x * 100.0).round() + 32768.0).clamp(0.0, 65_535.0) as u16;
+    ServerMsg::ArenaEvent {
+        kind: e.kind,
+        a: e.a,
+        b: e.b,
+        x: x100(e.x),
+        y: x100(e.y),
+        n: e.n,
+        m: e.m,
+        vx: v(e.vx),
+        vy: v(e.vy),
     }
 }
 
 impl Instance {
     /// Whether `id` is fighting in the arena now (they can't walk off).
     pub(super) fn arena_fighting(&self, id: u32) -> bool {
-        self.arena.as_ref().is_some_and(|ar| ar.side(id).is_some())
+        self.arena.as_ref().is_some_and(|ar| ar.m.playing(id))
+    }
+
+    /// Whether a walk to `t` would go into the ring while a match is on (not for bystanders).
+    pub(super) fn arena_closed(&self, t: TilePos) -> bool {
+        self.arena
+            .as_ref()
+            .is_some_and(|ar| ar.m.running() && ar.inside(t))
     }
 
     /// Sends to everyone who can see the ring (watching any cell it covers), once each.
     fn arena_broadcast(&mut self, msg: &ServerMsg) {
         let Some(ar) = &self.arena else { return };
-        let (x0, y0, x1, y1) = (ar.x, ar.y, ar.x + ar.w - 1, ar.y + ar.h - 1);
+        let (x0, y0, w, h) = ar.ring;
+        let (x1, y1) = (x0 + w - 1, y0 + h - 1);
         let mut cells: Vec<u16> = Vec::new();
         for ty in [y0, y1] {
             for tx in [x0, x1] {
@@ -134,9 +183,9 @@ impl Instance {
         }
     }
 
-    /// Puts fighter `id` (if it's a player here) on tile `t`: walking stopped, everyone shown.
+    /// Puts `id` (a player here) on tile `t`: walking stopped, everyone shown.
     fn arena_place(&mut self, id: u32, t: TilePos, now: u32) {
-        let Some(a) = self.avatars.get_mut(&id) else {
+        let Some(a) = self.avatars.get(&id) else {
             return;
         };
         if a.state == state::SITTING {
@@ -155,122 +204,199 @@ impl Instance {
         self.broadcast(cell, &ServerMsg::Snap { id, x: t.0, y: t.1 }, None);
     }
 
-    pub(super) fn arena_join(&mut self, id: u32, vs_bot: bool, now: u32) {
+    /// A round begins: the fighters onto the sand at their gates, anyone
+    /// else in the ring shown out.
+    fn arena_take_places(&mut self, now: u32) {
+        let Some(ar) = &self.arena else { return };
+        let fighters: Vec<(u32, TilePos)> =
+            ar.m.fighters
+                .iter()
+                .filter(|f| !f.bot)
+                .map(|f| (f.id, ar.tile(f.x, f.y)))
+                .collect();
+        let gate = ar.gate;
+        let inside: Vec<u32> = self
+            .avatars
+            .iter()
+            .filter(|(id, a)| ar.inside(a.tile) && !fighters.iter().any(|(f, _)| f == *id))
+            .map(|(id, _)| *id)
+            .collect();
+        for (id, t) in fighters {
+            self.arena_place(id, t, now);
+        }
+        for id in inside {
+            self.arena_place(id, gate, now);
+        }
+    }
+
+    /// `id` back outside the north gate.
+    fn arena_out(&mut self, id: u32, now: u32) {
+        let Some(ar) = &self.arena else { return };
+        let gate = ar.gate;
+        if self.avatars.contains_key(&id) {
+            self.arena_place(id, gate, now);
+        }
+    }
+
+    pub(super) fn arena_join(&mut self, id: u32, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
-        let (a, b) = match ar.status {
-            arena::PLAYING => return, // one match at a time: watch
-            arena::WAITING if ar.a != id && !vs_bot => (ar.a, id),
-            _ if vs_bot => (id, arena::BOT),
-            _ => {
-                ar.a = id;
-                ar.b = 0;
-                ar.status = arena::WAITING;
-                return self.arena_send(now);
+        let was = ar.m.playing(id);
+        if !ar.m.join(id, now) {
+            self.error(
+                id,
+                commons_protocol::error_code::BAD_MESSAGE,
+                "the arena's full: watch from the stands",
+            );
+            return;
+        }
+        ar.dirty = true;
+        // Into a match under way: onto the sand.
+        if !was && ar.m.playing(id) {
+            let t = ar.m.fighter(id).map(|f| ar.tile(f.x, f.y));
+            if let Some(t) = t {
+                self.arena_place(id, t, now);
             }
-        };
-        ar.a = a;
-        ar.b = b;
-        ar.fight = sim::Fight::new(now);
-        ar.status = arena::PLAYING;
-        // Onto the sand, facing each other.
-        let (ta, tb) = (ar.tile_at(ar.fight.f[0].x), ar.tile_at(ar.fight.f[1].x));
-        self.arena_place(a, ta, now);
-        self.arena_place(b, tb, now);
+        }
         self.arena_send(now);
     }
 
-    /// `id` yields (or goes): a match in progress goes to the other side.
     pub(super) fn arena_leave(&mut self, id: u32) {
         let now = self.clock.now_ms();
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
-        if ar.a != id && ar.b != id {
+        if ar.m.slot_of(id).is_none() {
             return;
         }
-        match ar.status {
-            arena::PLAYING => {
-                ar.status = if ar.a == id {
-                    arena::B_WON
-                } else {
-                    arena::A_WON
-                };
-                ar.fight.status = ar.status;
-                self.arena_ended(now);
-            }
-            arena::WAITING => {
-                ar.status = arena::EMPTY;
-                ar.a = 0;
-            }
-            _ => return,
+        let was = ar.m.playing(id);
+        let on = ar.m.running();
+        ar.m.leave(id);
+        ar.dirty = true;
+        let called_off = on && !ar.m.running();
+        let others: Vec<u32> = if called_off {
+            ar.m.slots
+                .iter()
+                .copied()
+                .filter(|&s| s != 0 && !sim::is_bot(s))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if was {
+            self.arena_out(id, now);
+        }
+        for o in others {
+            self.arena_out(o, now);
         }
         self.arena_send(now);
     }
 
-    /// The match is over: each fighter left standing where they finished.
-    fn arena_ended(&mut self, now: u32) {
-        let Some(ar) = &self.arena else { return };
-        let spots: Vec<(u32, TilePos)> = [(ar.a, ar.fight.f[0].x), (ar.b, ar.fight.f[1].x)]
-            .iter()
-            .map(|&(id, x)| (id, ar.tile_at(x)))
-            .collect();
-        for (id, t) in spots {
-            self.arena_place(id, t, now);
-        }
-    }
-
-    pub(super) fn arena_move(&mut self, id: u32, dir: u8) {
+    pub(super) fn arena_start(&mut self, id: u32, bots: bool, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
-        if let Some(p) = ar.side(id) {
-            ar.fight.walk(
-                p,
-                match dir {
-                    1 => -1,
-                    2 => 1,
-                    _ => 0,
-                },
+        if !ar.m.start(id, bots, now) {
+            self.error(
+                id,
+                commons_protocol::error_code::BAD_MESSAGE,
+                "two gladiators needed (or fill with bots)",
             );
+            return;
         }
+        ar.dirty = true;
+        self.arena_take_places(now);
+        self.arena_broadcast(&event_msg(&sim::Event {
+            kind: sim::ev::ROUND_START,
+            a: 0,
+            b: 0,
+            x: 0.0,
+            y: 0.0,
+            n: 1,
+            m: 0,
+            vx: 0.0,
+            vy: 0.0,
+        }));
+        self.arena_send(now);
     }
 
-    pub(super) fn arena_act(&mut self, id: u32, act: u8, now: u32) {
+    pub(super) fn arena_bot(&mut self, id: u32, slot: u8, on: bool, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
-        if let Some(p) = ar.side(id)
-            && ar.fight.input(p, act, now)
-        {
+        if ar.m.set_bot(id, slot as usize, on) {
+            ar.dirty = true;
             self.arena_send(now);
         }
     }
 
-    /// A tick of the match: the bot, the fight, the fighters' tiles, and everyone told.
+    pub(super) fn arena_level(&mut self, id: u32, level: u8, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.set_level(id, level) {
+            ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
+    pub(super) fn arena_move(&mut self, id: u32, x: u16, y: u16, aim: u16, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        ar.m.claim_move(id, from100(x), from100(y), sim::aim_from_u16(aim), now);
+    }
+
+    pub(super) fn arena_act(&mut self, id: u32, act: u8, aim: u16, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        let evs = ar.m.input(id, act, sim::aim_from_u16(aim), now);
+        for e in &evs {
+            self.arena_broadcast(&event_msg(e));
+        }
+    }
+
+    /// A tick of the match: it plays on, the fighters' avatars stand where
+    /// they are on the sand, and everyone watching is told.
     pub(super) fn arena_tick(&mut self, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
-        if ar.status != arena::PLAYING {
+        let before = ar.m.status;
+        if before == sim::LOBBY {
+            if ar.dirty {
+                ar.dirty = false;
+                self.arena_send(now);
+            }
             return;
         }
-        if ar.b == arena::BOT {
-            let mut rng = rand::rng();
-            let (dir, act) = ar.fight.ai(1, now, &mut || rng.random::<f64>());
-            ar.fight.walk(1, dir);
-            if let Some(a) = act {
-                ar.fight.input(1, a, now);
-            }
-        }
-        let events = ar.fight.step(now);
-        ar.status = ar.fight.status; // sim::PLAYING / A_WON / B_WON / DRAW match arena::*
-        let players = [ar.a, ar.b];
-        let tiles = [ar.tile_at(ar.fight.f[0].x), ar.tile_at(ar.fight.f[1].x)];
-        let over = ar.status != arena::PLAYING;
-        // The avatars stand where they fight (so cells and the nearby know).
-        for (id, t) in players.into_iter().zip(tiles) {
+        // The parade's end, worked out before the match is cleared away.
+        let parade: Vec<(u32, TilePos)> = if before == sim::OVER {
+            ar.m.parade_end()
+                .into_iter()
+                .map(|(id, x, y)| (id, ar.tile(x, y)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut rng = rand::rng();
+        let evs = ar.m.step(now, 100, &mut || rng.random::<f64>());
+        let after = ar.m.status;
+        let spots: Vec<(u32, TilePos)> =
+            ar.m.fighters
+                .iter()
+                .filter(|f| !f.bot)
+                .map(|f| (f.id, ar.tile(f.x, f.y)))
+                .collect();
+        let people: Vec<u32> =
+            ar.m.slots
+                .iter()
+                .copied()
+                .filter(|&s| s != 0 && !sim::is_bot(s))
+                .collect();
+        for (id, t) in spots {
             if let Some(a) = self.avatars.get_mut(&id)
                 && a.tile != t
             {
@@ -278,17 +404,22 @@ impl Instance {
                 self.on_tile_changed(id, now);
             }
         }
-        for e in events {
-            let msg = ServerMsg::ArenaEvent {
-                kind: e.kind,
-                by: players[e.by as usize],
-                dmg: e.dmg,
-                x: (e.x * 10.0).round() as u16,
-            };
-            self.arena_broadcast(&msg);
+        for e in &evs {
+            self.arena_broadcast(&event_msg(e));
         }
-        if over {
-            self.arena_ended(now);
+        // A new round: everyone back to their gates (and the ring cleared).
+        if after == sim::COUNTDOWN && before != sim::COUNTDOWN {
+            self.arena_take_places(now);
+        }
+        // Over: the parade's done; everyone stands where it ended, down the
+        // red carpet (anyone not in it, out through the gate).
+        if after == sim::LOBBY {
+            for id in people {
+                match parade.iter().find(|(p, _)| *p == id) {
+                    Some(&(_, t)) => self.arena_place(id, t, now),
+                    None => self.arena_out(id, now),
+                }
+            }
         }
         self.arena_send(now);
     }
@@ -299,20 +430,27 @@ mod tests {
     use crate::instance::Cmd;
     use crate::instance::tests::*;
     use crate::registry::ZoneDef;
-    use commons_protocol::{ClientMsg, ServerMsg, arena};
+    use commons_protocol::{ClientMsg, ServerMsg};
+    use commons_sim::arena as sim;
     use commons_sim::map::MapObject;
     use std::sync::Arc;
 
     fn park() -> crate::instance::Instance {
         let mut m = map(40, 30);
-        m.objects = vec![MapObject {
-            kind: "arena".into(),
-            x: 10,
-            y: 5,
-            w: 22,
-            h: 15,
-            label: None,
-        }];
+        let o = |kind: &str, x, y, w, h, label: Option<&str>| MapObject {
+            kind: kind.into(),
+            x,
+            y,
+            w,
+            h,
+            label: label.map(Into::into),
+        };
+        m.objects = vec![
+            o("arena", 10, 5, 22, 15, None),
+            o("arena_pillar", 15, 11, 2, 2, None),
+            o("arena_spikes", 20, 7, 2, 2, None),
+            o("spot", 20, 4, 1, 1, Some("arena")),
+        ];
         instance_for(Arc::new(ZoneDef::new("founders_park".into(), m, None)))
     }
 
@@ -320,31 +458,35 @@ mod tests {
         inst.handle(Cmd::Msg { conn, msg });
     }
 
-    fn last_status(c: &Client) -> Option<(u32, u32, u8)> {
+    fn last_state(c: &Client) -> Option<(u8, Vec<u32>)> {
         c.log.iter().rev().find_map(|m| match m {
-            ServerMsg::ArenaState { a, b, status, .. } => Some((*a, *b, *status)),
+            ServerMsg::ArenaState { status, slots, .. } => Some((*status, slots.clone())),
             _ => None,
         })
     }
 
     #[test]
-    fn fighters_take_the_sand_and_one_match_runs_at_a_time() {
+    fn gladiators_take_the_sand_bystanders_are_shown_out_and_bots_fight() {
         let mut inst = park();
         let mut a = connect(&mut inst, 1, "a", (20, 22));
         let _b = connect(&mut inst, 2, "b", (21, 22));
-        let _c = connect(&mut inst, 3, "c", (22, 22));
-        send(&mut inst, 1, ClientMsg::ArenaJoin { vs_bot: false });
-        send(&mut inst, 2, ClientMsg::ArenaJoin { vs_bot: false });
-        // A third can only watch.
-        send(&mut inst, 3, ClientMsg::ArenaJoin { vs_bot: true });
+        // Someone wandering about inside the ring.
+        let _c = connect(&mut inst, 3, "c", (25, 15));
+        inst.avatars.get_mut(&3).unwrap().tile = (25, 15);
+        send(&mut inst, 1, ClientMsg::ArenaJoin {});
+        send(&mut inst, 2, ClientMsg::ArenaJoin {});
+        send(&mut inst, 1, ClientMsg::ArenaStart { bots: true });
         inst.flush();
         a.pump();
-        assert_eq!(last_status(&a), Some((1, 2, arena::PLAYING)));
-        // Both on the middle row of the sand, a apart from b.
-        let (ta, tb) = (inst.avatars[&1].tile, inst.avatars[&2].tile);
-        assert_eq!((ta.1, tb.1), (12, 12));
-        assert!(ta.0 < tb.0 && ta.0 > 10 && tb.0 < 31, "{ta:?} {tb:?}");
-        // Fighters can't walk off.
+        let (status, slots) = last_state(&a).unwrap();
+        assert_eq!(status, sim::COUNTDOWN);
+        assert_eq!(&slots[..2], &[1, 2]);
+        assert!(slots[2..].iter().all(|&s| sim::is_bot(s)));
+        // On the sand at their gates; the bystander's outside the gate.
+        let ta = inst.avatars[&1].tile;
+        assert!(ta.0 > 10 && ta.0 < 31 && ta.1 > 5 && ta.1 < 19, "{ta:?}");
+        assert_eq!(inst.avatars[&3].tile, (20, 4));
+        // Fighters can't walk off; nobody walks in.
         send(
             &mut inst,
             1,
@@ -355,44 +497,52 @@ mod tests {
             },
         );
         assert!(inst.avatars[&1].motion.is_none());
-        // Walking in the fight moves the avatar.
-        send(&mut inst, 1, ClientMsg::ArenaMove { dir: 1 });
+        send(
+            &mut inst,
+            3,
+            ClientMsg::MoveTo {
+                x: 25,
+                y: 12,
+                sprint: false,
+            },
+        );
+        assert!(inst.avatars[&3].motion.is_none());
+        // The match runs: bots swing.
         let now = inst.clock.now_ms();
-        for k in 1..20 {
+        for k in 1..=200 {
             inst.arena_tick(now + k * 100);
         }
-        assert!(inst.avatars[&1].tile.0 < ta.0, "walked left");
-        // Blows are passed on.
-        send(&mut inst, 1, ClientMsg::ArenaMove { dir: 0 });
-        send(&mut inst, 1, ClientMsg::ArenaAct { act: 1 });
-        for k in 20..32 {
-            inst.arena_tick(now + k * 100);
-        }
+        send(
+            &mut inst,
+            1,
+            ClientMsg::ArenaAct {
+                act: sim::input::LIGHT,
+                aim: 0,
+            },
+        );
         inst.flush();
         a.pump();
         assert!(
-            a.log
-                .iter()
-                .any(|m| matches!(m, ServerMsg::ArenaEvent { by: 1, .. })),
-            "a's swing"
+            a.log.iter().any(|m| matches!(
+                m,
+                ServerMsg::ArenaEvent {
+                    kind: sim::ev::SWING,
+                    ..
+                }
+            )),
+            "swings are seen"
         );
-        // Yielding ends it; then a takes on the bot.
+        // b leaves: a bot takes the place.
         send(&mut inst, 2, ClientMsg::ArenaLeave {});
-        send(&mut inst, 1, ClientMsg::ArenaJoin { vs_bot: true });
         inst.flush();
         a.pump();
-        assert_eq!(last_status(&a), Some((1, arena::BOT, arena::PLAYING)));
-        let now = inst.clock.now_ms();
-        for k in 1..400 {
-            inst.arena_tick(now + k * 100);
-        }
+        let (_, slots) = last_state(&a).unwrap();
+        assert!(sim::is_bot(slots[1]));
+        // a leaves too: nobody left, called off; a's back out the gate.
+        send(&mut inst, 1, ClientMsg::ArenaLeave {});
         inst.flush();
         a.pump();
-        assert!(
-            a.log
-                .iter()
-                .any(|m| matches!(m, ServerMsg::ArenaEvent { by: arena::BOT, .. })),
-            "the bot fights"
-        );
+        assert_eq!(last_state(&a).unwrap().0, sim::LOBBY);
+        assert_eq!(inst.avatars[&1].tile, (20, 4));
     }
 }

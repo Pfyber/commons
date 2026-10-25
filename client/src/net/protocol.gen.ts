@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 27;
+export const PROTOCOL_VERSION = 30;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -106,37 +106,75 @@ export function decPoolBall(r: Reader): PoolBall {
 }
 
 export interface ArenaFighter {
+  id: number;
   x: number;
-  facing: number;
+  y: number;
+  aim: number;
   hp: number;
   stamina: number;
+  rage: number;
   act: number;
-  actAt: number;
-  blocking: boolean;
-  flinchUntil: number;
+  actMs: number;
+  charge: number;
+  flags: number;
+  holding: number;
+  fix: number;
 }
 
 export function encArenaFighter(w: Writer, v: ArenaFighter) {
+  w.u32(v.id);
   w.u16(v.x);
-  w.u8(v.facing);
+  w.u16(v.y);
+  w.u16(v.aim);
   w.u8(v.hp);
   w.u8(v.stamina);
+  w.u8(v.rage);
   w.u8(v.act);
-  w.u32(v.actAt);
-  w.bool(v.blocking);
-  w.u32(v.flinchUntil);
+  w.u16(v.actMs);
+  w.u8(v.charge);
+  w.u8(v.flags);
+  w.u8(v.holding);
+  w.u8(v.fix);
 }
 
 export function decArenaFighter(r: Reader): ArenaFighter {
   return {
+    id: r.u32(),
     x: r.u16(),
-    facing: r.u8(),
+    y: r.u16(),
+    aim: r.u16(),
     hp: r.u8(),
     stamina: r.u8(),
+    rage: r.u8(),
     act: r.u8(),
-    actAt: r.u32(),
-    blocking: r.bool(),
-    flinchUntil: r.u32(),
+    actMs: r.u16(),
+    charge: r.u8(),
+    flags: r.u8(),
+    holding: r.u8(),
+    fix: r.u8(),
+  };
+}
+
+export interface ArenaGift {
+  kind: number;
+  x: number;
+  y: number;
+  landsMs: number;
+}
+
+export function encArenaGift(w: Writer, v: ArenaGift) {
+  w.u8(v.kind);
+  w.u16(v.x);
+  w.u16(v.y);
+  w.u16(v.landsMs);
+}
+
+export function decArenaGift(r: Reader): ArenaGift {
+  return {
+    kind: r.u8(),
+    x: r.u16(),
+    y: r.u16(),
+    landsMs: r.u16(),
   };
 }
 
@@ -326,10 +364,10 @@ export type ClientMsg =
   | { t: "BowlJoin"; lane: number; vsBot: boolean }
   | { t: "BowlLeave"; lane: number }
   | { t: "BowlRoll"; lane: number; aim: number; power: number }
-  | { t: "ArenaJoin"; vsBot: boolean }
+  | { t: "ArenaJoin" }
   | { t: "ArenaLeave" }
-  | { t: "ArenaMove"; dir: number }
-  | { t: "ArenaAct"; act: number }
+  | { t: "ArenaMove"; x: number; y: number; aim: number }
+  | { t: "ArenaAct"; act: number; aim: number }
   | { t: "OpenCrate" }
   | { t: "Boat"; op: number }
   | { t: "PbJoin"; team: number }
@@ -339,6 +377,11 @@ export type ClientMsg =
   | { t: "PbFire"; shot: number; x: number; y: number; aim: number }
   | { t: "PbDash" }
   | { t: "PbReload" }
+  | { t: "ArenaStart"; bots: boolean }
+  | { t: "ArenaBot"; slot: number; on: boolean }
+  | { t: "ArenaLevel"; level: number }
+  | { t: "PbBot"; slot: number; on: boolean }
+  | { t: "PbLevel"; level: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -524,18 +567,20 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       break;
     case "ArenaJoin":
       w.u8(40);
-      w.bool(m.vsBot);
       break;
     case "ArenaLeave":
       w.u8(41);
       break;
     case "ArenaMove":
       w.u8(42);
-      w.u8(m.dir);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u16(m.aim);
       break;
     case "ArenaAct":
       w.u8(43);
       w.u8(m.act);
+      w.u16(m.aim);
       break;
     case "OpenCrate":
       w.u8(44);
@@ -573,6 +618,28 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       break;
     case "PbReload":
       w.u8(52);
+      break;
+    case "ArenaStart":
+      w.u8(53);
+      w.bool(m.bots);
+      break;
+    case "ArenaBot":
+      w.u8(54);
+      w.u8(m.slot);
+      w.bool(m.on);
+      break;
+    case "ArenaLevel":
+      w.u8(55);
+      w.u8(m.level);
+      break;
+    case "PbBot":
+      w.u8(56);
+      w.u8(m.slot);
+      w.bool(m.on);
+      break;
+    case "PbLevel":
+      w.u8(57);
+      w.u8(m.level);
       break;
   }
   return w.finish();
@@ -698,16 +765,16 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "BowlRoll", lane: r.u8(), aim: r.u16(), power: r.u16() };
       break;
     case 40:
-      m = { t: "ArenaJoin", vsBot: r.bool() };
+      m = { t: "ArenaJoin" };
       break;
     case 41:
       m = { t: "ArenaLeave" };
       break;
     case 42:
-      m = { t: "ArenaMove", dir: r.u8() };
+      m = { t: "ArenaMove", x: r.u16(), y: r.u16(), aim: r.u16() };
       break;
     case 43:
-      m = { t: "ArenaAct", act: r.u8() };
+      m = { t: "ArenaAct", act: r.u8(), aim: r.u16() };
       break;
     case 44:
       m = { t: "OpenCrate" };
@@ -735,6 +802,21 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       break;
     case 52:
       m = { t: "PbReload" };
+      break;
+    case 53:
+      m = { t: "ArenaStart", bots: r.bool() };
+      break;
+    case 54:
+      m = { t: "ArenaBot", slot: r.u8(), on: r.bool() };
+      break;
+    case 55:
+      m = { t: "ArenaLevel", level: r.u8() };
+      break;
+    case 56:
+      m = { t: "PbBot", slot: r.u8(), on: r.bool() };
+      break;
+    case 57:
+      m = { t: "PbLevel", level: r.u8() };
       break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
@@ -783,13 +865,13 @@ export type ServerMsg =
   | { t: "LureShown"; x: number; y: number; ends: number }
   | { t: "BowlState"; lane: number; a: number; b: number; status: number; turn: number; frame: number; ball: number; standing: number; shot: number; rollsA: number[]; rollsB: number[] }
   | { t: "BowlRolled"; lane: number; by: number; aim: number; power: number; knocked: number; shot: number }
-  | { t: "ArenaState"; a: number; b: number; status: number; now: number; ends: number; fighters: ArenaFighter[] }
-  | { t: "ArenaEvent"; kind: number; by: number; dmg: number; x: number }
+  | { t: "ArenaState"; status: number; now: number; phaseMs: number; round: number; fire: number; spikes: number[]; slots: number[]; crowns: number[]; fighters: ArenaFighter[]; gifts: ArenaGift[]; winner: number; level: number }
+  | { t: "ArenaEvent"; kind: number; a: number; b: number; x: number; y: number; n: number; m: number; vx: number; vy: number }
   | { t: "LuckyShown"; x: number; y: number; moves: number }
   | { t: "LuckyFound"; id: number; x: number; y: number }
   | { t: "LuckyOpened"; coins: number }
   | { t: "BoatState"; captain: number; until: number; seats: number[] }
-  | { t: "PbState"; status: number; now: number; phaseMs: number; blue: number; red: number; winner: number; slots: number[]; players: PbPlayer[]; pickups: PbPickup[] }
+  | { t: "PbState"; status: number; now: number; phaseMs: number; blue: number; red: number; winner: number; slots: number[]; players: PbPlayer[]; pickups: PbPickup[]; level: number }
   | { t: "PbShot"; by: number; shot: number; x: number; y: number; aim: number; kind: number }
   | { t: "PbEvent"; kind: number; a: number; b: number; x: number; y: number; n: number }
   ;
@@ -1069,19 +1151,30 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       break;
     case "ArenaState":
       w.u8(40);
-      w.u32(m.a);
-      w.u32(m.b);
       w.u8(m.status);
       w.u32(m.now);
-      w.u32(m.ends);
+      w.u32(m.phaseMs);
+      w.u8(m.round);
+      w.u16(m.fire);
+      w.vec(m.spikes, (x) => w.u8(x));
+      w.vec(m.slots, (x) => w.u32(x));
+      w.vec(m.crowns, (x) => w.u8(x));
       w.vec(m.fighters, (x) => encArenaFighter(w, x));
+      w.vec(m.gifts, (x) => encArenaGift(w, x));
+      w.u32(m.winner);
+      w.u8(m.level);
       break;
     case "ArenaEvent":
       w.u8(41);
       w.u8(m.kind);
-      w.u32(m.by);
-      w.u8(m.dmg);
+      w.u32(m.a);
+      w.u32(m.b);
       w.u16(m.x);
+      w.u16(m.y);
+      w.u16(m.n);
+      w.u16(m.m);
+      w.u16(m.vx);
+      w.u16(m.vy);
       break;
     case "LuckyShown":
       w.u8(42);
@@ -1116,6 +1209,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.vec(m.slots, (x) => w.u32(x));
       w.vec(m.players, (x) => encPbPlayer(w, x));
       w.vec(m.pickups, (x) => encPbPickup(w, x));
+      w.u8(m.level);
       break;
     case "PbShot":
       w.u8(47);
@@ -1262,10 +1356,10 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "BowlRolled", lane: r.u8(), by: r.u32(), aim: r.u16(), power: r.u16(), knocked: r.u16(), shot: r.u32() };
       break;
     case 40:
-      m = { t: "ArenaState", a: r.u32(), b: r.u32(), status: r.u8(), now: r.u32(), ends: r.u32(), fighters: r.vec(() => decArenaFighter(r)) };
+      m = { t: "ArenaState", status: r.u8(), now: r.u32(), phaseMs: r.u32(), round: r.u8(), fire: r.u16(), spikes: r.vec(() => r.u8()), slots: r.vec(() => r.u32()), crowns: r.vec(() => r.u8()), fighters: r.vec(() => decArenaFighter(r)), gifts: r.vec(() => decArenaGift(r)), winner: r.u32(), level: r.u8() };
       break;
     case 41:
-      m = { t: "ArenaEvent", kind: r.u8(), by: r.u32(), dmg: r.u8(), x: r.u16() };
+      m = { t: "ArenaEvent", kind: r.u8(), a: r.u32(), b: r.u32(), x: r.u16(), y: r.u16(), n: r.u16(), m: r.u16(), vx: r.u16(), vy: r.u16() };
       break;
     case 42:
       m = { t: "LuckyShown", x: r.u16(), y: r.u16(), moves: r.u32() };
@@ -1280,7 +1374,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "BoatState", captain: r.u32(), until: r.u32(), seats: r.vec(() => r.u32()) };
       break;
     case 46:
-      m = { t: "PbState", status: r.u8(), now: r.u32(), phaseMs: r.u32(), blue: r.u8(), red: r.u8(), winner: r.u8(), slots: r.vec(() => r.u32()), players: r.vec(() => decPbPlayer(r)), pickups: r.vec(() => decPbPickup(r)) };
+      m = { t: "PbState", status: r.u8(), now: r.u32(), phaseMs: r.u32(), blue: r.u8(), red: r.u8(), winner: r.u8(), slots: r.vec(() => r.u32()), players: r.vec(() => decPbPlayer(r)), pickups: r.vec(() => decPbPickup(r)), level: r.u8() };
       break;
     case 47:
       m = { t: "PbShot", by: r.u32(), shot: r.u16(), x: r.u16(), y: r.u16(), aim: r.u16(), kind: r.u8() };

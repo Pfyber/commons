@@ -571,39 +571,32 @@ mod tests {
         assert_eq!(count("home"), 24, "the whole outer ring");
         // Two of the first eight club lots became the bowling alley and the arena.
         assert_eq!(count("club_lot") + count("club_hall"), 6);
+        // Everything to play right round the market; the quieter places a ring out.
         for k in [
-            "park",
             "pond",
-            "museum",
+            "arena",
+            "cinema",
             "cafe",
-            "library",
-            "paintball",
-            "town_hall",
             "arcade",
+            "bowling",
+            "fairground",
+            "town_hall",
         ] {
             assert_eq!(count(k), 1, "{k}");
             let (b, _) = c.blocks().find(|(_, t)| t.key == k).unwrap();
             assert_eq!(c.ring(b), 1, "{k} is in ring 1");
         }
         for k in [
-            "orchard",
-            "woods",
-            "meadow",
-            "lake",
-            "theater",
-            "fairground",
-            "gallery",
-            "casino",
-            "bowling",
-            "arena",
+            "orchard", "woods", "meadow", "lake", "theater", "gallery", "museum", "park",
+            "library", "casino",
         ] {
             let (b, _) = c.blocks().find(|(_, t)| t.key == k).unwrap();
             assert_eq!(c.ring(b), 2, "{k} is in ring 2");
         }
-        // The park is north of the market and the pond south.
+        // The pond is right above the market, the fairground below.
         let at = |k: &str| c.blocks().find(|(_, t)| t.key == k).unwrap().0;
-        assert_eq!(at("park"), BlockId { bx: 3, by: 2 });
-        assert_eq!(at("pond"), BlockId { bx: 3, by: 4 });
+        assert_eq!(at("pond"), BlockId { bx: 3, by: 2 });
+        assert_eq!(at("fairground"), BlockId { bx: 3, by: 4 });
     }
 
     #[test]

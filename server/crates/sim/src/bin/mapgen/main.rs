@@ -101,6 +101,14 @@ const DECOR: &[&str] = &[
     "clover",
     "pebbles",
     "fern",
+    // The desert round the arena: palms, cacti (tall and small), dry shrubs
+    // and bleached bones (walk-through), clay pots.
+    "palm",
+    "cactus",
+    "cactus_small",
+    "dry_shrub",
+    "bones",
+    "amphora",
 ];
 
 fn g(name: &str) -> u8 {
@@ -218,6 +226,8 @@ impl Builder {
             d("clover"),
             d("pebbles"),
             d("fern"),
+            d("dry_shrub"),
+            d("bones"),
             // Secret passages look like the trees around them.
             d("willow_curtain"),
             d("pine_secret"),

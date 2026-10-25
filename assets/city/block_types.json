@@ -10,7 +10,7 @@
     { "key": "library", "name": "Library", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
     { "key": "cinema", "name": "Cinema", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
     { "key": "town_hall", "name": "Town Hall", "category": "landmark", "enabled": true, "swappable": false, "rentable": [], "instanced": false },
-    { "key": "arcade", "name": "Arcade", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
+    { "key": "arcade", "name": "Arcade & Splat Yard", "category": "landmark", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
 
     { "key": "orchard", "name": "Orchard & Greenhouse", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },
     { "key": "woods", "name": "Woods", "category": "nature", "enabled": true, "swappable": true, "rentable": [], "instanced": false },

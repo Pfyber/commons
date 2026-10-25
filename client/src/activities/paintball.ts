@@ -29,6 +29,7 @@ import type { MapObject } from "../world/map";
 import { BLUE_PAINT, RED_PAINT, splat } from "../world/paintballart";
 import { drawPixelText, pixelWidth } from "../world/pixelfont";
 import type { Scene } from "../world/scene";
+import { levelLabel, levelPicker } from "./botlevel";
 
 // ---- the rules (as commons_sim::paintball) -------------------------------------
 
@@ -90,6 +91,8 @@ export type PbSend =
   | { t: "PbJoin"; team: number }
   | { t: "PbLeave" }
   | { t: "PbStart"; bots: boolean }
+  | { t: "PbBot"; slot: number; on: boolean }
+  | { t: "PbLevel"; level: number }
   | { t: "PbMove"; x: number; y: number; aim: number }
   | { t: "PbFire"; shot: number; x: number; y: number; aim: number }
   | { t: "PbDash" }
@@ -1659,39 +1662,61 @@ export class PaintballShow {
     const show = !this.capturing && s.status !== OVER;
     this.lobby.hidden = !show;
     if (!show) return;
-    const key = `${s.status}|${s.slots.join(",")}|${s.blue}|${s.red}|${mySlot}`;
+    const key = `${s.status}|${s.slots.join(",")}|${s.blue}|${s.red}|${mySlot}|${s.level}`;
     if (key === this.lobbyKey) return;
     this.lobbyKey = key;
     this.lobby.replaceChildren();
     const head = el("div", "pb-lobby-head");
     head.append(el("strong", "", "🎯 Splat Yard · Paintball"), el("span", "pb-lobby-status", s.status === LOBBY ? "3 v 3 · first to 10" : `Match on · ${s.blue} – ${s.red}`));
+    const isBot = (id: number) => id >= BOT_BASE && id < BOT_BASE + SLOTS;
+    // In the lobby, those with a place choose who plays: each bot can be taken out, or put in an empty place.
+    const canEdit = s.status === LOBBY && mySlot >= 0;
     const teams = el("div", "pb-lobby-teams");
     for (const team of [0, 1]) {
       const col = el("div", `pb-lobby-team ${team ? "red" : "blue"}`);
       col.append(el("div", "pb-lobby-team-name", team ? "RED" : "BLUE"));
       for (let k = team * 3; k < team * 3 + 3; k++) {
         const id = s.slots[k];
-        const bot = id >= BOT_BASE && id < BOT_BASE + SLOTS;
-        const label = id === 0 ? "· open ·" : bot ? `🤖 ${BOT_NAMES[k]}` : id === me ? `${this.nameOf(id)} (you)` : this.nameOf(id);
-        col.append(el("div", `pb-slot${id === 0 ? " open" : ""}${id === me ? " me" : ""}`, label));
+        const bot = isBot(id);
+        const label = id === 0 ? "· empty ·" : bot ? `🤖 ${BOT_NAMES[k]}` : id === me ? `${this.nameOf(id)} (you)` : this.nameOf(id);
+        const row = el("div", `pb-slot${id === 0 ? " open" : ""}${id === me ? " me" : ""}${bot ? " bot" : ""}`);
+        row.append(el("span", "pb-slot-name", label));
+        if (canEdit && bot) row.append(Object.assign(button("✕", () => this.send({ t: "PbBot", slot: k, on: false }), "subtle pb-bot-btn"), { title: "Take this bot out" }));
+        if (canEdit && id === 0) row.append(Object.assign(button("+ 🤖", () => this.send({ t: "PbBot", slot: k, on: true }), "subtle pb-bot-btn"), { title: "Put a bot in" }));
+        col.append(row);
       }
-      const hasBot = s.slots.slice(team * 3, team * 3 + 3).some((id) => id >= BOT_BASE && id < BOT_BASE + SLOTS);
+      const hasBot = s.slots.slice(team * 3, team * 3 + 3).some(isBot);
       const hasRoom = s.slots.slice(team * 3, team * 3 + 3).some((id) => id === 0);
-      if (s.status === LOBBY && Math.floor(mySlot / 3) !== team && hasRoom) col.append(button(mySlot >= 0 ? "Switch here" : `Join ${team ? "Red" : "Blue"}`, () => this.send({ t: "PbJoin", team }), team ? "pb-join red" : "pb-join blue"));
+      if (s.status === LOBBY && Math.floor(mySlot / 3) !== team && (hasRoom || hasBot)) col.append(button(mySlot >= 0 ? "Switch here" : `Join ${team ? "Red" : "Blue"}`, () => this.send({ t: "PbJoin", team }), team ? "pb-join red" : "pb-join blue"));
       if (s.status !== LOBBY && mySlot < 0 && (hasBot || hasRoom)) col.append(button(`Jump in for ${team ? "Red" : "Blue"}`, () => this.send({ t: "PbJoin", team }), team ? "pb-join red" : "pb-join blue"));
       teams.append(col);
     }
+    // The match this makes: n v m, and who's who.
+    const side = (t: number) => s.slots.slice(t * 3, t * 3 + 3).filter((x) => x !== 0);
+    const [blue, red] = [side(0), side(1)];
+    const bots = [...blue, ...red].filter(isBot).length;
+    const people = blue.length + red.length - bots;
+    const ready = blue.length > 0 && red.length > 0;
+    const modeText =
+      s.status !== LOBBY
+        ? bots > 0
+          ? `Bots: ${levelLabel(s.level)}`
+          : ""
+        : !ready
+          ? `${blue.length ? "Red" : "Blue"} needs someone: add a bot, or wait for a player`
+          : `🎯 ${blue.length} v ${red.length} · ${people} ${people === 1 ? "player" : "players"}, ${bots} ${bots === 1 ? "bot" : "bots"}`;
+    const mode = el("p", `pb-mode${s.status === LOBBY && !ready ? " warn" : ""}`, modeText);
+    const level = s.status === LOBBY ? levelPicker(s.level, canEdit ? (l) => this.send({ t: "PbLevel", level: l }) : null) : null;
     const actions = el("div", "pb-lobby-actions");
     if (s.status === LOBBY && mySlot >= 0) {
-      actions.append(button("▶ Play! (bots fill the gaps)", () => this.send({ t: "PbStart", bots: true }), "primary"));
-      const both = s.slots.slice(0, 3).some((x) => x !== 0) && s.slots.slice(3).some((x) => x !== 0);
-      if (both) actions.append(button("Players only", () => this.send({ t: "PbStart", bots: false })));
-      actions.append(button("Leave", () => this.send({ t: "PbLeave" }), "subtle"));
+      const go = button("▶ Play!", () => this.send({ t: "PbStart", bots: false }), "primary");
+      go.disabled = !ready;
+      actions.append(go, button("Leave", () => this.send({ t: "PbLeave" }), "subtle"));
     } else if (s.status === LOBBY) {
       actions.append(button("🎯 Quick play", () => this.send({ t: "PbJoin", team: 2 }), "primary"));
     }
     const help = el("p", "hint pb-help", "WASD move · mouse aim · click to shoot · Space roll · R reload. Three hits and you're out. Grab the power-ups on the pads; hide in hedges; steel drums bounce balls back.");
-    this.lobby.append(head, teams, actions, help);
+    this.lobby.append(head, teams, ...(modeText ? [mode] : []), ...(level ? [level] : []), actions, help);
   }
 
   destroy() {

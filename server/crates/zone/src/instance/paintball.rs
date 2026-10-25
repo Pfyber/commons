@@ -95,6 +95,7 @@ impl Yard {
                     y: x100(p.y),
                 })
                 .collect(),
+            level: m.level,
         }
     }
 }
@@ -248,6 +249,22 @@ impl Instance {
         y.dirty = true;
         self.pb_place_all(now);
         self.pb_send_state(now);
+    }
+
+    pub(super) fn pb_bot(&mut self, id: u32, slot: u8, on: bool, now: u32) {
+        let Some(y) = self.yard.as_mut() else { return };
+        if y.m.set_bot(id, slot as usize, on) {
+            y.dirty = true;
+            self.pb_send_state(now);
+        }
+    }
+
+    pub(super) fn pb_level(&mut self, id: u32, level: u8, now: u32) {
+        let Some(y) = self.yard.as_mut() else { return };
+        if y.m.set_level(id, level) {
+            y.dirty = true;
+            self.pb_send_state(now);
+        }
     }
 
     pub(super) fn pb_move(&mut self, id: u32, x: u16, y: u16, aim: u16, now: u32) {

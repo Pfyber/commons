@@ -741,17 +741,18 @@ export class Game {
         (m) => this.socket?.send(m),
       );
     }
-    const ring = map.objects.find((o) => o.kind === "arena");
-    if (ring) {
+    if (map.objects.some((o) => o.kind === "arena")) {
       this.arena = new ArenaShow(
         this.scene,
-        ring,
+        map,
         labels,
+        app.canvas,
         () => this.selfId,
         (id) => this.avatars.get(id),
         (id) => this.avatars.get(id)?.info.name ?? "someone",
         () => this.socket?.clock.now() ?? 0,
         (m) => this.socket?.send(m),
+        (x, y) => this.daynight.addGlow(x, y, 2.6, 2.2, 0xff7a3a, 0.7),
       );
     }
     if (map.objects.some((o) => o.kind === "pb_field")) {
@@ -2643,12 +2644,12 @@ export class Game {
       return;
     }
     // Mid-game at a bowling lane (or mid-fight in the arena) you stay put until you leave it.
-    if (this.paintball?.capturing) return;
-    if (this.bowlingNow() || this.arena?.players.includes(this.selfId)) {
+    if (this.paintball?.capturing || this.arena?.capturing) return;
+    if (this.bowlingNow()) {
       const wall = performance.now();
       if (wall - this.bowlNagAt > 2500) {
         this.bowlNagAt = wall;
-        this.hud.toast(this.bowlingNow() ? "🎳 You're in a game! Tap your lane and press 'Leave game' to walk away." : "⚔️ You're mid-fight! Yield in the arena window to walk away.", 3000);
+        this.hud.toast("🎳 You're in a game! Tap your lane and press 'Leave game' to walk away.", 3000);
       }
       return;
     }
@@ -2800,7 +2801,7 @@ export class Game {
     };
     const touchDown = (e: PointerEvent) => {
       // (On the paintball field the thumbs are on the sticks: no pinching.)
-      if (e.pointerType !== "touch" || this.paintball?.capturing) return;
+      if (e.pointerType !== "touch" || this.paintball?.capturing || this.arena?.capturing) return;
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (touches.size === 2) pinch = { dist: Math.max(20, spread()), from: this.scene.zoomLevel };
     };
@@ -2854,7 +2855,7 @@ export class Game {
       // A pinch isn't a tap.
       if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
       // Out on the paintball field: the mouse aims and shoots, it doesn't walk.
-      if (this.paintball?.capturing) return;
+      if (this.paintball?.capturing || this.arena?.capturing) return;
       // A menu or shop open: a tap on the world closes it, and that's all.
       if (Panel.dismissOnWorldTap()) return;
       // Tapping anywhere else puts the lure back in the bag: its menu and highlight go.
@@ -3190,6 +3191,13 @@ export class Game {
       return true;
     }
     // The arena's sign by the gate: fight the bot, fight a player, or watch.
+    // Caesar (or his guard, or the grand entrance): walk up to him, and his games.
+    if ((obj?.kind === "arena_court" || obj?.kind === "arena_gate") && this.arena) {
+      const front = spot(map, "caesar") ?? { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
+      if (cheb(self.destination, front) > 2) this.moveTo(nearestWalkable(map, front.x, front.y, 2) ?? front, true);
+      this.arena.openSign();
+      return true;
+    }
     if (obj?.kind === "arena_sign" && this.arena) {
       const front = { x: obj.x, y: obj.y + obj.h };
       if (cheb(self.destination, front) > 3) {
@@ -3882,7 +3890,7 @@ export class Game {
     const self = this.self;
     if (self) {
       self.update(serverNow, wallNow);
-      this.scene.follow(this.paintball ? this.paintball.camera(self.pos) : self.pos);
+      this.scene.follow(this.paintball ? this.paintball.camera(self.pos) : this.arena ? this.arena.camera(self.pos) : self.pos);
       this.scene.world.visible = true;
       this.ui.minimap.update(self.pos, self.moving ? this.route : null, wallNow, this.heading, this.others);
     }

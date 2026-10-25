@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 27;
+pub const PROTOCOL_VERSION: u16 = 30;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -25,11 +25,16 @@ records! {
     /// stripes) at whole table units.
     PoolBall { n: u8, x: u16, y: u16 }
 
-    /// A gladiator in the arena (see `commons_sim::arena`): where (floor
-    /// units ×10), facing (0 left, 1 right), health and stamina, the swing
-    /// under way (`commons_sim::arena::act`) and since when, whether they're
-    /// blocking, and until when they're staggered (zone times, ms).
-    ArenaFighter { x: u16, facing: u8, hp: u8, stamina: u8, act: u8, act_at: u32, blocking: bool, flinch_until: u32 }
+    /// A gladiator on the arena's sand (`commons_sim::arena`): where (arena
+    /// tiles ×100) and aiming where (a fraction of a full turn), health,
+    /// stamina and rage (0–100), what they're doing (`arena::act`) and for
+    /// how long (ms), how charged a heavy blow is (0–100), `flags`
+    /// (`arena::flag`), what they're holding (`arena::gift`), and `fix`:
+    /// bumped when the server puts them somewhere (the client takes its word).
+    ArenaFighter { id: u32, x: u16, y: u16, aim: u16, hp: u8, stamina: u8, rage: u8, act: u8, act_ms: u16, charge: u8, flags: u8, holding: u8, fix: u8 }
+
+    /// A gift the crowd threw in (`commons_sim::arena::gift`): where (arena tiles ×100), and how long till it lands (ms).
+    ArenaGift { kind: u8, x: u16, y: u16, lands_ms: u16 }
 
     /// Someone on the paintball field (`commons_sim::paintball`): where
     /// (field tiles ×100), aiming where (a fraction of a full turn), paint
@@ -169,13 +174,14 @@ message_enum! {
         /// Bowl: where the ball meets the pins (`aim` 0–2000, 1000 the
         /// middle) and how hard (`power` 0–1000).
         39 BowlRoll { lane: u8, aim: u16, power: u16 }
-        /// The arena: fight the bot, or wait for (or take on) a player.
-        40 ArenaJoin { vs_bot: bool }
+        /// The arena: take one of the four places (mid-match, a bot's).
+        40 ArenaJoin {}
+        /// Give up your place (a bot takes it mid-match).
         41 ArenaLeave {}
-        /// Walking on the sand: 0 still, 1 left, 2 right.
-        42 ArenaMove { dir: u8 }
-        /// A swing, or holding or letting go of a block (`commons_sim::arena::input`).
-        43 ArenaAct { act: u8 }
+        /// Where you are on the sand (arena tiles ×100) and aim, a few times a second.
+        42 ArenaMove { x: u16, y: u16, aim: u16 }
+        /// A move (`commons_sim::arena::input`), aimed (or, a roll, headed) at `aim`.
+        43 ArenaAct { act: u8, aim: u16 }
         /// Open a lucky crate from your bag.
         44 OpenCrate {}
         /// The Lake's rowboats (`boat::*` op): rent one at the boat hire, or
@@ -196,6 +202,16 @@ message_enum! {
         51 PbDash {}
         /// Reload now.
         52 PbReload {}
+        /// Start the arena's match (you have a place): `bots` fill the empty ones.
+        53 ArenaStart { bots: bool }
+        /// In the arena's lobby: a bot in place `slot` (`on`), or taken out.
+        54 ArenaBot { slot: u8, on: bool }
+        /// In the arena's lobby: how good the bots are (0 easy, 1 medium, 2 hard).
+        55 ArenaLevel { level: u8 }
+        /// In the Splat Yard's lobby: a bot in place `slot` (`on`), or taken out.
+        56 PbBot { slot: u8, on: bool }
+        /// In the Splat Yard's lobby: how good the bots are (0 easy, 1 medium, 2 hard).
+        57 PbLevel { level: u8 }
     }
 }
 
@@ -318,12 +334,16 @@ message_enum! {
         /// `BowlRoll`) and the pins in `knocked` (a mask) fall; the next
         /// `BowlState` follows.
         39 BowlRolled { lane: u8, by: u32, aim: u16, power: u16, knocked: u16, shot: u32 }
-        /// How the arena stands (`arena::*` status): the two fighters, and
-        /// the zone's clock (`now`) and when time's up. Sent every tick of a match.
-        40 ArenaState { a: u32, b: u32, status: u8, now: u32, ends: u32, fighters: Vec<ArenaFighter> }
-        /// Something happened in the fight (`arena::event`): by whom (a
-        /// player id), how much it hurt, and where (floor units ×10).
-        41 ArenaEvent { kind: u8, by: u32, dmg: u8, x: u16 }
+        /// How the arena stands (`commons_sim::arena` status): the time left in
+        /// this phase, the round, how far the ring of fire has closed (×1000 of
+        /// the ring; 1150 is not at all), each spike plate (0 down, 1 rattling,
+        /// 2 up), who has each place (0 free) and their crowns, the fighters,
+        /// the gifts, and the round's (or match's) winner. Every tick of a match.
+        40 ArenaState { status: u8, now: u32, phase_ms: u32, round: u8, fire: u16, spikes: Vec<u8>, slots: Vec<u32>, crowns: Vec<u8>, fighters: Vec<ArenaFighter>, gifts: Vec<ArenaGift>, winner: u32, level: u8 }
+        /// Something happened (`commons_sim::arena::ev`): `a`, `b`, `n`, `m` as
+        /// each says, at (x, y) (arena tiles ×100), and a knock (`vx`, `vy`:
+        /// tiles a second ×100, + 32768).
+        41 ArenaEvent { kind: u8, a: u32, b: u32, x: u16, y: u16, n: u16, m: u16, vx: u16, vy: u16 }
         /// A lucky crate sits at (`x`, `y`) till instance time `moves` (then it
         /// turns up somewhere else): walk up to it to pick it up.
         42 LuckyShown { x: u16, y: u16, moves: u32 }
@@ -339,7 +359,7 @@ message_enum! {
         /// left in this phase, the score, who has each place (Blue's three,
         /// then Red's; 0 free), everyone on the field, the pads' power-ups,
         /// and (when it's over) the winners (0 Blue, 1 Red, 2 a draw).
-        46 PbState { status: u8, now: u32, phase_ms: u32, blue: u8, red: u8, winner: u8, slots: Vec<u32>, players: Vec<PbPlayer>, pickups: Vec<PbPickup> }
+        46 PbState { status: u8, now: u32, phase_ms: u32, blue: u8, red: u8, winner: u8, slots: Vec<u32>, players: Vec<PbPlayer>, pickups: Vec<PbPickup>, level: u8 }
         /// A shot fired (a ball, or with bit 1 of `kind` a spread of three; bit 0: bouncing).
         47 PbShot { by: u32, shot: u16, x: u16, y: u16, aim: u16, kind: u8 }
         /// Something happened (`paintball::ev`): `a` and `b` as each says, at (x, y), `n` the ball or a count.
@@ -430,19 +450,6 @@ pub mod drink {
 
 /// The bar's pool table (`PoolState`); the game itself is `commons_sim::pool`.
 /// The bowling alley's lanes (`BowlState`); the game itself is `commons_sim::bowling`.
-/// The gladiator arena (`ArenaState`); the fight itself is `commons_sim::arena`.
-pub mod arena {
-    /// `ArenaState.status`, as `pool::*`, and a draw.
-    pub const EMPTY: u8 = 0;
-    pub const WAITING: u8 = 4;
-    pub const PLAYING: u8 = 1;
-    pub const A_WON: u8 = 2;
-    pub const B_WON: u8 = 3;
-    pub const DRAW: u8 = 5;
-    /// The arena's bot, as a player id.
-    pub const BOT: u32 = 0xffff_fffa;
-}
-
 pub mod bowl {
     /// `BowlState.status`: as `pool::*`, and a tie.
     pub const EMPTY: u8 = 0;
