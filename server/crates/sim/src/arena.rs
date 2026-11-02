@@ -160,12 +160,12 @@ pub mod kit {
 /// blow's reach, sweep, damage and timing (of a knight's), its heavy blow's
 /// reach and damage (and the lunge's, barely and fully charged), its
 /// whirlwind's reach and damage, and how far blows knock it.
-pub const KIT_HP: [f64; 5] = [115.0, 80.0, 95.0, 110.0, 200.0];
-pub const KIT_SPEED: [f64; 5] = [1.0, 1.06, 1.0, 1.0, 0.84];
+pub const KIT_HP: [f64; 5] = [108.0, 105.0, 95.0, 110.0, 150.0];
+pub const KIT_SPEED: [f64; 5] = [1.0, 1.12, 1.0, 1.0, 0.84];
 pub const KIT_LIGHT_REACH: [f64; 5] = [1.35, 1.15, 1.15, 1.95, 1.4];
 pub const KIT_LIGHT_ARC: [f64; 5] = [1.0, 0.85, 0.85, 0.8, 1.05];
-pub const KIT_LIGHT_DMG: [f64; 5] = [1.0, 0.6, 0.65, 1.0, 0.88];
-pub const KIT_LIGHT_TIME: [f64; 5] = [1.0, 0.8, 0.8, 1.08, 1.35];
+pub const KIT_LIGHT_DMG: [f64; 5] = [1.0, 0.6, 0.65, 1.08, 1.25];
+pub const KIT_LIGHT_TIME: [f64; 5] = [1.0, 0.8, 0.8, 1.08, 1.15];
 pub const KIT_HEAVY_REACH: [f64; 5] = [1.55, 1.15, 1.15, 2.2, 1.6];
 pub const KIT_HEAVY_DMG: [f64; 5] = [1.0, 0.6, 0.65, 0.57, 1.1];
 pub const KIT_LUNGE: [f64; 5] = [1.3, 1.3, 1.3, 1.7, 1.0];
@@ -174,12 +174,14 @@ pub const KIT_SPIN_REACH: [f64; 5] = [1.75, 1.75, 1.75, 2.5, 1.75];
 pub const KIT_SPIN_DMG: [f64; 5] = [1.0, 1.0, 1.0, 0.8, 1.0];
 pub const KIT_KB_TAKEN: [f64; 5] = [1.0, 1.1, 1.0, 1.0, 0.75];
 /// What arrows, thrown spears and bombs do to each class (the tank's armour turns some).
-pub const KIT_RANGED_TAKEN: [f64; 5] = [1.0, 1.0, 1.0, 1.0, 0.7];
+pub const KIT_RANGED_TAKEN: [f64; 5] = [1.0, 1.0, 1.0, 1.0, 0.8];
 /// What each move costs it in stamina (of a knight's).
 pub const KIT_COST: [f64; 5] = [1.0, 1.0, 1.0, 1.0, 1.35];
 /// With classes on, each round begins with this long to pick one (cut
 /// short once everyone has).
 pub const CHOOSE_MS: u32 = 7000;
+/// With the wheel on, how long it spins (and shows what it gave) instead.
+pub const WHEEL_MS: u32 = 6000;
 /// Firing: the bow drawn back (the archer's charged blow) or a bomb lobbed
 /// (the bomber's): the moment it goes, and the recovery after.
 pub const SHOOT: (u32, u32) = (90, 260);
@@ -187,13 +189,13 @@ pub const SHOOT: (u32, u32) = (90, 260);
 /// thrown spear; one every third of a second (the shot, then the rest of it).
 pub const ARROW_SPEED: f64 = 22.0;
 pub const QUICK_SHOT: (u32, u32) = (60, 690);
-pub const QUICK_ARROW_DMG: f64 = 3.25;
+pub const QUICK_ARROW_DMG: f64 = 6.0;
 pub const QUICK_ARROW_COST: f64 = 9.0;
 /// The archer's charged shot: three arrows, one after another, flying on
 /// till they hit something, twice the quick one's damage, 1.7× as fast.
 pub const BURST_ARROWS: u8 = 3;
 pub const BURST_GAP_MS: u32 = 110;
-pub const BURST_DMG: f64 = 5.0;
+pub const BURST_DMG: f64 = 8.5;
 pub const BURST_SPEED: f64 = ARROW_SPEED * 1.7;
 pub const BURST_COST: f64 = 26.0;
 /// (As far as "till they hit something" goes.)
@@ -205,7 +207,7 @@ pub const LOB_MIN: f64 = 2.2;
 pub const LOB_RANGE: f64 = 7.0;
 /// Its quick throw: a small bomb.
 pub const QUICK_LOB: (u32, u32) = (120, 480);
-pub const QUICK_LOB_DMG: f64 = 10.0;
+pub const QUICK_LOB_DMG: f64 = 9.5;
 pub const QUICK_LOB_R: f64 = 1.5;
 pub const QUICK_LOB_COST: f64 = 20.0;
 /// Its charged throw: a big bomb, the blast (and the damage, and what it
@@ -240,9 +242,9 @@ pub const CAST: (u32, u32) = (320, 260);
 pub const VOLLEY_WAVES: u8 = 3;
 pub const VOLLEY_GAP_MS: u32 = 500;
 pub const VOLLEY_ARROWS: usize = 16;
-pub const VOLLEY_DMG: f64 = 5.85;
+pub const VOLLEY_DMG: f64 = 3.0;
 pub const VOLLEY_AIMED: usize = 3;
-pub const VOLLEY_AIMED_DMG: f64 = 8.45;
+pub const VOLLEY_AIMED_DMG: f64 = 4.5;
 pub const VOLLEY_SPREAD: f64 = 0.12;
 /// The bomber's: a great blast all round them (they're unharmed).
 pub const BLAST_R: f64 = 3.3;
@@ -560,6 +562,15 @@ impl Ring {
             && y <= self.h - r
             && (!self.oval || self.in_oval(x, y, r))
             && !self.pillars.iter().any(|p| p.hits(x, y, r))
+    }
+
+    /// Whether (x, y) is on the sand (inside the wall, rounded or not), give or take `pad`.
+    pub fn on_sand(&self, x: f64, y: f64, pad: f64) -> bool {
+        x >= -pad
+            && y >= -pad
+            && x <= self.w + pad
+            && y <= self.h + pad
+            && (!self.oval || self.in_oval(x, y, -pad))
     }
 
     /// Whether a body (radius `r`) at (x, y) is inside the rounded wall.
@@ -1388,6 +1399,12 @@ pub struct Match {
     pub kits: bool,
     pub choose_end: u32,
     pub picks: [u8; SLOTS],
+    /// The bots' own match, put on while nobody's playing (for anyone
+    /// to watch); called off the moment someone comes to play.
+    pub exhibition: bool,
+    /// The wheel of classes (with classes on): at the match's start it
+    /// spins for everyone, and each keeps what it gave them all match.
+    pub wheel: bool,
 }
 
 impl Match {
@@ -1412,7 +1429,59 @@ impl Match {
             kits: false,
             choose_end: 0,
             picks: [0; SLOTS],
+            exhibition: false,
+            wheel: false,
         }
+    }
+
+    /// In the lobby, someone with a place turns the wheel of classes on or
+    /// off. Returns whether it changed.
+    pub fn set_wheel(&mut self, by: u32, on: bool) -> bool {
+        if self.status != LOBBY || self.slot_of(by).is_none() || self.wheel == on {
+            return false;
+        }
+        self.wheel = on;
+        true
+    }
+
+    /// Nobody's playing: the bots put on a match of their own (a duel, a
+    /// brawl or the Goliath; classes or not; good bots). False if anyone has
+    /// a place, or a match is on.
+    pub fn exhibit(&mut self, now: u32, rng: &mut impl FnMut() -> f64) -> bool {
+        if self.status != LOBBY || self.slots.iter().any(|&s| s != 0) {
+            return false;
+        }
+        let n = if rng() < 0.3 { 2 } else { SLOTS };
+        for s in 0..n {
+            self.slots[s] = BOT_BASE + s as u32;
+        }
+        self.mode = if n == SLOTS && rng() < 0.25 {
+            mode::GOLIATH
+        } else {
+            mode::CLASSIC
+        };
+        self.goliath = (rng() * n as f64) as usize % n;
+        self.kits = rng() < 0.65;
+        self.wheel = self.kits && rng() < 0.4;
+        self.level = if rng() < 0.5 {
+            crate::level::HARD
+        } else {
+            crate::level::EXTREME
+        };
+        self.exhibition = true;
+        self.begin_match(now);
+        true
+    }
+
+    /// The bots' match called off (someone's come to play): back to an
+    /// empty lobby. False if there wasn't one.
+    pub fn call_off(&mut self) -> bool {
+        if !self.exhibition {
+            return false;
+        }
+        self.slots = [0; SLOTS];
+        self.back_to_lobby();
+        true
     }
 
     /// In the lobby, someone with a place turns classes on or off. Returns
@@ -1434,7 +1503,8 @@ impl Match {
     /// not the Goliath). Once everyone has, the countdown begins. Returns
     /// whether it took.
     pub fn choose_kit(&mut self, id: u32, k: u8, now: u32) -> bool {
-        if !self.choosing(now) || k >= kit::COUNT {
+        // (With the wheel, it chooses.)
+        if !self.choosing(now) || k >= kit::COUNT || self.wheel {
             return false;
         }
         let Some(i) = self.index(id) else {
@@ -1544,6 +1614,8 @@ impl Match {
         if self.slot_of(id).is_some() {
             return true;
         }
+        // (The bots were only filling in: off they go.)
+        self.call_off();
         let s = if self.running() {
             (0..SLOTS)
                 .find(|&k| is_bot(self.slots[k]))
@@ -1747,6 +1819,15 @@ impl Match {
     /// Back to the lobby: the same places (bots and all) for another, unless nobody's left.
     fn back_to_lobby(&mut self) {
         self.status = LOBBY;
+        if self.exhibition {
+            // (The lobby as it was: empty, the usual settings.)
+            self.exhibition = false;
+            self.slots = [0; SLOTS];
+            self.mode = mode::CLASSIC;
+            self.kits = false;
+            self.wheel = false;
+            self.level = crate::level::MEDIUM;
+        }
         self.fighters.clear();
         self.missiles.clear();
         self.gifts.clear();
@@ -1781,6 +1862,11 @@ impl Match {
         if self.mode == mode::GOLIATH && self.slots[self.goliath] == 0 {
             return false;
         }
+        self.begin_match(now);
+        true
+    }
+
+    fn begin_match(&mut self, now: u32) {
         self.crowns = [0; SLOTS];
         self.round = 0;
         self.fighters = (0..SLOTS)
@@ -1788,7 +1874,6 @@ impl Match {
             .map(|s| self.make(self.slots[s], s, self.place(s)))
             .collect();
         self.begin_round(now);
-        true
     }
 
     fn begin_round(&mut self, now: u32) {
@@ -1796,10 +1881,34 @@ impl Match {
         self.status = COUNTDOWN;
         // With classes on: a while to pick one first (the bots pick at once,
         // and the Goliath's the Goliath); each keeps last round's meanwhile.
-        let choose = if self.kits { CHOOSE_MS } else { 0 };
+        let spin = self.kits && self.wheel;
+        let choose = match (self.kits, spin) {
+            (false, _) => 0,
+            (true, false) => CHOOSE_MS,
+            // The wheel: it spins at the start; after, everyone keeps theirs.
+            (true, true) if self.round == 1 => WHEEL_MS,
+            (true, true) => 0,
+        };
         self.choose_end = now + choose;
         self.phase_end = now + choose + COUNTDOWN_MS;
         for s in 0..SLOTS {
+            if spin {
+                let giant = self.mode == mode::GOLIATH && s == self.goliath;
+                self.picks[s] = if giant {
+                    kit::PICKED
+                } else if self.round == 1 {
+                    // (Where the wheel stops: anyone's guess.)
+                    let mut h =
+                        now.wrapping_mul(2_654_435_761) ^ (s as u32 + 1).wrapping_mul(0x9e37_79b9);
+                    h ^= h >> 15;
+                    h = h.wrapping_mul(0x85eb_ca6b);
+                    h ^= h >> 13;
+                    (h % kit::COUNT as u32) as u8 | kit::PICKED
+                } else {
+                    self.picks[s] | kit::PICKED
+                };
+                continue;
+            }
             let k = self.picks[s] & !kit::PICKED;
             self.picks[s] = if !self.kits {
                 0
@@ -1840,8 +1949,9 @@ impl Match {
             })
             .collect();
         self.fighters = fresh;
-        // (Nobody left to pick: straight on.)
+        // (Nobody left to pick: straight on. Not while the wheel spins.)
         if self.kits
+            && !(self.wheel && self.round == 1)
             && self
                 .fighters
                 .iter()
@@ -6316,5 +6426,58 @@ mod kit_tests {
             HP - m.fighters[1].hp
         };
         assert!(blow(kit::TANK) > blow(kit::KNIGHT) * 1.2);
+    }
+    #[test]
+    fn the_bots_put_on_a_match_while_nobody_plays_and_make_way() {
+        let mut m = Match::new(sand());
+        let mut r = rng(21);
+        assert!(m.exhibit(0, &mut r));
+        assert!(m.exhibition && m.running());
+        assert!(m.slots.iter().filter(|&&s| s != 0).all(|&s| is_bot(s)));
+        assert!(!m.exhibit(0, &mut r), "one at a time");
+        let mut now = 0;
+        for _ in 0..50 {
+            now += 100;
+            m.step(now, 100, &mut r);
+        }
+        // Someone comes to play: the bots' match is off, they're in the lobby.
+        assert!(m.join(1, now));
+        assert_eq!(m.status, LOBBY);
+        assert!(!m.exhibition && m.fighters.is_empty());
+        assert_eq!(m.slot_of(1), Some(0));
+        assert_eq!(
+            (m.mode, m.kits, m.level),
+            (mode::CLASSIC, false, crate::level::MEDIUM)
+        );
+        // And with someone in the lobby, no exhibition.
+        assert!(!m.exhibit(now, &mut r));
+        // Called off by the sign: an empty lobby.
+        let mut m = Match::new(sand());
+        m.exhibit(0, &mut r);
+        assert!(m.call_off());
+        assert!(m.slots.iter().all(|&s| s == 0) && m.status == LOBBY);
+        assert!(!m.call_off());
+    }
+    #[test]
+    fn the_wheel_picks_everyones_class_and_they_keep_it() {
+        let mut m = Match::new(sand());
+        m.join(1, 0);
+        assert!(m.set_kits(1, true));
+        assert!(m.set_wheel(1, true));
+        assert!(m.start(1, true, 0));
+        assert!(m.choosing(10), "the wheel spins");
+        assert!(!m.choose_kit(1, kit::TANK, 10), "it chooses, not you");
+        assert!(m.picks.iter().all(|p| p & kit::PICKED != 0));
+        assert_eq!(m.choose_end, WHEEL_MS);
+        let kits: Vec<u8> = m.fighters.iter().map(|f| f.kit).collect();
+        let picks = m.picks;
+        // The next round: the same classes, no spin.
+        m.begin_round(50_000);
+        assert!(!m.choosing(50_001));
+        assert_eq!(
+            m.picks.map(|p| p & !kit::PICKED),
+            picks.map(|p| p & !kit::PICKED)
+        );
+        assert_eq!(m.fighters.iter().map(|f| f.kit).collect::<Vec<_>>(), kits);
     }
 }

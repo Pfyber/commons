@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 33;
+export const PROTOCOL_VERSION = 40;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -337,7 +337,7 @@ export type ClientMsg =
   | { t: "Sit"; seat: number }
   | { t: "Stand" }
   | { t: "GameMove"; table: number; uci: string }
-  | { t: "FishCast"; x: number; y: number }
+  | { t: "FishCast"; x: number; y: number; magnet: boolean }
   | { t: "FishReel"; quality: number }
   | { t: "PlotAction"; x: number; y: number; action: number; item: number }
   | { t: "Place"; item: number; x: number; y: number }
@@ -363,7 +363,7 @@ export type ClientMsg =
   | { t: "Reading"; book: number }
   | { t: "Calling"; on: boolean }
   | { t: "Going"; zone: string; arrive: string }
-  | { t: "ThrowLure"; x: number; y: number }
+  | { t: "ThrowLure"; x: number; y: number; gold: boolean }
   | { t: "BowlJoin"; lane: number; vsBot: boolean }
   | { t: "BowlLeave"; lane: number }
   | { t: "BowlRoll"; lane: number; aim: number; power: number }
@@ -388,6 +388,12 @@ export type ClientMsg =
   | { t: "ArenaMode"; mode: number; goliath: number }
   | { t: "ArenaKits"; on: boolean }
   | { t: "ArenaKit"; kit: number }
+  | { t: "ArenaLobby" }
+  | { t: "ArenaWheel"; on: boolean }
+  | { t: "SalvageReel"; target: boolean; extras: number }
+  | { t: "UseObject"; x: number; y: number }
+  | { t: "TankPut"; x: number; y: number; fish: number }
+  | { t: "TankTake"; x: number; y: number; index: number }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -435,6 +441,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(9);
       w.u16(m.x);
       w.u16(m.y);
+      w.bool(m.magnet);
       break;
     case "FishReel":
       w.u8(10);
@@ -555,6 +562,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(36);
       w.u16(m.x);
       w.u16(m.y);
+      w.bool(m.gold);
       break;
     case "BowlJoin":
       w.u8(37);
@@ -662,6 +670,35 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(60);
       w.u8(m.kit);
       break;
+    case "ArenaLobby":
+      w.u8(61);
+      break;
+    case "ArenaWheel":
+      w.u8(62);
+      w.bool(m.on);
+      break;
+    case "SalvageReel":
+      w.u8(63);
+      w.bool(m.target);
+      w.u8(m.extras);
+      break;
+    case "UseObject":
+      w.u8(64);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
+    case "TankPut":
+      w.u8(65);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.fish);
+      break;
+    case "TankTake":
+      w.u8(66);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u8(m.index);
+      break;
   }
   return w.finish();
 }
@@ -696,7 +733,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "GameMove", table: r.u32(), uci: r.str() };
       break;
     case 9:
-      m = { t: "FishCast", x: r.u16(), y: r.u16() };
+      m = { t: "FishCast", x: r.u16(), y: r.u16(), magnet: r.bool() };
       break;
     case 10:
       m = { t: "FishReel", quality: r.u16() };
@@ -774,7 +811,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "Going", zone: r.str(), arrive: r.str() };
       break;
     case 36:
-      m = { t: "ThrowLure", x: r.u16(), y: r.u16() };
+      m = { t: "ThrowLure", x: r.u16(), y: r.u16(), gold: r.bool() };
       break;
     case 37:
       m = { t: "BowlJoin", lane: r.u8(), vsBot: r.bool() };
@@ -848,6 +885,24 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 60:
       m = { t: "ArenaKit", kit: r.u8() };
       break;
+    case 61:
+      m = { t: "ArenaLobby" };
+      break;
+    case 62:
+      m = { t: "ArenaWheel", on: r.bool() };
+      break;
+    case 63:
+      m = { t: "SalvageReel", target: r.bool(), extras: r.u8() };
+      break;
+    case 64:
+      m = { t: "UseObject", x: r.u16(), y: r.u16() };
+      break;
+    case 65:
+      m = { t: "TankPut", x: r.u16(), y: r.u16(), fish: r.u32() };
+      break;
+    case 66:
+      m = { t: "TankTake", x: r.u16(), y: r.u16(), index: r.u8() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -892,10 +947,10 @@ export type ServerMsg =
   | { t: "ReadingShown"; id: number; book: number }
   | { t: "CallingShown"; id: number; on: boolean }
   | { t: "Went"; id: number; zone: string; arrive: string }
-  | { t: "LureShown"; x: number; y: number; ends: number }
+  | { t: "LureShown"; x: number; y: number; ends: number; gold: boolean }
   | { t: "BowlState"; lane: number; a: number; b: number; status: number; turn: number; frame: number; ball: number; standing: number; shot: number; rollsA: number[]; rollsB: number[] }
   | { t: "BowlRolled"; lane: number; by: number; aim: number; power: number; knocked: number; shot: number }
-  | { t: "ArenaState"; status: number; now: number; phaseMs: number; round: number; fire: number; spikes: number[]; slots: number[]; crowns: number[]; fighters: ArenaFighter[]; gifts: ArenaGift[]; winner: number; level: number; mode: number; goliath: number; kits: boolean; chooseMs: number }
+  | { t: "ArenaState"; status: number; now: number; phaseMs: number; round: number; fire: number; spikes: number[]; slots: number[]; crowns: number[]; fighters: ArenaFighter[]; gifts: ArenaGift[]; winner: number; level: number; mode: number; goliath: number; kits: boolean; chooseMs: number; exhibition: boolean; wheel: boolean }
   | { t: "ArenaEvent"; kind: number; a: number; b: number; x: number; y: number; n: number; m: number; vx: number; vy: number }
   | { t: "LuckyShown"; x: number; y: number; moves: number }
   | { t: "LuckyFound"; id: number; x: number; y: number }
@@ -904,6 +959,10 @@ export type ServerMsg =
   | { t: "PbState"; status: number; now: number; phaseMs: number; blue: number; red: number; winner: number; slots: number[]; players: PbPlayer[]; pickups: PbPickup[]; level: number }
   | { t: "PbShot"; by: number; shot: number; x: number; y: number; aim: number; kind: number }
   | { t: "PbEvent"; kind: number; a: number; b: number; x: number; y: number; n: number }
+  | { t: "SalvageJunk"; items: number[] }
+  | { t: "ObjectOn"; x: number; y: number; on: boolean }
+  | { t: "TankFish"; x: number; y: number; fish: number[] }
+  | { t: "ObjectTop"; x: number; y: number; item: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -1155,6 +1214,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.x);
       w.u16(m.y);
       w.u32(m.ends);
+      w.bool(m.gold);
       break;
     case "BowlState":
       w.u8(38);
@@ -1197,6 +1257,8 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(m.goliath);
       w.bool(m.kits);
       w.u16(m.chooseMs);
+      w.bool(m.exhibition);
+      w.bool(m.wheel);
       break;
     case "ArenaEvent":
       w.u8(41);
@@ -1262,6 +1324,28 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.x);
       w.u16(m.y);
       w.u16(m.n);
+      break;
+    case "SalvageJunk":
+      w.u8(49);
+      w.vec(m.items, (x) => w.u32(x));
+      break;
+    case "ObjectOn":
+      w.u8(50);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.bool(m.on);
+      break;
+    case "TankFish":
+      w.u8(51);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.vec(m.fish, (x) => w.u32(x));
+      break;
+    case "ObjectTop":
+      w.u8(52);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.item);
       break;
   }
   return w.finish();
@@ -1381,7 +1465,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "Went", id: r.u32(), zone: r.str(), arrive: r.str() };
       break;
     case 37:
-      m = { t: "LureShown", x: r.u16(), y: r.u16(), ends: r.u32() };
+      m = { t: "LureShown", x: r.u16(), y: r.u16(), ends: r.u32(), gold: r.bool() };
       break;
     case 38:
       m = { t: "BowlState", lane: r.u8(), a: r.u32(), b: r.u32(), status: r.u8(), turn: r.u8(), frame: r.u8(), ball: r.u8(), standing: r.u16(), shot: r.u32(), rollsA: r.vec(() => r.u8()), rollsB: r.vec(() => r.u8()) };
@@ -1390,7 +1474,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "BowlRolled", lane: r.u8(), by: r.u32(), aim: r.u16(), power: r.u16(), knocked: r.u16(), shot: r.u32() };
       break;
     case 40:
-      m = { t: "ArenaState", status: r.u8(), now: r.u32(), phaseMs: r.u32(), round: r.u8(), fire: r.u16(), spikes: r.vec(() => r.u8()), slots: r.vec(() => r.u32()), crowns: r.vec(() => r.u8()), fighters: r.vec(() => decArenaFighter(r)), gifts: r.vec(() => decArenaGift(r)), winner: r.u32(), level: r.u8(), mode: r.u8(), goliath: r.u8(), kits: r.bool(), chooseMs: r.u16() };
+      m = { t: "ArenaState", status: r.u8(), now: r.u32(), phaseMs: r.u32(), round: r.u8(), fire: r.u16(), spikes: r.vec(() => r.u8()), slots: r.vec(() => r.u32()), crowns: r.vec(() => r.u8()), fighters: r.vec(() => decArenaFighter(r)), gifts: r.vec(() => decArenaGift(r)), winner: r.u32(), level: r.u8(), mode: r.u8(), goliath: r.u8(), kits: r.bool(), chooseMs: r.u16(), exhibition: r.bool(), wheel: r.bool() };
       break;
     case 41:
       m = { t: "ArenaEvent", kind: r.u8(), a: r.u32(), b: r.u32(), x: r.u16(), y: r.u16(), n: r.u16(), m: r.u16(), vx: r.u16(), vy: r.u16() };
@@ -1415,6 +1499,18 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 48:
       m = { t: "PbEvent", kind: r.u8(), a: r.u32(), b: r.u32(), x: r.u16(), y: r.u16(), n: r.u16() };
+      break;
+    case 49:
+      m = { t: "SalvageJunk", items: r.vec(() => r.u32()) };
+      break;
+    case 50:
+      m = { t: "ObjectOn", x: r.u16(), y: r.u16(), on: r.bool() };
+      break;
+    case 51:
+      m = { t: "TankFish", x: r.u16(), y: r.u16(), fish: r.vec(() => r.u32()) };
+      break;
+    case 52:
+      m = { t: "ObjectTop", x: r.u16(), y: r.u16(), item: r.u32() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

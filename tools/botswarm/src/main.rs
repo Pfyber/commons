@@ -656,7 +656,7 @@ async fn bot_loop(
                     let pick = if angler && !near.is_empty() { near.choose(&mut rng).copied() } else { world.fishing.choose(&mut rng) };
                     if let Some(&(stand, water)) = pick {
                         tx.send(frame(&ClientMsg::MoveTo { x: stand.0, y: stand.1, sprint: false })).await?;
-                        tx.send(frame(&ClientMsg::FishCast { x: water.0, y: water.1 })).await?;
+                        tx.send(frame(&ClientMsg::FishCast { x: water.0, y: water.1, magnet: false })).await?;
                         fishing_until = Some(now + Duration::from_secs(60));
                     }
                 } else if now >= next_sit && self_id != 0 && behaviour == Behaviour::Wander && !angler {

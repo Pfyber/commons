@@ -11,6 +11,19 @@
 import { audio, setNotesMuted } from "../activities/jam";
 
 let muted = false;
+/** How loud what's played now is heard (1: right there; less, further off: `withScale`). */
+let scale = 1;
+
+/** Plays whatever `f` plays at `k` of its volume (a place's sounds, heard from further off). */
+export function withScale<T>(k: number, f: () => T): T {
+  const was = scale;
+  scale = was * Math.max(0, Math.min(1, k));
+  try {
+    return f();
+  } finally {
+    scale = was;
+  }
+}
 let out: GainNode | null = null;
 let room: ConvolverNode | null = null;
 let noise: AudioBuffer | null = null;
@@ -77,6 +90,7 @@ function dest(pan = 0, wet = 0): AudioNode | null {
 
 /** Plays `buf` at `t`, as loud as `level`, optionally darker (`lowpass` Hz) or re-pitched. */
 function play(buf: AudioBuffer, t: number, level: number, opts: { pan?: number; wet?: number; lowpass?: number; rate?: number } = {}) {
+  level *= scale;
   if (level < 0.003) return;
   const d = dest(opts.pan, opts.wet);
   if (!d) return;
@@ -588,6 +602,7 @@ function noiseBuffer(a: AudioContext): AudioBuffer {
 
 /** A shaped burst of filtered noise. */
 export function burst(t: number, len: number, level: number, type: BiquadFilterType, from: number, to = from, q = 1) {
+  level *= scale;
   const o = bus();
   if (!o || level < 0.002) return;
   const a = audio();
@@ -609,6 +624,7 @@ export function burst(t: number, len: number, level: number, type: BiquadFilterT
 
 /** A pitched blip that glides from `from` to `to` Hz. */
 export function tone(t: number, len: number, level: number, type: OscillatorType, from: number, to = from) {
+  level *= scale;
   const o = bus();
   if (!o || level < 0.002) return;
   const a = audio();

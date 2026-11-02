@@ -1904,6 +1904,8 @@ fn market(k: &mut Blk) {
     k.spot("fountain", 23, 27);
     k.object("story_board", 16, 23, 2, 1, "Story of the Town");
     k.object("notice_board", 30, 23, 2, 1, "Notice Board");
+    // The Leaderboard, up on the green between the north lamps.
+    k.object("leaderboard", 23, 17, 2, 1, "Leaderboard");
     // Street lamps round the green, and round the ring.
     for i in 0..8 {
         let a = (i as f32 + 0.5) * std::f32::consts::FRAC_PI_4;
@@ -2295,6 +2297,8 @@ fn pond(k: &mut Blk) {
     k.clear(38, 24, 4, 3, "path");
     k.marker("fisherman", 39, 25, 1, 1, Some("Fisherman"));
     k.spot("fisherman", 40, 26);
+    // The anglers' leaderboard (fish caught), on the bank by the fisherman.
+    k.object("leaderboard", 43, 21, 2, 1, "Anglers Leaderboard");
     k.object("bottles", 42, 25, 1, 1, "Messages in bottles");
     k.bench(5, 22, 3);
     // A bench up the east path, side on, looking out over the water.
@@ -2790,6 +2794,15 @@ fn arena(k: &mut Blk) {
     k.spot("arena", gate - 2, below + 2);
     k.object("arena_court", gate + 5, below + 1, 5, 2, "Caesar");
     k.spot("caesar", gate + 7, below + 3);
+    // The arena's leaderboard (gladiator wins), just right of Caesar.
+    k.object(
+        "leaderboard",
+        gate + 11,
+        below + 2,
+        2,
+        1,
+        "Arena Leaderboard",
+    );
     k.object(
         "signpost",
         gate - 4,
@@ -2929,6 +2942,8 @@ fn fun_corner(k: &mut Blk) {
         1,
         "Splat Yard: paintball inside, Blue against Red, three a side. First to ten!",
     );
+    // The Splat Yard's leaderboard (paintball wins), by its door.
+    k.object("leaderboard", 31, 18, 2, 1, "Paintball Leaderboard");
     // Snack carts in the middle, lanterns along the front.
     k.object("market_cart", 20, 18, 2, 1, "Snacks");
     k.object("market_cart", 26, 23, 2, 1, "Snacks");

@@ -369,6 +369,24 @@ export class PondFx {
     return this.field[iy * this.sw + ix];
   }
 
+  /**
+   * Whether world pixel (x, y) is this pond's water, at least `clear` px in
+   * from its edge (clear of the stones); null if it's nowhere near this pond.
+   */
+  /** Its painted edge (the water it rounds into, the stones): what a lure's shimmer goes just above. */
+  get edgeLayer(): Sprite | null {
+    return this.rim;
+  }
+
+  wetAt(x: number, y: number, clear = 5): boolean | null {
+    if (!this.active) return null;
+    const ix = Math.round(x - this.ox);
+    const iy = Math.round(y - this.oy);
+    if (ix < 0 || iy < 0 || ix >= this.sw || iy >= this.sh) return null;
+    const at = (a: number, b: number) => a >= 0 && b >= 0 && a < this.sw && b < this.sh && this.inside[b * this.sw + a] === 1;
+    return at(ix, iy) && at(ix - clear, iy) && at(ix + clear, iy) && at(ix, iy - clear) && at(ix, iy + clear);
+  }
+
   /** The new edge, painted over the baked one: water into the corners it fills, grass over the ones it rounds off, and stones all round (not along the dock). */
   private bakeRim(): Sprite {
     const { sw, sh, ox, oy, inside } = this;

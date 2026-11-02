@@ -67,11 +67,11 @@ import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
-import { type ActionMenu, type BagPanel, FishermanPanel, LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
+import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
-import { SKATE_SPEED_X10, type TileXY, WALK_SPEED_X10, endT, glideTiles, headingAt, retimed, routeAhead, skateRampAt, speedAt, splice, sprintProfile, sprintingAt, TURN_EARLY } from "./world/motion";
+import { isRamped, type TileXY, WALK_SPEED_X10, endT, glideTiles, headingAt, retimed, routeAhead, skateRampAt, speedAt, splice, sprintProfile, sprintingAt, TURN_EARLY } from "./world/motion";
 import { compress, route } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
@@ -92,6 +92,12 @@ import type { MetroPanel } from "./ui/metro";
 import type { BlackjackPanel, Casino, CagePanel, RoulettePanel, SlotsPanel, Tables } from "./ui/casino";
 import type { MegaSlotsPanel, RacePanel } from "./ui/casinogames";
 import { RouletteFx } from "./world/roulettefx";
+import { PET_SPOTS, TANKS, TOGGLES } from "./world/housewares";
+import { WALLS } from "./world/cozyart";
+import type { SalvageGame } from "./ui/salvage";
+import type { LeaderboardPanel } from "./ui/leaderboard";
+import { LeaderSigns } from "./world/leadersigns";
+import { leaderKind } from "./world/art";
 import type { Museum } from "./museum";
 import type { ArtCard, ArtCataloguePanel, DeskPanel, NaturePanel, StudioPanel } from "./ui/museum";
 import { MuseumFx } from "./world/museumfx";
@@ -113,12 +119,14 @@ const DANCE_BOT_LOOK = encodeLook({ hue: 200, skin: 0, hair: 4, hat: 0, hatHue: 
 /** Protocol `drink::*`. */
 const BEER = 1;
 const WATER = 2;
-const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5 };
+const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5, LURE: 6 };
 /** protocol `fish_event::FLOP_MS`; and the treasure chest (opened for coins). */
 const FLOP_MS = 4500;
 const TREASURE_ITEM = 113;
 /** Casts reach this far from where you stand (server: CAST_RANGE). */
-const CAST_RANGE = 2;
+const CAST_RANGE = 4;
+/** Lures are thrown this far (server: LURE_RANGE). */
+const LURE_RANGE = 10;
 /** Matches the server's bite window minus a little latency headroom. */
 const REEL_WINDOW_MS = 2300;
 
@@ -146,6 +154,7 @@ export interface Ui {
   market: MarketPanel;
   plot: PlotMenu;
   reel: ReelGame;
+  salvage: SalvageGame;
   place: PlaceBanner;
   menu: ActionMenu;
   social: Social;
@@ -183,6 +192,7 @@ export interface Ui {
   yard: YardPanel;
   metro: MetroPanel;
   casino: Casino;
+  leaders: LeaderboardPanel;
   slots: SlotsPanel;
   mega: MegaSlotsPanel;
   race: RacePanel;
@@ -428,6 +438,15 @@ export class Game {
   private waterTap: { t: TileXY; at: number } | null = null;
   /** Where we stood when the lure's menu came up (walking off closes it). */
   private lureMenuFrom: TileXY | null = null;
+  /** Our line in is the magnet (its bite is the salvage game). */
+  private magnetDown = false;
+  /** The leaderboard signs here (their top fives), and when they were last refreshed. */
+  private leaderSigns: LeaderSigns | null = null;
+  private leadersAt = 0;
+  /** The pointer over the game canvas (css px), for the placing preview. */
+  private hover: { x: number; y: number } | null = null;
+  /** The other junk about what the magnet found (the server's, for the greedy). */
+  private salvageJunk: number[] = [];
   private disposers: (() => void)[] = [];
   private furniture: Furniture;
   private games = new Map<number, GameStateMsg>();
@@ -629,6 +648,17 @@ export class Game {
     }
     // In through your own front door: a pet out with you is home.
     if (zoneId === "home" && place.owner === ui.social.selfId && ui.pets.mine?.out) void this.petLife.bringHome().catch(() => {});
+    // At home, your pet curls up on its bed (or its scratching tree).
+    if (zoneId === "home" && place.owner === ui.social.selfId) {
+      const pet = ui.pets.mine;
+      if (pet) this.props.setPet(Number(ui.eco.items.get(pet.item)?.meta.code ?? 0));
+    }
+    // The leaderboard signs: their top five, written on (and kept fresh).
+    const signs = new LeaderSigns(this.scene, map.objects);
+    if (signs.any) {
+      this.leaderSigns = signs;
+      void ui.leaders.load().then(() => signs.update(ui.leaders.data)).catch(() => {});
+    }
     // Fisherman Franci, fishing off his dock on the little pond by the Apartments
     // (his catches leap out of the water to him, as yours do).
     const francySpot = map.objects.find((o) => o.kind === "francy");
@@ -647,7 +677,12 @@ export class Game {
         () => this.self?.pos ?? null,
         () => [...this.avatars.values()].map((a) => a.pos),
       );
-      if (pond.active) this.pond = pond;
+      if (pond.active) {
+        this.pond = pond;
+        // (Lures in it stay on its water, off its stones.)
+        this.lures.wet = (x, y) => pond.wetAt(x, y);
+        this.lures.over = () => pond.edgeLayer;
+      }
     }
     // The fisherman stands still on his spot (a one-tile "counter" just below it).
     const fisher = map.objects.find((o) => o.kind === "fisherman");
@@ -666,6 +701,11 @@ export class Game {
         say("Toss that in where you fish. They can't resist the shine!");
         this.hud.toast("✨ A Glimmer Lure! Tap the water and choose to throw it in.", 4500);
       });
+      this.fisherman.onQuestDone = () => {
+        say("That's my whole order! You're a proper angler.");
+        this.hud.toast("📜 The fisherman's daily order is done! A new one comes in 20 hours.", 5000);
+        sfx.cash(1, 100);
+      };
     }
     const bar = map.objects.find((o) => o.kind === "bar_counter");
     if (bar) this.clerk = new Clerk(map, bar, this.scene, labels, BARTENDER);
@@ -2334,8 +2374,12 @@ export class Game {
       case "ScreenState":
         this.screen?.setState(m);
         break;
+      case "SalvageJunk":
+        // (Just before the magnet finds its thing: the junk lying about it.)
+        this.salvageJunk = m.items;
+        break;
       case "LureShown":
-        this.lures.show({ x: m.x, y: m.y }, m.ends);
+        this.lures.show({ x: m.x, y: m.y }, m.ends, m.gold);
         break;
       case "LuckyShown":
         this.lucky.show({ x: m.x, y: m.y }, m.moves);
@@ -2395,6 +2439,15 @@ export class Game {
       }
       case "ObjectUpdate":
         this.props.setObject(m.x, m.y, m.item);
+        break;
+      case "ObjectTop":
+        this.props.setTop(m.x, m.y, m.item);
+        break;
+      case "ObjectOn":
+        this.props.setOn(m.x, m.y, m.on);
+        break;
+      case "TankFish":
+        this.props.setTank(m.x, m.y, m.fish);
         break;
       case "Granted":
         this.ui.eco.setTotal(m.item, m.total, m.first);
@@ -2712,8 +2765,8 @@ export class Game {
     // for (the server works it out the same way).
     const ridden = this.predictSpeed(full);
     const pace =
-      ridden === SKATE_SPEED_X10
-        ? // A skate keeps the speed it has built up (as the server works it out).
+      isRamped(ridden)
+        ? // A skate (or a Vespa) keeps the speed it has built up (as the server works it out).
           { speedX10: ridden, sprintIn: going ? skateRampAt(cur, t0) : 0 }
         : ridden !== WALK_SPEED_X10
           ? { speedX10: ridden, sprintIn: 0 }
@@ -2849,6 +2902,13 @@ export class Game {
       }
     };
     const surface = this.app.canvas;
+    // Where the pointer is over the game (placing furniture: its preview follows it).
+    const hover = (e: PointerEvent) => {
+      const r = surface.getBoundingClientRect();
+      this.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    window.addEventListener("pointermove", hover);
+    this.disposers.push(() => window.removeEventListener("pointermove", hover));
     surface.addEventListener("pointerdown", touchDown);
     window.addEventListener("pointermove", touchMove);
     window.addEventListener("pointerup", touchUp);
@@ -2938,6 +2998,7 @@ export class Game {
       if (target) this.moveTo(target, true);
     };
     stage.on("pointertap", tap);
+
     this.disposers.push(() => stage.off("pointertap", tap));
 
     const down = (e: KeyboardEvent) => {
@@ -2947,6 +3008,8 @@ export class Game {
         return;
       }
       if (isTyping(e)) return;
+      // The salvage game has the keys (A D / arrows steer, Space / W / Enter hold): no walking off.
+      if (this.ui.salvage.open) return;
       if (e.key === "Enter") {
         e.preventDefault();
         this.hud.focusChat();
@@ -3005,6 +3068,55 @@ export class Game {
   }
 
   // ---- people & gifts ---------------------------------------------------------
+
+  /** A placed piece tapped: use it (turn it on, feed the tank…), or pick it up. */
+  private furnitureMenu(t: TileXY, item: number) {
+    const ui = this.ui;
+    const key = ui.eco.items.get(item)?.key ?? "";
+    const mine = this.isOwnHome || this.zoneId === "clubroom";
+    const actions: [string, () => void][] = [];
+    let note = "";
+    const walkUp = () => {
+      const self = this.self;
+      if (self && cheb(self.destination, t) > 2) {
+        const spot = nearestWalkable(this.scene.map, t.x, t.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+    };
+    if (TOGGLES.has(key)) {
+      const on = this.props.isOn(t.x, t.y);
+      actions.push([on ? "🔌 Turn it off" : "✨ Turn it on", () => (walkUp(), this.socket?.send({ t: "UseObject", x: t.x, y: t.y }))]);
+    }
+    const holds = TANKS[key];
+    if (holds) {
+      const inside = this.props.tankAt(t.x, t.y);
+      note = inside.length ? `${inside.length} of ${holds} fish: ${inside.map((f) => ui.eco.name(f)).join(", ")}` : `Empty: it holds ${holds} fish.`;
+      if (this.isOwnHome && inside.length < holds) {
+        actions.push(["🐟 Put a fish in…", () => {
+          // Your fish, rarest first (one of each).
+          const fish = ui.eco.ofKind("fish").filter((f) => ui.eco.qty(f.id) > 0).sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0)).slice(0, 8);
+          if (!fish.length) return this.hud.toast("🎣 No fish in your bag: go catch some!", 3000);
+          this.near(ui.menu, t).showWith("🐟 Which fish?", "It swims about in the tank (take it out any time).", fish.map((f) => [`${f.name} (${ui.eco.qty(f.id)})`, () => this.socket?.send({ t: "TankPut", x: t.x, y: t.y, fish: f.id })]));
+        }]);
+      }
+      if (this.isOwnHome && inside.length) {
+        actions.push(["🫴 Take a fish out…", () => {
+          this.near(ui.menu, t).showWith("🫴 Which one?", "Back into your bag.", inside.map((f, i) => [ui.eco.name(f), () => this.socket?.send({ t: "TankTake", x: t.x, y: t.y, index: i })]));
+        }]);
+      }
+    }
+    if (PET_SPOTS.has(key)) {
+      const pet = ui.pets.mine;
+      note = this.isOwnHome && pet ? `💤 ${pet.name}'s favourite spot.` : "For a pet: yours curls up here when you're home.";
+      if (this.isOwnHome && pet) actions.push([`🐾 Pat ${pet.name}`, () => (walkUp(), sfx.highFive(0.5), this.hud.toast(`💕 ${pet.name} stretches, yawns, and goes back to sleep.`, 3000))]);
+    }
+    if (mine) actions.push(["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]);
+    if (!actions.length) return;
+    // Over to it (from across the room, the menu would close at once: it
+    // stays only near what it's for).
+    walkUp();
+    this.near(ui.menu, t, 6).showWith(ui.eco.name(item), note, actions);
+  }
 
   private get isOwnHome(): boolean {
     return this.zoneId === "home" && this.place.owner === this.ui.social.selfId;
@@ -3116,11 +3228,19 @@ export class Game {
     if (!self) return false;
     const ui = this.ui;
     if (ui.place.item) {
+      // (Where it can't go, say why instead of trying.)
+      const key = ui.place.item.key;
+      if (!this.props.placeCheck(t.x, t.y, key).ok) {
+        this.hud.toast(WALLS.has(key) ? "🖼 Hang it on a wall, just above the floor." : "There's no room there.", 2500);
+        return true;
+      }
       this.socket?.send({ t: "Place", item: ui.place.item.id, x: t.x, y: t.y });
       ui.place.hide();
+      this.props.hideGhost();
       return true;
     }
-    const placed = this.props.objectAt(t.x, t.y);
+    // (What's on a table is what you tap.)
+    const placed = this.props.topAt(t.x, t.y) ?? this.props.objectAt(t.x, t.y);
     // A house's yard stand, when there's something on it (or it's yours).
     const stand = map.objects.find((o) => o.kind === "yard_stand" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 1 && t.y <= o.y);
     const yard = stand?.label ? this.yardStands?.yardAt(stand.label) : null;
@@ -3133,7 +3253,7 @@ export class Game {
       return true;
     }
     if (placed && (this.zoneId === "home" || this.zoneId === "clubroom")) {
-      this.near(ui.menu, t).showWith(ui.eco.name(placed), "", [["Pick up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]]);
+      this.furnitureMenu(t, placed);
       return true;
     }
     const tree = this.grove?.at(t);
@@ -3145,6 +3265,14 @@ export class Game {
     // Map objects: the drawn art reaches a couple of tiles above the footprint.
     // (Not the arena's ring: you walk about inside it; its sign is what you tap.)
     const obj = map.objects.find((o) => !MARKERS.has(o.kind) && o.kind !== "arena" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - (LOW_REACH.has(o.kind) ? 1 : 2) && t.y < o.y + o.h && (o.kind !== "fountain" || this.onFountain(o)));
+    if (obj?.kind === "leaderboard") {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+        const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
+        if (spot) this.moveTo(spot, true);
+      }
+      this.near(ui.leaders, obj, 6).openOn(leaderKind(obj.label ?? ""));
+      return true;
+    }
     if (obj?.kind === "market_cart") {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
       if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
@@ -3476,12 +3604,29 @@ export class Game {
       const twice = !!this.waterTap && wall - this.waterTap.at < DOUBLE_TAP_MS && cheb(this.waterTap.t, t) <= 1;
       this.waterTap = twice ? null : { t, at: wall };
       const lures = ui.eco.qty(LURE_ITEM);
-      if (twice && lures > 0) {
+      const golds = ui.eco.qty(GOLD_LURE_ITEM);
+      const magnet = ui.eco.qty(MAGNET_ITEM) > 0;
+      // Tapped twice with only the magnet: just the magnet on offer.
+      if (twice && magnet && lures + golds === 0) {
+        this.near(ui.menu, t, 6).showWith("🧲 Salvage Magnet", "Scrap off the bottom: it takes a while to find something.", [["🧲 Drop the magnet", () => this.fish(t, true)]]);
+        return true;
+      }
+      if (twice && lures + golds > 0) {
         this.lures.previewAt(t);
         this.lureMenuFrom = this.self ? { ...this.self.destination } : null;
-        this.near(ui.menu, t, 6).showWith("✨ Glimmer Lure", this.lures.covers(t, this.socket?.clock.now() ?? 0) ? "This water's already lured: rarer fish bite here." : "Rarer fish bite round it for 5 minutes, for anyone fishing there.", [
-          [`✨ Throw one in here (${lures} left)`, () => this.throwLure(t)],
-        ]);
+        const opts: [string, () => void][] = [];
+        if (magnet) opts.push(["🧲 Drop the magnet", () => this.fish(t, true)]);
+        if (golds > 0) opts.push([`🌟 Throw a Legendary Lure (${golds} left)`, () => this.throwLure(t, true)]);
+        if (lures > 0) opts.push([`✨ Throw a Glimmer Lure (${lures} left)`, () => this.throwLure(t, false)]);
+        this.near(ui.menu, t, 6).showWith(
+          golds > 0 ? "🌟 Lures" : "✨ Glimmer Lure",
+          this.lures.covers(t, this.socket?.clock.now() ?? 0)
+            ? "This water's already lured."
+            : golds > 0
+              ? "Legendary: the water turns gold for 3 minutes, epic fish and up only. Glimmer: rarer fish for 5 minutes."
+              : "Rarer fish bite round it for 5 minutes, for anyone fishing there.",
+          opts,
+        );
         return true;
       }
       this.fish(t);
@@ -3495,16 +3640,19 @@ export class Game {
   }
 
   /** Walks within reach of the water if needed, then casts. */
-  private fish(target: TileXY) {
+  private fish(target: TileXY, magnet = false) {
     const self = this.self;
     if (!self || !this.socket) return;
-    if (self.state === FISHING) return;
+    // (Fishing already: only the magnet, swapped in for the line, goes in.)
+    if (self.state === FISHING && (!magnet || this.magnetDown)) return;
     if (cheb(self.destination, target) > CAST_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
       const spot = this.castSpot(target, self.destination);
       if (!spot) return this.hud.toast("Find a spot on the shore.");
       this.moveTo(spot, true);
     }
-    this.socket.send({ t: "FishCast", x: target.x, y: target.y });
+    this.magnetDown = magnet;
+    if (magnet) this.hud.toast("🧲 Down goes the magnet… it'll take a while to find something.", 3500);
+    this.socket.send({ t: "FishCast", x: target.x, y: target.y, magnet });
   }
 
   /** Closes the glimmer lure's menu and its highlight, if they're up. */
@@ -3516,17 +3664,16 @@ export class Game {
   }
 
   /** Throws a glimmer lure into the water at `target`, walking up to the shore first if need be. */
-  private throwLure(target: TileXY) {
+  private throwLure(target: TileXY, gold = false) {
     const self = this.self;
     if (!self || !this.socket) return;
-    if (cheb(self.destination, target) > CAST_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
+    if (cheb(self.destination, target) > LURE_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
       const spot = this.castSpot(target, self.destination);
       if (!spot) return this.hud.toast("Find a spot on the shore.");
       this.moveTo(spot, true);
     }
     self.faceToward(target.x);
-    sfx.splash(0.6, 250);
-    this.socket.send({ t: "ThrowLure", x: target.x, y: target.y });
+    this.socket.send({ t: "ThrowLure", x: target.x, y: target.y, gold });
   }
 
   /** The walkable tile within casting range of `target` nearest to `from`. */
@@ -3553,14 +3700,35 @@ export class Game {
     switch (m.kind) {
       case FISH.CAST:
         this.castAt.set(m.id, { x: m.x, y: m.y });
-        this.props.cast(m.id, { x: m.x, y: m.y });
+        this.props.cast(m.id, { x: m.x, y: m.y }, m.item === MAGNET_ITEM);
         this.avatars.get(m.id)?.castLine({ x: m.x, y: m.y }, performance.now());
         sfx.splash(vol, CAST_SWING_MS);
         break;
+      case FISH.LURE: {
+        // A lure thrown: the rod swung out, the lure arcing from the hand
+        // over the water, a splash as it goes in.
+        const a = this.avatars.get(m.id);
+        if (a) {
+          const wasFishing = a.state === FISHING;
+          if (!wasFishing) {
+            a.castLine({ x: m.x, y: m.y }, performance.now());
+            window.setTimeout(() => a.state !== FISHING && a.reelIn(performance.now()), 700);
+          }
+          this.lures.toss({ x: a.pos.x * TILE + TILE / 2 + (m.x > a.pos.x ? 10 : -10), y: a.pos.y * TILE - 6 }, { x: m.x, y: m.y }, m.item === GOLD_LURE_ITEM);
+        }
+        sfx.splash(vol, 650);
+        break;
+      }
       case FISH.BITE:
         this.props.bite(m.id);
         this.avatars.get(m.id)?.bite(performance.now());
-        if (isSelf) {
+        if (isSelf && this.magnetDown) {
+          // The magnet's found something: the salvage game.
+          const it = this.ui.eco.items.get(m.item);
+          sfx.nibble();
+          const junk = this.salvageJunk.map((id) => this.ui.eco.items.get(id)).map((j) => ({ key: j?.key ?? "rusty_can", name: j?.name ?? "junk" }));
+          this.ui.salvage.play(it?.key ?? "rusty_can", it?.rarity ?? 0, it?.name ?? "something", junk, (r) => this.socket?.send({ t: "SalvageReel", target: r.target, extras: r.extras }));
+        } else if (isSelf) {
           sfx.nibble();
           // How hard the fight is depends on what's on the hook.
           const rarity = this.ui.eco.items.get(m.item)?.rarity ?? 0;
@@ -3634,6 +3802,7 @@ export class Game {
         break;
       }
       case FISH.ESCAPED:
+        if (isSelf && this.ui.salvage.open) this.ui.salvage.stop();
         if (this.flops.has(m.id)) {
           // Back into the water it goes.
           this.flops.escape(m.id);
@@ -3841,9 +4010,9 @@ export class Game {
           // On a skateboard you can't stop dead: you glide on the way you were
           // going, further the faster you were (braking all the way).
           let to = sp.next;
-          if (m.speedX10 === SKATE_SPEED_X10) {
+          if (isRamped(m.speedX10)) {
             const [gx, gy] = this.lastKeyDir.split(",").map(Number);
-            const glide = Math.round(glideTiles(speedAt(m, now)));
+            const glide = Math.round(glideTiles(speedAt(m, now), m.speedX10));
             if (glide > 0) to = stepTarget(this.scene.map, sp.next, gx, gy, glide) ?? sp.next;
           }
           this.moveTo(to, false);
@@ -3869,9 +4038,9 @@ export class Game {
     // skateboard far enough that the stretch never runs short (it would
     // start braking for its end).
     const curM = self.currentMotion;
-    const skating = curM?.speedX10 === SKATE_SPEED_X10;
+    const skating = isRamped(curM?.speedX10);
     const steps = skating ? SKATE_KEY_STEPS : self.info.vehicle ? KEY_STEPS * 2 : KEY_STEPS;
-    const brakeRoom = skating && curM && this.socket ? glideTiles(speedAt(curM, this.socket.clock.now())) + 6 : 0;
+    const brakeRoom = skating && curM && this.socket ? glideTiles(speedAt(curM, this.socket.clock.now()), curM.speedX10) + 6 : 0;
     // Turning answers at once; going straight, the next stretch is planned
     // well before this one runs out, so the walk never eases off.
     const turned = dirKey !== this.lastKeyDir;
@@ -3938,6 +4107,18 @@ export class Game {
       this.hud.setNearby(this.avatars.size);
     }
     this.scene.update();
+    // Placing furniture: a see-through preview of it where it would go.
+    const placing = this.ui.place.item;
+    if (placing && this.hover) {
+      const t = this.scene.screenToTile(this.hover.x, this.hover.y);
+      this.props.ghostAt(t.x, t.y, placing.key);
+    } else this.props.hideGhost();
+    // The leaderboards, fresh every minute while their signs are about.
+    if (this.leaderSigns && wallNow - this.leadersAt > 60_000) {
+      this.leadersAt = wallNow;
+      const signs = this.leaderSigns;
+      void this.ui.leaders.load(30_000).then(() => signs.update(this.ui.leaders.data)).catch(() => {});
+    }
     this.props.update(wallNow, (id) => (id === FRANCY_ID ? this.francy?.rodTip : this.avatars.get(id)?.rodTip) ?? null);
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
     this.daynight.update();
@@ -4061,6 +4242,8 @@ export class Game {
     this.fisherman?.destroy();
     this.francy?.destroy();
     this.pond?.destroy();
+    this.leaderSigns?.destroy();
+    this.leaderSigns = null;
     this.pond = null;
     this.catches.destroy();
     this.flops.destroy();

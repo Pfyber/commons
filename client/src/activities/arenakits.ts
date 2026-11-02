@@ -14,11 +14,11 @@ export const ACT = { NONE: 0, LIGHT1: 1, LIGHT2: 2, LIGHT3: 3, CHARGE: 4, HEAVY:
 
 export const KIT = { KNIGHT: 0, ARCHER: 1, BOMBER: 2, SPEARMAN: 3, TANK: 4, COUNT: 5, PICKED: 0x80 };
 /** Each class (by `KIT`): as `arena::KIT_*`. */
-export const KIT_HP = [115, 80, 95, 110, 200];
-export const KIT_SPEED = [1, 1.06, 1, 1, 0.84];
+export const KIT_HP = [108, 105, 95, 110, 150];
+export const KIT_SPEED = [1, 1.12, 1, 1, 0.84];
 export const KIT_LIGHT_REACH = [1.35, 1.15, 1.15, 1.95, 1.4];
 export const KIT_LIGHT_ARC = [1, 0.85, 0.85, 0.8, 1.05];
-export const KIT_LIGHT_TIME = [1, 0.8, 0.8, 1.08, 1.35];
+export const KIT_LIGHT_TIME = [1, 0.8, 0.8, 1.08, 1.15];
 export const KIT_HEAVY_REACH = [1.55, 1.15, 1.15, 2.2, 1.6];
 export const KIT_LUNGE = [1.3, 1.3, 1.3, 1.7, 1];
 export const KIT_LUNGE_MAX = [4, 4, 4, 5.2, 3];
@@ -124,8 +124,8 @@ export const KITS: KitInfo[] = [
     name: "Tank",
     icon: "🪨",
     role: "Bruiser",
-    blurb: "Twice the health of anyone. Slower, swings slower, tires sooner, hard to knock about, and its armour turns some of every arrow and bomb.",
-    quick: "Hammer blow: slow, heavy",
+    blurb: "The most health of anyone, a heavy hammer that hits hard. Slower, tires sooner, hard to knock about, and its armour turns some of every arrow and bomb.",
+    quick: "Hammer blow: hits hard, a touch slower",
     charged: "Stomp: leap toward your aim, a shockwave where you land",
     ultimate: "Earthquake: stamp the ground, throwing everyone near away, dazed",
     stats: [5, 1, 4, 2],

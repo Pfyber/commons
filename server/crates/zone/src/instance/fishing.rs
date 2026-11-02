@@ -10,14 +10,17 @@ use commons_protocol::{ServerMsg, error_code, fish_event, state};
 use commons_sim::TilePos;
 use rand::Rng;
 
-const BITE_MIN_MS: u32 = 2_500;
-const BITE_MAX_MS: u32 = 9_000;
+/// How long till a bite: twice what it was, and a bit more by chance
+/// (`BITE_JITTER_MS` on top, so no two waits feel the same).
+const BITE_MIN_MS: u32 = 5_000;
+const BITE_MAX_MS: u32 = 18_000;
+const BITE_JITTER_MS: u32 = 4_000;
 /// How long the fish stays on the hook.
 const WINDOW_MS: u32 = 2_500;
 /// Extra allowance for the reel message's network trip.
 const GRACE_MS: u32 = 400;
 /// Casts reach this far (Chebyshev tiles) from where you stand.
-const CAST_RANGE: i32 = 2;
+const CAST_RANGE: i32 = 4;
 /// Reels scoring below this lose the fish.
 const MIN_QUALITY: u16 = 250;
 /// The fisherman's upgraded rod (an item): fish bite a quarter sooner, and
@@ -47,12 +50,26 @@ const LURE_LUCK: f64 = 1.6;
 /// Nothing below uncommon bites at a lure.
 const LURE_LEAST: i16 = 1;
 /// Lures are thrown this far (Chebyshev tiles) from where you stand.
-const LURE_RANGE: i32 = 5;
+const LURE_RANGE: i32 = 10;
+/// The legendary lure (the fisherman's dearest): its circle of water turns
+/// gold for three minutes, and nothing below epic bites there.
+pub(crate) const GOLD_LURE_ITEM: u32 = 119;
+const GOLD_LURE_MS: u32 = 3 * 60_000;
+const GOLD_LEAST: i16 = 3;
+/// The fisherman's magnet (an item): dropped in instead of a line, it brings
+/// up scrap; it takes half again as long as a bite to find something, and then the
+/// salvage game (steer it down, pull the thing free of the mud, haul it up)
+/// has this long.
+pub(crate) const MAGNET_ITEM: u32 = 120;
+/// (Half again a line's wait: it was three times, twice too slow.)
+const MAGNET_SLOWER_HALVES: u32 = 3;
+const SALVAGE_MS: u32 = 32_000;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Lure {
     at: TilePos,
     until: u32,
+    gold: bool,
 }
 
 impl Lure {
@@ -76,6 +93,10 @@ pub(super) struct FishSession {
     rod: bool,
     /// A rare fish flopping on the bank, waiting to be hit.
     flop: Option<Flop>,
+    /// The magnet, not a line: scrap, and the salvage game; the other junk
+    /// lying about down there (the greedy may take it too).
+    magnet: bool,
+    junk: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,9 +130,22 @@ fn chebyshev(a: TilePos, b: TilePos) -> i32 {
 /// mythical ones seldom); night-only fish appear only at night. `luck`
 /// (a lure, above 1) multiplies the odds of rare-and-up ones, and keeps
 /// the commons away altogether: uncommon at the least.
+#[cfg(test)]
 pub(crate) fn roll_fish(fish: &[FishInfo], night: bool, luck: f64, roll: f64) -> Option<u32> {
+    let least = if luck > 1.0 { LURE_LEAST } else { 0 };
+    roll_fish_from(fish, night, luck, least, roll)
+}
+
+/// As `roll_fish`, nothing less rare than `least` biting (the gold lure: epic and up).
+pub(crate) fn roll_fish_from(
+    fish: &[FishInfo],
+    night: bool,
+    luck: f64,
+    least: i16,
+    roll: f64,
+) -> Option<u32> {
     let weight = |f: &FishInfo| -> f64 {
-        if (f.night && !night) || (luck > 1.0 && f.rarity < LURE_LEAST) {
+        if (f.night && !night) || f.rarity < least {
             0.0
         } else if f.rarity >= FLOP_FROM {
             f.weight as f64 * luck
@@ -141,19 +175,20 @@ fn is_night() -> bool {
 
 impl Instance {
     /// `id` throws a glimmer lure into the water at `target` (it's used up).
-    pub(super) fn throw_lure(&mut self, id: u32, target: TilePos, now: u32) {
+    pub(super) fn throw_lure(&mut self, id: u32, target: TilePos, gold: bool, now: u32) {
         // Walking up to the shore: thrown on arrival.
         if self.moving(id, now) {
             self.avatars.get_mut(&id).unwrap().pending = Some(Pending::Lure {
                 x: target.0,
                 y: target.1,
+                gold,
             });
             return;
         }
-        self.do_throw_lure(id, target, now);
+        self.do_throw_lure(id, target, gold, now);
     }
 
-    pub(super) fn do_throw_lure(&mut self, id: u32, target: TilePos, now: u32) {
+    pub(super) fn do_throw_lure(&mut self, id: u32, target: TilePos, gold: bool, now: u32) {
         if !self.is_water(target) {
             return self.error(id, error_code::BAD_MESSAGE, "throw it into the water");
         }
@@ -166,8 +201,9 @@ impl Instance {
         };
         let player = a.player_id.clone();
         let key = self.next_key("lure");
+        let item = if gold { GOLD_LURE_ITEM } else { LURE_ITEM };
         self.spawn_call(
-            async move { econ.grant(&player, LURE_ITEM, -1, "lure", &key).await },
+            async move { econ.grant(&player, item, -1, "lure", &key).await },
             move |inst, r| match r {
                 Ok(applied) => {
                     if inst.avatars.contains_key(&id) {
@@ -176,15 +212,32 @@ impl Instance {
                     inst.lures.retain(|l| l.until > now);
                     let lure = Lure {
                         at: target,
-                        until: now + LURE_MS,
+                        until: now + if gold { GOLD_LURE_MS } else { LURE_MS },
+                        gold,
                     };
                     inst.lures.push(lure);
+                    // The throw itself, seen by those nearby: the arm, the lure arcing out.
+                    if let Some(a) = inst.avatars.get(&id) {
+                        let cell = a.cell;
+                        inst.broadcast(
+                            cell,
+                            &ServerMsg::FishEvent {
+                                id,
+                                kind: fish_event::LURE,
+                                x: target.0,
+                                y: target.1,
+                                item,
+                            },
+                            None,
+                        );
+                    }
                     // Everyone in the park hears of it, not just those looking at
                     // that bit of the pond: whoever wanders over later sees it too.
                     let bytes = ServerMsg::LureShown {
                         x: target.0,
                         y: target.1,
                         ends: lure.until,
+                        gold,
                     }
                     .to_bytes();
                     for a in inst.avatars.values_mut() {
@@ -194,7 +247,11 @@ impl Instance {
                 Err(CallError::Rejected(_)) => inst.error(
                     id,
                     error_code::NOT_ALLOWED,
-                    "you don't have a lure: the fisherman sells them",
+                    if gold {
+                        "you don't have a legendary lure: the fisherman sells them"
+                    } else {
+                        "you don't have a lure: the fisherman sells them"
+                    },
                 ),
                 Err(CallError::Unavailable) => inst.error(
                     id,
@@ -216,6 +273,7 @@ impl Instance {
                     x: l.at.0,
                     y: l.at.1,
                     ends: l.until,
+                    gold: l.gold,
                 },
             );
         }
@@ -230,18 +288,19 @@ impl Instance {
         m.ground_legend.get(g).is_some_and(|n| n == "water")
     }
 
-    pub(super) fn fish_cast(&mut self, id: u32, target: TilePos, now: u32) {
+    pub(super) fn fish_cast(&mut self, id: u32, target: TilePos, magnet: bool, now: u32) {
         if self.moving(id, now) {
             self.avatars.get_mut(&id).unwrap().pending = Some(Pending::Cast {
                 x: target.0,
                 y: target.1,
+                magnet,
             });
             return;
         }
-        self.do_cast(id, target, now);
+        self.do_cast(id, target, magnet, now);
     }
 
-    pub(super) fn do_cast(&mut self, id: u32, target: TilePos, now: u32) {
+    pub(super) fn do_cast(&mut self, id: u32, target: TilePos, magnet: bool, now: u32) {
         if self.economy.as_ref().and_then(|e| e.catalog()).is_none() {
             return self.error(id, error_code::UNAVAILABLE, "the fish aren't biting yet");
         }
@@ -249,16 +308,31 @@ impl Instance {
             return self.error(id, error_code::BAD_MESSAGE, "cast into the water");
         }
         let a = &self.avatars[&id];
-        if a.fish.is_some() {
-            return;
+        if let Some(s) = &a.fish {
+            // A line just cast, nothing on it yet, swapped for the magnet (the
+            // double tap's menu: its first tap cast the line).
+            if magnet && !s.magnet && !s.biting && s.flop.is_none() {
+                self.stop_fishing(id, false);
+            } else {
+                return;
+            }
         }
+        let a = &self.avatars[&id];
         if chebyshev(a.tile, target) > CAST_RANGE {
             return self.error(id, error_code::TOO_FAR, "walk closer to the water");
         }
         if a.state == state::SITTING {
             self.stand(id, now);
         }
-        let bite_at = now + rand::rng().random_range(BITE_MIN_MS..=BITE_MAX_MS);
+        let mut rng = rand::rng();
+        let wait =
+            rng.random_range(BITE_MIN_MS..=BITE_MAX_MS) + rng.random_range(0..=BITE_JITTER_MS);
+        let bite_at = now
+            + if magnet {
+                wait * MAGNET_SLOWER_HALVES / 2
+            } else {
+                wait
+            };
         let a = self.avatars.get_mut(&id).unwrap();
         a.state = state::FISHING;
         a.fish = Some(FishSession {
@@ -270,10 +344,36 @@ impl Instance {
             cast_at: now,
             rod: false,
             flop: None,
+            magnet,
+            junk: Vec::new(),
         });
         let (tile, cell, player) = (a.tile, a.cell, a.player_id.clone());
-        // The upgraded rod? (Asked of the economy; the answer's back long before a bite.)
-        if let Some(econ) = self.economy.clone() {
+        // The magnet: only if they have one (asked of the economy; the answer's
+        // back long before anything bites).
+        if magnet && let Some(econ) = self.economy.clone() {
+            self.spawn_call(
+                async move { econ.has(&player, MAGNET_ITEM).await },
+                move |inst, has| {
+                    if matches!(has, Ok(q) if q > 0) {
+                        return;
+                    }
+                    let ours = inst
+                        .avatars
+                        .get(&id)
+                        .and_then(|a| a.fish.as_ref())
+                        .is_some_and(|s| s.cast_at == now && s.magnet);
+                    if ours {
+                        inst.stop_fishing(id, false);
+                        inst.error(
+                            id,
+                            error_code::NOT_ALLOWED,
+                            "you need a magnet: the fisherman sells them",
+                        );
+                    }
+                },
+            );
+        } else if let Some(econ) = self.economy.clone() {
+            // The upgraded rod? (Asked of the economy; the answer's back long before a bite.)
             self.spawn_call(
                 async move { econ.has(&player, ROD_ITEM).await },
                 move |inst, has| {
@@ -309,7 +409,8 @@ impl Instance {
                 kind: fish_event::CAST,
                 x: target.0,
                 y: target.1,
-                item: 0,
+                // (The magnet, not a line: everyone sees it dangling there.)
+                item: if magnet { MAGNET_ITEM } else { 0 },
             },
             None,
         );
@@ -365,7 +466,7 @@ impl Instance {
             .catalog()
             .and_then(|c| c.fish.iter().find(|f| f.id == item).map(|f| f.rarity))
             .unwrap_or(0);
-        if rarity >= FLOP_FROM && item != TREASURE_ITEM {
+        if rarity >= FLOP_FROM && item != TREASURE_ITEM && !session.magnet {
             let a = &self.avatars[&id];
             let at = self.flop_spot(a.tile, session.target, None, 1);
             let (need, reach) = flop_toughness(rarity);
@@ -400,6 +501,55 @@ impl Instance {
             return self.broadcast(cell, &idle, None);
         }
         self.land(id, item, session.target);
+    }
+
+    /// The salvage game's done: the glinting thing (if it came up) and
+    /// whichever of the other junk was grabbed too (`extras`, bit by bit).
+    pub(super) fn salvage_reel(&mut self, id: u32, target: bool, extras: u8, now: u32) {
+        let Some(session) = self.avatars.get(&id).and_then(|a| a.fish.clone()) else {
+            return;
+        };
+        let in_window = session.biting && now <= session.window_end + GRACE_MS;
+        if !session.magnet || !in_window {
+            return self.stop_fishing(id, true);
+        }
+        let mut items: Vec<u32> = Vec::new();
+        if target && let Some(i) = session.fish {
+            items.push(i);
+        }
+        for (k, &j) in session.junk.iter().enumerate().take(8) {
+            if extras & (1 << k) != 0 {
+                items.push(j);
+            }
+        }
+        if items.is_empty() {
+            return self.stop_fishing(id, true);
+        }
+        self.land_all(id, &items, session.target);
+    }
+
+    /// Lands several things at once (the salvage game, greedy): the first shown, all granted.
+    fn land_all(&mut self, id: u32, items: &[u32], from: TilePos) {
+        let Some(econ) = self.economy.clone() else {
+            return self.stop_fishing(id, true);
+        };
+        self.land(id, items[0], from);
+        let player = self.avatars[&id].player_id.clone();
+        for &item in &items[1..] {
+            let econ = econ.clone();
+            let player = player.clone();
+            let key = self.next_key("fish");
+            self.spawn_call(
+                async move { econ.grant(&player, item, 1, "fishing", &key).await },
+                move |inst, result| {
+                    if let Ok(applied) = result
+                        && inst.avatars.contains_key(&id)
+                    {
+                        inst.send_granted(id, &applied);
+                    }
+                },
+            );
+        }
     }
 
     /**
@@ -548,19 +698,61 @@ impl Instance {
                 }
                 continue;
             }
-            if !s.biting && now >= s.bite_at {
+            if !s.biting && now >= s.bite_at && s.magnet {
+                // The magnet's found something: what, and the salvage game's time to get it.
+                s.biting = true;
+                let catalog = self.economy.as_ref().and_then(|e| e.catalog());
+                s.fish = catalog
+                    .as_ref()
+                    .and_then(|c| roll_fish_from(&c.scrap, true, 1.0, 0, rand::rng().random()));
+                s.window_end = s.bite_at + SALVAGE_MS;
+                // Junk about it: common and uncommon only, more round rarer things.
+                let rarity = catalog.as_ref().and_then(|c| {
+                    s.fish
+                        .and_then(|i| c.scrap.iter().find(|f| f.id == i).map(|f| f.rarity))
+                });
+                let cheap: Vec<FishInfo> = catalog
+                    .as_ref()
+                    .map(|c| c.scrap.iter().filter(|f| f.rarity <= 1).cloned().collect())
+                    .unwrap_or_default();
+                let n = 2 + (rarity.unwrap_or(0).max(0) as usize / 2).min(2);
+                s.junk = (0..n)
+                    .filter_map(|_| roll_fish_from(&cheap, true, 1.0, 0, rand::rng().random()))
+                    .collect();
+                let (target, cell, item) = (s.target, a.cell, s.fish.unwrap_or(0));
+                let junk = ServerMsg::SalvageJunk {
+                    items: s.junk.clone(),
+                };
+                let bite = ServerMsg::FishEvent {
+                    id,
+                    kind: fish_event::BITE,
+                    x: target.0,
+                    y: target.1,
+                    item,
+                };
+                self.send_to(id, &junk);
+                self.broadcast(cell, &bite, None);
+            } else if !s.biting && now >= s.bite_at {
                 s.biting = true;
                 // What's on the hook: the angler sees how rare (and so how hard) it is.
                 let catalog = self.economy.as_ref().and_then(|e| e.catalog());
                 let target = s.target;
-                let luck = if self.lures.iter().any(|l| l.until > now && l.covers(target)) {
-                    LURE_LUCK
-                } else {
-                    1.0
+                let here = |gold: bool| {
+                    self.lures
+                        .iter()
+                        .any(|l| l.until > now && l.gold == gold && l.covers(target))
                 };
-                s.fish = catalog
-                    .as_ref()
-                    .and_then(|c| roll_fish(&c.fish, is_night(), luck, rand::rng().random()));
+                // (A gold lure's water: epic and up; a glimmer lure's: rarer, more often.)
+                let (luck, least) = if here(true) {
+                    (1.0, GOLD_LEAST)
+                } else if here(false) {
+                    (LURE_LUCK, LURE_LEAST)
+                } else {
+                    (1.0, 0)
+                };
+                s.fish = catalog.as_ref().and_then(|c| {
+                    roll_fish_from(&c.fish, is_night(), luck, least, rand::rng().random())
+                });
                 // A rare one may get a second swing at it.
                 let rarity = catalog.as_ref().and_then(|c| {
                     s.fish
@@ -616,6 +808,21 @@ mod tests {
     }
 
     #[test]
+    fn a_gold_lure_brings_only_epic_and_up() {
+        let fish = ZoneCatalog::for_tests().fish;
+        let mut seen = 0;
+        for i in 0..1000 {
+            if let Some(id) = roll_fish_from(&fish, i % 2 == 0, 1.0, GOLD_LEAST, i as f64 / 1000.0)
+            {
+                let f = fish.iter().find(|f| f.id == id).unwrap();
+                assert!(f.rarity >= GOLD_LEAST, "{} is below epic", f.id);
+                seen += 1;
+            }
+        }
+        assert!(seen > 0, "something bites");
+    }
+
+    #[test]
     fn a_lure_draws_the_rarer_fish_to_its_circle() {
         let fish = ZoneCatalog::for_tests().fish;
         let rare = |luck: f64| {
@@ -641,6 +848,7 @@ mod tests {
         let l = Lure {
             at: (10, 10),
             until: 1,
+            gold: false,
         };
         let n = (5..=15)
             .flat_map(|x| (5..=15).map(move |y| (x, y)))
@@ -651,6 +859,40 @@ mod tests {
     }
 
     #[test]
+    fn a_magnet_brings_up_scrap_after_a_long_wait_and_never_flops() {
+        let mut inst = pond_instance();
+        let _a = connect(&mut inst, 1, "salvager", (20, 12));
+        place(&mut inst, 1, (5, 4));
+        let now = inst.clock.now_ms();
+        inst.handle(Cmd::Msg {
+            conn: 1,
+            msg: ClientMsg::FishCast {
+                x: 5,
+                y: 6,
+                magnet: true,
+            },
+        });
+        let s = inst.avatars[&1].fish.clone().expect("dropped in");
+        assert!(s.magnet);
+        assert!(
+            s.bite_at >= now + BITE_MIN_MS * MAGNET_SLOWER_HALVES / 2,
+            "half again the wait"
+        );
+        inst.fish_tick(s.bite_at);
+        let s = inst.avatars[&1].fish.clone().unwrap();
+        assert!(s.biting);
+        let item = s.fish.expect("something down there");
+        assert!([121, 127].contains(&item), "scrap, not fish: {item}");
+        assert_eq!(s.window_end, s.bite_at + SALVAGE_MS);
+        // Junk lies about it (the cheap stuff only), for the greedy.
+        assert!((2..=4).contains(&s.junk.len()), "{:?}", s.junk);
+        assert!(s.junk.iter().all(|&j| j == 121));
+        // Salvaged, with two bits of junk: straight into the bag (an old safe never flops about).
+        inst.salvage_reel(1, true, 0b11, s.bite_at + 20_000);
+        assert!(inst.avatars[&1].fish.is_none());
+    }
+
+    #[test]
     fn cast_bite_and_escape() {
         let mut inst = pond_instance();
         let mut a = connect(&mut inst, 1, "angler", (20, 12));
@@ -658,13 +900,21 @@ mod tests {
         let now = inst.clock.now_ms();
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::FishCast { x: 5, y: 6 },
+            msg: ClientMsg::FishCast {
+                x: 5,
+                y: 6,
+                magnet: false,
+            },
         });
         assert_eq!(inst.avatars[&1].state, state::FISHING);
         // Too far.
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::FishCast { x: 5, y: 9 },
+            msg: ClientMsg::FishCast {
+                x: 5,
+                y: 9,
+                magnet: false,
+            },
         });
         // Reeling before the bite scares the fish.
         inst.handle(Cmd::Msg {
@@ -675,12 +925,22 @@ mod tests {
         // Cast again and let the fish get away.
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::FishCast { x: 5, y: 6 },
+            msg: ClientMsg::FishCast {
+                x: 5,
+                y: 6,
+                magnet: false,
+            },
         });
-        inst.fish_tick(now + BITE_MAX_MS + 1);
+        inst.fish_tick(now + BITE_MAX_MS + BITE_JITTER_MS + 1);
         assert!(inst.avatars[&1].fish.as_ref().unwrap().biting);
         inst.fish_tick(
-            now + BITE_MAX_MS + WINDOW_MS + SECOND_CHANCE_MS + DOUBLE_HIT_MS + GRACE_MS + 2,
+            now + BITE_MAX_MS
+                + BITE_JITTER_MS
+                + WINDOW_MS
+                + SECOND_CHANCE_MS
+                + DOUBLE_HIT_MS
+                + GRACE_MS
+                + 2,
         );
         assert!(inst.avatars[&1].fish.is_none());
         inst.flush();
@@ -713,7 +973,11 @@ mod tests {
         let now = inst.clock.now_ms();
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::FishCast { x: 5, y: 6 },
+            msg: ClientMsg::FishCast {
+                x: 5,
+                y: 6,
+                magnet: false,
+            },
         });
         // A koi (epic, in the test catalogue: four hits) bites.
         {
@@ -776,7 +1040,11 @@ mod tests {
         let now = inst.clock.now_ms();
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::FishCast { x: 5, y: 6 },
+            msg: ClientMsg::FishCast {
+                x: 5,
+                y: 6,
+                magnet: false,
+            },
         });
         {
             let s = inst.avatars.get_mut(&1).unwrap().fish.as_mut().unwrap();
@@ -805,7 +1073,11 @@ mod tests {
         let now = inst.clock.now_ms();
         inst.handle(Cmd::Msg {
             conn: 1,
-            msg: ClientMsg::FishCast { x: 5, y: 6 },
+            msg: ClientMsg::FishCast {
+                x: 5,
+                y: 6,
+                magnet: false,
+            },
         });
         {
             let s = inst.avatars.get_mut(&1).unwrap().fish.as_mut().unwrap();

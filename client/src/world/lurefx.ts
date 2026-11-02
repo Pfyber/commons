@@ -24,6 +24,12 @@ const GLIMMERS = 9;
 const AQUA = 0x2ee6ff;
 const SHEEN = [0xffffff, 0xa8fff4, 0xff9ff0, 0xc49bff, 0x8fe3ff];
 const SHEEN_PX = 4;
+/** The legendary lure's water: molten gold, its shimmer white-gold to amber. */
+const GOLD = 0xffc23a;
+const GOLD_SHEEN = [0xffffff, 0xfff3a8, 0xffe066, 0xffb020, 0xfff8e3];
+/** A thrown lure's flight (ms), and how high it arcs (px). */
+const TOSS_MS = 650;
+const TOSS_HEIGHT = 34;
 /** Where a lure would go, while you decide. */
 const PREVIEW = 0xbff8ff;
 /** Full strength out to this far from the middle (tiles), gone by this far. */
@@ -55,6 +61,8 @@ interface Lure {
   shown: string;
   glimmer: { g: Graphics; phase: number; tile: TileXY }[];
   tiles: TileXY[];
+  /** All it may shimmer over (see `reach`). */
+  area: TileXY[];
   centre: { x: number; y: number };
   ends: number;
   nextLeap: number;
@@ -62,12 +70,26 @@ interface Lure {
   rings: Ring[];
   /** Its glow after dark. */
   glow: Sprite | null;
+  /** The legendary one (gold water, epic fish and up). */
+  gold: boolean;
+  /** When it shows (wall ms): as the thrown lure lands. */
+  appearAt: number;
+}
+
+/** A lure in flight from the thrower's hand to the water. */
+interface Toss {
+  s: Sprite;
+  from: { x: number; y: number };
+  to: TileXY;
+  start: number;
 }
 
 /** Where a lure would go: its circle, fading in while you choose, and out after. */
 interface Preview {
   g: Graphics;
   tiles: TileXY[];
+  /** All it may shimmer over (see `reach`). */
+  area: TileXY[];
   centre: { x: number; y: number };
   at: TileXY;
   shownAt: number;
@@ -89,6 +111,19 @@ interface Block {
 
 export class LureShows {
   private lures = new Map<string, Lure>();
+  /**
+   * Where the water really is, pixel by pixel (a rounded pond's edge and its
+   * stones don't follow the tiles): true / false, or null where it can't say
+   * (then it's the tiles).
+   */
+  wet: (x: number, y: number) => boolean | null = () => null;
+  /**
+   * A rounded pond's painted edge: the shimmer goes just above it (it paints
+   * water over the old square shore, which would hide the shimmer there),
+   * kept off its stones by `wet`.
+   */
+  over: () => Container | null = () => null;
+  private tosses: Toss[] = [];
   private preview: Preview | null = null;
 
   constructor(
@@ -99,8 +134,11 @@ export class LureShows {
   ) {}
 
   /** A lure at `at`, until instance time `ends`. */
-  show(at: TileXY, ends: number) {
+  show(at: TileXY, ends: number, gold = false) {
     const key = `${at.x},${at.y}`;
+    // (Thrown just now: it shows as it lands.)
+    const toss = this.tosses.find((t) => t.to.x === at.x && t.to.y === at.y);
+    const appearAt = toss ? toss.start + TOSS_MS : 0;
     this.remove(key);
     const tiles = this.circle(at);
     // Its glowing water: a see-through aqua wash over the pond.
@@ -114,14 +152,73 @@ export class LureShows {
     const centre = { x: at.x * TILE + TILE / 2, y: at.y * TILE + TILE / 2 };
     timer.position.set(centre.x, centre.y);
     const glimmer = Array.from({ length: GLIMMERS }, (_, i) => {
-      const g = new Graphics().star(0, 0, 4, 2.6, 0.9).fill({ color: i % 3 ? 0xffffff : 0xfff3a8 });
+      const g = new Graphics().star(0, 0, 4, 2.6, 0.9).fill({ color: gold ? (i % 2 ? 0xfff3a8 : 0xffd23f) : i % 3 ? 0xffffff : 0xfff3a8 });
       top.addChild(g);
       return { g, phase: Math.random() * Math.PI * 2, tile: tiles[Math.floor(Math.random() * tiles.length)] ?? at };
     });
     top.addChild(timer);
     this.scene.world.addChild(top);
     const glow = this.nightGlow(centre.x, centre.y);
-    this.lures.set(key, { water, top, timer, shown: "", glimmer, tiles, centre, ends, nextLeap: 0, leaps: [], rings: [], glow });
+    this.lures.set(key, { water, top, timer, shown: "", glimmer, tiles, area: this.reach(at), centre, ends, nextLeap: 0, leaps: [], rings: [], glow, gold, appearAt });
+  }
+
+  /**
+   * A lure thrown from `from` (world px: the thrower's hand) into the water
+   * at `to`: it spins up and over in an arc and splashes in.
+   */
+  toss(from: { x: number; y: number }, to: TileXY, gold: boolean) {
+    const s = new Sprite(itemTexture(gold ? "gold_lure" : "fish_lure", "tool"));
+    s.anchor.set(0.5);
+    s.scale.set(0.75);
+    s.zIndex = 1e9;
+    this.scene.world.addChild(s);
+    const start = performance.now();
+    this.tosses.push({ s, from, to, start });
+    const l = this.lures.get(`${to.x},${to.y}`);
+    if (l) l.appearAt = start + TOSS_MS;
+  }
+
+  private flyTosses(wallNow: number) {
+    this.tosses = this.tosses.filter((t) => {
+      const k = (wallNow - t.start) / TOSS_MS;
+      const tx = t.to.x * TILE + TILE / 2;
+      const ty = t.to.y * TILE + TILE / 2;
+      if (k >= 1) {
+        t.s.destroy();
+        // The splash: rings out from where it went in.
+        const l = this.lures.get(`${t.to.x},${t.to.y}`);
+        if (l) {
+          this.ring(l, tx, ty, wallNow);
+          this.ring(l, tx, ty, wallNow + 120);
+        }
+        return false;
+      }
+      // Up and over, a little faster at the end (it drops in).
+      const e = k * k * 0.35 + k * 0.65;
+      const dist = Math.hypot(tx - t.from.x, ty - t.from.y);
+      const h = Math.min(TOSS_HEIGHT + dist * 0.15, 70);
+      t.s.position.set(t.from.x + (tx - t.from.x) * e, t.from.y + (ty - t.from.y) * e - Math.sin(e * Math.PI) * h);
+      t.s.rotation = k * Math.PI * 3;
+      return true;
+    });
+  }
+
+  /**
+   * Every tile the shimmer can reach round `at` (out to `FADE_OUT`): wider
+   * than the lure's circle, so its soft edge fades out on its own instead of
+   * being cut off along tile edges. Which of it is water is decided block by
+   * block (`waterAt`).
+   */
+  private reach(at: TileXY): TileXY[] {
+    const r = Math.ceil(FADE_OUT);
+    const tiles: TileXY[] = [];
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) tiles.push({ x: at.x + dx, y: at.y + dy });
+    return tiles;
+  }
+
+  /** Whether world pixel (x, y) is water the shimmer may cover (a rounded pond's own say, else the tile's). */
+  private waterAt(x: number, y: number): boolean {
+    return this.wet(x, y) ?? groundAt(this.map, Math.floor(x / TILE), Math.floor(y / TILE)) === "water";
   }
 
   /** The water tiles of a lure's circle round `at`. */
@@ -130,7 +227,9 @@ export class LureShows {
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         const t = { x: at.x + dx, y: at.y + dy };
-        if (dx * dx + dy * dy <= R2 && groundAt(this.map, t.x, t.y) === "water") tiles.push(t);
+        if (dx * dx + dy * dy > R2) continue;
+        const pond = this.wet(t.x * TILE + TILE / 2, t.y * TILE + TILE / 2);
+        if (pond ?? groundAt(this.map, t.x, t.y) === "water") tiles.push(t);
       }
     }
     return tiles;
@@ -142,9 +241,11 @@ export class LureShows {
     if (p && p.at.x === at.x && p.at.y === at.y && !p.goneAt) return;
     p?.g.destroy();
     const g = new Graphics();
-    this.scene.onGround(g);
+    const edge = this.over();
+    if (edge?.parent === this.scene.world) this.scene.world.addChildAt(g, this.scene.world.getChildIndex(edge) + 1);
+    else this.scene.onGround(g);
     const now = performance.now();
-    this.preview = { g, tiles: this.circle(at), centre: { x: at.x * TILE + TILE / 2, y: at.y * TILE + TILE / 2 }, at, shownAt: now, goneAt: 0 };
+    this.preview = { g, tiles: this.circle(at), area: this.reach(at), centre: { x: at.x * TILE + TILE / 2, y: at.y * TILE + TILE / 2 }, at, shownAt: now, goneAt: 0 };
   }
 
   /** …and lets it fade away (chosen, or not). */
@@ -171,11 +272,12 @@ export class LureShows {
     // the tile it lands on a little brighter.
     const pulse = 0.75 + 0.25 * Math.sin(wallNow / 220);
     p.g.clear();
-    for (const t of p.tiles) {
+    for (const t of p.area) {
       for (let by = 0; by < TILE; by += SHEEN_PX) {
         for (let bx = 0; bx < TILE; bx += SHEEN_PX) {
           const x = t.x * TILE + bx;
           const y = t.y * TILE + by;
+          if (!this.waterAt(x + SHEEN_PX / 2, y + SHEEN_PX / 2)) continue;
           const d = Math.hypot(x + SHEEN_PX / 2 - p.centre.x, y + SHEEN_PX / 2 - p.centre.y) / TILE;
           const fade = Math.min(1, Math.max(0, (FADE_OUT - d) / (FADE_OUT - FADE_IN)));
           if (fade <= 0) continue;
@@ -196,6 +298,7 @@ export class LureShows {
 
   update(serverNow: number, wallNow: number) {
     this.drawPreview(wallNow);
+    this.flyTosses(wallNow);
     // Each bit of lured water is drawn once, by the lure whose middle it's
     // nearest (where circles overlap), so two side by side don't pile up
     // into one too bright.
@@ -206,16 +309,22 @@ export class LureShows {
         this.remove(key);
         continue;
       }
+      // Not landed yet: nothing to see; then it spreads out from the splash.
+      const shown = Math.min(1, Math.max(0, (wallNow - l.appearAt) / 500));
+      l.top.visible = shown > 0;
+      if (shown <= 0) continue;
       // Its circle of water, block by block, for the drawing below.
-      for (const t of l.tiles) {
+      for (const t of l.area) {
         for (let by = 0; by < TILE; by += SHEEN_PX) {
           for (let bx = 0; bx < TILE; bx += SHEEN_PX) {
             const x = t.x * TILE + bx;
             const y = t.y * TILE + by;
+            // (Only real water: not over a rounded pond's edge or its stones.)
+            if (!this.waterAt(x + SHEEN_PX / 2, y + SHEEN_PX / 2)) continue;
             const dx = x + SHEEN_PX / 2 - l.centre.x;
             const dy = y + SHEEN_PX / 2 - l.centre.y;
             // Round, and fading out softly towards its rim (no hard tile edges).
-            const fade = Math.min(1, Math.max(0, (FADE_OUT - Math.hypot(dx, dy) / TILE) / (FADE_OUT - FADE_IN)));
+            const fade = Math.min(1, Math.max(0, (FADE_OUT * shown - Math.hypot(dx, dy) / TILE) / (FADE_OUT - FADE_IN)));
             if (fade <= 0) continue;
             const k = `${x},${y}`;
             const was = blocks.get(k);
@@ -307,18 +416,25 @@ export class LureShows {
     const spin = wallNow / 1400;
     for (const b of blocks.values()) {
       const g = b.l.water;
-      g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: AQUA, alpha: (0.42 + 0.1 * breathe) * b.fade });
+      const gold = b.l.gold;
+      g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: gold ? GOLD : AQUA, alpha: (gold ? 0.55 : 0.42) * b.fade + 0.1 * breathe * b.fade });
       const phase = (b.dx + b.dy) * 0.09 + Math.atan2(b.dy, b.dx) * 2 - spin * 4;
       const band = Math.sin(phase);
       if (band < 0.55) continue;
-      const hue = SHEEN[Math.floor(((phase / (Math.PI * 2)) % 1 + 1) % 1 * SHEEN.length)];
+      const sheen = gold ? GOLD_SHEEN : SHEEN;
+      const hue = sheen[Math.floor(((phase / (Math.PI * 2)) % 1 + 1) % 1 * sheen.length)];
       g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: hue, alpha: (band - 0.55) * 1.1 * b.fade });
     }
     // A new lure goes onto the ground (just above it, under everything
     // standing on it) only now it has something drawn: added while still
     // blank, the renderer could pass it over and never show it.
     for (const l of this.lures.values()) {
-      if (!l.water.parent && l.water.context.instructions.length) this.scene.onGround(l.water);
+      if (!l.water.parent && l.water.context.instructions.length) {
+        const edge = this.over();
+        const world = this.scene.world;
+        if (edge?.parent === world) world.addChildAt(l.water, world.getChildIndex(edge) + 1);
+        else this.scene.onGround(l.water);
+      }
     }
   }
 

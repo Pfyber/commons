@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 33;
+pub const PROTOCOL_VERSION: u16 = 40;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -103,7 +103,7 @@ message_enum! {
         /// actions `new` (rematch after a finished game) and `resign`.
         8 GameMove { table: u32, uci: String }
         /// Cast a line at water tile (x, y), standing within 2 tiles of it.
-        9 FishCast { x: u16, y: u16 }
+        9 FishCast { x: u16, y: u16, magnet: bool }
         /// Reel in after a bite; `quality` 0–1000 is the timing mini-game score.
         10 FishReel { quality: u16 }
         /// Garden plot action (`plot_action::*`); `item` is the seed to plant.
@@ -167,7 +167,7 @@ message_enum! {
         // so whoever follows you comes along.
         35 Going { zone: String, arrive: String }
         /// Throw one of your glimmer lures into the water at (`x`, `y`).
-        36 ThrowLure { x: u16, y: u16 }
+        36 ThrowLure { x: u16, y: u16, gold: bool }
         /// Step up to bowling lane `lane` (0-based, in map order): take on the
         /// bot, or wait for someone (or join whoever is waiting).
         37 BowlJoin { lane: u8, vs_bot: bool }
@@ -223,6 +223,19 @@ message_enum! {
         59 ArenaKits { on: bool }
         /// Your class for the round (`arena::kit`), while they're being chosen.
         60 ArenaKit { kit: u8 }
+        /// The arena's sign opened: the bots' own match (if one's on) is called off.
+        61 ArenaLobby {}
+        /// In the arena's lobby: the wheel of classes on or off (it picks everyone's at the match's start).
+        62 ArenaWheel { on: bool }
+        /// The salvage game done: whether the glinting thing came up, and
+        /// which of the other junk (bit `i`: `SalvageJunk.items[i]`) came with it.
+        63 SalvageReel { target: bool, extras: u8 }
+        /// At home: turn the piece at (x, y) on or off (a lamp, the TV…).
+        64 UseObject { x: u16, y: u16 }
+        /// At home: a fish from your bag into the tank at (x, y), or the
+        /// `index`th one back out.
+        65 TankPut { x: u16, y: u16, fish: u32 }
+        66 TankTake { x: u16, y: u16, index: u8 }
     }
 }
 
@@ -337,7 +350,7 @@ message_enum! {
         36 Went { id: u32, zone: String, arrive: String }
         /// A glimmer lure in the water at (`x`, `y`) until instance time `ends`:
         /// lines cast into the circle round it bite rarer fish.
-        37 LureShown { x: u16, y: u16, ends: u32 }
+        37 LureShown { x: u16, y: u16, ends: u32, gold: bool }
         /// How a bowling lane stands (`bowl::*` status): who's playing, whose
         /// frame and ball, the pins up, and every roll so far (pins each).
         38 BowlState { lane: u8, a: u32, b: u32, status: u8, turn: u8, frame: u8, ball: u8, standing: u16, shot: u32, rolls_a: Vec<u8>, rolls_b: Vec<u8> }
@@ -351,7 +364,7 @@ message_enum! {
         /// 2 up), who has each place (0 free) and their crowns, the fighters,
         /// the gifts, and the round's (or match's) winner; the bots' level, the kind of
         /// match, classes on, and how long left to pick one. Every tick of a match.
-        40 ArenaState { status: u8, now: u32, phase_ms: u32, round: u8, fire: u16, spikes: Vec<u8>, slots: Vec<u32>, crowns: Vec<u8>, fighters: Vec<ArenaFighter>, gifts: Vec<ArenaGift>, winner: u32, level: u8, mode: u8, goliath: u8, kits: bool, choose_ms: u16 }
+        40 ArenaState { status: u8, now: u32, phase_ms: u32, round: u8, fire: u16, spikes: Vec<u8>, slots: Vec<u32>, crowns: Vec<u8>, fighters: Vec<ArenaFighter>, gifts: Vec<ArenaGift>, winner: u32, level: u8, mode: u8, goliath: u8, kits: bool, choose_ms: u16, exhibition: bool, wheel: bool }
         /// Something happened (`commons_sim::arena::ev`): `a`, `b`, `n`, `m` as
         /// each says, at (x, y) (arena tiles ×100), and a knock (`vx`, `vy`:
         /// tiles a second ×100, + 32768).
@@ -376,6 +389,15 @@ message_enum! {
         47 PbShot { by: u32, shot: u16, x: u16, y: u16, aim: u16, kind: u8 }
         /// Something happened (`paintball::ev`): `a` and `b` as each says, at (x, y), `n` the ball or a count.
         48 PbEvent { kind: u8, a: u32, b: u32, x: u16, y: u16, n: u16 }
+        /// To the one with the magnet down, as it finds something: the other
+        /// junk lying about it on the bottom (theirs too, if they grab it).
+        49 SalvageJunk { items: Vec<u32> }
+        /// A piece of furniture at (x, y) turned on or off.
+        50 ObjectOn { x: u16, y: u16, on: bool }
+        /// What a fish tank at (x, y) holds (fish item ids).
+        51 TankFish { x: u16, y: u16, fish: Vec<u32> }
+        /// What stands on the table at (x, y) (0: nothing).
+        52 ObjectTop { x: u16, y: u16, item: u32 }
     }
 }
 
@@ -625,6 +647,8 @@ pub mod fish_event {
     /// The flopping fish was hit and flopped off to (x, y); `item` is how
     /// many hits so far.
     pub const HIT: u8 = 5;
+    /// A lure thrown into the water at (x, y) (`item`: which lure): the arm, the arc, the splash.
+    pub const LURE: u8 = 6;
     pub const FLOP_MS: u32 = 4_500;
 }
 

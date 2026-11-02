@@ -8,7 +8,7 @@
     { "t": "Sit", "hex": "06ffffffff" },
     { "t": "Stand", "hex": "07" },
     { "t": "GameMove", "hex": "08e110000005006537653871" },
-    { "t": "FishCast", "hex": "0914003c00" },
+    { "t": "FishCast", "hex": "0914003c0000" },
     { "t": "FishReel", "hex": "0a6b03" },
     { "t": "PlotAction", "hex": "0b15001b0001c8000000" },
     { "t": "Place", "hex": "0c9001000005000400" },

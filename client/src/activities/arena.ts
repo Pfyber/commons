@@ -32,6 +32,7 @@ import { drawPixelText, pixelWidth } from "../world/pixelfont";
 import { levelLabel, levelPicker } from "./botlevel";
 import { drawArms } from "./arenagear";
 import { ACT, ARROW, ARROW_RANGE, ARROW_SPEED, BIG_BOMB, BIG_BOMB_FULL_MS, BIG_BOMB_R, BLAST_R, BODY_H, CAST, GIANT_H, KIT, KIT_HEAVY_REACH, KIT_HP, KIT_LIGHT_ARC, KIT_LIGHT_REACH, KIT_LIGHT_TIME, KIT_LUNGE, KIT_LUNGE_MAX, KIT_SPEED, KIT_SPIN_REACH, KITS, KitPicker, LOB_MIN, LOB_RANGE, QUAKE_R, SHOOT, TANK_LEAP, TANK_LEAP_MIN, TANK_STOMP_R, kitGallery, kitOf, picked, shoots } from "./arenakits";
+import { ClassWheel } from "./arenawheel";
 import { BOWL_OVERHANG, bowlMasts, bowlSeats } from "../world/amphitheatre";
 import { spectatorTexture } from "../world/crowdart";
 import { drawGoliath, GOLIATH_HEIGHT, type GoliathAct, type GoliathPose } from "../world/goliathart";
@@ -170,6 +171,8 @@ export type ArenaSend =
   | { t: "ArenaMode"; mode: number; goliath: number }
   | { t: "ArenaKits"; on: boolean }
   | { t: "ArenaKit"; kit: number }
+  | { t: "ArenaLobby" }
+  | { t: "ArenaWheel"; on: boolean }
   | { t: "ArenaMove"; x: number; y: number; aim: number; reach: number }
   | { t: "ArenaAct"; act: number; aim: number; reach: number };
 
@@ -246,6 +249,10 @@ const toU16 = (a: number) => Math.round(((((a % (Math.PI * 2)) + Math.PI * 2) % 
 const fromU16 = (v: number) => (v / 65536) * Math.PI * 2;
 
 // ---- sound -------------------------------------------------------------------
+
+/** The arena's heard in full this near the sand (tiles), and not at all past `HEAR_TILES`. */
+const HEAR_NEAR = 6;
+const HEAR_TILES = 24;
 
 const snd = {
   whoosh(vol: number) {
@@ -611,6 +618,7 @@ export class ArenaShow {
   private lobby = el("div", "ar-lobby");
   /** With classes on: the pick at each round's start. */
   private kitPicker = new KitPicker((k) => this.send({ t: "ArenaKit", kit: k }));
+  private classWheel = new ClassWheel();
   private results = el("div", "pb-results");
   private lobbyOpen = false;
   private yieldBtn!: HTMLButtonElement;
@@ -1103,6 +1111,8 @@ export class ArenaShow {
 
   /** The sign by the gate: the four places, join, fight. */
   openSign() {
+    // (The bots' own match, if one's on, makes way.)
+    if (this.state?.exhibition) this.send({ t: "ArenaLobby" });
     this.lobbyOpen = true;
     this.lobbyKey = "";
     this.renderLobby();
@@ -1115,7 +1125,7 @@ export class ArenaShow {
     this.lobby.hidden = !show;
     if (!show) return;
     const mine = s ? s.slots.indexOf(me) : -1;
-    const key = s ? `${s.status}|${s.slots.join(",")}|${s.crowns.join(",")}|${mine}|${s.level}|${s.mode}|${s.goliath}|${s.kits}` : "none";
+    const key = s ? `${s.status}|${s.slots.join(",")}|${s.crowns.join(",")}|${mine}|${s.level}|${s.mode}|${s.goliath}|${s.kits}|${s.wheel}|${s.exhibition}` : "none";
     if (key === this.lobbyKey) return;
     this.lobbyKey = key;
     this.lobby.replaceChildren();
@@ -1125,7 +1135,7 @@ export class ArenaShow {
       this.lobby.hidden = true;
     }, "subtle ar-close");
     head.append(el("strong", "", "🏛️ Caesar's Games"), close);
-    const running = !!s && s.status !== LOBBY;
+    const running = !!s && s.status !== LOBBY && !s.exhibition;
     const sub = el(
       "p",
       "ar-lobby-sub",
@@ -1216,7 +1226,14 @@ export class ArenaShow {
       const on = button(s.kits ? "🎭 Classes: ON" : "🎭 Classes: OFF", () => this.send({ t: "ArenaKits", on: !s.kits }), `ar-kind${s.kits ? " on" : ""}`);
       on.title = s.kits ? "Each gladiator picks a class before every round" : "Everyone fights as a knight";
       on.disabled = !canEdit;
-      kitsRow.append(on, button("👁 Preview classes", () => kitGallery(), "subtle"));
+      kitsRow.append(on);
+      if (s.kits) {
+        const wheel = button(s.wheel ? "🎡 Wheel: ON" : "🎡 Wheel: OFF", () => this.send({ t: "ArenaWheel", on: !s.wheel }), `ar-kind${s.wheel ? " on" : ""}`);
+        wheel.title = s.wheel ? "A wheel spins at the start of the match and picks everyone's class (kept all match)" : "Everyone picks their own class";
+        wheel.disabled = !canEdit;
+        kitsRow.append(wheel);
+      }
+      kitsRow.append(button("👁 Preview classes", () => kitGallery(), "subtle"));
     }
     this.lobby.append(head, sub, kinds, places, modeEl, ...(level ? [level] : []), kitsRow, actions, how, ...(goliathHow ? [goliathHow] : []));
   }
@@ -1289,7 +1306,12 @@ export class ArenaShow {
     this.renderLobby();
   }
 
+  /** An event from the ring: shown, and heard as loud as we're near it. */
   onEvent(e: ArenaEv) {
+    sfx.withScale(this.hearing(), () => this.handleEvent(e));
+  }
+
+  private handleEvent(e: ArenaEv) {
     const me = this.selfId();
     const x = e.x / 100;
     const y = e.y / 100;
@@ -1486,7 +1508,8 @@ export class ArenaShow {
         break;
       case EV.ROUND_START:
         snd.gong();
-        this.announce(`ROUND ${e.n}`, "#ffe14f", 1.8);
+        if (this.state?.exhibition) this.announce(`🤖 EXHIBITION · ROUND ${e.n}`, "#ffe14f", 1.8, "the bots fight while nobody's playing: open the sign by the gate to play");
+        else this.announce(`ROUND ${e.n}`, "#ffe14f", 1.8);
         break;
       case EV.FIGHT:
         snd.horn();
@@ -1582,8 +1605,25 @@ export class ArenaShow {
   }
 
   private near(x: number, y: number): number {
-    if (!this.capturing) return 0.5;
+    if (!this.capturing) return 0.6;
     return Math.max(0.2, 1 - Math.hypot(x - this.me.x, y - this.me.y) / 18);
+  }
+
+  /**
+   * How well the arena's heard from where we are: all of it fighting in it
+   * (or right by it, up in the stands), fading out further off, and
+   * nothing at all past `HEAR_TILES` from the sand.
+   */
+  private hearing(): number {
+    if (this.capturing) return 1;
+    const self = this.avatarOf(this.selfId());
+    if (!self) return 0;
+    const a = this.arenaObj;
+    // From the nearest edge of the ring (the stands round it count as by it).
+    const dx = Math.max(a.x - self.pos.x, 0, self.pos.x - (a.x + a.w));
+    const dy = Math.max(a.y - self.pos.y, 0, self.pos.y - (a.y + a.h));
+    const d = Math.hypot(dx, dy);
+    return d <= HEAR_NEAR ? 1 : Math.max(0, 1 - (d - HEAR_NEAR) / (HEAR_TILES - HEAR_NEAR));
   }
 
   private buzz(pattern: number | number[]) {
@@ -1603,6 +1643,11 @@ export class ArenaShow {
   // ---- each frame ---------------------------------------------------------------
 
   update(serverNow: number, wallNow: number) {
+    // (Its sounds, the parade's fanfare and the spikes among them, heard as near as we are.)
+    sfx.withScale(this.hearing(), () => this.updateNow(serverNow, wallNow));
+  }
+
+  private updateNow(serverNow: number, wallNow: number) {
     const dt = Math.min(0.05, (wallNow - this.lastFrame) / 1000);
     this.lastFrame = wallNow;
     this.fx.clear();
@@ -3515,6 +3560,14 @@ export class ArenaShow {
     const left = on ? s!.chooseMs - (serverNow - s!.now) : 0;
     if (!on || left <= 0) {
       this.kitPicker.update(0, null, false, []);
+      this.classWheel.update(0, -1, []);
+      return;
+    }
+    // The wheel picks: it spins for us (the Goliath has no class to spin for).
+    if (s!.wheel) {
+      this.kitPicker.update(0, null, false, []);
+      const rest = s!.fighters.filter((f) => !isGiant(f) && f.id !== p!.id).map((f) => ({ name: this.who(f.id), color: CSS[this.slotOf(f.id)], kit: kitOf(f) }));
+      this.classWheel.update(left, isGiant(p!) ? -1 : kitOf(p!), rest);
       return;
     }
     const others = s!.fighters
@@ -3647,6 +3700,7 @@ export class ArenaShow {
 
   destroy() {
     this.kitPicker.destroy();
+    this.classWheel.destroy();
     window.removeEventListener("keydown", this.onKey, true);
     window.removeEventListener("keyup", this.onKeyUp, true);
     window.removeEventListener("blur", this.onBlur);

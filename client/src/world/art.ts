@@ -1086,6 +1086,20 @@ export function decorTexture(kind: string, variant: number): Texture | null {
 
 // ---- multi-tile objects ----------------------------------------------------
 
+/** A leaderboard sign's layout: how far it reaches above its tiles, and where its top five are written (px, in its picture). */
+export const LEADER_SIGN = { overhang: 60, textX: 5, textY: 25, textW: 54, textH: 34, rowH: 7 };
+
+/** Which board a leaderboard sign is (by its label): coins, arena, fish or paintball. */
+export function leaderKind(label: string): "coins" | "arena" | "fish" | "paintball" {
+  const l = label.toLowerCase();
+  return l.includes("arena") ? "arena" : l.includes("angler") ? "fish" : l.includes("paintball") ? "paintball" : "coins";
+}
+
+/** What a leaderboard sign says across its top. */
+export function leaderTitle(label: string): string {
+  return { coins: "LEADERBOARD", arena: "ARENA WINS", fish: "TOP ANGLERS", paintball: "PAINTBALL" }[leaderKind(label)];
+}
+
 function label(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, color = "#3b3a2e", size = 12) {
   if (canPixel(text)) {
     let scale = Math.max(1, Math.round(size / 7));
@@ -1616,6 +1630,53 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, accent, 4, 4, w - 8, 9);
       const title = o.kind === "notice_board" ? "NOTICES" : o.kind === "story_board" ? "OUR TOWN" : slug.toUpperCase();
       label(ctx, title, w / 2, 9, "#fff9ec", 7);
+      break;
+    }
+    case "leaderboard": {
+      // A leaderboard (on the green, by the arena, the pond, the Splat
+      // Yard): a plank board in the other boards' wood, a golden crown on
+      // top, its title in gold; the top five are written on the planks
+      // (live: world/leadersigns.ts writes them on).
+      [c, ctx] = makeCanvas(w, h + LEADER_SIGN.overhang);
+      overhang = LEADER_SIGN.overhang;
+      const H = h + LEADER_SIGN.overhang;
+      const top = 10;
+      const bottom = LEADER_SIGN.overhang;
+      const plank = ["#b07d4f", "#a3714a", "#bc8a5a", "#9c6b42", "#c49462"];
+      px(ctx, "rgba(0,0,0,0.15)", 6, H - 6, w - 12, 5);
+      // The two posts, as the other boards have.
+      px(ctx, P.outline, 8, bottom, 4, H - bottom - 2);
+      px(ctx, P.outline, w - 12, bottom, 4, H - bottom - 2);
+      // The board: planks in light wood, the grain in streaks.
+      px(ctx, P.outline, 2, top, w - 4, bottom - top + 1);
+      px(ctx, plank[0], 3, top + 1, w - 6, bottom - top - 1);
+      for (let y = top + 12; y < bottom; y++) {
+        let x = 3;
+        let i = y * 7;
+        while (x < w - 3) {
+          const len = 4 + ((i * 37 + y * 13) % 14);
+          px(ctx, plank[(i * 3 + y) % plank.length], x, y, Math.min(len, w - 3 - x), 1);
+          x += len;
+          i++;
+        }
+      }
+      // The title band: darker wood, so the gold shows.
+      px(ctx, P.woodDark, 3, top + 1, w - 6, 10);
+      px(ctx, P.outline, 3, top + 11, w - 6, 1);
+      const title = leaderTitle(o.label ?? "");
+      label(ctx, title, w / 2 + 1, top + 7, "#4a3010", 7);
+      label(ctx, title, w / 2, top + 6, "#f2c230", 7);
+      // The crown on top: gold, rubies, a shine.
+      const cx = w / 2;
+      px(ctx, "#8a6a10", cx - 8, 3, 16, 8);
+      px(ctx, "#f2c230", cx - 7, 4, 14, 6);
+      for (const dx of [-7, -1, 5]) {
+        px(ctx, "#8a6a10", cx + dx - 1, 0, 4, 4);
+        px(ctx, "#f2c230", cx + dx, 1, 2, 3);
+      }
+      px(ctx, "#ffe680", cx - 7, 4, 14, 1);
+      for (const dx of [-5, -1, 3]) px(ctx, "#9a1c10", cx + dx, 6, 2, 3);
+      px(ctx, "#ffe680", cx - 6, 5, 1, 1);
       break;
     }
     case "goal": {

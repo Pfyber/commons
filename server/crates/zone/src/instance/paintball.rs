@@ -333,6 +333,19 @@ impl Instance {
         for e in &evs {
             self.pb_broadcast(&event_msg(e), None);
         }
+        // The match won: a win for everyone on the winning side (people, not bots).
+        if after == pb::OVER && before != pb::OVER {
+            let won: Vec<u32> = self.yard.as_ref().map_or(vec![], |y| {
+                y.m.players
+                    .iter()
+                    .filter(|p| !p.bot && p.team == y.m.winner)
+                    .map(|p| p.id)
+                    .collect()
+            });
+            for id in won {
+                self.count_stat(id, "paintball_wins");
+            }
+        }
         if before != pb::LOBBY && after == pb::LOBBY {
             self.pb_all_to_desk(now);
         }

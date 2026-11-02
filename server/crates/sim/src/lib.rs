@@ -21,7 +21,10 @@ pub mod pool;
 pub mod vehicles;
 
 pub use map::{Grid, MapFile, StreetGrid};
-pub use motion::{Motion, SKATE_SPEED_X10, SPRINT_SPEED_X10, TURN_EARLY, WALK_SPEED_X10};
+pub use motion::{
+    Motion, SKATE_SPEED_X10, SPRINT_SPEED_X10, TURN_EARLY, VESPA_SPEED_X10, WALK_SPEED_X10,
+    is_ramped,
+};
 pub use path::{compress, find_path, route};
 
 pub type TilePos = (u16, u16);

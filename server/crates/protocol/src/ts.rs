@@ -263,7 +263,11 @@ pub fn sample_vectors() -> String {
             table: 4321,
             uci: "e7e8q".into(),
         },
-        ClientMsg::FishCast { x: 20, y: 60 },
+        ClientMsg::FishCast {
+            x: 20,
+            y: 60,
+            magnet: false,
+        },
         ClientMsg::FishReel { quality: 875 },
         ClientMsg::PlotAction {
             x: 21,

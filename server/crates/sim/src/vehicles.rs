@@ -15,16 +15,19 @@ pub const TRACK_GROUND: &str = "track";
 /// The skateboard: free for everyone, with its own pace (`SKATE_SPEED_X10`:
 /// a push-off, then a glide).
 pub const SKATEBOARD: u8 = 5;
-use crate::motion::SKATE_SPEED_X10;
+use crate::motion::{SKATE_SPEED_X10, VESPA_SPEED_X10};
+/// The Vespa: quick, and quicker the longer it rides (`VESPA_SPEED_X10`).
+pub const VESPA: u8 = 10;
 
 /// How much faster than walking each vehicle goes, in tenths: dearer goes
 /// faster, and even the cheapest is well past a sprint.
-const SPEEDUP_X10: [(u8, u16); 5] = [
+const SPEEDUP_X10: [(u8, u16); 6] = [
     (1, 22), // roller skates
     (2, 27), // kick scooter
     (3, 32), // city bike
     (4, 35), // vintage bike
     (5, 0),  // skateboard: its own speed (`SKATE_SPEED_X10`)
+    (10, 0), // Vespa: its own speed (`VESPA_SPEED_X10`)
 ];
 
 /// Speed riding vehicle `code` (test-ride bit ignored), in tenths of a tile
@@ -33,6 +36,9 @@ pub fn speed_x10(code: u8) -> Option<u8> {
     let code = code & !TEST_RIDE;
     if code == SKATEBOARD {
         return Some(SKATE_SPEED_X10);
+    }
+    if code == VESPA {
+        return Some(VESPA_SPEED_X10);
     }
     SPEEDUP_X10
         .iter()
