@@ -552,6 +552,23 @@ mod tests {
     }
 
     #[test]
+    fn getting_off_the_vespa_works_though_a_boat_keeps_you_aboard() {
+        let mut inst = lake_instance();
+        let (id, _c) = join(&mut inst, 1, "Rider", (8, 5));
+        let look = inst.avatars[&id].look;
+        // The Vespa's code comes after the boats': it's no boat.
+        inst.avatars.get_mut(&id).unwrap().vehicle = commons_sim::vehicles::VESPA;
+        inst.wear(id, look, 0, 0, 0);
+        assert_eq!(inst.avatars[&id].vehicle, 0, "off it");
+        // Aboard, you stay aboard, whatever you've saved to ride.
+        for seat in [boat::CAPTAIN, boat::PASSENGER, boat::PASSENGER + 2] {
+            inst.avatars.get_mut(&id).unwrap().vehicle = seat;
+            inst.wear(id, look, 0, 0, 0);
+            assert_eq!(inst.avatars[&id].vehicle, seat, "still aboard");
+        }
+    }
+
+    #[test]
     fn a_captain_rows_three_friends_round_the_lake_and_brings_them_ashore() {
         let mut inst = lake_instance();
         let (cap, mut cc) = join(&mut inst, 1, "Cap", (8, 5));

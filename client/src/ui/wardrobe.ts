@@ -4,6 +4,7 @@
 // the mall ("Mine") are worn once bought, and in a fitting room this week's
 // clothes can be tried on and bought on the spot.
 
+import { till } from "../ambient/salvagesfx";
 import type { Economy, Item } from "../economy";
 import { ApiError } from "../net/api";
 import type { Shop } from "../shop";
@@ -185,7 +186,10 @@ export class WardrobePanel extends Panel {
         this.msg.textContent = "";
         this.shop
           .buy(d.key, s.slot)
-          .then(() => (this.msg.textContent = `✓ The ${it.name} is yours. Wear it out!`))
+          .then(() => {
+            till(s.price);
+            this.msg.textContent = `✓ The ${it.name} is yours. Wear it out!`;
+          })
           .catch((e) => (this.msg.textContent = e instanceof Error ? e.message : "That didn't work."))
           .finally(() => this.open && this.render());
       }, "primary try-buy");
@@ -281,7 +285,10 @@ export class WardrobePanel extends Panel {
         this.msg.textContent = "";
         this.shop
           .buy(d.key, s.slot)
-          .then(() => (this.msg.textContent = `✓ The ${it.name} is yours. Wear it out!`))
+          .then(() => {
+            till(s.price);
+            this.msg.textContent = `✓ The ${it.name} is yours. Wear it out!`;
+          })
           .catch((e) => (this.msg.textContent = e instanceof Error ? e.message : "That didn't work."))
           .finally(() => this.open && this.render());
       }, "small primary-sm");

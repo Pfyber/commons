@@ -102,7 +102,7 @@ impl Instance {
             _ => 0,
         };
         // In a boat, you're seen in the boat (your wheels wait ashore).
-        let vehicle = if a.vehicle >= commons_protocol::boat::CAPTAIN {
+        let vehicle = if commons_protocol::boat::aboard(a.vehicle) {
             a.vehicle
         } else {
             vehicle

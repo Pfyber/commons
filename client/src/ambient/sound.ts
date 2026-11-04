@@ -19,6 +19,14 @@ export class Soundscape {
   muted: boolean;
   private master: GainNode | null = null;
   private nextBird = 0;
+  /** How loud the birds are (the settings' overall × ambience). */
+  private volume = 1;
+
+  /** How loud the ambience plays (0–1, from the settings). */
+  setVolume(v: number) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.6 * this.volume;
+  }
 
   constructor() {
     let m = false;
@@ -45,7 +53,7 @@ export class Soundscape {
     } catch {
       // storage unavailable
     }
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.6;
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.6 * this.volume;
     setSfxMuted(this.muted);
     return this.muted;
   }
@@ -55,7 +63,7 @@ export class Soundscape {
     this.started = true;
     const a = audio();
     this.master = a.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.6;
+    this.master.gain.value = this.muted ? 0 : 0.6 * this.volume;
     this.master.connect(a.destination);
   }
 

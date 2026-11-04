@@ -41,6 +41,15 @@ const ZOOM_IN = 3;
  * wide view of the city; past 1 the art can't stay pixel-perfect).
  */
 const FINE_OUT = [0.75, 0.5];
+/** An admin's: on out to three times as far (⅙ of a device pixel per art pixel). */
+const ADMIN_OUT = [0.75, 0.5, 0.375, 0.25, 0.2, 1 / 6];
+let wide = false;
+const fineOut = () => (wide ? ADMIN_OUT : FINE_OUT);
+
+/** Admins zoom out three times as far as everyone else. */
+export function setWideZoom(on: boolean) {
+  wide = on;
+}
 const ZOOM_KEY = "commons.zoom";
 
 function loadZoom(): number {
@@ -323,7 +332,7 @@ export class Scene {
 
   /** How far the zoom may go, in steps from the default (down to the finest step out). */
   private zoomRange(): [number, number] {
-    return [1 - this.baseStep() - FINE_OUT.length, ZOOM_IN];
+    return [1 - this.baseStep() - fineOut().length, ZOOM_IN];
   }
 
   /**
@@ -334,9 +343,9 @@ export class Scene {
     const s = this.baseStep() + z;
     if (s >= 1) return s;
     const f = 1 - s; // 0 at 1, 1 at the first fine step…
-    const i = Math.min(FINE_OUT.length - 1, Math.floor(f));
-    const from = i === 0 ? 1 : FINE_OUT[i - 1];
-    const to = FINE_OUT[Math.min(i, FINE_OUT.length - 1)];
+    const i = Math.min(fineOut().length - 1, Math.floor(f));
+    const from = i === 0 ? 1 : fineOut()[i - 1];
+    const to = fineOut()[Math.min(i, fineOut().length - 1)];
     return from + (to - from) * Math.min(1, f - i);
   }
 
@@ -403,8 +412,9 @@ export class Scene {
    */
   viewTiles(): { w: number; h: number } {
     const { width, height } = this.app.screen;
-    const widest = FINE_OUT[FINE_OUT.length - 1] / this.app.renderer.resolution;
-    return { w: Math.ceil(width / (TILE * widest)) + 1, h: Math.ceil(height / (TILE * widest)) + 1 };
+    const widest = fineOut()[fineOut().length - 1] / this.app.renderer.resolution;
+    // (A byte each way on the wire.)
+    return { w: Math.min(255, Math.ceil(width / (TILE * widest)) + 1), h: Math.min(255, Math.ceil(height / (TILE * widest)) + 1) };
   }
 
   /** Visible area in tiles at the zoom now (inclusive bounds, may exceed the map). */

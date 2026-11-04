@@ -1,14 +1,15 @@
-// The wheel of classes: with it on, at the start of a match a big pixel-art
+// The wheel of classes: with it on, before every round a big pixel-art
 // wheel spins for you (ten segments, each class twice, with the picker's
-// badges), winds back, whirls, ticks past the pointer peg by peg and eases
-// to a stop on the class the server gave you; a flash, confetti, a
-// fanfare, and everyone else's shown beneath. You keep it all match.
+// badges), winds back, whirls, clacks past the pointer peg by peg (every
+// peg heard, each class its own note) and eases to a stop on the class the
+// server gave you; a flash, confetti, that class's own sting, and everyone
+// else's shown beneath. A new class each round.
 //
 // The disc is drawn a pixel at a time at half size and blown up, so it
 // turns in chunky pixels like the rest of the game; the badges ride on it
 // upright (as crisp as in the picker).
 
-import * as cs from "../ambient/casinosfx";
+import * as fx from "../ambient/wheelsfx";
 import { KIT, KITS, kitBadge } from "./arenakits";
 import { el } from "../ui/panels";
 
@@ -24,9 +25,11 @@ const R = 58;
 const RIM = 66;
 const HUB = 10;
 /** The wind-back, the spin, and the settle (ms). */
-const WIND_MS = 260;
-const SPIN_MS = 3700;
-const SETTLE_MS = 380;
+const WIND_MS = 480;
+const SPIN_MS = 5200;
+const SETTLE_MS = 420;
+/** Turns it makes (at least). */
+const TURNS = 6;
 
 /** "#rrggbb" → ABGR (as ImageData takes it, little-endian), lightened or darkened by `f`. */
 function abgr(hex: string, f = 0): number {
@@ -64,9 +67,10 @@ export class ClassWheel {
   private others = el("div", "ark-wheel-others");
   private card = el("div", "ark-wheel-card");
   /** The spin being shown: where it starts and stops, when it began. */
-  private spin: { from: number; to: number; t0: number; dur: number; target: number; landed: boolean; landedAt: number } | null = null;
+  private spin: { from: number; to: number; t0: number; dur: number; target: number; landed: boolean; landedAt: number; loose: boolean } | null = null;
   private angle = 0;
-  private lastSeg = 0;
+  /** Pegs gone by the pointer (counting every one, however fast they pass). */
+  private lastPeg = 0;
   private flap = 0;
   private raf = 0;
   private othersKey = "";
@@ -132,20 +136,21 @@ export class ClassWheel {
     this.result.replaceChildren();
     this.result.className = "ark-wheel-result";
     this.card.classList.remove("landed");
+    this.card.style.transform = "";
     this.othersKey = "";
     this.bits = [];
     // Stop with one of its two segments under the pointer (at the top),
-    // somewhere inside it; after five turns or so.
+    // somewhere inside it; after six turns or so.
     const seg = target + KIT.COUNT * (Math.random() < 0.5 ? 0 : 1);
     const inside = (Math.random() - 0.5) * SEG * 0.6;
     const from = this.angle % TAU;
     let to = -(seg * SEG + SEG / 2) + inside;
-    while (to < from + TAU * 5) to += TAU;
+    while (to < from + TAU * TURNS) to += TAU;
     // (Joined late, it spins shorter.)
     const dur = Math.max(800, Math.min(WIND_MS + SPIN_MS + SETTLE_MS, leftMs - 1400));
-    this.spin = { from, to, t0: performance.now(), dur, target, landed: false, landedAt: 0 };
-    this.lastSeg = this.segAt(from);
-    cs.pull(0.8);
+    this.spin = { from, to, t0: performance.now(), dur, target, landed: false, landedAt: 0, loose: false };
+    this.lastPeg = Math.floor(from / SEG);
+    fx.windup();
     cancelAnimationFrame(this.raf);
     const frame = (now: number) => {
       this.tick(now);
@@ -168,8 +173,9 @@ export class ClassWheel {
 
   /**
    * Where the wheel is `ms` into a spin of `dur` from `from` to `to`: a
-   * little wind back, a whirl easing out (quintic: it creeps the last
-   * pegs), a hair past the stop and back.
+   * little wind back, a whirl easing out (quartic: fast enough to thrill,
+   * every peg still heard, and it creeps the last few), a hair past the
+   * stop and back.
    */
   private at(ms: number, dur: number, from: number, to: number): number {
     const k = dur / (WIND_MS + SPIN_MS + SETTLE_MS);
@@ -183,7 +189,7 @@ export class ClassWheel {
     }
     if (ms < wind + spin) {
       const u = (ms - wind) / spin;
-      const e = 1 - (1 - u) ** 5;
+      const e = 1 - (1 - u) ** 4;
       return from - back + (to + over - (from - back)) * e;
     }
     const u = Math.min(1, (ms - wind - spin) / (dur - wind - spin));
@@ -195,13 +201,34 @@ export class ClassWheel {
     if (!sp) return;
     const ms = now - sp.t0;
     this.angle = this.at(Math.min(ms, sp.dur), sp.dur, sp.from, sp.to);
-    const seg = this.segAt(this.angle);
-    if (seg !== this.lastSeg) {
-      this.lastSeg = seg;
-      this.flap = 1;
-      // A tick per peg: brighter while it whirls, deeper and clackier as it slows.
-      const slow = Math.min(1, ms / sp.dur);
-      cs.fret(0.25 + 0.75 * slow, 0.6 + 0.6 * slow);
+    // Let go: the spring, the rush of air.
+    const k = sp.dur / (WIND_MS + SPIN_MS + SETTLE_MS);
+    if (!sp.loose && ms >= WIND_MS * k) {
+      sp.loose = true;
+      fx.release((SPIN_MS * k) / 1000);
+    }
+    // Every peg past the pointer (a few in a frame at full tilt): one
+    // flapper's clack each, a little apart. Rattling at speed, slowing to
+    // deep clacks with each class's note, the last few with a heartbeat.
+    const pegNow = Math.floor(this.angle / SEG);
+    const passed = pegNow - this.lastPeg;
+    if (passed !== 0) {
+      this.lastPeg = pegNow;
+      const left = (sp.to - this.angle) / SEG;
+      const speed = Math.max(0, Math.min(1, left / 18));
+      if (passed > 0) {
+        this.flap = 1;
+        for (let i = 0; i < Math.min(passed, 3); i++) fx.peg(speed, this.segAt(this.angle) % KIT.COUNT, left, i * 7);
+        // Sparks off the pointer while it whirls.
+        if (speed > 0.25) {
+          for (let i = 0; i < 2; i++) this.bits.push({ x: CX + (Math.random() - 0.5) * 4, y: CY - R - 3, vx: (Math.random() - 0.5) * 1.8, vy: -0.6 - Math.random() * 1.2, c: i ? "#ffe08a" : "#fff8e3", life: 10 + Math.random() * 10 });
+        }
+      }
+    }
+    // The last few pegs: the whole card leaning in.
+    if (!sp.landed && sp.loose) {
+      const left = Math.max(0, (sp.to - this.angle) / SEG);
+      this.card.style.transform = left < 5 ? `scale(${(1 + 0.05 * (1 - left / 5)).toFixed(3)})` : "";
     }
     this.flap *= 0.8;
     if (ms >= sp.dur && !sp.landed) {
@@ -233,14 +260,15 @@ export class ClassWheel {
     this.card.classList.remove("landed");
     void this.card.offsetWidth;
     this.card.classList.add("landed");
+    this.card.style.transform = "";
+    this.card.style.setProperty("--win", info.tint);
     const cols = [info.tint, "#ffe08a", "#fff8e3", "#ff8a3f", info.tint];
     for (let i = 0; i < 70; i++) {
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6;
       const v = 1.2 + Math.random() * 2.6;
       this.bits.push({ x: CX, y: CY - R - 4, vx: Math.cos(a) * v, vy: Math.sin(a) * v, c: cols[i % cols.length], life: 60 + Math.random() * 50 });
     }
-    cs.pocket(0.6);
-    cs.win(8, 0.8);
+    fx.landed(k);
   }
 
   private draw(now: number) {
@@ -297,14 +325,15 @@ export class ClassWheel {
     }
     for (let i = 0; i < 20; i++) {
       const b = (i / 20) * TAU;
-      const lit = landed >= 0 ? blink : (i + Math.floor(now / 60)) % 5 === 0;
+      // (They chase round with the wheel, as fast as it's going.)
+      const lit = landed >= 0 ? blink : (i + Math.floor(a / (SEG / 2))) % 5 === 0;
       const bx = CX + Math.cos(b) * (R + 4);
       const by = CY + Math.sin(b) * (R + 4);
       pix(g, lit ? "#fffbe0" : "#8a5e14", bx - 1, by - 1, 2, 2);
       if (lit) pix(g, "rgba(255,240,170,0.5)", bx - 2, by - 2, 4, 4);
     }
     // The pointer: a red pixel arrowhead at the top, flicked by the pegs.
-    const tip = Math.round(this.flap * 3);
+    const tip = Math.round(this.flap * 5);
     for (let row = 0; row < 9; row++) {
       const w = 9 - row;
       const px0 = CX - Math.ceil(w / 2) + Math.round((tip * (8 - row)) / 8);

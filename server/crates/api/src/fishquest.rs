@@ -6,7 +6,11 @@
 //! and the period (the same all period, different for everyone); what's been
 //! handed in is kept in `fish_quests`.
 //!
-//! `GET /api/fisherman/quest`, `POST /api/fisherman/quest/deliver`.
+//! He has a second order, apart from the first, for what the magnet brings
+//! up: its own three things, its own progress, paid the same.
+//!
+//! `GET /api/fisherman/quest`, `POST /api/fisherman/quest/deliver`;
+//! `GET /api/fisherman/magnet-quest`, `POST /api/fisherman/magnet-quest/deliver`.
 
 use crate::AppState;
 use crate::economy::{Applied, COIN, EconError, Op, apply, bearer_player, key_used};
@@ -32,6 +36,53 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/fisherman/quest", get(quest))
         .route("/fisherman/quest/deliver", post(deliver))
+        .route("/fisherman/magnet-quest", get(magnet_quest))
+        .route("/fisherman/magnet-quest/deliver", post(magnet_deliver))
+}
+
+/// Which of his orders: the fish, or what the magnet brings up.
+#[derive(Clone, Copy)]
+enum Board {
+    Fish,
+    Magnet,
+}
+
+/// What each line of an order is drawn from: its rarities, and how many.
+type Slot = (&'static [i16], (i32, i32));
+
+impl Board {
+    fn kind(self) -> &'static str {
+        match self {
+            Board::Fish => "fish",
+            Board::Magnet => "scrap",
+        }
+    }
+
+    /// An uncommon fish (two to four of it), a rare or epic one (one to
+    /// three), an epic or legendary one (just the one). The magnet's slower,
+    /// so it asks for a little less: a few common things, a couple of
+    /// uncommon ones, and one rare or epic.
+    fn slots(self) -> [Slot; 3] {
+        match self {
+            Board::Fish => [(&[1], (2, 4)), (&[2, 3], (1, 3)), (&[3, 4], (1, 1))],
+            Board::Magnet => [(&[0], (3, 5)), (&[1], (1, 3)), (&[2, 3], (1, 1))],
+        }
+    }
+
+    /// Its dice's own stream, so the two orders are drawn apart.
+    fn salt(self) -> i64 {
+        match self {
+            Board::Fish => 0,
+            Board::Magnet => 0x5a17_a6e0,
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Board::Fish => "fish_quest",
+            Board::Magnet => "magnet_quest",
+        }
+    }
 }
 
 /// The period `unix` falls in.
@@ -52,17 +103,14 @@ fn dice(player: Uuid, period: i64) -> impl FnMut(u64) -> u64 {
     }
 }
 
-/// The order for `player` in `period`: three different fish (item, how many).
-pub fn order(state: &AppState, player: Uuid, period: i64) -> Vec<(i32, i32)> {
-    let mut roll = dice(player, period);
-    // An uncommon one (two to four of it), a rare or epic one (one to three),
-    // and an epic or legendary one (just the one).
-    let slots: [(&[i16], (i32, i32)); 3] = [(&[1], (2, 4)), (&[2, 3], (1, 3)), (&[3, 4], (1, 1))];
+/// The order on `board` for `player` in `period`: three different things (item, how many).
+fn order(state: &AppState, board: Board, player: Uuid, period: i64) -> Vec<(i32, i32)> {
+    let mut roll = dice(player, period + board.salt());
     let mut out: Vec<(i32, i32)> = Vec::new();
-    for (rarities, (lo, hi)) in slots {
+    for (rarities, (lo, hi)) in board.slots() {
         let pool: Vec<i32> = state
             .catalog
-            .of_kind("fish")
+            .of_kind(board.kind())
             .filter(|f| {
                 rarities.contains(&f.rarity)
                     && f.sell().is_some()
@@ -81,7 +129,12 @@ pub fn order(state: &AppState, player: Uuid, period: i64) -> Vec<(i32, i32)> {
 }
 
 /// The order now, as handed in so far.
-async fn state_of(state: &AppState, player: Uuid, period: i64) -> ApiResult<Vec<(i32, i32, i32)>> {
+async fn state_of(
+    state: &AppState,
+    board: Board,
+    player: Uuid,
+    period: i64,
+) -> ApiResult<Vec<(i32, i32, i32)>> {
     let given: Vec<(i32, i32)> = sqlx::query_as(
         "SELECT item_id, delivered FROM fish_quests WHERE player_id = $1 AND period = $2",
     )
@@ -90,7 +143,7 @@ async fn state_of(state: &AppState, player: Uuid, period: i64) -> ApiResult<Vec<
     .fetch_all(&state.db)
     .await
     .map_err(db_err)?;
-    Ok(order(state, player, period)
+    Ok(order(state, board, player, period)
         .into_iter()
         .map(|(item, need)| {
             (
@@ -124,11 +177,19 @@ fn view(rows: &[(i32, i32, i32)], period: i64, state: &AppState) -> Value {
     })
 }
 
-async fn quest(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
-    let player = bearer_player(&state, &headers)?;
+async fn current(state: &AppState, board: Board, headers: &HeaderMap) -> ApiResult<Json<Value>> {
+    let player = bearer_player(state, headers)?;
     let period = period_at(chrono::Utc::now().timestamp());
-    let rows = state_of(&state, player, period).await?;
-    Ok(Json(view(&rows, period, &state)))
+    let rows = state_of(state, board, player, period).await?;
+    Ok(Json(view(&rows, period, state)))
+}
+
+async fn quest(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
+    current(&state, Board::Fish, &headers).await
+}
+
+async fn magnet_quest(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
+    current(&state, Board::Magnet, &headers).await
 }
 
 #[derive(Deserialize)]
@@ -138,13 +199,30 @@ struct DeliverReq {
     key: String,
 }
 
-/// Hands fish in for the order (no more than it still wants), paid triple.
 async fn deliver(
     State(state): S,
     headers: HeaderMap,
     Json(req): Json<DeliverReq>,
 ) -> ApiResult<Json<Value>> {
-    let player = bearer_player(&state, &headers)?;
+    hand_in(&state, Board::Fish, &headers, req).await
+}
+
+async fn magnet_deliver(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<DeliverReq>,
+) -> ApiResult<Json<Value>> {
+    hand_in(&state, Board::Magnet, &headers, req).await
+}
+
+/// Hands things in for an order (no more than it still wants), paid triple.
+async fn hand_in(
+    state: &AppState,
+    board: Board,
+    headers: &HeaderMap,
+    req: DeliverReq,
+) -> ApiResult<Json<Value>> {
+    let player = bearer_player(state, headers)?;
     if req.key.is_empty() || req.key.len() > 80 || !(1..=99).contains(&req.qty) {
         return Err(ApiError::bad_request(
             "bad_delivery",
@@ -152,7 +230,7 @@ async fn deliver(
         ));
     }
     let period = period_at(chrono::Utc::now().timestamp());
-    let rows = state_of(&state, player, period).await?;
+    let rows = state_of(state, board, player, period).await?;
     let Some(&(item, need, given)) = rows.iter().find(|r| r.0 == req.item) else {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -183,7 +261,7 @@ async fn deliver(
                 delta: (price * qty as i64) as i32,
             },
         ],
-        "fish_quest",
+        board.reason(),
         &key,
     )
     .await
@@ -209,8 +287,8 @@ async fn deliver(
         .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
-    let rows = state_of(&state, player, period).await?;
+    let rows = state_of(state, board, player, period).await?;
     Ok(Json(
-        json!({ "applied": applied, "quest": view(&rows, period, &state) }),
+        json!({ "applied": applied, "quest": view(&rows, period, state) }),
     ))
 }

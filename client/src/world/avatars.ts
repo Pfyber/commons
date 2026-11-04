@@ -9,7 +9,7 @@ import { type Motion, type TileXY, headingAt, posAt, sprintingAt } from "./motio
 import type { Scene } from "./scene";
 import { moodIcon } from "../activities/together";
 import { Follower, type PetSprite } from "./pets";
-import { BOAT_CAPTAIN, BOAT_PASSENGER, RIDE_POSE, vehicleTexture } from "./vehicles";
+import { BOAT_CAPTAIN, BOAT_PASSENGER, RIDE_POSE, VESPA, VESPA_AHEAD, isBoat, vehicleTexture } from "./vehicles";
 import { heldCanTexture } from "./goods";
 
 export const EMOTES: Record<number, { icon: string; label: string }> = {
@@ -183,6 +183,8 @@ export class Avatar {
   /** Where the name label was last put on screen (px). */
   private labelAt = { x: NaN, y: NaN };
   pos: TileXY;
+  /** Where the avatar's drawn (`pos` with any correction still blending out): what the camera follows. */
+  shown: TileXY = { x: 0, y: 0 };
   private facing = 1;
   showName = true;
   private nameW = 0;
@@ -558,6 +560,7 @@ export class Avatar {
       this.facing = fighting.facing;
       this.sprite.tint = fighting.hurt ? 0xff8080 : 0xffffff;
     }
+    this.shown = { x, y };
 
     const walking = heading !== null || !!fighting?.walking;
     const sitting = this.state === 1 && !walking;
@@ -666,8 +669,8 @@ export class Avatar {
             ? 1
             : 0;
     // Afloat: passengers sit along the boat; everyone aboard bobs on the water.
-    const afloat = vehicle >= BOAT_CAPTAIN;
-    const seat = vehicle >= BOAT_PASSENGER ? vehicle - BOAT_PASSENGER : -1;
+    const afloat = isBoat(vehicle);
+    const seat = afloat && vehicle >= BOAT_PASSENGER ? vehicle - BOAT_PASSENGER : -1;
     if (seat >= 0) leanX += SEAT_X[seat] ?? 0;
     const wave = afloat ? Math.round(Math.sin(wallNow / 450)) : 0;
     const feetX = x * TILE + TILE / 2 + leanX;
@@ -918,7 +921,8 @@ export class Avatar {
       return;
     }
     w.texture = vehicleTexture(code, moving ? ((Math.floor(now / 50) % 2) as 0 | 1) : 0);
-    w.position.set(Math.round(feetX), Math.round(feetY + 3));
+    // (The Vespa's drawn ahead of its rider: its saddle's towards its back.)
+    w.position.set(Math.round(feetX + (code === VESPA ? this.facing * VESPA_AHEAD : 0)), Math.round(feetY + 3));
     w.scale.x = this.facing;
     // In front of the rider's legs.
     w.zIndex = feetY + 0.6;

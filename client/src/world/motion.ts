@@ -200,6 +200,11 @@ function timeFor(m: Motion, d: number): number {
   return s + (d - walked) * SPRINT_MS_PER_TILE;
 }
 
+/** How long after setting off a motion has covered `d` tiles (ms). */
+export function timeToCover(m: Motion, d: number): number {
+  return timeFor(m, d);
+}
+
 /** Whether they're sprinting at `t`. */
 export function sprintingAt(m: Motion, t: number): boolean {
   return m.speedX10 === SPRINT_SPEED_X10 || (!isRamped(m.speedX10) && !!m.sprintIn && t > m.t0 + m.sprintIn);

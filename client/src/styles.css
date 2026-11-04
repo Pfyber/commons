@@ -847,6 +847,10 @@ body.fading #stage {
   background: rgba(93, 138, 78, 0.6);
 }
 
+.reel .sweet.band {
+  opacity: 0.55;
+}
+
 .reel .needle {
   position: absolute;
   top: -2px;
@@ -3254,6 +3258,17 @@ body.woozy #stage canvas {
   padding: 1px 6px;
   color: #1a1a1a;
   background: var(--tier);
+}
+/* Fish, and magnet finds under them: each title stays in view as its list scrolls by. */
+.fisher-col-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 0 4px;
+  padding: 2px 0;
+  border-bottom: 2px solid var(--wood-dark, #7a5230);
+  background: var(--paper);
+  font-size: 14px;
 }
 .fisher-rows .fisher-row {
   border-left: 4px solid var(--tier);
@@ -6885,6 +6900,9 @@ button.ark-card:hover {
   font-weight: bold;
 }
 .ark-wheel-result.landed {
+  /* (Any class's colour, readable on the dark card.) */
+  filter: brightness(1.55) saturate(1.2);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
   animation: ark-wheel-pop 0.45s ease-out;
   text-shadow: 0 0 10px rgba(255, 224, 138, 0.6);
 }
@@ -6933,8 +6951,20 @@ button.ark-card:hover {
   vertical-align: middle;
   image-rendering: pixelated;
 }
+.ark-wheel-card {
+  transition: transform 0.12s ease-out;
+}
 .ark-wheel-card.landed {
-  animation: ark-wheel-thump 0.35s ease-out;
+  animation: ark-wheel-thump 0.35s ease-out, ark-wheel-glow 1.4s ease-out;
+}
+/* The class's colour flaring out from the wheel as it lands. */
+@keyframes ark-wheel-glow {
+  0% {
+    box-shadow: 0 0 0 4px #fff, 0 0 90px 40px var(--win, #ffe08a);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent;
+  }
 }
 @keyframes ark-wheel-thump {
   30% {
@@ -7061,4 +7091,179 @@ button.ark-card:hover {
   .panel .quest-bar i {
     transition: none;
   }
+}
+
+/* The settings panel. */
+.panel .set-head {
+  margin: 10px 0 4px;
+  font-size: 0.95em;
+}
+.panel .set-row {
+  display: grid;
+  grid-template-columns: 5.5em 1fr 3em;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+.panel .set-row input[type="range"] {
+  width: 100%;
+  accent-color: #c8553d;
+}
+.panel .set-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.panel .set-toggle {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 3px 0;
+}
+.panel .set-keys b {
+  min-width: 9em;
+  display: inline-block;
+}
+.fps-counter {
+  position: fixed;
+  left: 8px;
+  top: 56px;
+  z-index: 8;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #9fe07a;
+  font: bold 12px ui-monospace, monospace;
+  pointer-events: none;
+}
+.fps-counter[hidden] {
+  display: none;
+}
+
+/* ---- Phones (body.phone: a touch screen under 600px across its short
+   side): a simpler layout. The rarer top buttons behind "more"; the chat bar
+   folded into a chat button until tapped; the emotes behind one button;
+   a small map up top, and the zoom buttons out of its way. ---- */
+/* (Not on a computer: there the top buttons all fit, and the chat bar and the emotes stay out.) */
+body:not(.phone) .top-right .more-btn,
+body:not(.phone) .emotes .chat-fab,
+body:not(.phone) .emotes .emote-fab {
+  display: none !important;
+}
+body.phone .top {
+  align-items: flex-start;
+}
+body.phone .top-right {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 3px !important;
+  flex-shrink: 1;
+  min-width: 0;
+}
+body.phone .top-right .pill.btn {
+  width: 36px;
+  height: 36px;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+body.phone .pill.btn[hidden],
+body.phone .top-right:not(.more-open) .extra {
+  display: none;
+}
+body.phone .more-btn {
+  display: inline-flex;
+}
+/* (The everyday buttons on the first row; the rest on their own row under them.) */
+body.phone .top-right .extra {
+  order: 2;
+}
+body.phone #hud:has(.more-open) .tasks-chip {
+  display: none;
+}
+body.phone .top-right.more-open .more-btn {
+  background: var(--paper-2, #f3e4c0);
+}
+body.phone .pill.coins {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+body.phone .pill.nearby,
+body.phone .pill.place {
+  display: none;
+}
+body.phone .tasks-chip {
+  top: max(58px, calc(env(safe-area-inset-top) + 52px));
+  font-size: 12px !important;
+  padding: 4px 10px !important;
+}
+body.phone.ar-playing .tasks-chip {
+  display: none;
+}
+/* The map: small, under the top buttons on the right. */
+body.phone #hud .minimap {
+  top: max(104px, calc(env(safe-area-inset-top) + 98px));
+  bottom: auto;
+  width: 84px;
+  padding: 4px 4px 2px;
+}
+body.phone #hud .minimap canvas {
+  width: 76px;
+  height: 76px;
+}
+body.phone #hud .minimap span {
+  font-size: 9px;
+}
+/* Zoom: bottom right, by the thumb. */
+body.phone .zoom-pad {
+  top: auto;
+  transform: none;
+  bottom: max(14px, env(safe-area-inset-bottom));
+}
+body.phone .zoom-pad button {
+  width: 40px;
+  height: 40px;
+}
+/* The bottom: one short row (chat, emotes, sit…); the chat bar and the
+   emotes open above it when asked for. */
+body.phone .bottom {
+  width: auto;
+  max-width: calc(100% - 70px);
+}
+body.phone .chat-fab,
+body.phone .emote-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+body.phone .bottom:not(.chatting) .chat {
+  display: none;
+}
+body.phone .bottom.chatting .chat-fab {
+  display: none;
+}
+body.phone .bottom:not(.emoting) .emotes .emote,
+body.phone .bottom:not(.emoting) .emotes .mood-btn {
+  display: none;
+}
+body.phone .bottom.emoting .emote-fab {
+  background: var(--paper-2, #f3e4c0);
+}
+body.phone .emotes {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+body.phone .emotes button {
+  width: 42px;
+  height: 42px;
+  margin: 0;
+}
+body.phone .emotes button img.px-icon {
+  width: 24px;
+  height: 24px;
+}
+body.phone .bottom .log {
+  max-width: 80vw;
+  font-size: 12px;
 }

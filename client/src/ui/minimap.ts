@@ -23,7 +23,7 @@ export class Minimap {
   constructor(root: HTMLElement, onTap: () => void) {
     this.el.type = "button";
     this.el.className = "minimap";
-    this.el.title = "City map (C)";
+    this.el.title = "City map (M)";
     this.el.setAttribute("aria-label", "City map");
     this.el.hidden = true;
     // An old atlas in a wood-and-brass frame.

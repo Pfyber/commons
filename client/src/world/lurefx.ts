@@ -27,6 +27,13 @@ const SHEEN_PX = 4;
 /** The legendary lure's water: molten gold, its shimmer white-gold to amber. */
 const GOLD = 0xffc23a;
 const GOLD_SHEEN = [0xffffff, 0xfff3a8, 0xffe066, 0xffb020, 0xfff8e3];
+/** The magnet lure's water: deep purple, its shimmer lilac to violet. */
+const PURPLE = 0xa040ff;
+const PURPLE_SHEEN = [0xffffff, 0xe8c8ff, 0xc49bff, 0x8f5bff, 0xff9ff0];
+/** Which lure (`commons_protocol::lure`). */
+export const LURE = { GLIMMER: 0, GOLD: 1, MAGNET: 2 };
+/** Each lure's item, as thrown. */
+const LURE_KEY = ["fish_lure", "gold_lure", "magnet_lure"];
 /** A thrown lure's flight (ms), and how high it arcs (px). */
 const TOSS_MS = 650;
 const TOSS_HEIGHT = 34;
@@ -37,6 +44,8 @@ const FADE_IN = 1.3;
 const FADE_OUT = 2.7;
 /** Fish seen leaping (just for show). */
 const LEAPERS = ["bluegill", "perch", "rainbow_trout", "pike", "bass", "moonfish", "golden_koi", "carp"];
+/** The rarer metals seen tumbling up out of a magnet lure's water, instead. */
+const METALS = ["pocket_watch", "brass_compass", "old_key", "brass_bell", "gold_idol"];
 
 interface Leap {
   fish: Sprite;
@@ -70,8 +79,8 @@ interface Lure {
   rings: Ring[];
   /** Its glow after dark. */
   glow: Sprite | null;
-  /** The legendary one (gold water, epic fish and up). */
-  gold: boolean;
+  /** Which lure (`LURE`): blue water, gold, or the magnet lure's purple. */
+  kind: number;
   /** When it shows (wall ms): as the thrown lure lands. */
   appearAt: number;
 }
@@ -129,12 +138,12 @@ export class LureShows {
   constructor(
     private scene: Scene,
     private map: ZoneMap,
-    /** An aqua glow for the night (as the fountain's), round a lure. */
-    private nightGlow: (x: number, y: number) => Sprite | null = () => null,
+    /** A glow for the night (as the fountain's), round a lure. */
+    private nightGlow: (x: number, y: number, color: number) => Sprite | null = () => null,
   ) {}
 
   /** A lure at `at`, until instance time `ends`. */
-  show(at: TileXY, ends: number, gold = false) {
+  show(at: TileXY, ends: number, kind = LURE.GLIMMER) {
     const key = `${at.x},${at.y}`;
     // (Thrown just now: it shows as it lands.)
     const toss = this.tosses.find((t) => t.to.x === at.x && t.to.y === at.y);
@@ -152,22 +161,22 @@ export class LureShows {
     const centre = { x: at.x * TILE + TILE / 2, y: at.y * TILE + TILE / 2 };
     timer.position.set(centre.x, centre.y);
     const glimmer = Array.from({ length: GLIMMERS }, (_, i) => {
-      const g = new Graphics().star(0, 0, 4, 2.6, 0.9).fill({ color: gold ? (i % 2 ? 0xfff3a8 : 0xffd23f) : i % 3 ? 0xffffff : 0xfff3a8 });
+      const g = new Graphics().star(0, 0, 4, 2.6, 0.9).fill({ color: kind === LURE.GOLD ? (i % 2 ? 0xfff3a8 : 0xffd23f) : kind === LURE.MAGNET ? (i % 2 ? 0xe8c8ff : 0xffffff) : i % 3 ? 0xffffff : 0xfff3a8 });
       top.addChild(g);
       return { g, phase: Math.random() * Math.PI * 2, tile: tiles[Math.floor(Math.random() * tiles.length)] ?? at };
     });
     top.addChild(timer);
     this.scene.world.addChild(top);
-    const glow = this.nightGlow(centre.x, centre.y);
-    this.lures.set(key, { water, top, timer, shown: "", glimmer, tiles, area: this.reach(at), centre, ends, nextLeap: 0, leaps: [], rings: [], glow, gold, appearAt });
+    const glow = this.nightGlow(centre.x, centre.y, kind === LURE.MAGNET ? 0xb060ff : 0x5ff0ff);
+    this.lures.set(key, { water, top, timer, shown: "", glimmer, tiles, area: this.reach(at), centre, ends, nextLeap: 0, leaps: [], rings: [], glow, kind, appearAt });
   }
 
   /**
    * A lure thrown from `from` (world px: the thrower's hand) into the water
    * at `to`: it spins up and over in an arc and splashes in.
    */
-  toss(from: { x: number; y: number }, to: TileXY, gold: boolean) {
-    const s = new Sprite(itemTexture(gold ? "gold_lure" : "fish_lure", "tool"));
+  toss(from: { x: number; y: number }, to: TileXY, kind: number) {
+    const s = new Sprite(itemTexture(LURE_KEY[kind] ?? LURE_KEY[0], "tool"));
     s.anchor.set(0.5);
     s.scale.set(0.75);
     s.zIndex = 1e9;
@@ -351,7 +360,9 @@ export class LureShows {
         const a = l.tiles[Math.floor(Math.random() * l.tiles.length)];
         const across = l.tiles.filter((t) => t.y === a.y && Math.abs(t.x - a.x) >= 1 && Math.abs(t.x - a.x) <= 2);
         const b = across[Math.floor(Math.random() * across.length)] ?? a;
-        const fish = new Sprite(itemTexture(LEAPERS[Math.floor(Math.random() * LEAPERS.length)], "fish"));
+        const metal = l.kind === LURE.MAGNET;
+        const pool = metal ? METALS : LEAPERS;
+        const fish = new Sprite(itemTexture(pool[Math.floor(Math.random() * pool.length)], metal ? "scrap" : "fish"));
         fish.anchor.set(0.5);
         fish.scale.set(0.5);
         l.top.addChildAt(fish, 0);
@@ -416,12 +427,12 @@ export class LureShows {
     const spin = wallNow / 1400;
     for (const b of blocks.values()) {
       const g = b.l.water;
-      const gold = b.l.gold;
-      g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: gold ? GOLD : AQUA, alpha: (gold ? 0.55 : 0.42) * b.fade + 0.1 * breathe * b.fade });
+      const kind = b.l.kind;
+      g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: kind === LURE.GOLD ? GOLD : kind === LURE.MAGNET ? PURPLE : AQUA, alpha: (kind === LURE.GLIMMER ? 0.42 : 0.55) * b.fade + 0.1 * breathe * b.fade });
       const phase = (b.dx + b.dy) * 0.09 + Math.atan2(b.dy, b.dx) * 2 - spin * 4;
       const band = Math.sin(phase);
       if (band < 0.55) continue;
-      const sheen = gold ? GOLD_SHEEN : SHEEN;
+      const sheen = kind === LURE.GOLD ? GOLD_SHEEN : kind === LURE.MAGNET ? PURPLE_SHEEN : SHEEN;
       const hue = sheen[Math.floor(((phase / (Math.PI * 2)) % 1 + 1) % 1 * sheen.length)];
       g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: hue, alpha: (band - 0.55) * 1.1 * b.fade });
     }

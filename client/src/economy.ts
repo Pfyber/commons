@@ -41,7 +41,7 @@ export interface Applied {
   firsts: number[];
 }
 
-/** The fisherman's daily order (server `fishquest`): three fish, how many of each, handed in so far. */
+/** One of the fisherman's daily orders (server `fishquest`): three things, how many of each, handed in so far. */
 export interface FishQuest {
   items: { item: number; need: number; given: number; price: number }[];
   need: number;
@@ -136,14 +136,14 @@ export class Economy {
     this.emit();
   }
 
-  /** The fisherman's order for today. */
-  fishQuest(): Promise<FishQuest> {
-    return this.auth.get<FishQuest>("/api/fisherman/quest");
+  /** The fisherman's order for today (`magnet`: his other one, for what the magnet brings up). */
+  fishQuest(magnet = false): Promise<FishQuest> {
+    return this.auth.get<FishQuest>(`/api/fisherman/${magnet ? "magnet-quest" : "quest"}`);
   }
 
-  /** Hands `qty` of fish `item` in for the order (paid triple); the order as it stands now. */
-  async deliverFish(item: number, qty: number): Promise<FishQuest> {
-    const r = await this.auth.send<{ applied: Applied; quest: FishQuest }>("/api/fisherman/quest/deliver", { item, qty, key: crypto.randomUUID() });
+  /** Hands `qty` of `item` in for an order (paid triple); the order as it stands now. */
+  async deliverFish(item: number, qty: number, magnet = false): Promise<FishQuest> {
+    const r = await this.auth.send<{ applied: Applied; quest: FishQuest }>(`/api/fisherman/${magnet ? "magnet-quest" : "quest"}/deliver`, { item, qty, key: crypto.randomUUID() });
     this.applyResult(r.applied);
     return r.quest;
   }

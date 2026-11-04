@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 40;
+pub const PROTOCOL_VERSION: u16 = 42;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -167,7 +167,7 @@ message_enum! {
         // so whoever follows you comes along.
         35 Going { zone: String, arrive: String }
         /// Throw one of your glimmer lures into the water at (`x`, `y`).
-        36 ThrowLure { x: u16, y: u16, gold: bool }
+        36 ThrowLure { x: u16, y: u16, kind: u8 }
         /// Step up to bowling lane `lane` (0-based, in map order): take on the
         /// bot, or wait for someone (or join whoever is waiting).
         37 BowlJoin { lane: u8, vs_bot: bool }
@@ -350,7 +350,7 @@ message_enum! {
         36 Went { id: u32, zone: String, arrive: String }
         /// A glimmer lure in the water at (`x`, `y`) until instance time `ends`:
         /// lines cast into the circle round it bite rarer fish.
-        37 LureShown { x: u16, y: u16, ends: u32, gold: bool }
+        37 LureShown { x: u16, y: u16, ends: u32, kind: u8 }
         /// How a bowling lane stands (`bowl::*` status): who's playing, whose
         /// frame and ball, the pins up, and every roll so far (pins each).
         38 BowlState { lane: u8, a: u32, b: u32, status: u8, turn: u8, frame: u8, ball: u8, standing: u16, shot: u32, rolls_a: Vec<u8>, rolls_b: Vec<u8> }
@@ -470,6 +470,21 @@ pub mod boat {
     /// the passenger in seat `n` (`PASSENGER + n`, front to back from 0).
     pub const CAPTAIN: u8 = 6;
     pub const PASSENGER: u8 = 7;
+
+    /// Whether `vehicle` is a place in a boat (the Vespa's code comes after them).
+    pub fn aboard(vehicle: u8) -> bool {
+        (CAPTAIN..PASSENGER + SEATS as u8).contains(&vehicle)
+    }
+}
+
+/// `ThrowLure.kind`, `LureShown.kind`.
+pub mod lure {
+    /// Rarer fish, in blue water.
+    pub const GLIMMER: u8 = 0;
+    /// Epic fish and up, in gold water.
+    pub const GOLD: u8 = 1;
+    /// Rarer metals for a magnet, in purple water.
+    pub const MAGNET: u8 = 2;
 }
 
 /// `Drink.kind`.
@@ -649,6 +664,9 @@ pub mod fish_event {
     pub const HIT: u8 = 5;
     /// A lure thrown into the water at (x, y) (`item`: which lure): the arm, the arc, the splash.
     pub const LURE: u8 = 6;
+    /// The magnet's reel game won: down it goes for `item` (sent to the angler
+    /// alone, after `SalvageJunk`): the salvage game starts.
+    pub const SALVAGE: u8 = 7;
     pub const FLOP_MS: u32 = 4_500;
 }
 

@@ -64,8 +64,10 @@ const MAX_PATH_EXPANSIONS: usize = 12_000;
 const ACTIVITY_EVERY_MS: u32 = 60_000;
 /// Cap on interactions counted per avatar per report.
 const MAX_INTERACTIONS_PER_REPORT: u32 = 30;
-const MAX_VIEW_W: u8 = 104;
-const MAX_VIEW_H: u8 = 64;
+/// (As wide as the byte goes: an admin zoomed right out sees the city whole;
+/// everyone else asks only for what their own zoom can show.)
+const MAX_VIEW_W: u8 = 255;
+const MAX_VIEW_H: u8 = 160;
 /// Entities per CellEnter message, keeping each well under the u16 frame limit.
 const CELL_ENTER_CHUNK: usize = 200;
 /// A client whose unsent output grows past this is disconnected.
@@ -102,11 +104,11 @@ enum Pending {
         action: u8,
         item: u32,
     },
-    /// Throw a glimmer lure (or the gold one) here on arrival.
+    /// Throw a lure (`commons_protocol::lure`) here on arrival.
     Lure {
         x: u16,
         y: u16,
-        gold: bool,
+        kind: u8,
     },
     Cast {
         x: u16,
@@ -925,7 +927,7 @@ impl Instance {
             ClientMsg::FishReel { quality } => self.fish_reel(id, quality, now),
             ClientMsg::SalvageReel { target, extras } => self.salvage_reel(id, target, extras, now),
             ClientMsg::FishHit {} => self.fish_hit(id, now),
-            ClientMsg::ThrowLure { x, y, gold } => self.throw_lure(id, (x, y), gold, now),
+            ClientMsg::ThrowLure { x, y, kind } => self.throw_lure(id, (x, y), kind, now),
             ClientMsg::OpenCrate {} => self.open_crate(id, now),
             ClientMsg::BowlJoin { lane, vs_bot } => self.bowl_join(id, lane, vs_bot, now),
             ClientMsg::BowlLeave { lane } => self.bowl_leave(id, lane),
@@ -1218,7 +1220,7 @@ impl Instance {
                         self.do_plot_action(id, (x, y), action, item)
                     }
                     Pending::Cast { x, y, magnet } => self.do_cast(id, (x, y), magnet, now),
-                    Pending::Lure { x, y, gold } => self.do_throw_lure(id, (x, y), gold, now),
+                    Pending::Lure { x, y, kind } => self.do_throw_lure(id, (x, y), kind, now),
                 }
             }
         }

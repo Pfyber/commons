@@ -65,11 +65,16 @@ import { LOGIN_NOTICE, signIn } from "./ui/login";
 import { JournalPanel, NetGame } from "./ui/nature";
 import { Nature } from "./nature";
 import { ActionMenu, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
+import { SettingsPanel } from "./ui/settings";
+import { onSettings } from "./settings";
+import { setSfxVolume } from "./ambient/sfx";
+import { setMusicVolume } from "./activities/jam";
 import { FriendsPanel, NotificationsPanel } from "./ui/social";
 import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { EaselPanel } from "./activities/easel";
 import { WordPanel } from "./activities/word";
 import { type ZoneMap, spot } from "./world/map";
+import { setWideZoom } from "./world/scene";
 import "@fontsource/pixelify-sans/400.css";
 import "@fontsource/pixelify-sans/500.css";
 import "@fontsource/pixelify-sans/600.css";
@@ -172,10 +177,47 @@ async function main() {
   document.getElementById("stage")!.appendChild(app.canvas);
 
   let game: Game | null = null;
+  // Admins zoom out three times as far.
+  setWideZoom(!!auth.player?.admin);
   const eco = new Economy(auth);
   const social = new Social(auth, auth.player!.id);
   const town = new Town(auth);
   const sound = new Soundscape();
+  // The settings: how loud everything is, how sharp the picture; and the ⚙️ panel.
+  const fpsEl = document.createElement("div");
+  fpsEl.className = "fps-counter";
+  fpsEl.hidden = true;
+  document.body.append(fpsEl);
+  let fpsAt = 0;
+  app.ticker.add(() => {
+    if (fpsEl.hidden || performance.now() - fpsAt < 500) return;
+    fpsAt = performance.now();
+    fpsEl.textContent = `${Math.round(app.ticker.FPS)} fps`;
+  });
+  onSettings((s) => {
+    setSfxVolume(s.master * s.sfx);
+    sound.setVolume(s.master * s.ambience);
+    setMusicVolume(s.master * s.music);
+    const res = s.quality === "high" ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+    if (app.renderer.resolution !== res) {
+      app.renderer.resolution = res;
+      app.renderer.resize(app.screen.width, app.screen.height);
+    }
+    fpsEl.hidden = !s.fps;
+  });
+  const settingsPanel = new SettingsPanel({
+    muted: () => sound.muted,
+    toggleMute: () => {
+      const m = sound.toggle();
+      hud.setMuted(m);
+      return m;
+    },
+    name: () => auth.player?.display_name ?? "you",
+    logout: () => {
+      auth.signOut();
+      location.reload();
+    },
+  });
   const gov = new Gov(auth);
   const townhall = new TownHallPanel(gov);
   const welcome = new Welcome(auth);
@@ -208,6 +250,7 @@ async function main() {
     onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
     onNotifications: () => notifications.toggle(),
     onSound: () => sound.toggle(),
+    onSettings: () => settingsPanel.toggle(),
     onTasks: () => welcomePanel.show(),
     onMap: () => cityMap.toggle(),
     onBooks: () => myBooks.toggle(),

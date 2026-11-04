@@ -11,6 +11,8 @@
 import { audio, setNotesMuted } from "../activities/jam";
 
 let muted = false;
+/** How loud the effects are (the settings' overall × effects). */
+let level = 1;
 /** How loud what's played now is heard (1: right there; less, further off: `withScale`). */
 let scale = 1;
 
@@ -28,12 +30,18 @@ let out: GainNode | null = null;
 let room: ConvolverNode | null = null;
 let noise: AudioBuffer | null = null;
 
+/** How loud the sound effects play (0–1, from the settings). */
+export function setSfxVolume(v: number) {
+  level = Math.max(0, Math.min(1, v));
+  if (out) out.gain.value = muted ? 0 : level;
+}
+
 /** Mirrors the HUD's sound toggle. */
 export function setSfxMuted(m: boolean) {
   muted = m;
   // The instruments (the fairground's, the bandstand's) go quiet too.
   setNotesMuted(m);
-  if (out) out.gain.value = m ? 0 : 1;
+  if (out) out.gain.value = m ? 0 : level;
   if (m) {
     skate.stop();
     poolRoll.stop();
@@ -46,6 +54,7 @@ function bus(): GainNode | null {
   const a = audio();
   if (!out) {
     out = a.createGain();
+    out.gain.value = muted ? 0 : level;
     out.connect(a.destination);
     room = a.createConvolver();
     room.buffer = roomEcho(a);
@@ -89,7 +98,7 @@ function dest(pan = 0, wet = 0): AudioNode | null {
 }
 
 /** Plays `buf` at `t`, as loud as `level`, optionally darker (`lowpass` Hz) or re-pitched. */
-function play(buf: AudioBuffer, t: number, level: number, opts: { pan?: number; wet?: number; lowpass?: number; rate?: number } = {}) {
+export function play(buf: AudioBuffer, t: number, level: number, opts: { pan?: number; wet?: number; lowpass?: number; rate?: number } = {}) {
   level *= scale;
   if (level < 0.003) return;
   const d = dest(opts.pan, opts.wet);
@@ -112,13 +121,38 @@ function play(buf: AudioBuffer, t: number, level: number, opts: { pan?: number; 
   src.start(t);
 }
 
+/** Loops `buf` softly (darkened to `lowpass` Hz) until the function it returns fades it out. */
+export function drone(buf: AudioBuffer, level: number, lowpass: number): () => void {
+  const d = dest();
+  if (!d) return () => {};
+  const a = audio();
+  const src = a.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  const f = a.createBiquadFilter();
+  f.type = "lowpass";
+  f.frequency.value = lowpass;
+  const g = a.createGain();
+  g.gain.setValueAtTime(0.0001, a.currentTime);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.001, level * scale), a.currentTime + 0.9);
+  src.connect(f).connect(g).connect(d);
+  src.start(a.currentTime);
+  return () => {
+    const t = a.currentTime;
+    g.gain.cancelScheduledValues(t);
+    g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+    src.stop(t + 0.85);
+  };
+}
+
 export const at = (delayMs: number) => audio().currentTime + Math.max(0, delayMs) / 1000;
 const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 
 // ---- rendering sounds sample by sample -------------------------------------
 
 /** A mono buffer `secs` long filled by `fill`, normalised to a peak of 1. */
-function render(secs: number, fill: (d: Float32Array, sr: number) => void): AudioBuffer {
+export function render(secs: number, fill: (d: Float32Array, sr: number) => void): AudioBuffer {
   const a = audio();
   const b = a.createBuffer(1, Math.ceil(a.sampleRate * secs), a.sampleRate);
   const d = b.getChannelData(0);
@@ -130,7 +164,7 @@ function render(secs: number, fill: (d: Float32Array, sr: number) => void): Audi
 }
 
 /** Adds a decaying sine (one ringing mode) from `t0` s: `tau` s to fall to 1/e. */
-function mode(d: Float32Array, sr: number, t0: number, hz: number, tau: number, amp: number) {
+export function mode(d: Float32Array, sr: number, t0: number, hz: number, tau: number, amp: number) {
   const start = Math.floor(t0 * sr);
   const end = Math.min(d.length, start + Math.floor(tau * 7 * sr));
   const ph = Math.random() * Math.PI * 2;
@@ -144,7 +178,7 @@ function mode(d: Float32Array, sr: number, t0: number, hz: number, tau: number, 
  * Adds a burst of noise from `t0` s decaying with `tau`; `tone` 0 is dull
  * (low-passed), 1 bright (high-passed). Starts at full strength: a hit.
  */
-function hit(d: Float32Array, sr: number, t0: number, tau: number, amp: number, tone: number) {
+export function hit(d: Float32Array, sr: number, t0: number, tau: number, amp: number, tone: number) {
   const start = Math.floor(t0 * sr);
   const end = Math.min(d.length, start + Math.floor(tau * 7 * sr));
   // One-pole filter: dull tones keep what's below ~250 Hz…1.7 kHz; bright
@@ -162,7 +196,7 @@ function hit(d: Float32Array, sr: number, t0: number, tau: number, amp: number, 
 
 /** A few variants of each sound, rendered once on first use. */
 const variants = new Map<string, AudioBuffer[]>();
-function pick(key: string, make: () => AudioBuffer, n = 4): AudioBuffer {
+export function pick(key: string, make: () => AudioBuffer, n = 4): AudioBuffer {
   let v = variants.get(key);
   if (!v) {
     v = Array.from({ length: n }, make);
