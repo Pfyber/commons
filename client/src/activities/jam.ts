@@ -50,8 +50,18 @@ export function setNotesMuted(m: boolean) {
   notesMuted = m;
 }
 
+/** How loud music plays (the settings' overall × music): the jam's notes, the dance floor. */
+let musicLevel = 1;
+export function setMusicVolume(v: number) {
+  musicLevel = Math.max(0, Math.min(1, v));
+}
+export function musicVolume(): number {
+  return musicLevel;
+}
+
 /** Plays one note at audio time `when` with loudness `vol` (0–1). */
 export function playNote(instrument: number, pitch: number, when: number, vol: number) {
+  vol *= musicLevel;
   if (notesMuted || vol <= 0.01) return;
   const a = audio();
   const out = a.createGain();

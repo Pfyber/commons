@@ -9,6 +9,8 @@ export interface PlayerView {
   style: number;
   trust_tier: string;
   minor: boolean;
+  /** An admin: zooms out three times as far. */
+  admin?: boolean;
 }
 
 export interface Session {

@@ -1,6 +1,7 @@
 // The Salvage Claw: the magnet's game (the fisherman's magnet, dropped in the
-// pond instead of a line). A side view down into the murky water: something
-// glints, half-buried in the mud among other junk. Steer the swaying magnet
+// pond instead of a line). A side view down into the murky water: things lie
+// half-buried in the mud, each sparkling in its rarity's colour; one among
+// them is what the magnet found. Steer the swaying magnet
 // down; hold over a thing on the bottom to pulse the magnet and work it free
 // of the mud (the glinting one is stuck fast; the junk comes easier). Hold
 // anywhere else to reel up, let go to let the magnet sink back. Grab more
@@ -11,16 +12,28 @@
 // touch and the lot's lost. Surface with whatever you've got. The server
 // decides what everything is; this says what came up.
 
-import { at, burst, tone } from "../ambient/sfx";
-import * as cs from "../ambient/casinosfx";
+import * as fx from "../ambient/salvagesfx";
 import { itemIconUrl } from "../world/items";
 import { button, el, isTyping } from "./panels";
 
-const W = 180;
-const H = 132;
+const W = 320;
+const H = 224;
 const SCALE = 2;
 const SURFACE = 14;
-const BED = 112;
+const BED = 204;
+/** What sparkles on the bottom, by rarity: white, green, blue, purple, gold, red. */
+const SPARKLE = ["#ffffff", "#5fe07a", "#4fa8ff", "#b46bff", "#ffd23f", "#ff3b3b"];
+/** How often a dive has no jellyfish, and one (else two). */
+const JELLY_NONE = 0.2;
+const JELLY_ONE = 0.7;
+/** The fish about (drawn from the real ones): small and big, on the art's own pixels. */
+const FISH_SMALL = 16;
+const FISH_BIG = 24;
+/** Which way the fish art faces (left). */
+const ART_FACES = -1;
+/** How big a thing from the bottom is drawn, and how far apart they hang on the chain. */
+const ITEM = 11;
+const LINK = 9;
 /** The whole dive (ms): a hair under the server's `SALVAGE_MS`. */
 const LIMIT_MS = 30_000;
 
@@ -28,6 +41,9 @@ interface Junk {
   x: number;
   key: string;
   real: boolean;
+  rarity: number;
+  /** Its chime's been heard, this glint. */
+  rang: boolean;
   /** Which of the server's junk it is (-1: the glinting one), and how much pulling frees it. */
   index: number;
   need: number;
@@ -59,6 +75,8 @@ interface Critter {
   from: number;
   to: number;
   y0: number;
+  /** A fish's own picture. */
+  img: HTMLImageElement | null;
 }
 
 interface Mote {
@@ -78,10 +96,18 @@ export interface Salvaged {
   extras: number;
 }
 
-/** How a junk item looks (its key) and what it's called. */
+/** How a junk item looks (its key), what it's called, how rare it is. */
 export interface JunkInfo {
   key: string;
   name: string;
+  rarity: number;
+}
+
+/** A fish you can catch (its key, how rare, how often it bites), to swim about down there. */
+export interface FishLook {
+  key: string;
+  rarity: number;
+  weight: number;
 }
 
 export class SalvageGame {
@@ -120,8 +146,13 @@ export class SalvageGame {
   private lastHum = 0;
   private lastCreak = 0;
   private lastBubble = 0;
+  /** On the bottom last frame (for the bump as it lands), and the last second the clock ticked. */
+  private grounded = false;
+  private lastTick = 0;
   private critters: Critter[] = [];
   private nextCritter = 0;
+  /** The real fish: seen as often as they bite (`weight`), the rarer ones bigger. */
+  private swimmers: { img: HTMLImageElement; big: boolean; weight: number }[] = [];
 
   private onKey = (e: KeyboardEvent, down: boolean) => {
     if (this.el.hidden || isTyping(e)) return;
@@ -134,7 +165,8 @@ export class SalvageGame {
     }
     else return;
     e.preventDefault();
-    e.stopPropagation();
+    // (Key-ups go on: the walk must hear a key let go, held as this opened.)
+    if (down) e.stopPropagation();
   };
 
   constructor() {
@@ -143,8 +175,9 @@ export class SalvageGame {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.width = W * SCALE * dpr;
     this.canvas.height = H * SCALE * dpr;
+    // (As big as it'll go, leaving room for the words and the button; its height follows.)
     this.canvas.style.width = `${W * SCALE}px`;
-    this.canvas.style.height = `${H * SCALE}px`;
+    this.canvas.style.width = `min(${W * SCALE}px, calc(100vw - 44px), calc((100dvh - 170px) * ${W / H}))`;
     const card = el("div", "salvage-card");
     card.append(this.title, this.canvas, this.hint, this.hold);
     this.el.append(card);
@@ -203,8 +236,13 @@ export class SalvageGame {
    * among `junk` (the server's other junk down there): calls `done` once with
    * what came up.
    */
-  play(key: string, rarity: number, name: string, junk: JunkInfo[], done: (r: Salvaged) => void) {
+  play(key: string, rarity: number, name: string, junk: JunkInfo[], done: (r: Salvaged) => void, fish: FishLook[] = []) {
     this.stop();
+    this.swimmers = fish.map((f) => {
+      const img = new Image();
+      img.src = itemIconUrl(f.key, "fish");
+      return { img, big: f.rarity >= 2, weight: f.weight };
+    });
     this.done = done;
     this.rarity = Math.max(0, Math.min(5, rarity));
     this.phase = "play";
@@ -223,16 +261,18 @@ export class SalvageGame {
     this.pulsing = null;
     this.names = new Map([[key, name], ...junk.map((j) => [j.key, j.name] as [string, string])]);
     // The junk on the bottom: the real thing glints (and is stuck fast), the rest doesn't.
-    const spots = [20, 46, 72, 98, 124, 150].sort(() => Math.random() - 0.5);
-    const things = [{ key, index: -1 }, ...junk.slice(0, 5).map((j, i) => ({ key: j.key, index: i }))];
+    const spots = [26, 71, 116, 161, 206, 251, 296].sort(() => Math.random() - 0.5);
+    const things = [{ key, rarity, index: -1 }, ...junk.slice(0, 6).map((j, i) => ({ key: j.key, rarity: j.rarity, index: i }))];
     this.junk = things.map((t, i) => {
       const img = new Image();
       img.src = itemIconUrl(t.key, "scrap");
       const real = t.index < 0;
       return {
-        x: spots[i] + (Math.random() - 0.5) * 8,
+        x: spots[i] + (Math.random() - 0.5) * 14,
         key: t.key,
         real,
+        rarity: Math.max(0, Math.min(5, t.rarity)),
+        rang: false,
         index: t.index,
         need: real ? 1300 + this.rarity * 550 : 650,
         grip: 0,
@@ -244,17 +284,20 @@ export class SalvageGame {
     const n = 1 + Math.ceil(this.rarity / 2);
     this.snags = Array.from({ length: n }, (_, i) => {
       const left = i % 2 === 0;
-      return { x: left ? 0 : W, y: 34 + ((BED - 50) / n) * i + Math.random() * 10, w: 36 + Math.random() * 26, left };
+      return { x: left ? 0 : W, y: 34 + ((BED - 50) / n) * i + Math.random() * 10, w: 50 + Math.random() * 40, left };
     });
     this.critters = [];
     for (const sn of this.snags) if (Math.random() < 0.5 + this.rarity * 0.12) this.spawnCrab(sn);
     this.floorCrab();
+    this.jellies();
     this.spawn(true);
-    this.nextCritter = this.t0 + 1500;
+    this.nextCritter = this.t0 + 2500;
     this.title.textContent = "🧲 Salvage!";
     this.hint.textContent = "Steer with the mouse or A D / ← → · hold (click, or Space / W / ↑) over a thing on the bottom to grab it · hold anywhere else to reel up · let go to sink";
     this.el.hidden = false;
-    burst(at(0), 0.5, 0.06, "lowpass", 900, 200);
+    this.grounded = false;
+    this.lastTick = 0;
+    fx.dive();
     const frame = (now: number) => {
       this.tick(now);
       if (!this.el.hidden) this.raf = requestAnimationFrame(frame);
@@ -267,6 +310,7 @@ export class SalvageGame {
     if (this.el.hidden) return;
     this.el.hidden = true;
     cancelAnimationFrame(this.raf);
+    fx.surfacing();
     const d = this.done;
     this.done = null;
     if (d && this.phase !== "won") d({ target: false, extras: 0 });
@@ -276,6 +320,7 @@ export class SalvageGame {
   private finish(won: boolean) {
     if (this.phase === "won" || this.phase === "lost") return;
     this.phase = won ? "won" : "lost";
+    fx.surfacing();
     const got: Salvaged = won ? { target: this.carried.some((j) => j.real), extras: this.carried.reduce((m, j) => (j.index >= 0 ? m | (1 << j.index) : m), 0) } : { target: false, extras: 0 };
     const d = this.done;
     this.done = null;
@@ -284,8 +329,7 @@ export class SalvageGame {
       const names = this.carried.map((j) => this.names.get(j.key) ?? j.key);
       this.title.textContent = got.target ? `✨ Salvaged: ${names.join(" + ")}!` : `🧲 Up: ${names.join(" + ")}`;
       this.hint.textContent = got.target ? (this.carried.length > 1 ? "Greedy, and it paid off!" : "Up it comes!") : "Not the glinting one, but it's something.";
-      cs.win(got.target ? 2 + this.rarity * 2 + (this.carried.length - 1) : 1.5, 0.8);
-      burst(at(0), 0.4, 0.08, "bandpass", 1400, 400, 0.8);
+      fx.surfaced(this.carried.reduce((best, j) => Math.max(best, j.rarity), 0), this.carried.length);
       for (let i = 0; i < 40; i++) this.mote(this.x, SURFACE, (Math.random() - 0.5) * 3, -Math.random() * 2.5, i % 2 ? "#fff3a8" : "#bfefff", 50);
     }
     window.setTimeout(() => {
@@ -296,12 +340,10 @@ export class SalvageGame {
     }, 1800);
   }
 
-  private fail(why: string) {
+  private fail(why: string, by: "fish" | "crab" | "jelly" | "time") {
     this.title.textContent = why;
     this.hint.textContent = this.carried.length > 1 ? "Too greedy: the lot sinks back into the murk…" : "It sinks back into the murk…";
-    tone(at(0), 0.25, 0.08, "sawtooth", 900, 120);
-    burst(at(0), 0.08, 0.1, "highpass", 3000);
-    cs.lose(0.7);
+    fx.lost(by);
     this.finish(false);
   }
 
@@ -314,8 +356,14 @@ export class SalvageGame {
     this.last = now;
     const left = LIMIT_MS - (now - this.t0);
     if (this.phase === "play") {
-      if (left <= 0) this.fail("⌛ Out of time!");
+      if (left <= 0) this.fail("⌛ Out of time!", "time");
       else {
+        // The last few seconds tick away.
+        const sec = Math.ceil(left / 1000);
+        if (sec <= 5 && sec !== this.lastTick) {
+          this.lastTick = sec;
+          fx.lastSeconds(sec);
+        }
         this.steer(now, dt);
         this.play1(now, dt);
       }
@@ -339,8 +387,8 @@ export class SalvageGame {
 
   /** The magnet follows the pointer / keys, swayed by the current (stronger for rarer things). */
   private steer(now: number, dt: number) {
-    if (this.keys.left) this.aimX -= 2.2 * dt;
-    if (this.keys.right) this.aimX += 2.2 * dt;
+    if (this.keys.left) this.aimX -= 3 * dt;
+    if (this.keys.right) this.aimX += 3 * dt;
     this.aimX = Math.max(8, Math.min(W - 8, this.aimX));
     const current = Math.sin(now / 900) * (0.25 + this.rarity * 0.08) + Math.sin(now / 370) * 0.12;
     this.vx += ((this.aimX - this.x) * 0.012 + current * 0.08) * dt;
@@ -350,20 +398,20 @@ export class SalvageGame {
 
   /** Where the `k`th thing on the chain hangs (0: right under the magnet). */
   private hang(k: number): { x: number; y: number } {
-    const d = 12 + k * 11;
+    const d = LINK + k * LINK;
     return { x: this.x + Math.sin(this.swing) * d, y: this.y + Math.cos(this.swing) * d };
   }
 
   /** How far the chain hangs below the magnet (the lowest thing on it). */
   private get reach(): number {
-    return this.carried.length ? 12 + (this.carried.length - 1) * 11 + 8 : 6;
+    return this.carried.length ? this.carried.length * LINK + 6 : 4;
   }
 
   private play1(now: number, dt: number) {
     const floor = BED - this.reach;
     const bottom = this.y >= floor - 2;
     // Over something on the bottom (what the magnet's tips reach)?
-    const under = bottom && !this.carried.length ? (this.junk.find((j) => Math.abs(j.x - this.x) < 11) ?? null) : bottom ? (this.junk.find((j) => Math.abs(j.x - this.hang(this.carried.length - 1).x) < 11) ?? null) : null;
+    const under = bottom && !this.carried.length ? (this.junk.find((j) => Math.abs(j.x - this.x) < 9) ?? null) : bottom ? (this.junk.find((j) => Math.abs(j.x - this.hang(this.carried.length - 1).x) < 9) ?? null) : null;
     this.pulsing = this.holding && !this.lock && under ? under : null;
     // Weight: the glinting thing's by its rarity, each bit of junk a good deal more.
     const load = this.carried.reduce((w, j) => w + (j.real ? 0.15 * this.rarity : 0.55), 0);
@@ -372,9 +420,7 @@ export class SalvageGame {
       j.grip += 16.7 * dt;
       if (now - this.lastHum > 110) {
         this.lastHum = now;
-        const k = j.grip / j.need;
-        tone(at(0), 0.14, 0.04 + k * 0.03, "sawtooth", 70 + k * 60, 66 + k * 60);
-        if (k > 0.3) tone(at(0), 0.05, 0.02, "square", 900 + k * 900);
+        fx.hum(Math.min(1, j.grip / j.need));
       }
       if (Math.random() < 0.6 * dt) this.mote(j.x + (Math.random() - 0.5) * 14, BED - 2, (Math.random() - 0.5) * 0.8, -0.3 - Math.random() * 0.6, "rgba(120,100,70,0.8)", 40);
       if (j.grip >= j.need) {
@@ -383,27 +429,29 @@ export class SalvageGame {
         this.carried.push(j);
         this.lock = true;
         this.shake = 4;
-        tone(at(0), 0.12, 0.1, "square", 220, 880);
-        burst(at(0), 0.1, 0.1, "highpass", 2500);
+        fx.pulledFree(j.rarity, j.real);
         for (let i = 0; i < 18; i++) this.mote(j.x, BED - 4, (Math.random() - 0.5) * 2, -Math.random() * 1.5, "#8a6a40", 35);
         this.title.textContent = j.real ? "🧲 Got it! Now up, quick!" : this.carried.some((c) => c.real) ? "🧲 Greedy… it's getting heavy!" : "🧲 Junk on the chain: heavier now";
         this.hint.textContent = "Hold (away from the junk) to reel up · let go to sink · don't touch anything alive!";
       }
     } else if (this.holding && !this.lock) {
       // Reeling: up as fast as it'll go, the heavier the slower.
-      this.y -= ((0.5 - this.rarity * 0.03) / (1 + load)) * dt;
+      this.y -= ((0.85 - this.rarity * 0.05) / (1 + load)) * dt;
       if (now - this.lastCreak > 120) {
         this.lastCreak = now;
-        burst(at(0), 0.03, 0.05 + load * 0.02, "bandpass", 2400 - load * 500, 2400 - load * 500, 5);
+        fx.winch(load);
       }
     } else {
       // Let go: it sinks (faster the more it carries), down to the bottom.
-      this.y += (0.32 + load * 0.15) * dt;
+      this.y += (0.55 + load * 0.2) * dt;
       for (const j of this.junk) j.grip = Math.max(0, j.grip - 3 * dt);
     }
     this.y = Math.max(SURFACE + 3, Math.min(floor, this.y));
+    if (bottom && !this.grounded) fx.touchdown();
+    this.grounded = bottom;
     if (now - this.lastBubble > 600) {
       this.lastBubble = now;
+      if (Math.random() < 0.7) fx.bubbles();
       this.mote(this.x + 2, this.y - 6, 0, -0.4, "rgba(200,240,255,0.8)", 60);
     }
     // The chain swings, pushed by the magnet's sideways motion (slower with more on it).
@@ -412,20 +460,20 @@ export class SalvageGame {
     this.swing = Math.max(-1.1, Math.min(1.1, this.swing + this.swingV * dt));
     // The creatures come and go (more, and quicker, for rarer things).
     if (now > this.nextCritter) {
-      this.nextCritter = now + Math.max(450, 1150 - this.rarity * 140) * (0.6 + Math.random() * 0.8);
+      this.nextCritter = now + Math.max(800, 2000 - this.rarity * 220) * (0.6 + Math.random() * 0.8);
       this.spawn(false);
     }
     this.moveCritters(now, dt);
     // Touch one, magnet or anything on the chain, and it's all lost.
-    const parts = [{ x: this.x, y: this.y - 1, r: 4 }, ...this.carried.map((_, k) => ({ ...this.hang(k), r: 6 }))];
+    // (A little inside what's drawn: a graze doesn't count.)
+    const parts = [{ x: this.x, y: this.y - 1, r: 3 }, ...this.carried.map((_, k) => ({ ...this.hang(k), r: 3.5 }))];
     for (const c of this.critters) {
-      const hit = parts.find((p) => Math.abs(p.x - c.x) < c.w / 2 + p.r && Math.abs(p.y - c.y) < c.h / 2 + p.r);
+      const hit = parts.find((p) => Math.abs(p.x - c.x) < c.w * 0.38 + p.r && Math.abs(p.y - c.y) < c.h * 0.38 + p.r);
       if (!hit) continue;
       this.shake = 6;
-      tone(at(0), 0.3, 0.09, "square", 520, 160);
       for (let k = 0; k < 14; k++) this.mote(hit.x, hit.y, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, "#d8d0b0", 30);
       c.vx *= 2.5;
-      return this.fail(c.kind === "crab" ? "🦀 A crab snatched at it!" : c.kind === "jelly" ? "🪼 Stung! You let go!" : "🐟 A fish knocked it loose!");
+      return this.fail(c.kind === "crab" ? "🦀 A crab snatched at it!" : c.kind === "jelly" ? "🪼 Stung! You let go!" : "🐟 A fish knocked it loose!", c.kind);
     }
     // At the top with something on the chain: done.
     if (this.y <= SURFACE + 3 && this.carried.length) this.finish(true);
@@ -435,29 +483,42 @@ export class SalvageGame {
   private spawnCrab(sn: Snag) {
     const from = sn.left ? 4 : W - sn.w + 4;
     const to = sn.left ? sn.w - 4 : W - 4;
-    this.critters.push({ kind: "crab", x: from + Math.random() * (to - from), y: sn.y - 5, vx: (Math.random() < 0.5 ? -1 : 1) * (0.25 + this.rarity * 0.05), w: 9, h: 6, body: "#d8483a", fin: "#ff8a6a", phase: Math.random() * 6, from, to, y0: sn.y - 5 });
+    this.critters.push({ kind: "crab", x: from + Math.random() * (to - from), y: sn.y - 5, vx: (Math.random() < 0.5 ? -1 : 1) * (0.25 + this.rarity * 0.05), w: 9, h: 6, body: "#d8483a", fin: "#ff8a6a", phase: Math.random() * 6, from, to, y0: sn.y - 5, img: null });
   }
 
-  /** A fish swimming across (or, for rarer things, sometimes a jellyfish drifting); `calm`: up high, out of the way. */
-  private spawn(calm: boolean) {
-    const jelly = !calm && this.rarity >= 2 && Math.random() < 0.25 + this.rarity * 0.05;
-    const y = calm ? SURFACE + 10 + Math.random() * 20 : SURFACE + 14 + Math.random() * (BED - SURFACE - 34);
-    if (jelly) {
-      const x = 20 + Math.random() * (W - 40);
-      this.critters.push({ kind: "jelly", x, y, vx: 0, w: 9, h: 10, body: "rgba(255,170,230,0.75)", fin: "#ffd0f0", phase: Math.random() * 6, from: 0, to: 0, y0: y });
-      return;
+  /** A dive's jellyfish, there from the start: usually one, sometimes none, now and then two (a side each). */
+  private jellies() {
+    const r = Math.random();
+    const n = r < JELLY_NONE ? 0 : r < JELLY_NONE + JELLY_ONE ? 1 : 2;
+    for (let i = 0; i < n; i++) {
+      const span = (W - 40) / n;
+      const x = 20 + span * (i + Math.random());
+      const y = SURFACE + 40 + Math.random() * (BED - SURFACE - 80);
+      this.critters.push({ kind: "jelly", x, y, vx: 0, w: 9, h: 10, body: "rgba(255,170,230,0.75)", fin: "#ffd0f0", phase: Math.random() * 6, from: 0, to: 0, y0: y, img: null });
     }
-    const big = Math.random() < 0.35 + this.rarity * 0.08;
+  }
+
+  /** One of the real fish, as likely as it is to bite. */
+  private pickFish() {
+    let x = Math.random() * this.swimmers.reduce((sum, f) => sum + f.weight, 0);
+    return this.swimmers.find((f) => (x -= f.weight) < 0) ?? this.swimmers[this.swimmers.length - 1];
+  }
+
+  /** A fish swimming across; `calm`: up high, out of the way. */
+  private spawn(calm: boolean) {
+    const fish = this.pickFish();
+    if (!fish) return;
+    const { img, big } = fish;
+    const y = calm ? SURFACE + 10 + Math.random() * 20 : SURFACE + 14 + Math.random() * (BED - SURFACE - 34);
     const right = Math.random() < 0.5;
     const speed = (0.4 + Math.random() * 0.35 + this.rarity * 0.07) * (big ? 0.85 : 1);
-    const looks = [["#5a7a4a", "#8aaa6a"], ["#6a6a8a", "#9a9abf"], ["#8a5a3a", "#c88a5a"], ["#3a5a7a", "#6a9acf"]][(Math.random() * 4) | 0];
-    this.critters.push({ kind: "fish", x: right ? -12 : W + 12, y, vx: right ? speed : -speed, w: big ? 20 : 13, h: big ? 8 : 6, body: looks[0], fin: looks[1], phase: Math.random() * 6, from: 0, to: 0, y0: y });
+    this.critters.push({ kind: "fish", x: right ? -20 : W + 20, y, vx: right ? speed : -speed, w: big ? 18 : 13, h: big ? 9 : 6, body: "", fin: "", phase: Math.random() * 6, from: 0, to: 0, y0: y, img });
   }
 
   /** The crab on the bottom, scuttling along the mud from bank to bank. */
   private floorCrab() {
     const v = (0.3 + this.rarity * 0.05) * (Math.random() < 0.5 ? -1 : 1);
-    this.critters.push({ kind: "crab", x: 10 + Math.random() * (W - 20), y: BED - 3, vx: v, w: 9, h: 6, body: "#c84a2a", fin: "#ff9a6a", phase: Math.random() * 6, from: 6, to: W - 6, y0: BED - 3 });
+    this.critters.push({ kind: "crab", x: 10 + Math.random() * (W - 20), y: BED - 3, vx: v, w: 9, h: 6, body: "#c84a2a", fin: "#ff9a6a", phase: Math.random() * 6, from: 6, to: W - 6, y0: BED - 3, img: null });
   }
 
   private moveCritters(now: number, dt: number) {
@@ -484,33 +545,14 @@ export class SalvageGame {
     const x = Math.round(c.x);
     const y = Math.round(c.y);
     if (c.kind === "fish") {
-      const f = c.vx > 0 ? 1 : -1;
-      const hw = c.w / 2;
-      const hh = c.h / 2;
-      // Body, belly, tail flicking, a fin, an eye (and a mouthful of teeth for a big one).
-      g.fillStyle = "#1a1a24";
-      g.fillRect(x - hw, y - hh, c.w, c.h);
-      g.fillStyle = c.body;
-      g.fillRect(x - hw + 1, y - hh + 1, c.w - 2, c.h - 2);
-      g.fillStyle = c.fin;
-      g.fillRect(x - hw + 2, y, c.w - 4, hh - 1);
-      const tail = Math.round(Math.sin(c.phase * 2) * 2);
-      const tx = f > 0 ? x - hw - 4 : x + hw;
-      g.fillStyle = c.body;
-      g.fillRect(tx, y - hh - 1 + tail, 4, 2);
-      g.fillRect(tx, y + hh - 1 + tail, 4, 2);
-      g.fillRect(f > 0 ? tx + 2 : tx, y - 1 + tail, 2, 2);
-      g.fillStyle = c.fin;
-      g.fillRect(x - 2, y - hh - 2, 5, 2);
-      const ex = f > 0 ? x + hw - 4 : x - hw + 2;
-      g.fillStyle = "#ffffff";
-      g.fillRect(ex, y - hh + 1, 2, 2);
-      g.fillStyle = "#000000";
-      g.fillRect(ex + (f > 0 ? 1 : 0), y - hh + 1, 1, 1);
-      if (c.w > 15) {
-        g.fillStyle = "#ffffff";
-        g.fillRect(f > 0 ? x + hw - 2 : x - hw + 1, y + 1, 1, 1);
-      }
+      // A fish you could catch, nosing along with a little bob.
+      if (!c.img?.complete) return;
+      const size = c.w > 15 ? FISH_BIG : FISH_SMALL;
+      g.save();
+      g.translate(x, y + Math.round(Math.sin(c.phase) * 1));
+      g.scale(c.vx > 0 ? ART_FACES : -ART_FACES, 1);
+      g.drawImage(c.img, -size / 2, -size / 2, size, size);
+      g.restore();
     } else if (c.kind === "crab") {
       // A red crab, legs going, claws up and snapping.
       const step = Math.floor(c.phase) % 2;
@@ -559,13 +601,13 @@ export class SalvageGame {
     g.fillRect(0, SURFACE, W, H - SURFACE);
     // Light rays slanting down, slowly shifting.
     g.fillStyle = "rgba(200,240,255,0.07)";
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       const x0 = ((i * 47 + now / 60) % (W + 60)) - 30;
       g.beginPath();
       g.moveTo(x0, SURFACE);
       g.lineTo(x0 + 10, SURFACE);
-      g.lineTo(x0 + 34, BED);
-      g.lineTo(x0 + 18, BED);
+      g.lineTo(x0 + 60, BED);
+      g.lineTo(x0 + 40, BED);
       g.fill();
     }
     // The surface's ripple.
@@ -597,13 +639,13 @@ export class SalvageGame {
     }
     g.fillStyle = "#5e4a2e";
     for (let x = 0; x < W; x += 3) g.fillRect(x, BED + 1 + ((x * 7) % 3), 2, 1);
-    for (const [rx, rw] of [[12, 7], [64, 5], [120, 8], [170, 6]]) {
+    for (const [rx, rw] of [[12, 7], [64, 5], [120, 8], [170, 6], [226, 7], [272, 5], [308, 8]]) {
       g.fillStyle = "#5a5a62";
       g.fillRect(rx, BED - 2, rw, 4);
       g.fillStyle = "#7a7a84";
       g.fillRect(rx + 1, BED - 2, rw - 2, 1);
     }
-    for (let k = 0; k < 9; k++) {
+    for (let k = 0; k < 15; k++) {
       const wx = 8 + k * 21;
       const sway = Math.sin(now / 600 + k) * 2;
       g.fillStyle = "#3f7a2e";
@@ -612,8 +654,8 @@ export class SalvageGame {
     // The junk half in the mud; the real one glints (gold for the rare).
     for (const j of this.junk) {
       if (!j.img.complete) continue;
-      const size = 16;
-      const y = BED - size + Math.round(j.sunk * 10);
+      const size = ITEM;
+      const y = BED - size + Math.round(j.sunk * 7);
       const wobble = this.pulsing === j ? Math.round((Math.random() - 0.5) * Math.min(3, 1 + (j.grip / j.need) * 3)) : 0;
       g.globalAlpha = j.real ? 1 : 0.75;
       g.drawImage(j.img, Math.round(j.x - size / 2) + wobble, y, size, size);
@@ -621,17 +663,20 @@ export class SalvageGame {
       // The mud over its lower part.
       g.fillStyle = "#4a3a24";
       g.fillRect(Math.round(j.x - size / 2) - 1, BED + 1, size + 2, H - BED);
-      if (j.real) {
-        const tw = (now / 1100 + j.x) % 1;
-        if (tw < 0.25) {
-          const s = Math.sin((tw / 0.25) * Math.PI);
-          const c = this.rarity >= 3 ? "#ffe14f" : "#ffffff";
-          const gx = Math.round(j.x + 3);
-          const gy = y + 3;
-          g.fillStyle = c;
-          g.fillRect(gx - Math.round(3 * s), gy, Math.round(6 * s) + 1, 1);
-          g.fillRect(gx, gy - Math.round(3 * s), 1, Math.round(6 * s) + 1);
-        }
+      // Each sparkles now and then, in its rarity's colour.
+      const tw = (now / 1100 + j.x) % 1;
+      if (tw >= 0.35) j.rang = false;
+      if (tw < 0.35) {
+        // (The rarer ones chime faintly as they catch the light.)
+        if (j.rarity >= 2 && !j.rang && this.phase === "play") fx.glint(j.rarity, (j.x / W - 0.5) * 1.4);
+        j.rang = true;
+        const s = Math.sin((tw / 0.35) * Math.PI);
+        const gx = Math.round(j.x + 3);
+        const gy = y + 3;
+        g.fillStyle = SPARKLE[j.rarity];
+        g.fillRect(gx - Math.round(5 * s), gy, Math.round(10 * s) + 1, 1);
+        g.fillRect(gx, gy - Math.round(5 * s), 1, Math.round(10 * s) + 1);
+        g.fillRect(gx - 1, gy - 1, 3, 3);
       }
     }
     for (const c of this.critters) this.critter(g, c, now);
@@ -643,11 +688,11 @@ export class SalvageGame {
     g.lineWidth = 1;
     g.beginPath();
     g.moveTo(W / 2, 0);
-    g.quadraticCurveTo(W / 2 + (mx - W / 2) * 0.3, my / 2, mx, my - 7);
+    g.quadraticCurveTo(W / 2 + (mx - W / 2) * 0.3, my / 2, mx, my - 5);
     g.stroke();
     // The chain: everything grabbed, hanging one under another.
     let px = mx;
-    let py = my + 2;
+    let py = my + 1;
     this.carried.forEach((j, k) => {
       const at2 = this.hang(k);
       const ix = Math.round(at2.x + sx);
@@ -655,15 +700,15 @@ export class SalvageGame {
       g.strokeStyle = "#a0a0b0";
       g.beginPath();
       g.moveTo(px, py);
-      g.lineTo(ix, iy - 6);
+      g.lineTo(ix, iy - 4);
       g.stroke();
-      if (j.img.complete) g.drawImage(j.img, ix - 8, iy - 8, 16, 16);
+      if (j.img.complete) g.drawImage(j.img, ix - 5, iy - 5, ITEM, ITEM);
       if (j.real) {
         g.fillStyle = "#ffe14f";
-        g.fillRect(ix + 5, iy - 7, 1, 1);
+        g.fillRect(ix + 4, iy - 5, 1, 1);
       }
       px = ix;
-      py = iy + 6;
+      py = iy + 4;
     });
     this.magnet(g, mx, my, now);
     // The pulse: field arcs out from the magnet's tips.
@@ -673,7 +718,7 @@ export class SalvageGame {
         const r = ((now / 8 + k * 9) % 27) + 3;
         g.strokeStyle = `rgba(150,220,255,${0.7 * (1 - r / 30)})`;
         g.beginPath();
-        g.arc(tip.x, tip.y + 4, r, 0.15 * Math.PI, 0.85 * Math.PI);
+        g.arc(tip.x, tip.y + 3, r, 0.15 * Math.PI, 0.85 * Math.PI);
         g.stroke();
       }
     }
@@ -711,18 +756,18 @@ export class SalvageGame {
   private magnet(g: CanvasRenderingContext2D, x: number, y: number, now: number) {
     const glow = !!this.pulsing;
     g.fillStyle = "#2b2233";
-    g.fillRect(x - 6, y - 7, 12, 3);
-    g.fillRect(x - 6, y - 7, 4, 13);
-    g.fillRect(x + 2, y - 7, 4, 13);
+    g.fillRect(x - 4, y - 5, 8, 3);
+    g.fillRect(x - 4, y - 5, 3, 9);
+    g.fillRect(x + 1, y - 5, 3, 9);
     g.fillStyle = "#d83a3a";
-    g.fillRect(x - 5, y - 6, 10, 2);
-    g.fillRect(x - 5, y - 6, 2, 9);
-    g.fillRect(x + 3, y - 6, 2, 9);
+    g.fillRect(x - 3, y - 4, 6, 1);
+    g.fillRect(x - 3, y - 4, 1, 6);
+    g.fillRect(x + 2, y - 4, 1, 6);
     g.fillStyle = "#ff8a7a";
-    g.fillRect(x - 5, y - 6, 4, 1);
+    g.fillRect(x - 3, y - 4, 3, 1);
     g.fillStyle = glow && Math.floor(now / 80) % 2 ? "#bff4ff" : "#d8dce8";
-    g.fillRect(x - 5, y + 3, 2, 2);
-    g.fillRect(x + 3, y + 3, 2, 2);
+    g.fillRect(x - 3, y + 2, 1, 2);
+    g.fillRect(x + 2, y + 2, 1, 2);
   }
 }
 

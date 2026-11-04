@@ -111,10 +111,12 @@ const FLAG = { DOWN: 1, FURY: 2, KNOCKED: 4, IFRAMES: 8, QUEUED: 16, WINDED: 32,
  * checks they agree): one giant against the rest, drawn as its own brute (goliathart).
  */
 export const MODE = { CLASSIC: 0, GOLIATH: 1 };
-export const GIANT_HP = 500;
+export const GIANT_HP = 400;
 export const GIANT_SPEED = 0.95;
 export const GIANT_R = 0.55;
 export const SMASH: [number, number, number] = [210, 110, 280];
+/** Out of stamina, its smash is slower: the wind-up and recovery this many times as long (as `arena::TIRED_SMASH`). */
+export const TIRED_SMASH = 1.8;
 /** Its smash's reach (tiles) and how far either side of its aim it sweeps (as `arena::SMASH_*`): any way it aims, up and down too. */
 export const SMASH_REACH = 4.3;
 /** What a slash and the Goliath's smash cost in stamina (as `arena::LIGHT_COST`, `SMASH_COST`). */
@@ -599,6 +601,8 @@ export class ArenaShow {
   private keys = new Set<string>();
   private mouse: { sx: number; sy: number } | null = null;
   private touchMode = false;
+  /** Goliaths swinging a tired smash (out of stamina: slower) right now. */
+  private tiredSmash = new Set<number>();
   private stick: Stick | null = null;
   private stickEl = el("div", "pb-stick move");
   // Feel.
@@ -963,6 +967,13 @@ export class ArenaShow {
       this.throwIt();
       return;
     }
+    // The Goliath whirling someone round: a click hurls them, there and then
+    // (at the mouse), whenever in the whirl.
+    const p = this.mine();
+    if (p && isGiant(p) && p.act === ACT.GRAB) {
+      this.act(INPUT.LIGHT);
+      return;
+    }
     this.me.pressAt = this.serverNow();
     this.me.charging = false;
   }
@@ -1218,7 +1229,7 @@ export class ArenaShow {
       }
     }
     const goliathHow = goliathMode
-      ? el("p", "hint ar-how", "👹 The Goliath: twice the size, far tougher, slower; can't roll. Click: a crushing SMASH. Hold & let go: a leaping STOMP that shakes all near it. Rage full (Q): GRAB the gladiator nearest your aim, whirl them into the others, and HURL them. Gladiators: one side, no harming each other; bring the giant down together.")
+      ? el("p", "hint ar-how", "👹 The Goliath: twice the size, far tougher, slower; can't roll. Click: a crushing SMASH. Hold & let go: a leaping STOMP that shakes all near it. Rage full (Q): GRAB the gladiator nearest your aim and whirl them into the others; click any time to HURL them at the mouse (or they're hurled when the whirl ends). Gladiators: one side, no harming each other; bring the giant down together.")
       : null;
     // Classes: off (all knights) or on (each picks one before every round), and a look at them.
     const kitsRow = el("div", "ar-kits-row");
@@ -1229,7 +1240,7 @@ export class ArenaShow {
       kitsRow.append(on);
       if (s.kits) {
         const wheel = button(s.wheel ? "🎡 Wheel: ON" : "🎡 Wheel: OFF", () => this.send({ t: "ArenaWheel", on: !s.wheel }), `ar-kind${s.wheel ? " on" : ""}`);
-        wheel.title = s.wheel ? "A wheel spins at the start of the match and picks everyone's class (kept all match)" : "Everyone picks their own class";
+        wheel.title = s.wheel ? "A wheel spins before every round and picks everyone a new class" : "Everyone picks their own class";
         wheel.disabled = !canEdit;
         kitsRow.append(wheel);
       }
@@ -1320,6 +1331,10 @@ export class ArenaShow {
     this.hype = Math.min(1, this.hype + (HYPE[e.kind] ?? 0) * (e.kind === EV.HIT && (e.m & 2) !== 0 ? 2 : 1));
     switch (e.kind) {
       case EV.SWING:
+        if (e.n === ACT.SMASH) {
+          if (e.m & 1) this.tiredSmash.add(e.a);
+          else this.tiredSmash.delete(e.a);
+        }
         sfx.swordSwing(e.n === ACT.HEAVY ? 0 : 1, nearMe * (e.n === ACT.HEAVY ? 1 : 0.5));
         // Our heavy blow, taken: lunge now if we were waiting on its word
         // (the windup's already gone by on the server, so straight in).
@@ -1590,7 +1605,7 @@ export class ArenaShow {
         sfx.crowdRoar(0.9);
         this.float("GRABBED!", "#ff4f1a", x, y - 3.6, 1.8);
         if (e.b === me) this.announce("THE GOLIATH HAS YOU!", "#ff4f1a", 1.4, "hold on…");
-        else if (e.a === me) this.announce("👹 GOT ONE!", "#ffd23f", 1.3, "aim where to hurl them");
+        else if (e.a === me) this.announce("👹 GOT ONE!", "#ffd23f", 1.3, this.touchMode ? "aim, and tap ⚔️ to hurl them" : "aim, and click to hurl them");
         this.buzz(e.b === me ? [40, 40, 80] : 30);
         break;
       case EV.HURL:
@@ -1948,6 +1963,20 @@ export class ArenaShow {
   }
 
   /** A fighter's pose: their avatar frame (null: standing or walking), lean (radians round the feet) and lift (px). */
+  /**
+   * How far into a smash `since` is, on the usual smash's clock: a tired one
+   * (out of stamina) winds up and recovers slower, so it's drawn slower to
+   * match, the club coming down when the server's blow does.
+   */
+  private smashSince(f: F, since: number): number {
+    if (!this.tiredSmash.has(f.id)) return since;
+    const [w, a] = SMASH;
+    const tw = w * TIRED_SMASH;
+    if (since < tw) return since / TIRED_SMASH;
+    if (since < tw + a) return w + (since - tw);
+    return w + a + (since - tw - a) / TIRED_SMASH;
+  }
+
   private pose(f: F, since: number, now: number, self: boolean): Pose {
     // Hurled, flying: flat out sideways, head first, till they land or crash.
     const fl = this.flung.get(f.id);
@@ -2002,6 +2031,7 @@ export class ArenaShow {
       }
       // The Goliath: the club up, then down; the crouch, the leap, the landing; the whirl.
       case ACT.SMASH:
+        since = this.smashSince(f, since);
         return since < SMASH[0] ? { frame: SWORD_RAISE, lean: -face * (0.08 + 0.1 * (since / SMASH[0])), lift: 0, hurt: false } : { frame: BOWL_RELEASE, lean: face * 0.22, lift: 0, hurt: false };
       case ACT.STOMP: {
         if (since < STOMP[0]) return { frame: SWORD_RAISE, lean: 0, lift: -2, hurt: false };
@@ -2128,10 +2158,12 @@ export class ArenaShow {
     if (down) act = "down";
     else
       switch (f.act) {
-        case ACT.SMASH:
-          if (since < SMASH[0]) [act, k] = ["windup", since / SMASH[0]];
-          else [act, k] = ["smash", (since - SMASH[0]) / (SMASH[1] + SMASH[2])];
+        case ACT.SMASH: {
+          const ss = this.smashSince(f, since);
+          if (ss < SMASH[0]) [act, k] = ["windup", ss / SMASH[0]];
+          else [act, k] = ["smash", (ss - SMASH[0]) / (SMASH[1] + SMASH[2])];
           break;
+        }
         case ACT.CHARGE:
           [act, k] = ["charge", since / GIANT_CHARGE_MS];
           break;
@@ -2524,6 +2556,7 @@ export class ArenaShow {
         // The Goliath's club: a faint warning arc the way it's aiming as it
         // hauls it up, then the great sweep there (any way: up and down too),
         // dust thrown up along it.
+        since = this.smashSince(f, since);
         if (since < SMASH[0]) {
           const k = since / SMASH[0];
           const r = SMASH_REACH * TILE * 0.85;

@@ -68,7 +68,22 @@ export class Weather {
     this.sky.destroy({ children: true });
   }
 
+  /** Drawn at all (the settings can turn the weather's look off). */
+  enabled = true;
+
   update(now: number, hour: number) {
+    if (!this.enabled) {
+      // No rain, no mist, no cloud shadows: a clear sky to look at.
+      this.kind = "clear";
+      this.scene.wind = 0.2;
+      this.shadows.clear();
+      this.rain.clear();
+      this.mist.clear();
+      this.ripples.clear();
+      this.drops.length = 0;
+      this.rings.length = 0;
+      return;
+    }
     const w = weatherAt(Date.now(), hour);
     this.kind = this.indoors ? "clear" : (this.override ?? w.kind);
     this.wind = this.indoors ? 0 : this.kind === "rain" ? Math.max(0.5, w.wind) : w.wind;

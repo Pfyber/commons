@@ -161,7 +161,7 @@ pub mod kit {
 /// reach and damage (and the lunge's, barely and fully charged), its
 /// whirlwind's reach and damage, and how far blows knock it.
 pub const KIT_HP: [f64; 5] = [108.0, 105.0, 95.0, 110.0, 150.0];
-pub const KIT_SPEED: [f64; 5] = [1.0, 1.12, 1.0, 1.0, 0.84];
+pub const KIT_SPEED: [f64; 5] = [1.0, 1.176, 1.0, 1.0, 0.84];
 pub const KIT_LIGHT_REACH: [f64; 5] = [1.35, 1.15, 1.15, 1.95, 1.4];
 pub const KIT_LIGHT_ARC: [f64; 5] = [1.0, 0.85, 0.85, 0.8, 1.05];
 pub const KIT_LIGHT_DMG: [f64; 5] = [1.0, 0.6, 0.65, 1.08, 1.25];
@@ -181,7 +181,7 @@ pub const KIT_COST: [f64; 5] = [1.0, 1.0, 1.0, 1.0, 1.35];
 /// short once everyone has).
 pub const CHOOSE_MS: u32 = 7000;
 /// With the wheel on, how long it spins (and shows what it gave) instead.
-pub const WHEEL_MS: u32 = 6000;
+pub const WHEEL_MS: u32 = 8000;
 /// Firing: the bow drawn back (the archer's charged blow) or a bomb lobbed
 /// (the bomber's): the moment it goes, and the recovery after.
 pub const SHOOT: (u32, u32) = (90, 260);
@@ -195,7 +195,7 @@ pub const QUICK_ARROW_COST: f64 = 9.0;
 /// till they hit something, twice the quick one's damage, 1.7× as fast.
 pub const BURST_ARROWS: u8 = 3;
 pub const BURST_GAP_MS: u32 = 110;
-pub const BURST_DMG: f64 = 8.5;
+pub const BURST_DMG: f64 = 6.5;
 pub const BURST_SPEED: f64 = ARROW_SPEED * 1.7;
 pub const BURST_COST: f64 = 26.0;
 /// (As far as "till they hit something" goes.)
@@ -242,9 +242,9 @@ pub const CAST: (u32, u32) = (320, 260);
 pub const VOLLEY_WAVES: u8 = 3;
 pub const VOLLEY_GAP_MS: u32 = 500;
 pub const VOLLEY_ARROWS: usize = 16;
-pub const VOLLEY_DMG: f64 = 3.0;
+pub const VOLLEY_DMG: f64 = 1.65;
 pub const VOLLEY_AIMED: usize = 3;
-pub const VOLLEY_AIMED_DMG: f64 = 4.5;
+pub const VOLLEY_AIMED_DMG: f64 = 2.475;
 pub const VOLLEY_SPREAD: f64 = 0.12;
 /// The bomber's: a great blast all round them (they're unharmed).
 pub const BLAST_R: f64 = 3.3;
@@ -268,7 +268,7 @@ pub mod mode {
     pub const GOLIATH: u8 = 1;
 }
 /// The Goliath: a giant, much tougher and slower, too heavy to roll; bigger to hit.
-pub const GIANT_HP: f64 = 500.0;
+pub const GIANT_HP: f64 = 400.0;
 pub const GIANT_SPEED: f64 = 0.95;
 pub const GIANT_R: f64 = 0.55;
 /// Its stamina comes back slower than a gladiator's used to (a share of `STAMINA_REGEN`).
@@ -299,6 +299,10 @@ pub const SMASH_DMG: f64 = 12.0;
 pub const SMASH_REACH: f64 = 4.3;
 pub const SMASH_ARC: f64 = 0.9;
 pub const SMASH_COST: f64 = 14.0;
+/// Out of stamina, the Goliath still smashes, only slower (its wind-up and
+/// recovery this many times as long) and softer (this much of the blow).
+pub const TIRED_SMASH: f64 = 1.8;
+pub const TIRED_SMASH_DMG: f64 = 0.7;
 /// Its charged blow, the stomp: a crouch, a leap forward, and a shockwave
 /// where it lands; then recovery. Everything about it grows with how long
 /// it was charged (full at `GIANT_CHARGE_MS`): from a hop of
@@ -339,6 +343,9 @@ pub const DEFLECT_STUN_MS: u32 = 380;
 /// swung into), then hurls them the way it's aiming.
 pub const GRAB_REACH: f64 = 2.4;
 pub const GRAB_SPIN_MS: u32 = 3000;
+/// Whirling them, a click throws them at once (not in the very first
+/// moment of the grab, so the click that was still going doesn't).
+pub const GRAB_THROW_AFTER_MS: u32 = 250;
 /// None in reach: it lunges at one this far off (and seizes them).
 pub const GRAB_LUNGE: f64 = 4.5;
 /// How many times round it whirls them, and how far out (and how near, to be swung into).
@@ -476,6 +483,20 @@ pub mod flag {
     pub const GIANT: u8 = 64;
     /// Dazed by the Goliath's stomp (reeling, stars round their head).
     pub const DAZED: u8 = 128;
+}
+
+/// The smash's wind-up, blow and recovery (ms): slower when tired.
+pub fn smash_times(tired: bool) -> (u32, u32, u32) {
+    let (w, a, r) = SMASH;
+    if tired {
+        (
+            (w as f64 * TIRED_SMASH) as u32,
+            a,
+            (r as f64 * TIRED_SMASH) as u32,
+        )
+    } else {
+        (w, a, r)
+    }
 }
 
 /// A pillar or a spike plate, in arena tiles.
@@ -1012,6 +1033,8 @@ pub struct Fighter {
     /// Firing (or casting): how many it's let go so far, and whether it's the quick shot.
     pub shots: u8,
     pub quick: bool,
+    /// The Goliath's smash, swung with no stamina left for it: slower (`TIRED_SMASH`).
+    pub tired: bool,
 }
 
 impl Fighter {
@@ -1074,6 +1097,7 @@ impl Fighter {
             max_hp: HP,
             shots: 0,
             quick: false,
+            tired: false,
         }
     }
 
@@ -1273,6 +1297,18 @@ impl Fighter {
         self.whirl(now, evs);
     }
 
+    /// The Goliath's smash: with the stamina for it, or (out of breath) a
+    /// slower one (`TIRED_SMASH`: the swing's event says so, `m` 1).
+    fn start_smash(&mut self, now: u32, evs: &mut Vec<Event>) {
+        let tired = !self.spend(SMASH_COST, now);
+        let (w, a, r) = smash_times(tired);
+        self.set(act::SMASH, now, w + a + r);
+        self.tired = tired;
+        let mut e = Event::new(ev::SWING, self.id, 0, self.x, self.y, act::SMASH as u16);
+        e.m = tired as u16;
+        evs.push(e);
+    }
+
     /// Into the whirlwind (rage spent).
     fn whirl(&mut self, now: u32, evs: &mut Vec<Event>) {
         self.rage = 0.0;
@@ -1402,8 +1438,8 @@ pub struct Match {
     /// The bots' own match, put on while nobody's playing (for anyone
     /// to watch); called off the moment someone comes to play.
     pub exhibition: bool,
-    /// The wheel of classes (with classes on): at the match's start it
-    /// spins for everyone, and each keeps what it gave them all match.
+    /// The wheel of classes (with classes on): before every round it spins
+    /// for everyone, and gives each a class other than the one they just had.
     pub wheel: bool,
 }
 
@@ -1885,9 +1921,8 @@ impl Match {
         let choose = match (self.kits, spin) {
             (false, _) => 0,
             (true, false) => CHOOSE_MS,
-            // The wheel: it spins at the start; after, everyone keeps theirs.
-            (true, true) if self.round == 1 => WHEEL_MS,
-            (true, true) => 0,
+            // The wheel: it spins again every round (a new class each time).
+            (true, true) => WHEEL_MS,
         };
         self.choose_end = now + choose;
         self.phase_end = now + choose + COUNTDOWN_MS;
@@ -1896,16 +1931,24 @@ impl Match {
                 let giant = self.mode == mode::GOLIATH && s == self.goliath;
                 self.picks[s] = if giant {
                     kit::PICKED
-                } else if self.round == 1 {
-                    // (Where the wheel stops: anyone's guess.)
+                } else {
+                    // (Where the wheel stops: anyone's guess, but never last
+                    // round's class again: someone new every round.)
                     let mut h =
                         now.wrapping_mul(2_654_435_761) ^ (s as u32 + 1).wrapping_mul(0x9e37_79b9);
                     h ^= h >> 15;
                     h = h.wrapping_mul(0x85eb_ca6b);
                     h ^= h >> 13;
-                    (h % kit::COUNT as u32) as u8 | kit::PICKED
-                } else {
-                    self.picks[s] | kit::PICKED
+                    let last = self.picks[s] & kit::PICKED != 0 && self.round > 1;
+                    let was = self.picks[s] & !kit::PICKED;
+                    let k = if last {
+                        // One of the others, evenly.
+                        let k = (h % (kit::COUNT as u32 - 1)) as u8;
+                        if k >= was { k + 1 } else { k }
+                    } else {
+                        (h % kit::COUNT as u32) as u8
+                    };
+                    k | kit::PICKED
                 };
                 continue;
             }
@@ -1951,7 +1994,7 @@ impl Match {
         self.fighters = fresh;
         // (Nobody left to pick: straight on. Not while the wheel spins.)
         if self.kits
-            && !(self.wheel && self.round == 1)
+            && !self.wheel
             && self
                 .fighters
                 .iter()
@@ -2707,15 +2750,26 @@ impl Match {
     fn giant_input(&mut self, i: usize, what: u8, aim: f64, now: u32) -> Option<Vec<Event>> {
         let mut evs = Vec::new();
         match what {
+            // Whirling someone round: a click throws them now, at the mouse
+            // (the whirl skips to its end; the hurl's the next tick's).
+            // (A player's throw: a bot Goliath, clicking away, whirls them the whole way round.)
+            input::LIGHT
+                if self.fighters[i].act == act::GRAB
+                    && !self.fighters[i].bot
+                    && now.saturating_sub(self.fighters[i].act_at) >= GRAB_THROW_AFTER_MS
+                    && now.saturating_sub(self.fighters[i].act_at) < GRAB_SPIN_MS =>
+            {
+                let f = &mut self.fighters[i];
+                f.aim = aim;
+                f.pending = (0, 0, 0.0);
+                f.act_at = now - GRAB_SPIN_MS;
+                f.act_until = now + 250;
+            }
             input::LIGHT => {
                 let f = &mut self.fighters[i];
                 if f.free(now) {
-                    if f.spend(SMASH_COST, now) {
-                        f.aim = aim;
-                        let (w, a, r) = SMASH;
-                        f.set(act::SMASH, now, w + a + r);
-                        evs.push(Event::new(ev::SWING, f.id, 0, f.x, f.y, act::SMASH as u16));
-                    }
+                    f.aim = aim;
+                    f.start_smash(now, &mut evs);
                 } else {
                     // Still busy: it swings the moment it's free.
                     f.pending = (input::LIGHT, now, aim);
@@ -2754,11 +2808,9 @@ impl Match {
                         let (w, a, r) = STOMP;
                         f.set(act::STOMP, now, w + a + r);
                         evs.push(Event::new(ev::SWING, f.id, 0, f.x, f.y, act::STOMP as u16));
-                    } else if f.spend(SMASH_COST, now) {
-                        // Let go too soon: a smash.
-                        let (w, a, r) = SMASH;
-                        f.set(act::SMASH, now, w + a + r);
-                        evs.push(Event::new(ev::SWING, f.id, 0, f.x, f.y, act::SMASH as u16));
+                    } else if f.stamina >= SMASH_COST * 0.5 {
+                        // Let go too soon: a smash. (Too tired to leap: nothing; a click still smashes, slower.)
+                        f.start_smash(now, &mut evs);
                     } else {
                         f.act = act::NONE;
                     }
@@ -2806,6 +2858,7 @@ impl Match {
                 let v = &self.fighters[j];
                 !v.down
                     && v.held_by == 0
+                    && !v.immune()
                     && v.flags(now) & flag::IFRAMES == 0
                     && (v.x - g.x).hypot(v.y - g.y) < GRAB_REACH + GIANT_R
             })
@@ -2822,6 +2875,7 @@ impl Match {
                     let v = &self.fighters[j];
                     !v.down
                         && v.held_by == 0
+                        && !v.immune()
                         && v.flags(now) & flag::IFRAMES == 0
                         && (v.x - g.x).hypot(v.y - g.y) < GRAB_LUNGE + GIANT_R
                         && self.ring.clear_line(g.x, g.y, v.x, v.y)
@@ -2869,7 +2923,7 @@ impl Match {
 
     /// The smash: when the club comes down, all in front of it within its reach take it.
     fn tick_smash(&mut self, i: usize, f: &Fighter, since: u32, now: u32, evs: &mut Vec<Event>) {
-        let (w, _, _) = SMASH;
+        let (w, _, _) = smash_times(f.tired);
         if !f.struck && since >= w {
             self.fighters[i].struck = true;
             let victims: Vec<usize> = (0..self.fighters.len())
@@ -2891,7 +2945,7 @@ impl Match {
                     i,
                     j,
                     (f.x, f.y),
-                    SMASH_DMG * f.fury(now),
+                    SMASH_DMG * f.fury(now) * if f.tired { TIRED_SMASH_DMG } else { 1.0 },
                     8.5,
                     2,
                     520,
@@ -5592,6 +5646,149 @@ mod tests {
     }
 
     #[test]
+    fn the_goliath_throws_the_one_it_whirls_on_a_click() {
+        let mut m = goliath_match(0);
+        let now = m.round_at + 100;
+        at(&mut m, 0, 10.0, 6.5);
+        at(&mut m, 1, 11.6, 6.5);
+        at(&mut m, 2, 6.0, 6.5);
+        at(&mut m, 3, 3.0, 2.0);
+        m.fighters[0].rage = RAGE;
+        let gid = m.fighters[0].id;
+        let evs = m.input(gid, input::SPECIAL, 0.0, now);
+        let victim = evs.iter().find(|e| e.kind == ev::GRAB).expect("grabbed").b;
+        // The click still going as it grabbed: no throw yet.
+        m.input(gid, input::LIGHT, PI, now + 100);
+        let mut t = now;
+        let mut evs = Vec::new();
+        while t < now + 900 {
+            t += 100;
+            evs.extend(m.step(t, 100, &mut rng(4)));
+        }
+        assert!(!evs.iter().any(|e| e.kind == ev::HURL), "still whirling");
+        assert_eq!(m.fighters[0].act, act::GRAB);
+        // A click a second in: hurled at once, long before the whirl's end.
+        m.input(gid, input::LIGHT, PI, t);
+        let clicked = t;
+        let mut evs = Vec::new();
+        while t < clicked + 300 {
+            t += 100;
+            evs.extend(m.step(t, 100, &mut rng(4)));
+        }
+        assert!(
+            evs.iter().any(|e| e.kind == ev::HURL && e.b == victim),
+            "thrown on the click"
+        );
+        let hurl = evs.iter().find(|e| e.kind == ev::HURL).unwrap();
+        assert!(hurl.vx < -1.0, "flung the way it aimed (west): {}", hurl.vx);
+        assert_eq!(m.fighter(victim).unwrap().held_by, 0);
+        // (And no smash queued up after.)
+        assert_ne!(m.fighters[0].act, act::SMASH);
+    }
+
+    #[test]
+    fn gladiators_mid_ultimate_take_nothing_from_the_goliath() {
+        // Classes off (the whirlwind), and on (an archer's volley, a tank's quake).
+        for (kits, k, ult) in [
+            (false, kit::KNIGHT, act::SPIN),
+            (true, kit::ARCHER, act::CAST),
+            (true, kit::TANK, act::CAST),
+        ] {
+            let mut m = goliath_match(0);
+            m.kits = kits;
+            let gid = m.fighters.iter().find(|f| f.slot == 0).unwrap().id;
+            let vid = m.fighters.iter().find(|f| f.slot == 1).unwrap().id;
+            at(&mut m, 0, 10.0, 6.5);
+            at(&mut m, 1, 11.8, 6.5);
+            at(&mut m, 2, 3.0, 2.0);
+            at(&mut m, 3, 3.0, 11.0);
+            let mut now = m.round_at + 100;
+            let mut r = rng(9);
+            let ulting = |m: &mut Match, now: u32| {
+                let v = m.fighters.iter_mut().find(|f| f.id == vid).unwrap();
+                v.kit = k;
+                v.set(ult, now, 5_000);
+            };
+            let hp = m.fighter(vid).unwrap().hp;
+            let mut all = Vec::new();
+            // A smash.
+            ulting(&mut m, now);
+            all.extend(m.input(gid, input::LIGHT, 0.0, now));
+            for _ in 0..8 {
+                now += 100;
+                all.extend(m.step(now, 100, &mut r));
+            }
+            // A stomp, full.
+            ulting(&mut m, now);
+            m.fighters.iter_mut().find(|f| f.id == gid).unwrap().stamina = 100.0;
+            all.extend(m.input(gid, input::HEAVY_START, 0.0, now));
+            for _ in 0..12 {
+                now += 100;
+                all.extend(m.step(now, 100, &mut r));
+            }
+            m.fighters.iter_mut().find(|f| f.id == gid).unwrap().reach = 1.8;
+            all.extend(m.input(gid, input::HEAVY_RELEASE, 0.0, now));
+            for _ in 0..12 {
+                now += 100;
+                all.extend(m.step(now, 100, &mut r));
+            }
+            // The grab.
+            ulting(&mut m, now);
+            m.fighters.iter_mut().find(|f| f.id == gid).unwrap().rage = RAGE;
+            all.extend(m.input(gid, input::SPECIAL, 0.0, now));
+            assert!(
+                !all.iter().any(|e| e.kind == ev::GRAB && e.b == vid),
+                "kits {kits}: never grabbed mid-ultimate"
+            );
+            let v = m.fighter(vid).unwrap();
+            assert_eq!(v.hp, hp, "kits {kits} kit {k}: unhurt mid-ultimate");
+            assert!(
+                all.iter()
+                    .any(|e| e.kind == ev::HIT && e.b == vid && e.m & 256 != 0),
+                "kits {kits}: shown glancing off"
+            );
+        }
+    }
+
+    #[test]
+    fn the_goliath_smashes_out_of_breath_only_slower() {
+        let mut m = goliath_match(0);
+        let gid = m.fighters.iter().find(|f| f.slot == 0).unwrap().id;
+        at(&mut m, 0, 10.0, 6.5);
+        at(&mut m, 1, 12.5, 6.5);
+        at(&mut m, 2, 3.0, 2.0);
+        at(&mut m, 3, 3.0, 11.0);
+        let now = m.round_at + 100;
+        m.fighters.iter_mut().find(|f| f.id == gid).unwrap().stamina = 0.0;
+        let evs = m.input(gid, input::LIGHT, 0.0, now);
+        let swing = evs
+            .iter()
+            .find(|e| e.kind == ev::SWING)
+            .expect("it still smashes");
+        assert_eq!(swing.m, 1, "a tired one");
+        let g = m.fighter(gid).unwrap();
+        assert_eq!(g.act, act::SMASH);
+        let (w, a, r) = smash_times(true);
+        assert_eq!(g.act_until - g.act_at, w + a + r);
+        assert!(w + a + r > SMASH.0 + SMASH.1 + SMASH.2, "slower");
+        // It lands, later than a fresh one would.
+        let vid = m.fighters.iter().find(|f| f.slot == 1).unwrap().id;
+        let mut t = now;
+        let mut rr = rng(3);
+        let mut hit_at = 0;
+        while t < now + 1500 && hit_at == 0 {
+            t += 50;
+            if m.step(t, 50, &mut rr)
+                .iter()
+                .any(|e| e.kind == ev::HIT && e.b == vid)
+            {
+                hit_at = t;
+            }
+        }
+        assert!(hit_at >= now + w, "the blow comes after the slower wind-up");
+    }
+
+    #[test]
     fn bots_play_a_goliath_match_to_a_champion() {
         let mut giant_wins = 0;
         for seed in 0..8u64 {
@@ -6459,7 +6656,7 @@ mod kit_tests {
         assert!(!m.call_off());
     }
     #[test]
-    fn the_wheel_picks_everyones_class_and_they_keep_it() {
+    fn the_wheel_spins_every_round_for_a_new_class() {
         let mut m = Match::new(sand());
         m.join(1, 0);
         assert!(m.set_kits(1, true));
@@ -6469,15 +6666,23 @@ mod kit_tests {
         assert!(!m.choose_kit(1, kit::TANK, 10), "it chooses, not you");
         assert!(m.picks.iter().all(|p| p & kit::PICKED != 0));
         assert_eq!(m.choose_end, WHEEL_MS);
-        let kits: Vec<u8> = m.fighters.iter().map(|f| f.kit).collect();
-        let picks = m.picks;
-        // The next round: the same classes, no spin.
-        m.begin_round(50_000);
-        assert!(!m.choosing(50_001));
-        assert_eq!(
-            m.picks.map(|p| p & !kit::PICKED),
-            picks.map(|p| p & !kit::PICKED)
-        );
-        assert_eq!(m.fighters.iter().map(|f| f.kit).collect::<Vec<_>>(), kits);
+        // Every round after: it spins again, and never lands on the class you just had.
+        for round in 0..40u32 {
+            let before: Vec<u8> = m
+                .fighters
+                .iter()
+                .map(|f| m.picks[f.slot] & !kit::PICKED)
+                .collect();
+            let at = 50_000 + round * 17_011;
+            m.begin_round(at);
+            assert!(m.choosing(at + 1), "it spins every round");
+            assert_eq!(m.choose_end, at + WHEEL_MS);
+            for (f, was) in m.fighters.iter().zip(before) {
+                let now = m.picks[f.slot];
+                assert!(now & kit::PICKED != 0);
+                assert_ne!(now & !kit::PICKED, was, "a new class each round");
+                assert!((now & !kit::PICKED) < kit::COUNT);
+            }
+        }
     }
 }

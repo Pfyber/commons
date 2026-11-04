@@ -61,6 +61,9 @@ function wearing(key: string, kind: string): HTMLCanvasElement {
   return avatarCanvas(MANNEQUIN_LOOK, 0, styleFor(kind, COSMETIC_CODES.get(key) ?? 0));
 }
 
+/** Tools with art of their own (the rest are drawn from what they do). */
+const OWN_ART = new Set(["pro_rod", "bug_net", "magnet", "gold_lure", "magnet_lure", "fish_lure"]);
+
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
   if (kind === "gadget") {
@@ -111,10 +114,14 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     px(ctx, "#ffe14f", 6, 8, 4, 1);
     return;
   }
-  if (drawGoodsIcon(ctx, kind, ITEM_META.get(key) ?? {})) return;
+  // (Tools with art of their own, below; the rest are the mall's rods and cans.)
+  if (!OWN_ART.has(key) && drawGoodsIcon(ctx, kind, ITEM_META.get(key) ?? {})) return;
   if (kind === "vehicle") {
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(vehicleCanvas(COSMETIC_CODES.get(key) ?? 3), 0, 0, 32, 24, 0, 2, 16, 12);
+    // (Whatever size it's drawn at, fitted to the width.)
+    const v = vehicleCanvas(COSMETIC_CODES.get(key) ?? 3);
+    const h = (16 * v.height) / v.width;
+    ctx.drawImage(v, 0, 0, v.width, v.height, 0, 8 - h / 2, 16, h);
     return;
   }
   if (kind === "pet") {
@@ -189,6 +196,28 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     px(ctx, "#ffffff", 13, 2, 3, 1);
     px(ctx, "#fff3a8", 1, 11, 1, 1);
     px(ctx, "#fff3a8", 14, 9, 1, 1);
+    return;
+  }
+  if (key === "magnet_lure") {
+    // A glimmering lure with a magnet's heart: a violet spoon, horseshoe-tipped, sparkling.
+    px(ctx, O, 5, 2, 6, 10);
+    px(ctx, O, 4, 4, 8, 6);
+    px(ctx, "#a040ff", 5, 4, 6, 6);
+    px(ctx, "#a040ff", 6, 3, 4, 8);
+    px(ctx, "#e8c8ff", 6, 4, 2, 3);
+    px(ctx, "#6a24c0", 9, 8, 1, 2);
+    px(ctx, "#d83a3a", 6, 8, 1, 2);
+    px(ctx, "#d83a3a", 8, 8, 1, 2);
+    px(ctx, "#d83a3a", 6, 7, 3, 1);
+    px(ctx, "#e2e6ef", 6, 10, 1, 1);
+    px(ctx, "#e2e6ef", 8, 10, 1, 1);
+    px(ctx, "#c8c8dc", 7, 0, 2, 2);
+    px(ctx, "#c8c8dc", 8, 12, 1, 3);
+    px(ctx, "#c8c8dc", 9, 14, 2, 1);
+    px(ctx, "#c8c8dc", 11, 12, 1, 2);
+    px(ctx, "#ffffff", 13, 2, 1, 3);
+    px(ctx, "#ffffff", 12, 3, 3, 1);
+    px(ctx, "#c49bff", 2, 12, 1, 1);
     return;
   }
   if (key === "fish_lure") {

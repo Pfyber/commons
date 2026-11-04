@@ -19,6 +19,8 @@ pub struct Player {
     /// What they wear from the mall (outfit, hat, accessory, skin codes).
     pub style: u32,
     pub trust_tier: TrustTier,
+    /// An admin (players.is_admin): a few extra powers in the client.
+    pub admin: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,7 +56,7 @@ pub fn db_err(e: sqlx::Error) -> ApiError {
 
 const PLAYER_COLS: &str = "p.id, a.email, p.display_name, a.birth_year, \
     COALESCE((p.avatar->>'look')::bigint, 0) AS look, \
-    COALESCE((p.avatar->>'style')::bigint, 0) AS style, p.trust_tier::text AS tier";
+    COALESCE((p.avatar->>'style')::bigint, 0) AS style, p.trust_tier::text AS tier, p.is_admin";
 
 fn player_from(row: &sqlx::postgres::PgRow) -> Player {
     Player {
@@ -65,6 +67,7 @@ fn player_from(row: &sqlx::postgres::PgRow) -> Player {
         look: row.get::<i64, _>("look") as u32,
         style: row.get::<i64, _>("style") as u32,
         trust_tier: tier_from(row.get::<&str, _>("tier")),
+        admin: row.get("is_admin"),
     }
 }
 
@@ -203,6 +206,7 @@ impl Store {
             look,
             style: 0,
             trust_tier: TrustTier::Visitor,
+            admin: false,
         }))
     }
 

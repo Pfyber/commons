@@ -298,8 +298,18 @@ export class DayNight {
     this.shade.destroy();
   }
 
+  /** Always day (the settings can keep night from falling). */
+  alwaysDay = false;
+  /** The colour grade over the whole picture (off on the fast setting). */
+  setGraded(on: boolean) {
+    const now = this.app.stage.filters;
+    const has = Array.isArray(now) && now.length > 0;
+    if (has !== on) this.app.stage.filters = on ? [this.grade] : [];
+  }
+
   hour(): number {
     if (this.override !== null) return this.override;
+    if (this.alwaysDay) return 13;
     const d = new Date();
     return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
   }

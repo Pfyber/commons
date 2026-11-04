@@ -3,6 +3,7 @@
 // dance's first beat. Kick, snare on two and four, hats, a syncopated slap
 // bass in E minor and offbeat chord stabs; the seed picks the bass line.
 
+import { musicVolume } from "./jam";
 import { BEAT_MS, DANCE_BEATS, rng } from "./arcade-shared";
 
 const SIXTEENTH = BEAT_MS / 4 / 1000;
@@ -37,7 +38,7 @@ export class DanceMusic {
     }
     const ctx = this.ctx;
     this.out = ctx.createGain();
-    this.out.gain.value = 0.32;
+    this.out.gain.value = 0.32 * musicVolume();
     this.out.connect(ctx.destination);
     this.noise = ctx.createBuffer(1, ctx.sampleRate / 2, ctx.sampleRate);
     const data = this.noise.getChannelData(0);

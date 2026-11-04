@@ -24,6 +24,7 @@ import type { BottlesPanel, WishPanel } from "./ui/dream";
 import type { WardrobePanel } from "./ui/wardrobe";
 import { Critters } from "./ambient/critters";
 import type { Soundscape } from "./ambient/sound";
+import * as salvagefx from "./ambient/salvagesfx";
 import * as sfx from "./ambient/sfx";
 import { Weather } from "./ambient/weather";
 import { BigScreen } from "./activities/screen";
@@ -46,7 +47,7 @@ import { FlopShows } from "./world/flopfx";
 import { FountainFx } from "./world/fountainfx";
 import { PondFx } from "./world/pondfx";
 import { LuckyCrate } from "./world/luckyfx";
-import { LureShows } from "./world/lurefx";
+import { LURE, LureShows } from "./world/lurefx";
 import { LaneBalls } from "./world/bowlfx";
 import { BOWL_RELEASE_MS, type PlayKind } from "./world/avatars";
 import { type CloseReason, ZoneSocket } from "./net/socket";
@@ -58,7 +59,7 @@ import type { DecoratePanel } from "./ui/exterior";
 import { HouseFronts } from "./world/housefronts";
 import { CARDS, wrappedTexture } from "./world/goods";
 import { EMOTES } from "./world/avatars";
-import { BOAT_CAPTAIN, BOAT_SEATS, BOAT_SPEED_X10, rideSpeed } from "./world/vehicles";
+import { BOAT_SEATS, BOAT_SPEED_X10, isBoat, rideSpeed } from "./world/vehicles";
 import { itemIconUrl } from "./world/items";
 import { PetLife, petTitle } from "./ambient/petlife";
 import { PET_SOUNDS } from "./world/pets";
@@ -67,11 +68,11 @@ import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
-import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
+import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, MAGNET_LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
-import { isRamped, type TileXY, WALK_SPEED_X10, endT, glideTiles, headingAt, retimed, routeAhead, skateRampAt, speedAt, splice, sprintProfile, sprintingAt, TURN_EARLY } from "./world/motion";
+import { isRamped, posAt, type TileXY, WALK_SPEED_X10, endT, glideTiles, headingAt, retimed, routeAhead, skateRampAt, speedAt, splice, sprintProfile, sprintingAt, timeToCover, TURN_EARLY } from "./world/motion";
 import { compress, route } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
@@ -95,6 +96,7 @@ import { RouletteFx } from "./world/roulettefx";
 import { PET_SPOTS, TANKS, TOGGLES } from "./world/housewares";
 import { WALLS } from "./world/cozyart";
 import type { SalvageGame } from "./ui/salvage";
+import { settings } from "./settings";
 import type { LeaderboardPanel } from "./ui/leaderboard";
 import { LeaderSigns } from "./world/leadersigns";
 import { leaderKind } from "./world/art";
@@ -119,7 +121,7 @@ const DANCE_BOT_LOOK = encodeLook({ hue: 200, skin: 0, hair: 4, hat: 0, hatHue: 
 /** Protocol `drink::*`. */
 const BEER = 1;
 const WATER = 2;
-const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5, LURE: 6 };
+const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5, LURE: 6, SALVAGE: 7 };
 /** protocol `fish_event::FLOP_MS`; and the treasure chest (opened for coins). */
 const FLOP_MS = 4500;
 const TREASURE_ITEM = 113;
@@ -602,7 +604,7 @@ export class Game {
     const fountain = map.objects.find((o) => o.kind === "fountain");
     if (fountain) this.fountain = new FountainFx(this.scene, fountain);
     this.flops = new FlopShows(this.scene);
-    this.lures = new LureShows(this.scene, map, (x, y) => this.daynight.addGlow(x, y, 3.4, 2.9, 0x5ff0ff, 0.55));
+    this.lures = new LureShows(this.scene, map, (x, y, color) => this.daynight.addGlow(x, y, 3.4, 2.9, color, 0.55));
     this.laneBalls = new LaneBalls(this.scene);
     this.critters = new Critters(app, this.scene, map);
     if (zoneId === "city") {
@@ -701,9 +703,9 @@ export class Game {
         say("Toss that in where you fish. They can't resist the shine!");
         this.hud.toast("✨ A Glimmer Lure! Tap the water and choose to throw it in.", 4500);
       });
-      this.fisherman.onQuestDone = () => {
-        say("That's my whole order! You're a proper angler.");
-        this.hud.toast("📜 The fisherman's daily order is done! A new one comes in 20 hours.", 5000);
+      this.fisherman.onQuestDone = (magnet) => {
+        say(magnet ? "That's the whole magnet order! What a haul." : "That's my whole order! You're a proper angler.");
+        this.hud.toast(`${magnet ? "🧲 The fisherman's magnet order" : "📜 The fisherman's daily order"} is done! A new one comes in 20 hours.`, 5000);
         sfx.cash(1, 100);
       };
     }
@@ -1789,7 +1791,7 @@ export class Game {
       return;
     }
     // Out on the lake (them, or us): wait on the bank till they're back.
-    if (this.boat || (them.info.vehicle ?? 0) >= BOAT_CAPTAIN) return;
+    if (this.boat || isBoat(them.info.vehicle ?? 0)) return;
     const goal = them.destination;
     // Keep up: run when they run, or when we've fallen behind.
     const now = this.socket?.clock.now() ?? 0;
@@ -2379,7 +2381,7 @@ export class Game {
         this.salvageJunk = m.items;
         break;
       case "LureShown":
-        this.lures.show({ x: m.x, y: m.y }, m.ends, m.gold);
+        this.lures.show({ x: m.x, y: m.y }, m.ends, m.kind);
         break;
       case "LuckyShown":
         this.lucky.show({ x: m.x, y: m.y }, m.moves);
@@ -2773,7 +2775,23 @@ export class Game {
           : this.sprint
             ? sprintProfile(going ? cur : null, t0, now)
             : { speedX10: WALK_SPEED_X10, sprintIn: 0 };
-    if (full.length >= 2) self.setMotion({ path: compress(full), t0, ...pace }, now);
+    if (full.length >= 2) {
+      const m = { path: compress(full), t0, ...pace };
+      // Turning early, the new walk starts from the tile just left; but as
+      // far as we'd already come the new way, we're on it already (start
+      // that far along, set off that much earlier). Only the sideways part is
+      // left to blend out: no sliding back against the keys held, letting go
+      // of one of a diagonal's or turning.
+      if (early && cur) {
+        const at = posAt(cur, now);
+        const a = full[0];
+        const dx = full[1].x - a.x;
+        const dy = full[1].y - a.y;
+        const along = Math.max(0, Math.min(0.9, ((at.x - a.x) * dx + (at.y - a.y) * dy) / (dx * dx + dy * dy)));
+        if (along > 0) m.t0 = now - timeToCover(m, along * Math.hypot(dx, dy));
+      }
+      self.setMotion(m, now);
+    }
     const wall = performance.now();
     this.sentMoves = this.sentMoves.filter((s) => wall - s.at < 3000);
     this.sentMoves.push({ x: t.x, y: t.y, at: wall });
@@ -3139,7 +3157,7 @@ export class Game {
       // Reading something: see what, and open the same book.
       if (a.reading) actions.unshift(["📖 What are they reading?", () => this.ui.bookCard.showBook(a.reading, null)]);
       // Our rowboat has a free seat: ask them aboard.
-      if (this.boat?.captain === this.selfId && this.boat.seats.length < BOAT_SEATS && (a.info.vehicle ?? 0) < BOAT_CAPTAIN) {
+      if (this.boat?.captain === this.selfId && this.boat.seats.length < BOAT_SEATS && !isBoat(a.info.vehicle ?? 0)) {
         actions.unshift([
           "🚣 Invite aboard",
           () => {
@@ -3605,23 +3623,29 @@ export class Game {
       this.waterTap = twice ? null : { t, at: wall };
       const lures = ui.eco.qty(LURE_ITEM);
       const golds = ui.eco.qty(GOLD_LURE_ITEM);
+      const metals = ui.eco.qty(MAGNET_LURE_ITEM);
       const magnet = ui.eco.qty(MAGNET_ITEM) > 0;
       // Tapped twice with only the magnet: just the magnet on offer.
-      if (twice && magnet && lures + golds === 0) {
+      if (twice && magnet && lures + golds + metals === 0) {
         this.near(ui.menu, t, 6).showWith("🧲 Salvage Magnet", "Scrap off the bottom: it takes a while to find something.", [["🧲 Drop the magnet", () => this.fish(t, true)]]);
         return true;
       }
-      if (twice && lures + golds > 0) {
+      if (twice && lures + golds + metals > 0) {
         this.lures.previewAt(t);
         this.lureMenuFrom = this.self ? { ...this.self.destination } : null;
         const opts: [string, () => void][] = [];
         if (magnet) opts.push(["🧲 Drop the magnet", () => this.fish(t, true)]);
-        if (golds > 0) opts.push([`🌟 Throw a Legendary Lure (${golds} left)`, () => this.throwLure(t, true)]);
-        if (lures > 0) opts.push([`✨ Throw a Glimmer Lure (${lures} left)`, () => this.throwLure(t, false)]);
+        if (metals > 0) opts.push([`🧲 Throw a Glimmering Magnet Lure (${metals} left)`, () => this.throwLure(t, LURE.MAGNET)]);
+        if (golds > 0) opts.push([`🌟 Throw a Legendary Lure (${golds} left)`, () => this.throwLure(t, LURE.GOLD)]);
+        if (lures > 0) opts.push([`✨ Throw a Glimmer Lure (${lures} left)`, () => this.throwLure(t, LURE.GLIMMER)]);
         this.near(ui.menu, t, 6).showWith(
-          golds > 0 ? "🌟 Lures" : "✨ Glimmer Lure",
+          golds > 0 ? "🌟 Lures" : metals > 0 && !lures ? "🧲 Magnet Lure" : metals > 0 ? "✨ Lures" : "✨ Glimmer Lure",
           this.lures.covers(t, this.socket?.clock.now() ?? 0)
             ? "This water's already lured."
+            : metals > 0 && !golds && !lures
+              ? "Attracts rare metals to the area of your magnet, for 5 minutes."
+            : metals > 0
+              ? "Magnet lure: rare metals for a magnet, 5 minutes. The others draw rarer fish."
             : golds > 0
               ? "Legendary: the water turns gold for 3 minutes, epic fish and up only. Glimmer: rarer fish for 5 minutes."
               : "Rarer fish bite round it for 5 minutes, for anyone fishing there.",
@@ -3664,7 +3688,7 @@ export class Game {
   }
 
   /** Throws a glimmer lure into the water at `target`, walking up to the shore first if need be. */
-  private throwLure(target: TileXY, gold = false) {
+  private throwLure(target: TileXY, kind = LURE.GLIMMER) {
     const self = this.self;
     if (!self || !this.socket) return;
     if (cheb(self.destination, target) > LURE_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
@@ -3673,7 +3697,7 @@ export class Game {
       this.moveTo(spot, true);
     }
     self.faceToward(target.x);
-    this.socket.send({ t: "ThrowLure", x: target.x, y: target.y, gold });
+    this.socket.send({ t: "ThrowLure", x: target.x, y: target.y, kind });
   }
 
   /** The walkable tile within casting range of `target` nearest to `from`. */
@@ -3702,7 +3726,9 @@ export class Game {
         this.castAt.set(m.id, { x: m.x, y: m.y });
         this.props.cast(m.id, { x: m.x, y: m.y }, m.item === MAGNET_ITEM);
         this.avatars.get(m.id)?.castLine({ x: m.x, y: m.y }, performance.now());
-        sfx.splash(vol, CAST_SWING_MS);
+        // (The magnet's heavy iron, not a little bobber.)
+        if (m.item === MAGNET_ITEM) salvagefx.plunge(vol, CAST_SWING_MS);
+        else sfx.splash(vol, CAST_SWING_MS);
         break;
       case FISH.LURE: {
         // A lure thrown: the rod swung out, the lure arcing from the hand
@@ -3714,20 +3740,25 @@ export class Game {
             a.castLine({ x: m.x, y: m.y }, performance.now());
             window.setTimeout(() => a.state !== FISHING && a.reelIn(performance.now()), 700);
           }
-          this.lures.toss({ x: a.pos.x * TILE + TILE / 2 + (m.x > a.pos.x ? 10 : -10), y: a.pos.y * TILE - 6 }, { x: m.x, y: m.y }, m.item === GOLD_LURE_ITEM);
+          this.lures.toss({ x: a.pos.x * TILE + TILE / 2 + (m.x > a.pos.x ? 10 : -10), y: a.pos.y * TILE - 6 }, { x: m.x, y: m.y }, m.item === GOLD_LURE_ITEM ? LURE.GOLD : m.item === MAGNET_LURE_ITEM ? LURE.MAGNET : LURE.GLIMMER);
         }
-        sfx.splash(vol, 650);
+        if (m.item === MAGNET_LURE_ITEM) salvagefx.magnetLure(vol, 650);
+        else sfx.splash(vol, 650);
         break;
       }
       case FISH.BITE:
         this.props.bite(m.id);
         this.avatars.get(m.id)?.bite(performance.now());
         if (isSelf && this.magnetDown) {
-          // The magnet's found something: the salvage game.
-          const it = this.ui.eco.items.get(m.item);
-          sfx.nibble();
-          const junk = this.salvageJunk.map((id) => this.ui.eco.items.get(id)).map((j) => ({ key: j?.key ?? "rusty_can", name: j?.name ?? "junk" }));
-          this.ui.salvage.play(it?.key ?? "rusty_can", it?.rarity ?? 0, it?.name ?? "something", junk, (r) => this.socket?.send({ t: "SalvageReel", target: r.target, extras: r.extras }));
+          // The magnet's found something: the reel game says how much of it comes up.
+          salvagefx.found();
+          const found = this.ui.eco.items.get(m.item)?.rarity ?? 0;
+          this.ui.reel.playMagnet(found, (quality) => {
+            // (`quality`: `MAGNET_BEST` the middle, less the band a rarity down, 0 a miss.)
+            if (!quality) salvagefx.reelMiss();
+            else salvagefx.reelHit(quality >= 1000 ? found : found - 1, quality >= 1000);
+            this.socket?.send({ t: "FishReel", quality });
+          });
         } else if (isSelf) {
           sfx.nibble();
           // How hard the fight is depends on what's on the hook.
@@ -3736,6 +3767,17 @@ export class Game {
           this.ui.reel.play(REEL_WINDOW_MS, (quality) => this.socket?.send({ t: "FishReel", quality }), rarity, rod);
         }
         break;
+      case FISH.SALVAGE: {
+        // The reel game's won: down the magnet goes for the best that's on offer now.
+        if (isSelf) {
+          const it = this.ui.eco.items.get(m.item);
+          const junk = this.salvageJunk.map((id) => this.ui.eco.items.get(id)).map((j) => ({ key: j?.key ?? "rusty_can", name: j?.name ?? "junk", rarity: j?.rarity ?? 0 }));
+          // The game has the keys now: nothing's left held for the walk.
+          this.keys.clear();
+          this.ui.salvage.play(it?.key ?? "rusty_can", it?.rarity ?? 0, it?.name ?? "something", junk, (r) => this.socket?.send({ t: "SalvageReel", target: r.target, extras: r.extras }), [...this.ui.eco.items.values()].filter((i) => i.kind === "fish").map((i) => ({ key: i.key, rarity: i.rarity, weight: i.meta.weight ?? 1 })));
+        }
+        break;
+      }
       case FISH.FLOP: {
         // Out it comes, onto the bank beside the angler, flopping: hit it!
         this.props.reelIn(m.id);
@@ -3766,7 +3808,8 @@ export class Game {
         const caught = this.ui.eco.items.get(m.item);
         const rarity = caught?.rarity ?? 0;
         const t = tier(rarity);
-        sfx.landed(vol, rarity);
+        // (Your own magnet's haul already had its fanfare, breaking the surface.)
+        if (!(isSelf && this.magnetDown)) sfx.landed(vol, rarity);
         // Out of the water and up above the angler's head, for all to see.
         const angler = m.id;
         this.catches.start(
@@ -4088,7 +4131,9 @@ export class Game {
     const self = this.self;
     if (self) {
       self.update(serverNow, wallNow);
-      this.scene.follow(this.paintball ? this.paintball.camera(self.pos) : this.arena ? this.arena.camera(self.pos) : self.pos);
+      // (Following where we're drawn, not the walk's own spot: that jumps a
+      // little when a turn re-plans it, and the drawing blends it out.)
+      this.scene.follow(this.paintball ? this.paintball.camera(self.shown) : this.arena ? this.arena.camera(self.shown) : self.shown);
       this.scene.world.visible = true;
       this.ui.minimap.update(self.pos, self.moving ? this.route : null, wallNow, this.heading, this.others);
     }
@@ -4121,6 +4166,11 @@ export class Game {
     }
     this.props.update(wallNow, (id) => (id === FRANCY_ID ? this.francy?.rodTip : this.avatars.get(id)?.rodTip) ?? null);
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
+    // The settings: night falling or not, the weather, the colour grade, name tags.
+    this.daynight.alwaysDay = !settings.daynight;
+    this.daynight.setGraded(settings.quality === "high");
+    this.weather.enabled = settings.weather;
+    this.labels.style.visibility = settings.names ? "" : "hidden";
     this.daynight.update();
     this.milestones.update(wallNow, this.daynight.dark);
     this.ball?.update(serverNow);

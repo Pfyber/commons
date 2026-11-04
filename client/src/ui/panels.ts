@@ -1,6 +1,7 @@
 // M3 panels: bag, album, market, garden plot menu, fishing reel mini-game
 // and the furniture placement banner. Plain DOM, styled in styles.css.
 
+import { till } from "../ambient/salvagesfx";
 import { COIN, type Economy, type FishQuest, type Item } from "../economy";
 import { ApiError } from "../net/api";
 import { itemIconUrl } from "../world/items";
@@ -59,9 +60,13 @@ export function confirmButton(key: string, label: string, ask: string, run: () =
 }
 
 /** Whether a key event belongs to a text field, so game keys must leave it alone. */
+const NOT_TYPED = new Set(["range", "checkbox", "radio", "button", "submit", "reset", "color", "file", "image"]);
+
 export function isTyping(e: Event): boolean {
   const t = e.target as HTMLElement | null;
-  return !!t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t.isContentEditable);
+  // (A slider, checkbox or button that's kept the focus isn't: the keys still walk.)
+  if (t instanceof HTMLInputElement) return !NOT_TYPED.has(t.type);
+  return !!t && (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t.isContentEditable);
 }
 
 /** A closable floating panel. */
@@ -405,11 +410,12 @@ export class MarketPanel extends Panel {
 export class FishermanPanel extends Panel {
   private err = el("p", "error");
   private busy = false;
-  /** Which tab: his shop, or today's order (and the order, once fetched). */
-  private tab: "shop" | "quest" = "shop";
+  /** Which tab: his shop, today's fish order, or today's magnet order (each once fetched). */
+  private tab: "shop" | "quest" | "magnet" = "shop";
   private quest: FishQuest | null = null;
-  /** Told when the day's order is filled (for a cheer). */
-  onQuestDone: () => void = () => {};
+  private magnetQuest: FishQuest | null = null;
+  /** Told when one of the day's orders is filled (for a cheer). */
+  onQuestDone: (magnet: boolean) => void = () => {};
 
   constructor(
     private eco: Economy,
@@ -451,6 +457,7 @@ export class FishermanPanel extends Panel {
     this.err.textContent = "";
     try {
       await this.eco.buy(ROD_ITEM, 1);
+      till(this.eco.items.get(ROD_ITEM)?.meta.buy ?? 0);
       this.onRod();
     } catch (e) {
       this.err.textContent = e instanceof ApiError ? e.message : "He shook his head. Try again?";
@@ -465,6 +472,7 @@ export class FishermanPanel extends Panel {
     this.err.textContent = "";
     try {
       await this.eco.buy(MAGNET_ITEM, 1);
+      till(this.eco.items.get(MAGNET_ITEM)?.meta.buy ?? 0);
     } catch (e) {
       this.err.textContent = e instanceof ApiError ? e.message : "He shook his head. Try again?";
     }
@@ -478,6 +486,7 @@ export class FishermanPanel extends Panel {
     this.err.textContent = "";
     try {
       await this.eco.buy(item, 1);
+      till(this.eco.items.get(item)?.meta.buy ?? 0);
       this.onLure();
     } catch (e) {
       this.err.textContent = e instanceof ApiError ? e.message : "He shook his head. Try again?";
@@ -488,13 +497,15 @@ export class FishermanPanel extends Panel {
 
   render() {
     this.body.replaceChildren();
-    // Two tabs: his shop, and today's order.
+    // Three tabs: his shop, today's fish order, today's magnet order.
     const tabs = el("div", "tier-row fisher-tabs");
+    const so = (q: FishQuest | null) => (q && !q.done ? ` · ${q.given}/${q.need}` : q?.done ? " ✓" : "");
     tabs.append(
       button("🛒 Shop", () => ((this.tab = "shop"), this.render()), this.tab === "shop" ? "small on" : "small"),
-      button(`📜 Daily order${this.quest && !this.quest.done ? ` · ${this.quest.given}/${this.quest.need}` : this.quest?.done ? " ✓" : ""}`, () => ((this.tab = "quest"), this.render(), void this.loadQuest()), this.tab === "quest" ? "small on" : "small"),
+      button(`📜 Daily order${so(this.quest)}`, () => ((this.tab = "quest"), this.render(), void this.loadQuest()), this.tab === "quest" ? "small on" : "small"),
+      button(`🧲 Magnet order${so(this.magnetQuest)}`, () => ((this.tab = "magnet"), this.render(), void this.loadQuest()), this.tab === "magnet" ? "small on" : "small"),
     );
-    if (this.tab === "quest") {
+    if (this.tab !== "shop") {
       this.body.append(tabs);
       this.renderQuest();
       return;
@@ -503,10 +514,13 @@ export class FishermanPanel extends Panel {
     this.body.prepend(tabs);
   }
 
-  /** Today's order, fetched fresh. */
+  /** The order on the tab that's open, fetched fresh. */
   private async loadQuest() {
+    const magnet = this.tab === "magnet";
     try {
-      this.quest = await this.eco.fishQuest();
+      const q = await this.eco.fishQuest(magnet);
+      if (magnet) this.magnetQuest = q;
+      else this.quest = q;
     } catch (e) {
       this.err.textContent = e instanceof ApiError ? e.message : "He can't think what he wants just now.";
     }
@@ -518,12 +532,15 @@ export class FishermanPanel extends Panel {
     if (this.busy) return;
     this.busy = true;
     this.err.textContent = "";
+    const magnet = this.tab === "magnet";
     try {
-      const before = this.quest?.items.find((x) => x.item === it.id);
-      this.quest = await this.eco.deliverFish(it.id, qty);
+      const before = (magnet ? this.magnetQuest : this.quest)?.items.find((x) => x.item === it.id);
+      const q = await this.eco.deliverFish(it.id, qty, magnet);
+      if (magnet) this.magnetQuest = q;
+      else this.quest = q;
       const paid = (before?.price ?? 0) * qty;
       this.onSold(paid, it);
-      if (this.quest.done) this.onQuestDone();
+      if (q.done) this.onQuestDone(magnet);
     } catch (e) {
       this.err.textContent = e instanceof ApiError ? e.message : "He shook his head. Try again?";
     }
@@ -532,7 +549,8 @@ export class FishermanPanel extends Panel {
   }
 
   private renderQuest() {
-    const q = this.quest;
+    const magnet = this.tab === "magnet";
+    const q = magnet ? this.magnetQuest : this.quest;
     if (!q) {
       this.body.append(el("p", "hint", "\"Now, what was I after today…\""), this.err);
       void this.loadQuest();
@@ -542,9 +560,10 @@ export class FishermanPanel extends Panel {
     const h = Math.floor(left / 3600);
     const m = Math.floor((left % 3600) / 60);
     this.body.append(
-      el("p", "hint", q.done ? "\"That's the lot! Grand. Come back for my next order.\"" : "\"Bring me these and I'll pay three times the going rate. Every one.\""),
+      el("p", "hint", q.done ? "\"That's the lot! Grand. Come back for my next order.\"" : magnet ? "\"Fish these up off the bottom with a magnet and I'll pay three times the going rate.\"" : "\"Bring me these and I'll pay three times the going rate. Every one.\""),
     );
-    // The order's progress, all three fish together.
+    if (magnet && !q.done && this.eco.qty(MAGNET_ITEM) <= 0) this.body.append(el("p", "hint", "You'll need a Salvage Magnet first: it's in his shop."));
+    // The order's progress, all three things together.
     const bar = el("div", "quest-bar");
     const fill = el("i");
     fill.style.width = `${q.need ? (100 * q.given) / q.need : 0}%`;
@@ -565,7 +584,7 @@ export class FishermanPanel extends Panel {
       if (still <= 0) row.append(el("span", "fisher-rod-owned", "✓"));
       else {
         const n = Math.min(have, still);
-        const give = button(n ? `Hand over ${n} · +${n * want.price}` : "Go catch some", () => this.deliver(it, n), n ? "small primary" : "small");
+        const give = button(n ? `Hand over ${n} · +${n * want.price}` : magnet ? "Go salvage some" : "Go catch some", () => this.deliver(it, n), n ? "small primary" : "small");
         give.disabled = !n || this.busy;
         row.append(give);
       }
@@ -654,6 +673,23 @@ export class FishermanPanel extends Panel {
       card.append(buy);
       this.body.append(card);
     }
+    // …and one for the magnet.
+    const ml = this.eco.items.get(MAGNET_LURE_ITEM);
+    if (ml) {
+      const have = this.eco.qty(MAGNET_LURE_ITEM);
+      const price = ml.meta.buy ?? 0;
+      const card = el("div", "fisher-rod fisher-lure");
+      const text = el("div", "fisher-rod-text");
+      text.append(
+        el("b", "", `🧲 ${ml.name} · $${price}${have ? ` · you have ${have}` : ""}`),
+        el("small", "", "Attracts rare metals to the area of your magnet. Turns its circle of water purple for 5 minutes"),
+      );
+      card.append(icon(ml), text);
+      const buy = button(`Buy · $${price}`, () => this.buyLure(MAGNET_LURE_ITEM), "primary");
+      buy.disabled = this.busy || this.eco.coins < price;
+      card.append(buy);
+      this.body.append(card);
+    }
     // The tiers, as a key.
     const key = el("div", "fisher-key");
     for (const t of TIERS) {
@@ -662,8 +698,11 @@ export class FishermanPanel extends Panel {
       key.append(chip);
     }
     this.body.append(key);
-    const list = el("div", "rows fisher-rows");
+    // Two lists: what comes up on a line, and under it what the magnet pulls up.
+    const fromRod = el("div", "rows fisher-rows");
+    const fromMagnet = el("div", "rows fisher-rows");
     for (const it of all) {
+      const list = it.kind === "scrap" ? fromMagnet : fromRod;
       const t: Tier = tier(it.rarity);
       const n = this.eco.qty(it.id);
       const known = n > 0 || this.eco.album.has(it.id);
@@ -678,7 +717,12 @@ export class FishermanPanel extends Panel {
       if (n > 1) row.append(button(`All ${n}`, () => this.sell([[it, Math.min(n, 99)]]), "small"));
       list.append(row);
     }
-    this.body.append(list);
+    const section = (title: string, rows: HTMLElement) => {
+      const c = el("div", "fisher-col");
+      c.append(el("h4", "fisher-col-head", title), rows);
+      return c;
+    };
+    this.body.append(section("🎣 Fish", fromRod), section("🧲 Magnet finds", fromMagnet));
   }
 }
 
@@ -757,6 +801,8 @@ export const ROD_ITEM = 112;
 export const LURE_ITEM = 117;
 /** The legendary lure (server `fishing::GOLD_LURE_ITEM`). */
 export const GOLD_LURE_ITEM = 119;
+/** The Glimmering Magnet Lure (server `fishing::MAGNET_LURE_ITEM`). */
+export const MAGNET_LURE_ITEM = 142;
 /** The salvage magnet (server `fishing::MAGNET_ITEM`). */
 export const MAGNET_ITEM = 120;
 const ROD_PACE = 0.85;
@@ -765,6 +811,14 @@ const ROD_EXTRA_MAX_MS = 3000;
 /** Rare fish and up, missed, may stay hooked for one more swing (the server holds them this long: 3 s). */
 const SECOND_CHANCE_FROM = 2;
 const SECOND_CHANCE_MAX_MS = 2800;
+/** The magnet's reel game, as the server reads it (`fishing::SALVAGE_BEST`): the middle, the band round it. */
+const MAGNET_BEST = 1000;
+const MAGNET_BAND = 500;
+/** How many times the needle swings there and back, and a moment more (ms). (Fits the server's `MAGNET_REEL_MS`.) */
+const MAGNET_SWINGS = 2;
+const MAGNET_SLACK_MS = 250;
+/** Half the band's width: well wide, quite easy to hit. */
+const MAGNET_BAND_W = 0.3;
 /** Legendary and mythical fish must be stopped in the zone twice (the server holds them 2 s longer). */
 const DOUBLE_HIT_FROM = 4;
 const DOUBLE_HIT_MS = 1800;
@@ -773,7 +827,13 @@ export class ReelGame {
   private el = el("div", "reel");
   private needle = el("div", "needle");
   private sweet = el("div", "sweet");
+  /** The magnet's game: the easy band round the middle, a rarity down. */
+  private band = el("div", "sweet band");
   private title = el("div", "title");
+  private magnet = false;
+  /** Half the middle's width and the band's, in the magnet's game. */
+  private middle = 0;
+  private bandW = 0;
   private start = 0;
   /** This bite's difficulty (rarity tier), and the needle's pace (slower with the upgraded rod). */
   private tier: Tier = TIERS[0];
@@ -798,7 +858,8 @@ export class ReelGame {
 
   constructor() {
     const bar = el("div", "bar");
-    bar.append(this.sweet, this.needle);
+    this.band.hidden = true;
+    bar.append(this.band, this.sweet, this.needle);
     // Counted the moment it's pressed (a click comes on release, a beat late).
     const btn = button("Reel in! (Space)", () => {}, "primary");
     btn.addEventListener("pointerdown", (e) => {
@@ -832,6 +893,8 @@ export class ReelGame {
    */
   play(windowMs: number, done: (quality: number) => void, rarity = 0, rod = false) {
     this.done = done;
+    this.magnet = false;
+    this.band.hidden = true;
     this.tier = tier(rarity);
     this.pace = this.tier.pace * (rod ? ROD_PACE : 1);
     if (rod) windowMs += Math.min(ROD_EXTRA_MAX_MS, ((2 * Math.PI) / this.pace) * 1000);
@@ -858,10 +921,50 @@ export class ReelGame {
     window.addEventListener("keydown", this.key, true);
     const frame = (t: number) => {
       this.needle.style.left = `${this.pos(t) * 100}%`;
-      if (t > this.deadline) return this.stop();
+      if (t > this.deadline) {
+        // (The magnet's told, so it isn't left waiting out the server's time.)
+        const f = this.magnet ? this.done : null;
+        this.stop();
+        return f?.(0);
+      }
       this.raf = requestAnimationFrame(frame);
     };
     this.raf = requestAnimationFrame(frame);
+  }
+
+  /**
+   * The magnet's found something of `rarity`: the same bar, its middle (as
+   * hard as a fish that rare) that thing, and an easy band round it a rarity
+   * lower. `done` is told which: `MAGNET_BEST`, `MAGNET_BAND`, or 0 for a miss
+   * (or too late: the needle swings there and back `MAGNET_SWINGS` times, however
+   * quick it is). (Common's only got the easy one: there's nothing below it.)
+   */
+  playMagnet(rarity: number, done: (quality: number) => void) {
+    const r = Math.max(0, Math.min(5, rarity));
+    this.play(MAGNET_SWINGS * ((2 * Math.PI) / tier(r).pace) * 1000 + MAGNET_SLACK_MS, done);
+    this.magnet = true;
+    this.tier = tier(r);
+    this.pace = this.tier.pace;
+    this.middle = r ? this.tier.sweet : MAGNET_BAND_W;
+    this.bandW = r ? MAGNET_BAND_W : 0;
+    this.sweet.style.left = `${(0.5 - this.middle) * 100}%`;
+    this.sweet.style.width = `${this.middle * 200}%`;
+    this.sweet.style.background = this.tier.color;
+    this.el.style.setProperty("--tier", this.tier.color);
+    this.el.className = `reel tier-${r}`;
+    const name = el("b", "", this.tier.name.toUpperCase());
+    name.style.color = this.tier.color;
+    this.title.replaceChildren("🧲 ", name);
+    if (r) {
+      const low = tier(r - 1);
+      this.band.hidden = false;
+      this.band.style.left = `${(0.5 - MAGNET_BAND_W) * 100}%`;
+      this.band.style.width = `${MAGNET_BAND_W * 200}%`;
+      this.band.style.background = low.color;
+      const lower = el("b", "", low.name.toUpperCase());
+      lower.style.color = low.color;
+      this.title.append(" in the middle, ", lower, " round it: stop the needle!");
+    } else this.title.append(": stop the needle in the coloured zone!");
   }
 
   private hit() {
@@ -869,6 +972,12 @@ export class ReelGame {
     this.hitAt = performance.now();
     // In the zone (a hair of slack at its edges): the closer to its middle the better.
     const d = Math.abs(this.pos(performance.now()) - 0.5);
+    if (this.magnet) {
+      const f = this.done;
+      const q = d <= this.middle + 0.008 ? MAGNET_BEST : d <= this.bandW + 0.008 ? MAGNET_BAND : 0;
+      this.stop();
+      return f(q);
+    }
     const w = this.tier.sweet + 0.008;
     const quality = d <= w ? Math.round(1000 - (d / w) * 600) : 0;
     // Missed a rare one: a coin flip says whether it stays hooked for one more go.

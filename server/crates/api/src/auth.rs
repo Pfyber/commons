@@ -57,6 +57,8 @@ pub struct PlayerView {
     style: u32,
     trust_tier: token::TrustTier,
     minor: bool,
+    /// An admin: zooms out much further (players.is_admin).
+    admin: bool,
 }
 
 #[derive(Serialize)]
@@ -171,6 +173,7 @@ pub(crate) async fn issue_session(state: &AppState, p: &Player) -> ApiResult<Ses
             style: p.style,
             trust_tier: p.trust_tier,
             minor: is_minor(p),
+            admin: p.admin,
         },
     })
 }

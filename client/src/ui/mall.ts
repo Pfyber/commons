@@ -3,6 +3,7 @@
 // and the shop panel (one display up close, or a shop's counter).
 
 import departments from "../../../assets/mall/departments.json";
+import { till } from "../ambient/salvagesfx";
 import type { Economy } from "../economy";
 import type { Dept, Shelf, Shop } from "../shop";
 import { isWearable } from "../world/items";
@@ -174,7 +175,10 @@ export class ShopPanel extends Panel {
       this.msg.textContent = "";
       this.shop
         .buy(this.dept, s.slot)
-        .then(() => (this.msg.textContent = `✓ ${this.eco.name(s.item)} is in your bag.`))
+        .then(() => {
+          till(s.price);
+          this.msg.textContent = `✓ ${this.eco.name(s.item)} is in your bag.`;
+        })
         .catch((e) => (this.msg.textContent = e instanceof Error ? e.message : "That didn't work."))
         // Fresh counts ("2 left"), or the new week's shelves.
         .finally(() => this.open && this.render());
@@ -204,6 +208,7 @@ export class ShopPanel extends Panel {
       this.shop
         .buy(this.dept, s.slot, n)
         .then(() => {
+          till(s.price);
           this.hide();
           this.adopted(n);
         })

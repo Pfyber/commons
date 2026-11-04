@@ -3403,4 +3403,69 @@ mod fish_quest {
         let (_, q) = call(&app, &me, "GET", "/api/fisherman/quest", json!({})).await;
         assert_eq!(q["done"], true, "{q}");
     }
+
+    #[tokio::test]
+    async fn the_magnet_order_is_kept_apart_from_the_fish_one() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = Router::new()
+            .nest("/api", crate::fishquest::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let me = bearer_for(&s, p, "salvager");
+        let (st, q) = call(&app, &me, "GET", "/api/fisherman/magnet-quest", json!({})).await;
+        assert_eq!(st, StatusCode::OK, "{q}");
+        let items = q["items"].as_array().unwrap().clone();
+        assert_eq!(items.len(), 3, "three things: {q}");
+        for it in &items {
+            let item = s.catalog.get(it["item"].as_i64().unwrap() as i32).unwrap();
+            assert_eq!(item.kind, "scrap", "from the magnet: {q}");
+        }
+        // A fish order's item is no good here.
+        let (_, fish) = call(&app, &me, "GET", "/api/fisherman/quest", json!({})).await;
+        let (st, _) = call(
+            &app,
+            &me,
+            "POST",
+            "/api/fisherman/magnet-quest/deliver",
+            json!({ "item": fish["items"][0]["item"], "qty": 1, "key": "x" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        // Filling it leaves the fish order as it was.
+        let ops: Vec<Op> = items
+            .iter()
+            .map(|i| Op {
+                item: i["item"].as_i64().unwrap() as i32,
+                delta: 10,
+            })
+            .collect();
+        let mut tx = s.db.begin().await.unwrap();
+        apply(
+            &mut tx,
+            &s.catalog,
+            p,
+            &ops,
+            "test",
+            &format!("magnet-grant-{p}"),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        for (i, it) in items.iter().enumerate() {
+            let (st, r) = call(
+                &app,
+                &me,
+                "POST",
+                "/api/fisherman/magnet-quest/deliver",
+                json!({ "item": it["item"], "qty": 99, "key": format!("m{i}") }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+        }
+        let (_, q) = call(&app, &me, "GET", "/api/fisherman/magnet-quest", json!({})).await;
+        assert_eq!(q["done"], true, "{q}");
+        let (_, fish) = call(&app, &me, "GET", "/api/fisherman/quest", json!({})).await;
+        assert_eq!(fish["given"], 0, "{fish}");
+    }
 }

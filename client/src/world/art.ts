@@ -587,31 +587,80 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       break;
     }
     case "bush": {
-      // A clump of leafy lumps: shaded underneath, lit on top, speckled with
-      // leaves; one kind in berries, one in blossom.
+      // A round, leafy bush: a ball of little leaf clumps, each lit on its
+      // top and shaded under it, the whole ball lit from the top left and
+      // deep green round its bottom; a ragged, clumpy edge in dark green (no
+      // black line). One kind in berries, one in blossom.
       [c, ctx] = makeCanvas(32, 26);
-      oval(ctx, "rgba(0,0,0,0.18)", 16, 23, 12, 2);
-      const lumps: [number, number, number][] = [
-        [10, 16, 7],
-        [22, 16, 7],
-        [16, 11, 8],
-      ];
-      const mid = ["#6fae55", "#5f9e4b", "#7cb860"][v];
-      for (const [x, y, r] of lumps) circle(ctx, P.outline, x, y, r + 1);
-      for (const [x, y, r] of lumps) circle(ctx, "#4f8a3c", x, y, r);
-      for (const [x, y, r] of lumps) circle(ctx, mid, x, y - 1, r - 1);
-      circle(ctx, "#8cc46a", 13, 7, 3);
-      circle(ctx, "#8cc46a", 7, 13, 2);
-      circle(ctx, "#8cc46a", 19, 13, 2);
-      px(ctx, "#a8d68a", 12, 6, 2, 1);
-      const inBush = (x: number, y: number) => lumps.some(([lx, ly, r]) => (x - lx) ** 2 + (y - ly) ** 2 < (r - 1) ** 2);
-      for (let i = 0; i < 26; i++) {
-        const hh = hash(i, v, 77);
-        const x = 4 + (hh % 24);
-        const y = 4 + ((hh >>> 8) % 18);
-        if (!inBush(x, y)) continue;
-        px(ctx, y > 14 ? "#4f8a3c" : i % 3 ? "#5a9547" : "#8cc46a", x, y, 2, 1);
-      }
+      oval(ctx, "rgba(0,0,0,0.2)", 16, 23, 12, 2);
+      // Darkest to lightest.
+      const greens = [
+        ["#1c4424", "#265c2c", "#2f7334", "#3f8c3a", "#5aa845", "#7cc24f", "#a6dc5e"],
+        ["#173f2a", "#1f5634", "#2a6e3e", "#3a8748", "#53a356", "#74bd63", "#9ed67a"],
+        ["#1f4a28", "#2a6330", "#367c38", "#4c9842", "#68b24c", "#8bca58", "#b4e06a"],
+      ][v];
+      const CX = 16;
+      const CY = 12;
+      const RX = 12.5;
+      const RY = 10.5;
+      // The clumps: a jittered grid of little leaf balls.
+      const clumps: [number, number][] = [];
+      for (let gy = 0; gy < 7; gy++)
+        for (let gx = 0; gx < 8; gx++) {
+          const hh = hash(gx, gy, 311 + v);
+          clumps.push([2 + gx * 4 + (gy % 2) * 2 + ((hh & 3) - 1.5), 1 + gy * 3.6 + (((hh >>> 2) & 3) - 1.5)]);
+        }
+      const ell = (x: number, y: number) => ((x - CX) / RX) ** 2 + ((y - CY) / RY) ** 2;
+      const near = (x: number, y: number) => {
+        let d1 = Infinity;
+        let d2 = Infinity;
+        let at = clumps[0];
+        for (const k of clumps) {
+          const d = Math.hypot(x - k[0], y - k[1]);
+          if (d < d1) {
+            d2 = d1;
+            d1 = d;
+            at = k;
+          } else if (d < d2) d2 = d;
+        }
+        return { d1, d2, at };
+      };
+      // In the bush: well inside the ball, or on a clump that bulges out of it.
+      const inside = (x: number, y: number) => {
+        const px0 = x + 0.5;
+        const py0 = y + 0.5;
+        if (py0 > 22.5) return false;
+        // (Round, scalloped a little where each clump bulges: nearer a
+        // clump, a touch further out; a stray leaf pixel here and there.)
+        const n = near(px0, py0);
+        const bulge = 0.9 + 0.16 * Math.max(0, 1 - n.d1 / 2.6) + (hash(x, y, 17 + v) % 4 === 0 ? 0.05 : 0);
+        return ell(px0, py0) < bulge * bulge;
+      };
+      const L = [-0.48, -0.66, 0.58];
+      for (let y = 0; y < 26; y++)
+        for (let x = 0; x < 32; x++) {
+          if (!inside(x, y)) continue;
+          const cx = x + 0.5;
+          const cy = y + 0.5;
+          // The ball's light.
+          const nx = (cx - CX) / RX;
+          const ny = (cy - CY) / RY;
+          const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+          const ball = nx * L[0] + ny * L[1] + nz * L[2];
+          // Each clump's: lit on its top left, shaded under; a darker seam between clumps.
+          const n = near(cx, cy);
+          const lx = (cx - n.at[0]) / 2.6;
+          const ly = (cy - n.at[1]) / 2.6;
+          const clump = -(lx * 0.55 + ly * 0.85);
+          const seam = n.d2 - n.d1 < 1.1 ? -0.24 : 0;
+          const grain = ((hash(x, y, 5 + v) % 100) / 100 - 0.5) * 0.05;
+          let level = 0.42 + ball * 0.7 + clump * 0.24 + seam + grain;
+          // The edge: dark green, darker still underneath.
+          const rim = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+          if (rim) level = Math.min(level, cy > CY ? 0.02 : 0.18);
+          const i = Math.max(0, Math.min(greens.length - 1, Math.floor(level * greens.length)));
+          px(ctx, greens[i], x, y, 1, 1);
+        }
       if (v === 1)
         [[8, 14], [14, 9], [20, 12], [24, 17], [12, 18], [18, 17]].forEach(([x, y]) => {
           px(ctx, "#d8343f", x, y, 2, 2);
@@ -2896,9 +2945,9 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
   // On a board the shadow is on the ground below it, drawn with the board.
   if (frame < 3 || frame in ROBOT_ARMS || frame >= 13) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
   // A full-body skin from the mall: the suit in the basic poses (walking,
-  // sitting; standing for the rest).
+  // sprinting, sitting; standing for the rest).
   if (m.skin) {
-    drawSkin(ctx, m.skin, frame <= 2 ? (frame as 0 | 1 | 2) : 0, p.skinColor);
+    drawSkin(ctx, m.skin, frame <= 2 || frame === 16 || frame === 17 ? (frame as 0 | 1 | 2 | 16 | 17) : 0, p.skinColor);
     canvasCache.set(key, c);
     return c;
   }
@@ -3405,7 +3454,7 @@ function drawMallHat(ctx: CanvasRenderingContext2D, code: number) {
 }
 
 /** A full-body skin: the whole figure in a suit (fox, frog, bear, robot). */
-function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2, face: string) {
+function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 | 16 | 17, face: string) {
   const o = PALETTE.outline;
   const [suit, light] = ({ 1: ["#e07a2f", "#fff4e0"], 2: ["#6aa152", "#c5e0a8"], 3: ["#8f6a4a", "#d9b48a"], 4: ["#9aa3a8", "#d6dde0"] } as Record<number, [string, string]>)[code] ?? ["#9aa3a8", "#d6dde0"];
   // legs
@@ -3413,6 +3462,13 @@ function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2,
     px(ctx, o, 6, 27, 12, 5);
     px(ctx, suit, 7, 28, 10, 3);
     ctx.translate(0, 4);
+  } else if (frame >= 16) {
+    // Sprinting: one knee up high, the other leg stretched out behind (as the plain avatar).
+    const [upX, backX] = frame === 16 ? [7, 15] : [13, 5];
+    px(ctx, o, upX, 25, 4, 5);
+    px(ctx, suit, upX + 1, 25, 2, 4);
+    px(ctx, o, backX, 25, 4, 7);
+    px(ctx, suit, backX + 1, 25, 2, 6);
   } else {
     px(ctx, o, frame ? 7 : 8, 25, 4, 7);
     px(ctx, o, frame ? 14 : 13, 25, 4, 7);
@@ -3425,11 +3481,26 @@ function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2,
     px(ctx, suit, 18, 19, 4, 4);
     px(ctx, "#fff4e0", 21, 19, 1, 2);
   }
+  // Sprinting, the arms swing just as the plain avatar's do: the one on the
+  // side whose knee is up back and low, behind the body...
+  const sprint = frame === 16 ? -1 : frame === 17 ? 1 : 0;
+  if (sprint) {
+    const ax = sprint < 0 ? 4 : 18;
+    px(ctx, suit, ax, 18, 2, 2);
+    px(ctx, suit, ax - 2, 20, 3, 2);
+    px(ctx, suit, ax - 3, 21, 2, 2);
+  }
   // body with a light belly, arms
   px(ctx, o, 5, 15, 14, 12);
   px(ctx, suit, 6, 16, 12, 10);
   px(ctx, light, 9, 18, 6, 7);
-  for (const ax of [4, 18]) px(ctx, suit, ax, 18, 2, 6);
+  if (sprint) {
+    // ...and the other forward and up, in front of it.
+    const ax = sprint < 0 ? 18 : 4;
+    px(ctx, suit, ax, 18, 2, 2);
+    px(ctx, suit, ax + 1, 19, 3, 2);
+    px(ctx, suit, ax + 3, 18, 2, 2);
+  } else for (const ax of [4, 18]) px(ctx, suit, ax, 18, 2, 6);
   if (code === 4) {
     px(ctx, "#5f6a70", 9, 18, 6, 1);
     px(ctx, "#e8566b", 10, 20, 1, 1);

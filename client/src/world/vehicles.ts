@@ -18,6 +18,11 @@ export const TEST_RIDE = 0x80;
 export const BOAT_CAPTAIN = 6;
 export const BOAT_PASSENGER = 7;
 export const BOAT_SEATS = 3;
+
+/** Whether vehicle `code` is a place in a rowboat (not a thing with wheels: the Vespa's code comes after them). */
+export function isBoat(code: number): boolean {
+  return code >= BOAT_CAPTAIN && code < BOAT_PASSENGER + BOAT_SEATS;
+}
 /** Rowing speed, tenths of a tile a second. */
 export const BOAT_SPEED_X10 = 64;
 
@@ -25,6 +30,10 @@ export const BOAT_SPEED_X10 = 64;
 const SPEED_X10: Record<number, number> = { 1: 88, 2: 108, 3: 128, 4: 140, 5: 82, 10: 130 };
 /** The Vespa (sim::vehicles::VESPA). */
 export const VESPA = 10;
+/** Its canvas (bigger than the others'), and how far ahead of it (px) its saddle puts its rider. */
+const VESPA_W = 40;
+const VESPA_H = 26;
+export const VESPA_AHEAD = 8;
 
 /** How many times walking speed vehicle `code` goes, for the shop ("3.2×"). */
 export function rideTimes(code: number): number {
@@ -43,8 +52,8 @@ export const RIDE_POSE: Record<number, { lift: number; pose: "walk" | "stand" | 
   7: { lift: 2, pose: "sit" },
   8: { lift: 2, pose: "sit" },
   9: { lift: 2, pose: "sit" },
-  // On the Vespa: sat up on its saddle.
-  10: { lift: 8, pose: "sit" },
+  // On the Vespa: sat on its saddle.
+  10: { lift: 10, pose: "sit" },
   1: { lift: 3, pose: "walk" },
   2: { lift: 4, pose: "stand" },
   3: { lift: 7, pose: "sit" },
@@ -70,98 +79,104 @@ function wheel(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number,
 }
 
 /**
- * The Vespa, side on, facing right: a curvy mint body (the round rear cowl,
- * the step-through floor, the tall front shield), cream two-tone trim, a
- * chrome front fender and bumper rail, a tan saddle, chrome bars with
- * little round mirrors, a big round headlamp, whitewall wheels, a chrome
- * exhaust (a puff out of it on the second frame) and a little luggage rack.
+ * The Vespa, side on, facing right, on a 40×26 canvas (about hip high to a
+ * rider): a glossy mint body, its round rear cowl with vents and a cream
+ * stripe, the step-through floor with a chrome rail, the tall leg shield
+ * and the fender over the front wheel, a long two-tone saddle, a round
+ * headlamp in the headset, chrome bars and a little mirror, whitewall
+ * wheels, a chrome exhaust (a puff from it on the second frame), a rack and
+ * a tail light. One dark outline round the lot.
  */
 function vespa(ctx: CanvasRenderingContext2D, frame: 0 | 1) {
-  const MINT = "#7fd1b9";
-  const MINT_D = "#4fa88f";
-  const MINT_L = "#c4f2e4";
+  const MINT = "#6fd0b4";
+  const MINT_D = "#3f9c86";
+  const MINT_DD = "#2f7a6c";
+  const MINT_L = "#b4f0dc";
   const CREAM = "#f6ecd2";
   const CHROME = "#e2e6ef";
   const CHROME_D = "#8a909c";
-  const disc = (cx: number, cy: number, r: number, color: string) => {
-    for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) if (x * x + y * y <= r * r + r * 0.6) px(ctx, color, cx + x, cy + y);
+  const paint = (inside: (x: number, y: number) => boolean, color: (x: number, y: number) => string) => {
+    for (let y = 0; y < VESPA_H; y++) for (let x = 0; x < VESPA_W; x++) if (inside(x, y)) px(ctx, color(x, y), x, y);
   };
-  const ellipse = (cx: number, cy: number, rx: number, ry: number, color: string, shade?: (x: number, y: number) => string) => {
-    for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++)
-      for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
-        const k = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
-        if (k <= 1) px(ctx, shade ? shade(x, y) : color, x, y);
-      }
-  };
-  // The exhaust, low at the back, and a puff of smoke on the second frame.
-  px(ctx, O, 1, 19, 8, 3);
-  px(ctx, CHROME, 2, 20, 6, 1);
-  if (frame) {
-    disc(0, 18, 1, "rgba(225,225,235,0.75)");
-    px(ctx, "rgba(225,225,235,0.5)", 2, 16, 1, 1);
-  }
+  const ball = (cx: number, cy: number, rx: number, ry: number) => (x: number, y: number) => ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1;
+  // The exhaust, low at the back.
+  px(ctx, CHROME_D, 2, 20, 11, 2);
+  px(ctx, CHROME, 2, 20, 11, 1);
   // Whitewall wheels (small, as a Vespa's are), the hub turning.
-  for (const wx of [8, 25]) {
-    disc(wx, 19, 4, O);
-    disc(wx, 19, 3, "#2a2a2a");
-    disc(wx, 19, 2, CREAM);
-    disc(wx, 19, 1, CHROME_D);
-    px(ctx, CHROME, wx + (frame ? 1 : -1), 19 + (frame ? -1 : 1), 1, 1);
+  for (const wx of [9, 31]) {
+    paint(ball(wx, 21.5, 4.5, 4.5), () => "#23232b");
+    paint(ball(wx, 21.5, 3, 3), () => CREAM);
+    paint(ball(wx, 21.5, 2, 2), () => CHROME_D);
+    px(ctx, CHROME, wx + (frame ? 0 : -1), frame ? 20 : 22, 2, 1);
+    px(ctx, "#23232b", wx, 21, 1, 1);
   }
-  // The floor between them: a step-through board, a chrome rail along its edge.
-  px(ctx, O, 13, 15, 9, 4);
-  px(ctx, "#5a5a6a", 14, 16, 7, 1);
-  px(ctx, MINT_D, 14, 17, 7, 1);
-  px(ctx, CHROME, 14, 18, 7, 1);
-  // The rear cowl: a big rounded hump over the back wheel, lit at the top,
-  // its vents, a cream trim line and a badge.
-  ellipse(8, 12.5, 8.5, 5.5, O);
-  ellipse(8, 12.5, 7.5, 4.5, MINT, (x, y) => (y < 10 && x < 9 ? MINT_L : y > 15 ? MINT_D : MINT));
-  px(ctx, CREAM, 1, 14, 13, 1);
-  for (const x of [9, 11, 13]) px(ctx, MINT_D, x, 11, 1, 2);
-  px(ctx, CHROME, 3, 12, 2, 1);
-  // The saddle on top: tan leather, rounded, a seam.
-  px(ctx, O, 2, 5, 12, 4);
-  px(ctx, O, 3, 4, 10, 1);
-  px(ctx, "#b07a4a", 3, 6, 10, 2);
-  px(ctx, "#d6a070", 3, 5, 10, 1);
-  px(ctx, O, 9, 6, 1, 2);
-  // A little chrome luggage rack behind it.
-  px(ctx, CHROME_D, 0, 6, 3, 1);
-  px(ctx, CHROME_D, 0, 7, 1, 3);
-  // The leg shield: a tall curved panel sweeping up from the floor to the
-  // bars, mint with a cream edge.
-  for (let y = 3; y <= 17; y++) {
-    const l = 21 - Math.round((y - 3) * 0.2);
-    const r = 25 + Math.round((y - 3) * 0.12);
-    px(ctx, O, l - 1, y, r - l + 2, 1);
-    px(ctx, y < 6 ? MINT_L : MINT, l, y, r - l, 1);
-    px(ctx, CREAM, l, y, 1, 1);
+  // The body, in one piece: the cowl, the floor, the shield, the fender, the headset.
+  const cowl = ball(10, 15, 9, 5.5);
+  const inCowl = (x: number, y: number) => cowl(x, y) && y <= 18;
+  const shieldL = (y: number) => 26 - Math.round(((y - 6) * 2) / 13);
+  const shieldR = (y: number) => 30 + Math.round(((y - 6) * 3) / 13);
+  const inShield = (x: number, y: number) => y >= 6 && y <= 19 && x >= shieldL(y) && x <= shieldR(y);
+  const fender = ball(31, 19, 6.5, 4.5);
+  const inFender = (x: number, y: number) => fender(x, y) && y <= 18;
+  const headset = ball(28.5, 5, 5, 2.8);
+  paint(inCowl, (x, y) => (y < 12 && x < 12 ? MINT_L : y > 16 || x > 16 ? MINT_D : MINT));
+  paint((x, y) => x >= 15 && x <= 27 && y >= 16 && y <= 18, (_x, y) => (y === 16 ? MINT : MINT_D));
+  paint(inShield, (x, y) => (x <= shieldL(y) + 1 ? MINT_L : x >= shieldR(y) - 1 ? MINT_D : MINT));
+  paint(inFender, (x, y) => (y < 17 && x < 32 ? MINT_L : y > 17 ? MINT_D : MINT));
+  paint(headset, (_x, y) => (y < 4 ? MINT_L : y > 6 ? MINT_D : MINT));
+  // The long saddle: tan on top, dark below.
+  paint((x, y) => (y === 8 && x >= 5 && x <= 18) || (y >= 9 && y <= 10 && x >= 3 && x <= 19), (_x, y) => (y === 8 ? "#e0ae7c" : y === 9 ? "#b07a4a" : "#5e3f2a"));
+  // One dark line round all of it (over the wheels' tops as well).
+  const img = ctx.getImageData(0, 0, VESPA_W, VESPA_H);
+  const solid = (x: number, y: number) => x >= 0 && y >= 0 && x < VESPA_W && y < VESPA_H && img.data[(y * VESPA_W + x) * 4 + 3] > 0;
+  for (let y = 0; y < VESPA_H; y++)
+    for (let x = 0; x < VESPA_W; x++) {
+      if (!solid(x, y) && (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1))) px(ctx, O, x, y);
+    }
+  // The cowl's cream stripe, its vents and badge; a tail light; the rack.
+  paint((x, y) => y === 15 && inCowl(x, y), () => CREAM);
+  for (const x of [12, 14, 16]) px(ctx, MINT_DD, x, 12, 1, 2);
+  px(ctx, CHROME, 4, 13, 3, 1);
+  px(ctx, "#e8233a", 1, 13, 2, 2);
+  px(ctx, "#ff9a9a", 1, 13, 1, 1);
+  px(ctx, CHROME, 0, 9, 4, 1);
+  px(ctx, CHROME_D, 1, 10, 1, 3);
+  // The saddle's seam.
+  px(ctx, "#5e3f2a", 11, 8, 1, 3);
+  px(ctx, CREAM, 4, 10, 15, 1);
+  // The floor: a dark mat, a chrome rail along its edge.
+  px(ctx, "#4a4a5a", 18, 16, 8, 1);
+  px(ctx, CHROME, 16, 18, 10, 1);
+  // The shield's gold crest; the fender's chrome crest.
+  px(ctx, "#f2c94c", 28, 10, 2, 3);
+  px(ctx, "#fff3a8", 28, 10, 1, 1);
+  px(ctx, CHROME, 27, 14, 8, 1);
+  // The headlamp, its chrome ring, a glint; a beam's sparkle as it goes.
+  paint(ball(33.5, 5, 2.6, 2.6), () => CHROME);
+  paint(ball(33.5, 5, 1.7, 1.7), () => "#fff3a8");
+  px(ctx, "#ffffff", 33, 4, 1, 1);
+  if (frame) px(ctx, "#fff3a8", 37, 5, 2, 1);
+  // The bars: a dark grip, chrome back to the headset; the mirror on its stalk.
+  px(ctx, O, 20, 2, 6, 3);
+  px(ctx, "#23232b", 21, 3, 3, 1);
+  px(ctx, CHROME, 24, 3, 2, 1);
+  px(ctx, CHROME_D, 23, 1, 1, 2);
+  px(ctx, O, 21, 0, 4, 2);
+  px(ctx, CHROME, 22, 0, 2, 1);
+  // A puff of smoke out of the exhaust.
+  if (frame) {
+    px(ctx, "rgba(225,225,235,0.75)", 0, 19, 2, 2);
+    px(ctx, "rgba(225,225,235,0.5)", 1, 17, 1, 1);
   }
-  // The front fender, wrapping the front wheel; a chrome strip on its crest.
-  ellipse(25.5, 16, 5, 2.5, O);
-  ellipse(25.5, 16, 4, 1.6, MINT);
-  px(ctx, CHROME, 23, 14, 6, 1);
-  // The headset on top: mint, rounded, the big round headlamp in its nose
-  // (a glint in it); chrome bars with dark grips, a little round mirror.
-  px(ctx, O, 19, 0, 11, 4);
-  px(ctx, MINT, 20, 1, 9, 2);
-  px(ctx, MINT_L, 20, 1, 6, 1);
-  disc(28, 2, 2, O);
-  disc(28, 2, 1, "#fff3a8");
-  px(ctx, "#ffffff", 28, 1, 1, 1);
-  px(ctx, CHROME, 16, 2, 4, 1);
-  px(ctx, "#2a2a2a", 15, 1, 2, 3);
-  px(ctx, O, 18, 0, 1, 2);
-  px(ctx, CHROME, 17, 0, 1, 1);
 }
 
 /** The vehicle on its own (frame 0/1: the wheels turning). */
 export function vehicleCanvas(code: number, frame: 0 | 1 = 0): HTMLCanvasElement {
   const c = document.createElement("canvas");
-  c.width = 32;
-  c.height = 24;
-  const ctx = c.getContext("2d")!;
+  const big = (code & ~TEST_RIDE) === VESPA;
+  c.width = big ? VESPA_W : 32;
+  c.height = big ? VESPA_H : 24;
+  const ctx = c.getContext("2d", { willReadFrequently: big })!;
   const spin = frame * 0.5;
   switch (code & ~TEST_RIDE) {
     case 1: {

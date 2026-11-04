@@ -6,7 +6,7 @@
 
 use super::{Instance, Pending};
 use crate::econ::{CallError, FishInfo};
-use commons_protocol::{ServerMsg, error_code, fish_event, state};
+use commons_protocol::{ServerMsg, error_code, fish_event, lure, state};
 use commons_sim::TilePos;
 use rand::Rng;
 
@@ -56,6 +56,12 @@ const LURE_RANGE: i32 = 10;
 pub(crate) const GOLD_LURE_ITEM: u32 = 119;
 const GOLD_LURE_MS: u32 = 3 * 60_000;
 const GOLD_LEAST: i16 = 3;
+/// The Glimmering Magnet Lure: for five minutes its circle of water turns
+/// purple and the rarer metals gather there, for a magnet dropped in it
+/// (nothing common, the rare and up more often; a line's no different).
+pub(crate) const MAGNET_LURE_ITEM: u32 = 142;
+/// What lies on the bottom about what a magnet found (so 3 to 7 things in all).
+const SALVAGE_JUNK: std::ops::RangeInclusive<usize> = 2..=6;
 /// The fisherman's magnet (an item): dropped in instead of a line, it brings
 /// up scrap; it takes half again as long as a bite to find something, and then the
 /// salvage game (steer it down, pull the thing free of the mud, haul it up)
@@ -64,12 +70,22 @@ pub(crate) const MAGNET_ITEM: u32 = 120;
 /// (Half again a line's wait: it was three times, twice too slow.)
 const MAGNET_SLOWER_HALVES: u32 = 3;
 const SALVAGE_MS: u32 = 32_000;
+/// What the magnet finds comes after a reel game: this good (the hard middle
+/// of the bar), and it's what was found; less (the easy band round it), the
+/// next rarity down. A miss loses it.
+const SALVAGE_BEST: u16 = 800;
+/// That reel game's time: long enough for two full swings of the needle at
+/// its slowest (the client's `MAGNET_SWINGS`); it says at once if it's over sooner.
+const MAGNET_REEL_MS: u32 = 5_500;
+/// In a magnet lure's water the magnet finds something this much of the
+/// time it would take (a percentage: 15% faster).
+const MAGNET_LURE_WAIT_PCT: u32 = 85;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Lure {
     at: TilePos,
     until: u32,
-    gold: bool,
+    kind: u8,
 }
 
 impl Lure {
@@ -97,6 +113,8 @@ pub(super) struct FishSession {
     /// lying about down there (the greedy may take it too).
     magnet: bool,
     junk: Vec<u32>,
+    /// The magnet's reel game is won: the salvage game's on.
+    diving: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -175,20 +193,38 @@ fn is_night() -> bool {
 
 impl Instance {
     /// `id` throws a glimmer lure into the water at `target` (it's used up).
-    pub(super) fn throw_lure(&mut self, id: u32, target: TilePos, gold: bool, now: u32) {
+    pub(super) fn throw_lure(&mut self, id: u32, target: TilePos, kind: u8, now: u32) {
         // Walking up to the shore: thrown on arrival.
         if self.moving(id, now) {
             self.avatars.get_mut(&id).unwrap().pending = Some(Pending::Lure {
                 x: target.0,
                 y: target.1,
-                gold,
+                kind,
             });
             return;
         }
-        self.do_throw_lure(id, target, gold, now);
+        self.do_throw_lure(id, target, kind, now);
     }
 
-    pub(super) fn do_throw_lure(&mut self, id: u32, target: TilePos, gold: bool, now: u32) {
+    pub(super) fn do_throw_lure(&mut self, id: u32, target: TilePos, kind: u8, now: u32) {
+        let (item, ms, missing) = match kind {
+            lure::GLIMMER => (
+                LURE_ITEM,
+                LURE_MS,
+                "you don't have a lure: the fisherman sells them",
+            ),
+            lure::GOLD => (
+                GOLD_LURE_ITEM,
+                GOLD_LURE_MS,
+                "you don't have a legendary lure: the fisherman sells them",
+            ),
+            lure::MAGNET => (
+                MAGNET_LURE_ITEM,
+                LURE_MS,
+                "you don't have a magnet lure: the fisherman sells them",
+            ),
+            _ => return self.error(id, error_code::BAD_MESSAGE, "that's no lure"),
+        };
         if !self.is_water(target) {
             return self.error(id, error_code::BAD_MESSAGE, "throw it into the water");
         }
@@ -201,7 +237,6 @@ impl Instance {
         };
         let player = a.player_id.clone();
         let key = self.next_key("lure");
-        let item = if gold { GOLD_LURE_ITEM } else { LURE_ITEM };
         self.spawn_call(
             async move { econ.grant(&player, item, -1, "lure", &key).await },
             move |inst, r| match r {
@@ -212,8 +247,8 @@ impl Instance {
                     inst.lures.retain(|l| l.until > now);
                     let lure = Lure {
                         at: target,
-                        until: now + if gold { GOLD_LURE_MS } else { LURE_MS },
-                        gold,
+                        until: now + ms,
+                        kind,
                     };
                     inst.lures.push(lure);
                     // The throw itself, seen by those nearby: the arm, the lure arcing out.
@@ -237,22 +272,14 @@ impl Instance {
                         x: target.0,
                         y: target.1,
                         ends: lure.until,
-                        gold,
+                        kind,
                     }
                     .to_bytes();
                     for a in inst.avatars.values_mut() {
                         a.send(&bytes);
                     }
                 }
-                Err(CallError::Rejected(_)) => inst.error(
-                    id,
-                    error_code::NOT_ALLOWED,
-                    if gold {
-                        "you don't have a legendary lure: the fisherman sells them"
-                    } else {
-                        "you don't have a lure: the fisherman sells them"
-                    },
-                ),
+                Err(CallError::Rejected(_)) => inst.error(id, error_code::NOT_ALLOWED, missing),
                 Err(CallError::Unavailable) => inst.error(
                     id,
                     error_code::UNAVAILABLE,
@@ -273,7 +300,7 @@ impl Instance {
                     x: l.at.0,
                     y: l.at.1,
                     ends: l.until,
-                    gold: l.gold,
+                    kind: l.kind,
                 },
             );
         }
@@ -327,8 +354,15 @@ impl Instance {
         let mut rng = rand::rng();
         let wait =
             rng.random_range(BITE_MIN_MS..=BITE_MAX_MS) + rng.random_range(0..=BITE_JITTER_MS);
+        // (Rare metals gather quicker in a magnet lure's water.)
+        let lured = self
+            .lures
+            .iter()
+            .any(|l| l.until > now && l.kind == lure::MAGNET && l.covers(target));
         let bite_at = now
-            + if magnet {
+            + if magnet && lured {
+                wait * MAGNET_SLOWER_HALVES / 2 * MAGNET_LURE_WAIT_PCT / 100
+            } else if magnet {
                 wait * MAGNET_SLOWER_HALVES / 2
             } else {
                 wait
@@ -346,6 +380,7 @@ impl Instance {
             flop: None,
             magnet,
             junk: Vec::new(),
+            diving: false,
         });
         let (tile, cell, player) = (a.tile, a.cell, a.player_id.clone());
         // The magnet: only if they have one (asked of the economy; the answer's
@@ -451,6 +486,10 @@ impl Instance {
         let Some(session) = self.avatars[&id].fish.clone() else {
             return;
         };
+        // (Already down there: that reel game's over.)
+        if session.diving {
+            return;
+        }
         let in_window = session.biting && now <= session.window_end + GRACE_MS;
         if !in_window || quality < MIN_QUALITY {
             return self.stop_fishing(id, true);
@@ -461,6 +500,9 @@ impl Instance {
         let Some(item) = session.fish else {
             return self.stop_fishing(id, true);
         };
+        if session.magnet {
+            return self.start_salvage(id, item, quality, now);
+        }
         // A rare fish (not a chest) comes out flopping onto the bank: hit it to land it.
         let rarity = econ
             .catalog()
@@ -503,6 +545,55 @@ impl Instance {
         self.land(id, item, session.target);
     }
 
+    /// The magnet's reel game won: the best that can come up now is `item`
+    /// (hit in the bar's middle) or something a rarity below it (hit in the
+    /// band round that), with cheaper junk about it, never better than that.
+    fn start_salvage(&mut self, id: u32, item: u32, quality: u16, now: u32) {
+        let catalog = self.economy.as_ref().and_then(|e| e.catalog());
+        let scrap: &[FishInfo] = catalog.as_ref().map_or(&[], |c| &c.scrap);
+        let rarity_of = |i: u32| scrap.iter().find(|f| f.id == i).map_or(0, |f| f.rarity);
+        let found = rarity_of(item);
+        // The next rarity down that there is.
+        let below = scrap.iter().map(|f| f.rarity).filter(|&r| r < found).max();
+        let item = match below {
+            Some(r) if quality < SALVAGE_BEST => {
+                let pool: Vec<FishInfo> = scrap.iter().filter(|f| f.rarity == r).cloned().collect();
+                roll_fish_from(&pool, true, 1.0, 0, rand::rng().random()).unwrap_or(item)
+            }
+            _ => item,
+        };
+        let top = rarity_of(item);
+        // Junk about it: common and uncommon only, and nothing above the best on offer.
+        let cheap: Vec<FishInfo> = scrap
+            .iter()
+            .filter(|f| f.rarity <= top.min(1))
+            .cloned()
+            .collect();
+        let n = rand::rng().random_range(SALVAGE_JUNK);
+        let junk: Vec<u32> = (0..n)
+            .filter_map(|_| roll_fish_from(&cheap, true, 1.0, 0, rand::rng().random()))
+            .collect();
+        let Some(s) = self.avatars.get_mut(&id).and_then(|a| a.fish.as_mut()) else {
+            return;
+        };
+        s.fish = Some(item);
+        s.junk = junk.clone();
+        s.diving = true;
+        s.window_end = now + SALVAGE_MS;
+        let target = s.target;
+        self.send_to(id, &ServerMsg::SalvageJunk { items: junk });
+        self.send_to(
+            id,
+            &ServerMsg::FishEvent {
+                id,
+                kind: fish_event::SALVAGE,
+                x: target.0,
+                y: target.1,
+                item,
+            },
+        );
+    }
+
     /// The salvage game's done: the glinting thing (if it came up) and
     /// whichever of the other junk was grabbed too (`extras`, bit by bit).
     pub(super) fn salvage_reel(&mut self, id: u32, target: bool, extras: u8, now: u32) {
@@ -510,7 +601,7 @@ impl Instance {
             return;
         };
         let in_window = session.biting && now <= session.window_end + GRACE_MS;
-        if !session.magnet || !in_window {
+        if !session.magnet || !session.diving || !in_window {
             return self.stop_fishing(id, true);
         }
         let mut items: Vec<u32> = Vec::new();
@@ -699,30 +790,26 @@ impl Instance {
                 continue;
             }
             if !s.biting && now >= s.bite_at && s.magnet {
-                // The magnet's found something: what, and the salvage game's time to get it.
+                // The magnet's found something: what, and the reel game first (see
+                // `start_salvage`). Its pace and its zones are this thing's rarity.
                 s.biting = true;
                 let catalog = self.economy.as_ref().and_then(|e| e.catalog());
-                s.fish = catalog
-                    .as_ref()
-                    .and_then(|c| roll_fish_from(&c.scrap, true, 1.0, 0, rand::rng().random()));
-                s.window_end = s.bite_at + SALVAGE_MS;
-                // Junk about it: common and uncommon only, more round rarer things.
-                let rarity = catalog.as_ref().and_then(|c| {
-                    s.fish
-                        .and_then(|i| c.scrap.iter().find(|f| f.id == i).map(|f| f.rarity))
-                });
-                let cheap: Vec<FishInfo> = catalog
-                    .as_ref()
-                    .map(|c| c.scrap.iter().filter(|f| f.rarity <= 1).cloned().collect())
-                    .unwrap_or_default();
-                let n = 2 + (rarity.unwrap_or(0).max(0) as usize / 2).min(2);
-                s.junk = (0..n)
-                    .filter_map(|_| roll_fish_from(&cheap, true, 1.0, 0, rand::rng().random()))
-                    .collect();
-                let (target, cell, item) = (s.target, a.cell, s.fish.unwrap_or(0));
-                let junk = ServerMsg::SalvageJunk {
-                    items: s.junk.clone(),
+                // (In a magnet lure's water: the rarer metals, nothing common.)
+                let target = s.target;
+                let lured = self
+                    .lures
+                    .iter()
+                    .any(|l| l.until > now && l.kind == lure::MAGNET && l.covers(target));
+                let (luck, least) = if lured {
+                    (LURE_LUCK, LURE_LEAST)
+                } else {
+                    (1.0, 0)
                 };
+                s.fish = catalog.as_ref().and_then(|c| {
+                    roll_fish_from(&c.scrap, true, luck, least, rand::rng().random())
+                });
+                s.window_end = s.bite_at + MAGNET_REEL_MS;
+                let (target, cell, item) = (s.target, a.cell, s.fish.unwrap_or(0));
                 let bite = ServerMsg::FishEvent {
                     id,
                     kind: fish_event::BITE,
@@ -730,22 +817,21 @@ impl Instance {
                     y: target.1,
                     item,
                 };
-                self.send_to(id, &junk);
                 self.broadcast(cell, &bite, None);
             } else if !s.biting && now >= s.bite_at {
                 s.biting = true;
                 // What's on the hook: the angler sees how rare (and so how hard) it is.
                 let catalog = self.economy.as_ref().and_then(|e| e.catalog());
                 let target = s.target;
-                let here = |gold: bool| {
+                let here = |kind: u8| {
                     self.lures
                         .iter()
-                        .any(|l| l.until > now && l.gold == gold && l.covers(target))
+                        .any(|l| l.until > now && l.kind == kind && l.covers(target))
                 };
                 // (A gold lure's water: epic and up; a glimmer lure's: rarer, more often.)
-                let (luck, least) = if here(true) {
+                let (luck, least) = if here(lure::GOLD) {
                     (1.0, GOLD_LEAST)
-                } else if here(false) {
+                } else if here(lure::GLIMMER) {
                     (LURE_LUCK, LURE_LEAST)
                 } else {
                     (1.0, 0)
@@ -848,7 +934,7 @@ mod tests {
         let l = Lure {
             at: (10, 10),
             until: 1,
-            gold: false,
+            kind: lure::GLIMMER,
         };
         let n = (5..=15)
             .flat_map(|x| (5..=15).map(move |y| (x, y)))
@@ -883,13 +969,104 @@ mod tests {
         assert!(s.biting);
         let item = s.fish.expect("something down there");
         assert!([121, 127].contains(&item), "scrap, not fish: {item}");
-        assert_eq!(s.window_end, s.bite_at + SALVAGE_MS);
+        assert_eq!(
+            s.window_end,
+            s.bite_at + MAGNET_REEL_MS,
+            "the reel game first"
+        );
+        assert!(s.junk.is_empty() && !s.diving);
+        // Reeled (the bar's middle): the salvage game's on, for what was found.
+        let at = s.bite_at + 500;
+        inst.fish_reel(1, 1000, at);
+        let s = inst.avatars[&1].fish.clone().unwrap();
+        assert!(s.diving);
+        assert_eq!(s.fish, Some(item));
+        assert_eq!(s.window_end, at + SALVAGE_MS);
         // Junk lies about it (the cheap stuff only), for the greedy.
-        assert!((2..=4).contains(&s.junk.len()), "{:?}", s.junk);
+        assert!(SALVAGE_JUNK.contains(&s.junk.len()), "{:?}", s.junk);
         assert!(s.junk.iter().all(|&j| j == 121));
         // Salvaged, with two bits of junk: straight into the bag (an old safe never flops about).
-        inst.salvage_reel(1, true, 0b11, s.bite_at + 20_000);
+        inst.salvage_reel(1, true, 0b11, at + 20_000);
         assert!(inst.avatars[&1].fish.is_none());
+    }
+
+    #[test]
+    fn a_magnet_lure_gathers_the_rarer_metals_and_three_to_seven_things_lie_about() {
+        let mut inst = pond_instance();
+        let _a = connect(&mut inst, 1, "salvager", (20, 12));
+        place(&mut inst, 1, (5, 4));
+        inst.lures.push(Lure {
+            at: (5, 6),
+            until: u32::MAX,
+            kind: lure::MAGNET,
+        });
+        let mut counts = std::collections::HashSet::new();
+        // (15% faster: never as long as the slowest wait of all.)
+        let slowest = (BITE_MAX_MS + BITE_JITTER_MS) * MAGNET_SLOWER_HALVES / 2;
+        for _ in 0..60 {
+            let now = inst.clock.now_ms();
+            inst.handle(Cmd::Msg {
+                conn: 1,
+                msg: ClientMsg::FishCast {
+                    x: 5,
+                    y: 6,
+                    magnet: true,
+                },
+            });
+            let s = inst.avatars[&1].fish.clone().expect("dropped in");
+            assert!(
+                s.bite_at - now <= slowest * 85 / 100 + 1,
+                "sooner in its water"
+            );
+            inst.fish_tick(s.bite_at);
+            let s = inst.avatars[&1].fish.clone().unwrap();
+            assert_eq!(s.fish, Some(127), "never the common can in its water");
+            inst.fish_reel(1, 1000, s.bite_at + 100);
+            let s = inst.avatars[&1].fish.clone().unwrap();
+            let on_the_floor = 1 + s.junk.len();
+            assert!((3..=7).contains(&on_the_floor), "{on_the_floor}");
+            counts.insert(on_the_floor);
+            inst.salvage_reel(1, true, 0, s.bite_at + 20_000);
+        }
+        assert!(counts.contains(&3) && counts.contains(&7), "{counts:?}");
+    }
+
+    #[test]
+    fn the_magnets_reel_game_sets_the_best_that_can_come_up() {
+        // Dropped in lured water, so it's the old safe (legendary) it finds.
+        let dive = |quality: u16| {
+            let mut inst = pond_instance();
+            let _a = connect(&mut inst, 1, "salvager", (20, 12));
+            place(&mut inst, 1, (5, 4));
+            inst.lures.push(Lure {
+                at: (5, 6),
+                until: u32::MAX,
+                kind: lure::MAGNET,
+            });
+            inst.handle(Cmd::Msg {
+                conn: 1,
+                msg: ClientMsg::FishCast {
+                    x: 5,
+                    y: 6,
+                    magnet: true,
+                },
+            });
+            let s = inst.avatars[&1].fish.clone().unwrap();
+            inst.fish_tick(s.bite_at);
+            let s = inst.avatars[&1].fish.clone().unwrap();
+            assert_eq!(s.fish, Some(127));
+            assert!(!s.diving, "the reel game first");
+            inst.fish_reel(1, quality, s.bite_at + 100);
+            inst.avatars[&1].fish.clone()
+        };
+        // The hard middle: what it found.
+        assert_eq!(dive(1000).unwrap().fish, Some(127));
+        // The easy band: the next rarity down, and nothing on the floor above it.
+        let s = dive(500).unwrap();
+        assert_eq!(s.fish, Some(121));
+        assert!(s.diving && s.junk.iter().all(|&j| j == 121));
+        // Missed: it's gone.
+        assert!(dive(0).is_none());
     }
 
     #[test]

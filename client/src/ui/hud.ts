@@ -21,6 +21,8 @@ export interface HudHandlers {
   onNotifications(): void;
   /** Toggles sound; returns whether it's now muted. */
   onSound(): boolean;
+  /** The ⚙️ settings. */
+  onSettings(): void;
   onTasks(): void;
   onMood(): void;
   onMap(): void;
@@ -85,15 +87,17 @@ export class Hud {
         <div class="pill place"></div>
         <div class="top-right">
           <div class="pill coins" title="Coins"></div>
-          <button type="button" class="pill btn map-btn" title="City map (C)" aria-label="City map"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("map")}" /></button>
+          <button type="button" class="pill btn map-btn" title="City map (M)" aria-label="City map"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("map")}" /></button>
           <button type="button" class="pill btn bag-btn" title="Bag (B)" aria-label="Bag"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bag")}" /></button>
-          <button type="button" class="pill btn album-btn" title="Naturalist's Journal (L)" aria-label="Journal"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("book")}" /></button>
-          <button type="button" class="pill btn friends-btn" title="Friends (F)" aria-label="Friends"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("friends")}" /></button>
+          <button type="button" class="pill btn album-btn extra" title="Naturalist's Journal (L)" aria-label="Journal"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("book")}" /></button>
+          <button type="button" class="pill btn friends-btn extra" title="Friends (F)" aria-label="Friends"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("friends")}" /></button>
           <button type="button" class="pill btn notes-btn" title="Notifications (N)" aria-label="Notifications"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bell")}" /><span class="badge-count" hidden></span></button>
           <button type="button" class="pill btn clubs-btn" title="Clubs (K)" aria-label="Clubs"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("shield")}" /><span class="badge-count" hidden>!</span></button>
           <button type="button" class="pill btn phone-btn" title="Phone" aria-label="Phone" hidden><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("phone")}" /></button>
           <button type="button" class="pill btn books-btn" title="Your library books" aria-label="Your library books" hidden><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("books")}" /><span class="badge-count"></span></button>
-          <button type="button" class="pill btn sound-btn" title="Sound (M)" aria-label="Sound"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("sound")}" /></button>
+          <button type="button" class="pill btn sound-btn extra" title="Sound" aria-label="Sound"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("sound")}" /></button>
+          <button type="button" class="pill btn settings-btn" title="Settings" aria-label="Settings"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("gear")}" /></button>
+          <button type="button" class="pill btn more-btn" title="More" aria-label="More" aria-expanded="false"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("more")}" /></button>
           <div class="pill nearby" title="People in view"></div>
         </div>
       </div>
@@ -113,7 +117,23 @@ export class Hud {
     this.log = root.querySelector(".log")!;
     this.input = root.querySelector(".chat input")!;
     this.toastEl = root.querySelector(".toast")!;
-    if (matchMedia("(pointer: coarse)").matches) this.input.placeholder = "Tap to chat";
+    if (matchMedia("(pointer: coarse)").matches) this.input.placeholder = "Say something…";
+    // Phones get a simpler layout (body.phone, in the styles): the rarer
+    // buttons behind "more", the chat and the emotes folded into a button each.
+    const phone = () => document.body.classList.toggle("phone", matchMedia("(pointer: coarse)").matches && Math.min(innerWidth, innerHeight) < 600);
+    phone();
+    window.addEventListener("resize", phone);
+    const topRight = root.querySelector<HTMLElement>(".top-right")!;
+    const moreBtn = root.querySelector<HTMLButtonElement>(".more-btn")!;
+    const setMore = (open: boolean) => {
+      topRight.classList.toggle("more-open", open);
+      moreBtn.setAttribute("aria-expanded", String(open));
+    };
+    moreBtn.onclick = () => setMore(!topRight.classList.contains("more-open"));
+    // (Picking one of them folds them away again.)
+    topRight.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest(".extra")) setMore(false);
+    });
     this.coinsEl = root.querySelector(".coins")!;
     this.tasksEl = root.querySelector(".tasks-chip")!;
     this.followEl = root.querySelector(".follow-chip")!;
@@ -134,19 +154,22 @@ export class Hud {
     const soundBtn = root.querySelector<HTMLButtonElement>(".sound-btn")!;
     const sound = () => this.setMuted(h.onSound());
     soundBtn.onclick = sound;
+    root.querySelector<HTMLButtonElement>(".settings-btn")!.onclick = () => h.onSettings();
     window.addEventListener("keydown", (e) => {
       if (isTyping(e)) return;
+      // M for the map (C too, as it was).
       if (e.key === "c" || e.key === "C") h.onMap();
       if (e.key === "b" || e.key === "B") h.onBag();
       if (e.key === "l" || e.key === "L") h.onAlbum();
       if (e.key === "f" || e.key === "F") h.onFriends();
       if (e.key === "k" || e.key === "K") h.onClubs();
       if (e.key === "n" || e.key === "N") h.onNotifications();
-      if (e.key === "m" || e.key === "M") sound();
+      if (e.key === "m" || e.key === "M") h.onMap();
       if ((e.key === "r" || e.key === "R") && !e.repeat && !this.rideBtn.hidden) h.onRide();
     });
 
     const form = root.querySelector<HTMLFormElement>(".chat")!;
+    const bottom = root.querySelector<HTMLElement>(".bottom")!;
     form.onsubmit = (ev) => {
       ev.preventDefault();
       const text = this.input.value.trim();
@@ -154,12 +177,38 @@ export class Hud {
       this.input.value = "";
       this.input.blur();
     };
+    // On a phone the chat bar is folded into a button until it's wanted
+    // (and folds away again once it's left).
+    this.input.addEventListener("focus", () => bottom.classList.add("chatting"));
+    this.input.addEventListener("blur", () => window.setTimeout(() => document.activeElement !== this.input && bottom.classList.remove("chatting"), 120));
     this.input.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") this.input.blur();
       ev.stopPropagation();
     });
 
     const bar = root.querySelector(".emotes")!;
+    // (Phones: the chat and the emotes, each folded into a button.)
+    const chatFab = document.createElement("button");
+    chatFab.type = "button";
+    chatFab.className = "chat-fab";
+    chatFab.title = "Chat";
+    chatFab.setAttribute("aria-label", "Chat");
+    chatFab.replaceChildren(pxIcon("chat"));
+    // (Focused straight from the tap, so the phone's keyboard comes up.)
+    chatFab.onclick = () => {
+      bottom.classList.remove("emoting");
+      bottom.classList.add("chatting");
+      this.input.focus();
+    };
+    bar.appendChild(chatFab);
+    const emoteFab = document.createElement("button");
+    emoteFab.type = "button";
+    emoteFab.className = "emote-fab";
+    emoteFab.title = "Emotes";
+    emoteFab.setAttribute("aria-label", "Emotes");
+    emoteFab.replaceChildren(pxIcon("laugh"));
+    emoteFab.onclick = () => bottom.classList.toggle("emoting");
+    bar.appendChild(emoteFab);
     this.moodBtn = document.createElement("button");
     this.moodBtn.type = "button";
     this.moodBtn.className = "mood-btn";
@@ -207,8 +256,9 @@ export class Hud {
       b.type = "button";
       b.append(pxIcon(EMOTE_ICONS[Number(id)] ?? "heart"));
       b.title = `${e.label} (${id})`;
+      b.className = "emote";
       b.setAttribute("aria-label", e.label);
-      b.onclick = () => h.onEmote(Number(id));
+      b.onclick = () => (h.onEmote(Number(id)), bottom.classList.remove("emoting"));
       bar.appendChild(b);
     }
   }

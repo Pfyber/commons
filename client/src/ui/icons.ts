@@ -19,6 +19,8 @@ const PAL: Record<string, string> = {
   i: "#b97c55",
   n: "#a0703f",
   N: "#6e4b30",
+  m: "#b7bcc4", // steel (the settings cog)
+  M: "#7d838e",
 };
 
 export const ICONS: Record<string, string[]> = {
@@ -135,6 +137,34 @@ export const ICONS: Record<string, string[]> = {
     "oooooooooooo",
     ".....oo.....",
     "....oYYo....",
+    ".....oo.....",
+  ],
+  more: [
+    "............",
+    "............",
+    "............",
+    "............",
+    "............",
+    "oo...oo...oo",
+    "oo...oo...oo",
+    "............",
+    "............",
+    "............",
+    "............",
+    "............",
+  ],
+  gear: [
+    ".....oo.....",
+    "..o.ommo.o..",
+    ".omoommoomo.",
+    "..ommmmmmo..",
+    ".oommoomMoo.",
+    "ommmo..oMMMo",
+    "ommmo..oMMMo",
+    ".oomMooMMoo.",
+    "..oMMMMMMo..",
+    ".oMooMMooMo.",
+    "..o.oMMo.o..",
     ".....oo.....",
   ],
   sound: [

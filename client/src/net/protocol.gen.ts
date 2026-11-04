@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 40;
+export const PROTOCOL_VERSION = 42;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -363,7 +363,7 @@ export type ClientMsg =
   | { t: "Reading"; book: number }
   | { t: "Calling"; on: boolean }
   | { t: "Going"; zone: string; arrive: string }
-  | { t: "ThrowLure"; x: number; y: number; gold: boolean }
+  | { t: "ThrowLure"; x: number; y: number; kind: number }
   | { t: "BowlJoin"; lane: number; vsBot: boolean }
   | { t: "BowlLeave"; lane: number }
   | { t: "BowlRoll"; lane: number; aim: number; power: number }
@@ -562,7 +562,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(36);
       w.u16(m.x);
       w.u16(m.y);
-      w.bool(m.gold);
+      w.u8(m.kind);
       break;
     case "BowlJoin":
       w.u8(37);
@@ -811,7 +811,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "Going", zone: r.str(), arrive: r.str() };
       break;
     case 36:
-      m = { t: "ThrowLure", x: r.u16(), y: r.u16(), gold: r.bool() };
+      m = { t: "ThrowLure", x: r.u16(), y: r.u16(), kind: r.u8() };
       break;
     case 37:
       m = { t: "BowlJoin", lane: r.u8(), vsBot: r.bool() };
@@ -947,7 +947,7 @@ export type ServerMsg =
   | { t: "ReadingShown"; id: number; book: number }
   | { t: "CallingShown"; id: number; on: boolean }
   | { t: "Went"; id: number; zone: string; arrive: string }
-  | { t: "LureShown"; x: number; y: number; ends: number; gold: boolean }
+  | { t: "LureShown"; x: number; y: number; ends: number; kind: number }
   | { t: "BowlState"; lane: number; a: number; b: number; status: number; turn: number; frame: number; ball: number; standing: number; shot: number; rollsA: number[]; rollsB: number[] }
   | { t: "BowlRolled"; lane: number; by: number; aim: number; power: number; knocked: number; shot: number }
   | { t: "ArenaState"; status: number; now: number; phaseMs: number; round: number; fire: number; spikes: number[]; slots: number[]; crowns: number[]; fighters: ArenaFighter[]; gifts: ArenaGift[]; winner: number; level: number; mode: number; goliath: number; kits: boolean; chooseMs: number; exhibition: boolean; wheel: boolean }
@@ -1214,7 +1214,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.x);
       w.u16(m.y);
       w.u32(m.ends);
-      w.bool(m.gold);
+      w.u8(m.kind);
       break;
     case "BowlState":
       w.u8(38);
@@ -1465,7 +1465,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "Went", id: r.u32(), zone: r.str(), arrive: r.str() };
       break;
     case 37:
-      m = { t: "LureShown", x: r.u16(), y: r.u16(), ends: r.u32(), gold: r.bool() };
+      m = { t: "LureShown", x: r.u16(), y: r.u16(), ends: r.u32(), kind: r.u8() };
       break;
     case 38:
       m = { t: "BowlState", lane: r.u8(), a: r.u32(), b: r.u32(), status: r.u8(), turn: r.u8(), frame: r.u8(), ball: r.u8(), standing: r.u16(), shot: r.u32(), rollsA: r.vec(() => r.u8()), rollsB: r.vec(() => r.u8()) };

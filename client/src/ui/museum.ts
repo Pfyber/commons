@@ -4,6 +4,7 @@
 // desk (the week's theme, your paintings and when they're on the wall, the
 // Hall of Fame); and Natural History, where the town gives its fish.
 
+import { till } from "../ambient/salvagesfx";
 import type { Economy } from "../economy";
 import { ApiError } from "../net/api";
 import { NET_ITEM } from "../nature";
@@ -491,6 +492,7 @@ export class DeskPanel extends Panel {
         button(`Buy a bug net (${net.meta.buy} coins)`, async () => {
           try {
             await this.eco.buy(NET_ITEM, 1);
+            till(net.meta.buy ?? 0);
           } catch (e) {
             msg.textContent = errText(e);
           }
