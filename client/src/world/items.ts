@@ -6,6 +6,8 @@ import { Texture } from "pixi.js";
 import { PALETTE, avatarCanvas, styleFor, toTexture } from "./art";
 import { drawBug, drawShroom } from "./critterart";
 import { drawFish } from "./fish";
+import { drawScrap } from "./scrapart";
+import { drawHouseware } from "./housewares";
 import { petCanvas, petTexture } from "./pets";
 import { vehicleCanvas, vehicleTexture } from "./vehicles";
 import { drawGoodsIcon } from "./goods";
@@ -150,6 +152,43 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     disc(ctx, O, 11, 5, 5);
     disc(ctx, "#f4f2ea", 11, 5, 4);
     for (const [x, y] of [[9, 3], [11, 3], [13, 3], [8, 5], [10, 5], [12, 5], [14, 5], [9, 7], [11, 7], [13, 7]]) px(ctx, "#cfcabb", x, y);
+    return;
+  }
+  if (key === "magnet") {
+    // A red horseshoe magnet, silver tips, on a coil of line, with a spark.
+    px(ctx, O, 2, 2, 10, 4);
+    px(ctx, O, 2, 2, 4, 12);
+    px(ctx, O, 8, 2, 4, 12);
+    px(ctx, "#d83a3a", 3, 3, 8, 2);
+    px(ctx, "#d83a3a", 3, 3, 2, 9);
+    px(ctx, "#d83a3a", 9, 3, 2, 9);
+    px(ctx, "#ff8a7a", 3, 3, 4, 1);
+    px(ctx, "#d8dce8", 3, 11, 2, 2);
+    px(ctx, "#d8dce8", 9, 11, 2, 2);
+    px(ctx, "#e8f4ff", 7, 0, 1, 2);
+    px(ctx, "#7ad8ff", 13, 9, 1, 3);
+    px(ctx, "#7ad8ff", 12, 10, 3, 1);
+    px(ctx, "#7ad8ff", 0, 13, 1, 2);
+    return;
+  }
+  if (key === "gold_lure") {
+    // The legendary lure: a big gold spoon with a ruby eye, a red feather tail, sparkles.
+    px(ctx, O, 4, 1, 8, 12);
+    px(ctx, O, 3, 3, 10, 8);
+    px(ctx, "#ffd23f", 4, 3, 8, 8);
+    px(ctx, "#ffd23f", 5, 2, 6, 10);
+    px(ctx, "#fff8d0", 5, 3, 3, 3);
+    px(ctx, "#c98a12", 9, 8, 2, 3);
+    px(ctx, "#e8283a", 8, 6, 2, 2);
+    px(ctx, "#ffb0b8", 8, 6, 1, 1);
+    px(ctx, "#c8c8dc", 7, 0, 2, 1);
+    px(ctx, "#e8283a", 6, 12, 1, 3);
+    px(ctx, "#ff8a3f", 8, 12, 1, 3);
+    px(ctx, "#e8283a", 10, 12, 1, 3);
+    px(ctx, "#ffffff", 14, 1, 1, 3);
+    px(ctx, "#ffffff", 13, 2, 3, 1);
+    px(ctx, "#fff3a8", 1, 11, 1, 1);
+    px(ctx, "#fff3a8", 14, 9, 1, 1);
     return;
   }
   if (key === "fish_lure") {
@@ -468,6 +507,8 @@ function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
       oval(ctx, "rgba(0,0,0,0.15)", 16, 30, 12, 2);
       break;
     default:
+      // Inside Housing's things (housewares.ts), or a plain crate.
+      if (drawHouseware(ctx, key)) break;
       px(ctx, O, 6, 6, 20, 20);
       px(ctx, W, 7, 7, 18, 18);
   }
@@ -480,6 +521,7 @@ function iconCanvas(key: string, kind: string): HTMLCanvasElement {
   if (kind === "fish") return canvas(32, 32, (ctx) => drawFish(ctx, key));
   if (kind === "bug") return canvas(32, 32, (ctx) => drawBug(ctx, key));
   if (kind === "shroom") return canvas(32, 32, (ctx) => drawShroom(ctx, key));
+  if (kind === "scrap") return canvas(32, 32, (ctx) => drawScrap(ctx, key));
   return canvas(16, 16, (ctx) => drawIcon(ctx, key, kind));
 }
 
@@ -510,6 +552,7 @@ export function itemTexture(key: string, kind: string): Texture {
   if (kind === "fish") return cachedTex(`fish:${key}`, () => canvas(32, 32, (ctx) => drawFish(ctx, key)));
   if (kind === "bug") return cachedTex(`bug:${key}`, () => canvas(32, 32, (ctx) => drawBug(ctx, key)));
   if (kind === "shroom") return cachedTex(`shroom:${key}`, () => canvas(32, 32, (ctx) => drawShroom(ctx, key)));
+  if (kind === "scrap") return cachedTex(`scrap:${key}`, () => canvas(32, 32, (ctx) => drawScrap(ctx, key)));
   if (WEARABLE.has(kind)) return cachedTex(`wear:${key}`, () => wearing(key, kind));
   if (kind === "pet") return petTexture(COSMETIC_CODES.get(key) ?? 1, 2);
   if (kind === "vehicle") return vehicleTexture(COSMETIC_CODES.get(key) ?? 3);
@@ -580,6 +623,25 @@ export function bobberTexture(): Texture {
       px(ctx, "#e8566b", 2, 2, 4, 3);
       px(ctx, "#fff", 2, 5, 4, 3);
       px(ctx, "rgba(255,255,255,0.6)", 0, 8, 8, 2);
+    }),
+  );
+}
+
+/** The salvage magnet down in the water instead of a bobber: red horseshoe, silver tips, the line tied on top. */
+export function magnetBobberTexture(): Texture {
+  return cachedTex("magnet_bobber", () =>
+    canvas(10, 11, (ctx) => {
+      px(ctx, O, 1, 1, 8, 3);
+      px(ctx, O, 1, 1, 3, 8);
+      px(ctx, O, 6, 1, 3, 8);
+      px(ctx, "#d83a3a", 2, 2, 6, 1);
+      px(ctx, "#d83a3a", 2, 2, 1, 5);
+      px(ctx, "#d83a3a", 7, 2, 1, 5);
+      px(ctx, "#ff8a7a", 2, 2, 3, 1);
+      px(ctx, "#d8dce8", 2, 7, 1, 1);
+      px(ctx, "#d8dce8", 7, 7, 1, 1);
+      px(ctx, "#e8f4ff", 4, 0, 2, 1);
+      px(ctx, "rgba(255,255,255,0.6)", 0, 9, 10, 2);
     }),
   );
 }

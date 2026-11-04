@@ -17,6 +17,8 @@ const GROUND: Record<string, string> = {
   pitch: "#78b85f",
   stones: "#7fb5d8",
   road: "#8a857b",
+  brick: "#b25c44",
+  moss: "#5f8540",
   curb: "#cfc6b2",
   carpet: "#c48d7a",
   straw: "#e3c77a",

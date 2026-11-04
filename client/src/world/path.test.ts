@@ -28,7 +28,8 @@ describe("splice mirrors sim::Motion::splice", () => {
   const m = { path: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 7, y: 3 }], t0: 1000, speedX10: 40 };
   it("matches the Rust case", () => {
     expect(splice(m, 1000)).toBeNull();
-    expect(splice(m, 1600)).toEqual({ prev: { x: 2, y: 0 }, next: { x: 3, y: 0 }, tPrev: 1500 });
+    expect(splice(m, 1600)).toMatchObject({ prev: { x: 2, y: 0 }, next: { x: 3, y: 0 }, tPrev: 1500 });
+    expect(splice(m, 1600)!.into).toBeCloseTo(0.4);
     const s = splice(m, 2400)!;
     expect([s.prev, s.next]).toEqual([{ x: 5, y: 1 }, { x: 6, y: 2 }]);
     expect(splice(m, 9999)).toBeNull();

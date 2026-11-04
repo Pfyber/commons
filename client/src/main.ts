@@ -54,6 +54,9 @@ import { Concert } from "./concert";
 import { ConcertPanel } from "./ui/concert";
 import { MetroPanel, playRide, stationsOf } from "./ui/metro";
 import { BlackjackPanel, CagePanel, Casino, RoulettePanel, SlotsPanel, Tables } from "./ui/casino";
+import { MegaSlotsPanel, RacePanel } from "./ui/casinogames";
+import { LeaderboardPanel } from "./ui/leaderboard";
+import { SalvageGame } from "./ui/salvage";
 import { MOODS, MoodPicker, OfferCard } from "./activities/together";
 import { GATHERINGS, Welcome, nextOccurrence } from "./welcome";
 import { Soundscape } from "./ambient/sound";
@@ -383,6 +386,7 @@ async function main() {
     market: new MarketPanel(eco),
     plot: new PlotMenu(eco, (x, y, action, item) => game?.plotAction(x, y, action, item)),
     reel: new ReelGame(),
+    salvage: new SalvageGame(),
     place,
     menu: new ActionMenu(),
     social,
@@ -434,7 +438,10 @@ async function main() {
     concertPanel,
     yard: new YardPanel(rent, eco, rentHost),
     casino,
+    leaders: new LeaderboardPanel(auth),
     slots: new SlotsPanel(casino),
+    mega: new MegaSlotsPanel(casino),
+    race: new RacePanel(casino),
     roulette: new RoulettePanel(casino, tables),
     blackjack: new BlackjackPanel(casino, tables),
     tables,

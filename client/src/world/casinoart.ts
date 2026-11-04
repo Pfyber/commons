@@ -121,6 +121,65 @@ export function casinoObject(o: MapObject): { c: HTMLCanvasElement; overhang: nu
       disc(ctx, "#c8553d", w, 16, 4);
       return { c, overhang: 32 };
     }
+    case "mega_slot": {
+      // The big machine: a taller cabinet, deep blue with gold, a lit
+      // marquee of bulbs, a wide window of twenty little symbols, a button.
+      const [c, ctx] = canvas(w + 8, h + 48);
+      const H = c.height;
+      px(ctx, "rgba(0,0,0,0.2)", 4, H - 6, w - 6, 5);
+      px(ctx, O, 2, 4, w - 4, H - 8);
+      px(ctx, "#27407a", 4, 6, w - 8, H - 12);
+      px(ctx, "#3a5cab", 5, 7, 3, H - 16);
+      // The marquee: a gold band with bulbs, BIG on it.
+      px(ctx, O, 4, 0, w - 8, 18);
+      px(ctx, GOLD, 5, 1, w - 10, 16);
+      for (let x = 7; x < w - 6; x += 5) disc(ctx, x % 10 ? "#fff3b0" : "#ff8a3f", x, 3, 1);
+      text(ctx, "BIG", w / 2, 10, "#8f1f2b", w - 14);
+      // The window: five reels four high.
+      px(ctx, O, 6, 22, w - 12, 30);
+      px(ctx, "#fff8e3", 7, 23, w - 14, 28);
+      const cols = ["#c8553d", "#f2c94c", "#8a4fb0", "#e0a43a", "#5ec8c8", "#4f86d8", "#c8553d"];
+      for (let r = 0; r < 4; r++) {
+        for (let k = 0; k < 5; k++) {
+          px(ctx, cols[(r * 3 + k * 2) % cols.length], 9 + k * ((w - 18) / 5), 25 + r * 7, 4, 4);
+        }
+      }
+      // The button, glowing, and the tray.
+      disc(ctx, O, w / 2, 60, 5);
+      disc(ctx, "#ff5a5a", w / 2, 60, 4);
+      disc(ctx, "#ffb0b0", w / 2 - 1, 59, 1);
+      px(ctx, O, 10, H - 22, w - 20, 8);
+      px(ctx, GOLD, 11, H - 21, w - 22, 6);
+      return { c, overhang: 48 };
+    }
+    case "horse_race": {
+      // A big screen on a stand: the track, six little horses running, the
+      // finishing post; a ticket counter in front.
+      const [c, ctx] = canvas(w, h + 40);
+      const H = c.height;
+      px(ctx, "rgba(0,0,0,0.22)", 6, H - 8, w - 12, 8);
+      // The stand's legs.
+      px(ctx, O, 16, 50, 6, H - 66);
+      px(ctx, O, w - 22, 50, 6, H - 66);
+      // The screen.
+      px(ctx, O, 2, 0, w - 4, 54);
+      px(ctx, "#1b1816", 4, 2, w - 8, 50);
+      px(ctx, "#4f8a3a", 6, 4, w - 12, 46);
+      px(ctx, "#b9864f", 6, 12, w - 12, 34);
+      for (let i = 0; i < 6; i++) {
+        const y = 14 + i * 5.5;
+        const x = 18 + ((i * 37) % 60);
+        px(ctx, ["#5a3418", "#2b2320", "#8a5a33", "#b0a090", "#6b3a1c", "#c79a5a"][i], x, y, 8, 3);
+        px(ctx, ["#c8553d", "#4f86d8", "#f2c94c", "#5fb36b", "#b06fd8", "#ef8bb5"][i], x + 3, y - 2, 3, 2);
+      }
+      for (let y = 12; y < 46; y += 2) px(ctx, (y / 2) % 2 ? "#fff8e3" : "#1b1816", w - 18, y, 2, 2);
+      text(ctx, "RACES", w / 2, 7, "#ffe14f", w - 20);
+      // The counter.
+      px(ctx, O, 4, H - 26, w - 8, 20);
+      px(ctx, "#8f1f2b", 5, H - 25, w - 10, 18);
+      px(ctx, GOLD, 5, H - 25, w - 10, 3);
+      return { c, overhang: 40 };
+    }
     case "roulette_table": {
       // Green baize on a wooden rim: the wheel at one end, the numbers at the other.
       const [c, ctx] = canvas(w, h + 16);

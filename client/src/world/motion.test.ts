@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SKATE_SPEED_X10, SPRINT_SPEED_X10, durationMs, endT, headingAt, posAt, skateRampAt, speedAt, splice, sprintingAt } from "./motion";
+import { SKATE_SPEED_X10, SPRINT_SPEED_X10, VESPA_SPEED_X10, durationMs, endT, headingAt, posAt, skateRampAt, speedAt, splice, sprintingAt } from "./motion";
 
 describe("motion mirrors sim::motion", () => {
   // Same case as `walks_at_speed` in server/crates/sim/src/motion.rs.
@@ -42,6 +42,22 @@ describe("motion mirrors sim::motion", () => {
     const k = Math.floor(2 + 0.5 * sp);
     expect([s.prev, s.next]).toEqual([{ x: k, y: 0 }, { x: k + 1, y: 0 }]);
     expect(posAt(r, s.tPrev).x).toBeCloseTo(k, 1);
+  });
+});
+
+describe("the Vespa (in lockstep with sim::motion)", () => {
+  it("gives the same numbers as the server", () => {
+    for (const [len, ramp0, end, mid, at3000] of [
+      [200, 0, 7652, 78.391455, 67.6],
+      [10, 3000, 1541, 7.443125, 10],
+      [3, 0, 1320, 2.108376, 3],
+      [60, 4500, 2740, 36.192, 60],
+    ]) {
+      const m = { path: [{ x: 0, y: 0 }, { x: len, y: 0 }], t0: 1000, speedX10: VESPA_SPEED_X10, sprintIn: ramp0 };
+      expect(endT(m)).toBe(end);
+      expect(posAt(m, 1000 + Math.floor((end - 1000) / 2)).x).toBeCloseTo(mid, 5);
+      expect(posAt(m, 4000).x).toBeCloseTo(at3000, 5);
+    }
   });
 });
 

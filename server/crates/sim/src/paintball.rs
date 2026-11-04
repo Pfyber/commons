@@ -819,7 +819,7 @@ impl Match {
     /// In the lobby, someone with a place picks how good the bots are.
     /// Returns whether it changed.
     pub fn set_level(&mut self, by: u32, level: u8) -> bool {
-        let level = crate::level::clamp(level);
+        let level = crate::level::clamp(level).min(crate::level::HARD);
         if self.status != LOBBY || self.slot_of(by).is_none() || self.level == level {
             return false;
         }
@@ -1798,6 +1798,9 @@ mod tests {
         assert_eq!(m.slots.iter().filter(|&&s| s != 0).count(), 5);
         // The level: picked by those in, in the lobby.
         assert!(m.set_level(7, crate::level::HARD));
+        // (No extreme here: the Splat Yard's bots go up to hard.)
+        assert!(!m.set_level(7, crate::level::EXTREME));
+        assert_eq!(m.level, crate::level::HARD);
         assert!(!m.set_level(42, crate::level::EASY));
         assert!(m.start(7, false, 0));
         assert_eq!(m.players.len(), 5);

@@ -1,5 +1,5 @@
 //! The Casino (ADR 0017): its own zone behind its doors on the Casino block.
-//! Six slot machines along the back wall, the roulette table in the middle
+//! Six slot machines along the back wall (two of them the big kind), the horse races, the roulette table in the middle
 //! on a red carpet with a blackjack table either side (numbered from the
 //! left, as `social::tables` numbers them), the cashier's desk (the rules, the limits, today's play,
 //! taking a break), little tables to sit at, and the way out.
@@ -23,10 +23,16 @@ pub fn floor() -> MapFile {
         b.decor(0, y, "wood_wall");
         b.decor(w - 1, y, "wood_wall");
     }
-    // The slot machines, a step out from the back wall.
-    for i in 0..6u16 {
+    // The slot machines, a step out from the back wall: four of the old
+    // three-reel kind, then two big ones (twenty symbols).
+    for i in 0..4u16 {
         b.object("slot_machine", 2 + i * 3, 2, 2, 2, Some("Slots"), true);
     }
+    for i in 4..6u16 {
+        b.object("mega_slot", 2 + i * 3, 2, 2, 2, Some("Big Machine"), true);
+    }
+    // The horse races: a screen on a stand, the track on it.
+    b.object("horse_race", 15, 12, 4, 2, Some("Horse Races"), true);
     b.object("roulette_table", 8, 8, 8, 3, Some("Roulette"), true);
     b.object("blackjack_table", 2, 8, 5, 3, Some("Blackjack"), true);
     b.object("blackjack_table", 18, 8, 5, 3, Some("Blackjack"), true);

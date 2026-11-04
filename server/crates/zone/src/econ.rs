@@ -88,6 +88,18 @@ pub struct HomeObject {
     pub x: i16,
     pub y: i16,
     pub item: i32,
+    #[serde(default)]
+    pub layer: i16,
+    /// A fish tank's fish.
+    #[serde(default)]
+    pub fish: Vec<i32>,
+}
+
+/// A tank changed: what it holds now, and the bag's change.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TankDone {
+    pub fish: Vec<i32>,
+    pub applied: Applied,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,9 +123,18 @@ pub struct FishInfo {
 #[derive(Debug, Default)]
 pub struct ZoneCatalog {
     pub fish: Vec<FishInfo>,
+    /// What a magnet brings up from the bottom (by the same odds as fish).
+    pub scrap: Vec<FishInfo>,
     /// seed item → plant item
     pub seeds: HashMap<u32, u32>,
     pub furniture: HashSet<u32>,
+    /// Furniture that turns on and off (lights, the TV…), and fish tanks (how many they hold).
+    pub toggles: HashSet<u32>,
+    pub tanks: HashMap<u32, u8>,
+    /// Tables (things stand on them), the small things that do, and what hangs on a wall.
+    pub surfaces: HashSet<u32>,
+    pub tops: HashSet<u32>,
+    pub walls: HashSet<u32>,
     pub names: HashMap<u32, String>,
 }
 
@@ -135,6 +156,12 @@ impl ZoneCatalog {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false),
                 }),
+                "scrap" => c.scrap.push(FishInfo {
+                    id,
+                    weight: meta("weight").unwrap_or(1) as u32,
+                    rarity: it.rarity,
+                    night: false,
+                }),
                 "seed" => {
                     if let Some(p) = meta("grows") {
                         c.seeds.insert(id, p as u32);
@@ -142,6 +169,22 @@ impl ZoneCatalog {
                 }
                 "furniture" => {
                     c.furniture.insert(id);
+                    if it.meta.get("use").and_then(|v| v.as_str()) == Some("toggle") {
+                        c.toggles.insert(id);
+                    }
+                    if let Some(n) = meta("tank") {
+                        c.tanks.insert(id, n.clamp(1, 20) as u8);
+                    }
+                    let flag = |k: &str| it.meta.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+                    if meta("surface").is_some() {
+                        c.surfaces.insert(id);
+                    }
+                    if flag("top") {
+                        c.tops.insert(id);
+                    }
+                    if flag("wall") {
+                        c.walls.insert(id);
+                    }
                 }
                 _ => {}
             }
@@ -338,11 +381,61 @@ impl EconomyClient {
         .await
     }
 
+    /// Adds to a player's tally for the leaderboards (`arena_wins`, `paintball_wins`).
+    pub async fn stat_add(
+        &self,
+        player: &str,
+        stat: &str,
+        n: i64,
+    ) -> Result<serde_json::Value, CallError> {
+        let body = serde_json::json!({ "player": player, "stat": stat, "n": n });
+        self.call(reqwest::Method::POST, "/internal/stats/add", Some(&body))
+            .await
+    }
+
     pub async fn home_objects(&self, owner: &str) -> Result<Vec<HomeObject>, CallError> {
         self.call::<(), _>(
             reqwest::Method::GET,
             &format!("/internal/home/{owner}/objects"),
             None,
+        )
+        .await
+    }
+
+    /// A fish from `owner`'s bag into the tank at (x, y).
+    pub async fn tank_put(
+        &self,
+        owner: &str,
+        x: u16,
+        y: u16,
+        layer: u8,
+        fish: u32,
+        key: &str,
+    ) -> Result<TankDone, CallError> {
+        let body = serde_json::json!({ "owner": owner, "x": x, "y": y, "layer": layer, "fish": fish, "key": key });
+        self.call(
+            reqwest::Method::POST,
+            "/internal/home/tank/put",
+            Some(&body),
+        )
+        .await
+    }
+
+    /// The `index`th fish out of the tank at (x, y), back to the bag.
+    pub async fn tank_take(
+        &self,
+        owner: &str,
+        x: u16,
+        y: u16,
+        layer: u8,
+        index: u8,
+        key: &str,
+    ) -> Result<TankDone, CallError> {
+        let body = serde_json::json!({ "owner": owner, "x": x, "y": y, "layer": layer, "index": index, "key": key });
+        self.call(
+            reqwest::Method::POST,
+            "/internal/home/tank/take",
+            Some(&body),
         )
         .await
     }
@@ -353,9 +446,10 @@ impl EconomyClient {
         item: u32,
         x: u16,
         y: u16,
+        layer: u8,
         key: &str,
     ) -> Result<Applied, CallError> {
-        let body = serde_json::json!({ "owner": owner, "item": item, "x": x, "y": y, "key": key });
+        let body = serde_json::json!({ "owner": owner, "item": item, "x": x, "y": y, "layer": layer, "key": key });
         self.call(reqwest::Method::POST, "/internal/home/place", Some(&body))
             .await
     }
@@ -406,9 +500,11 @@ impl EconomyClient {
         owner: &str,
         x: u16,
         y: u16,
+        layer: u8,
         key: &str,
     ) -> Result<Applied, CallError> {
-        let body = serde_json::json!({ "owner": owner, "x": x, "y": y, "key": key });
+        let body =
+            serde_json::json!({ "owner": owner, "x": x, "y": y, "layer": layer, "key": key });
         self.call(reqwest::Method::POST, "/internal/home/pickup", Some(&body))
             .await
     }
@@ -466,8 +562,27 @@ impl ZoneCatalog {
         ];
         ZoneCatalog {
             fish,
+            scrap: vec![
+                FishInfo {
+                    id: 121,
+                    weight: 50,
+                    rarity: 0,
+                    night: false,
+                },
+                FishInfo {
+                    id: 127,
+                    weight: 1,
+                    rarity: 4,
+                    night: false,
+                },
+            ],
             seeds: [(200, 300)].into(),
-            furniture: [400].into(),
+            furniture: [400, 445].into(),
+            toggles: [434].into(),
+            tanks: [(445, 3)].into(),
+            surfaces: [454].into(),
+            tops: [445, 460].into(),
+            walls: [430].into(),
             names: Default::default(),
         }
     }

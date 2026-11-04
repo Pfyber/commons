@@ -19,6 +19,7 @@ import { boatObject } from "./boatart";
 import { museumObject } from "./museumart";
 import { paintballObject, splat as paintSplat } from "./paintballart";
 import { arenaObject } from "./arenaart";
+import { treeCanvas } from "./treeart";
 
 export const TILE = 32;
 
@@ -120,6 +121,8 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     floor: P.floor,
     pitch: P.pitch,
     road: "#8f8a80",
+    brick: "#a5523f",
+    moss: "#6d9447",
     carpet: "#c48d7a",
     straw: "#e3c77a",
     track: "#c0674e",
@@ -214,6 +217,41 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
         }
       }
       break;
+    case "moss": {
+      // The woods' floor: deep moss, lighter clumps of it, fallen leaves and twigs.
+      for (let i = 0; i < 5; i++) {
+        const s = hash(tx, ty, 70 + i);
+        px(ctx, "#5f8540", ox + (s % 28), oy + ((s >>> 8) % 28), 4, 3);
+      }
+      for (let i = 0; i < 3; i++) {
+        const s = hash(tx, ty, 80 + i);
+        px(ctx, "#7fa656", ox + (s % 29), oy + ((s >>> 8) % 29), 3, 2);
+      }
+      for (let i = 0; i < 3; i++) {
+        const s = hash(tx, ty, 90 + i);
+        px(ctx, ["#b5763a", "#c9953f", "#8a5a2c", "#a8643a"][(s >>> 16) % 4], ox + (s % 30), oy + ((s >>> 8) % 30), 2, 2);
+      }
+      if ((h & 7) === 0) px(ctx, "#6a4a2a", ox + 6 + (h % 16), oy + 10 + ((h >>> 5) % 14), 6, 1);
+      break;
+    }
+    case "brick": {
+      // The Ring Road: warm red bricks in staggered courses, each a little
+      // different, mortar between; a worn paler one here and there.
+      px(ctx, "#8a4334", ox, oy, TILE, TILE);
+      for (let r = 0; r < 4; r++) {
+        const shift = r % 2 ? 8 : 0;
+        for (let c = -1; c < 2; c++) {
+          const s = hash(tx * 2 + c, ty * 4 + r, 61);
+          const x = ox + c * 16 + shift;
+          const tone = ["#b0583f", "#a5523f", "#b96649", "#9c4a39", "#c27a58"][s % 5];
+          const x0 = Math.max(ox, x + 1);
+          const x1 = Math.min(ox + TILE, x + 16);
+          if (x1 > x0) px(ctx, tone, x0, oy + r * 8 + 1, x1 - x0, 6);
+          if ((s >>> 8) % 9 === 0 && x1 - x0 > 6) px(ctx, "#d79a74", x0 + 2, oy + r * 8 + 2, 4, 1);
+        }
+      }
+      break;
+    }
     case "track": {
       // A rubber running track: a fine grain, white lane lines where it
       // meets something else.
@@ -254,10 +292,17 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
       px(ctx, "#bdb39e", ox + (tx % 2 ? 0 : 16), oy, 1, TILE);
       px(ctx, "#bdb39e", ox, oy + (ty % 2 ? 0 : 16), TILE, 1);
       if ((h & 15) === 0) px(ctx, "#c4bba7", ox + 4 + (h % 18), oy + 6 + ((h >>> 5) % 18), 5, 3);
-      if (at(tx, ty - 1) === "road") px(ctx, "#7d776c", ox, oy, TILE, 4);
-      if (at(tx, ty + 1) === "road") px(ctx, "#7d776c", ox, oy + TILE - 4, TILE, 4);
-      if (at(tx - 1, ty) === "road") px(ctx, "#7d776c", ox, oy, 4, TILE);
-      if (at(tx + 1, ty) === "road") px(ctx, "#7d776c", ox + TILE - 4, oy, 4, TILE);
+      {
+        // (The kerb stone, along cobbles or the Ring Road's brick.)
+        const kerb = (dx: number, dy: number) => {
+          const n = at(tx + dx, ty + dy);
+          return n === "road" || n === "brick";
+        };
+        if (kerb(0, -1)) px(ctx, "#7d776c", ox, oy, TILE, 4);
+        if (kerb(0, 1)) px(ctx, "#7d776c", ox, oy + TILE - 4, TILE, 4);
+        if (kerb(-1, 0)) px(ctx, "#7d776c", ox, oy, 4, TILE);
+        if (kerb(1, 0)) px(ctx, "#7d776c", ox + TILE - 4, oy, 4, TILE);
+      }
       break;
     case "tavern_floor": {
       // Dark, worn walnut planks, two to a tile: a quiet floor, so the
@@ -401,6 +446,19 @@ function soften(ctx: CanvasRenderingContext2D, kind: string, tx: number, ty: num
 const decorCache = new Map<string, Texture>();
 
 export function decorTexture(kind: string, variant: number): Texture | null {
+  // The amphitheatre's walls and seats: the painted bowl has them, cushions
+  // on the public ones and all (the tiles are only there to bump into and
+  // sit on).
+  if (kind.startsWith("amph_")) return null;
+  // The trees, richer and in six shapes each (treeart.ts).
+  const treeKey = `${kind}:t${variant % 6}`;
+  const tree = decorCache.get(treeKey) ?? treeCanvas(kind, variant);
+  if (tree) {
+    if (tree instanceof Texture) return tree;
+    const t = toTexture(tree);
+    decorCache.set(treeKey, t);
+    return t;
+  }
   const key = `${kind}:${variant % 3}`;
   const cached = decorCache.get(key);
   if (cached) return cached;
@@ -409,77 +467,6 @@ export function decorTexture(kind: string, variant: number): Texture | null {
   let ctx: CanvasRenderingContext2D;
   const v = variant % 3;
   switch (kind) {
-    case "tree": {
-      [c, ctx] = makeCanvas(40, 56);
-      px(ctx, "rgba(0,0,0,0.18)", 8, 50, 24, 4);
-      px(ctx, P.outline, 17, 34, 7, 18);
-      px(ctx, P.trunk, 18, 34, 5, 17);
-      const leaf = [P.leaf, "#6aa24e", "#58913f"][v];
-      circle(ctx, P.outline, 20, 22, 17);
-      circle(ctx, leaf, 20, 22, 16);
-      circle(ctx, P.leafLight, 14, 16, 7);
-      circle(ctx, leaf, 26, 28, 7);
-      px(ctx, P.leafLight, 24, 12, 3, 3);
-      break;
-    }
-    case "pine": {
-      [c, ctx] = makeCanvas(36, 60);
-      px(ctx, "rgba(0,0,0,0.18)", 8, 54, 20, 4);
-      px(ctx, P.trunk, 16, 46, 4, 10);
-      for (let i = 0; i < 3; i++) {
-        const top = 4 + i * 13;
-        const half = 8 + i * 4;
-        polygon(ctx, i % 2 ? P.pine : P.pineLight, [
-          [18, top],
-          [18 + half, top + 20],
-          [18 - half, top + 20],
-        ]);
-      }
-      break;
-    }
-    case "pine_secret": {
-      // Looks just like a pine. Almost.
-      [c, ctx] = makeCanvas(36, 60);
-      px(ctx, "rgba(0,0,0,0.18)", 8, 54, 20, 4);
-      px(ctx, P.trunk, 16, 46, 4, 10);
-      for (let i = 0; i < 3; i++) {
-        const top = 4 + i * 13;
-        const half = 8 + i * 4;
-        polygon(ctx, i % 2 ? P.pine : P.pineLight, [
-          [18, top],
-          [18 + half, top + 20],
-          [18 - half, top + 20],
-        ]);
-      }
-      px(ctx, "#fff6d0", 22, 30, 1, 1);
-      break;
-    }
-    case "willow":
-    case "willow_curtain": {
-      // A weeping willow: a round crown and long hanging strands. The
-      // curtain is a gap between two willows, all strands.
-      [c, ctx] = makeCanvas(40, 60);
-      const curtain = kind === "willow_curtain";
-      const leaf = ["#9cc46e", "#a8cc74", "#93bd66"][v];
-      if (!curtain) {
-        px(ctx, "rgba(0,0,0,0.18)", 4, 54, 32, 4);
-        px(ctx, P.outline, 18, 26, 5, 30);
-        px(ctx, P.trunk, 19, 26, 3, 29);
-        oval(ctx, P.outline, 20, 14, 19, 12);
-        oval(ctx, leaf, 20, 14, 18, 11);
-        oval(ctx, "#c3e08f", 14, 9, 7, 4);
-      }
-      // Long hanging strands, almost to the ground.
-      for (let i = 0; i < 10; i++) {
-        const sx = 2 + i * 4;
-        const top = curtain ? 0 : 14 + (Math.abs(4.5 - i) | 0);
-        const len = curtain ? 50 + ((i * 7 + v) % 8) : 36 + ((i * 5 + v) % 6) - (Math.abs(4.5 - i) | 0);
-        px(ctx, P.outline, sx - 1, top, 1, len);
-        px(ctx, curtain ? "#b2d685" : leaf, sx, top, 2, len);
-        px(ctx, "#c3e08f", sx, top + len - 4, 2, 4);
-      }
-      break;
-    }
     case "arena_wall": {
       // The arena's sandstone wall: big blocks in courses, a capstone on top,
       // and now and then an arch window or a torch.
@@ -657,6 +644,35 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       if (!openR) px(ctx, P.outline, 24, 17, 2, 6);
       break;
     }
+    // A bench stood north to south, its back to the east (you sit looking
+    // west): one tile of it, or the top, middle or bottom of a longer one.
+    case "bench_v":
+    case "bench_v_top":
+    case "bench_v_mid":
+    case "bench_v_bot": {
+      [c, ctx] = makeCanvas(32, 32);
+      const openT = kind === "bench_v_mid" || kind === "bench_v_bot";
+      const openB = kind === "bench_v_mid" || kind === "bench_v_top";
+      const y0 = openT ? 0 : 4;
+      const y1 = openB ? 32 : 26;
+      const t = y0 + (openT ? 0 : 1);
+      const len = y1 - y0 - (openT ? 0 : 1) - (openB ? 0 : 1);
+      // The seat's slats, then the back, a step higher.
+      px(ctx, P.outline, 8, y0, 11, y1 - y0);
+      px(ctx, P.wood, 9, t, 4, len);
+      px(ctx, P.wood, 14, t, 4, len);
+      px(ctx, P.outline, 19, y0 - (openT ? 0 : 2), 6, y1 - y0 + (openT ? 0 : 2));
+      px(ctx, P.woodDark, 20, t - (openT ? 0 : 2), 4, len + (openT ? 0 : 2));
+      px(ctx, P.wood, 21, t - (openT ? 0 : 2), 1, len + (openT ? 0 : 2));
+      if (!openB) {
+        px(ctx, P.outline, 9, 26, 2, 5);
+        px(ctx, P.outline, 21, 26, 2, 5);
+      }
+      if (!openT) {
+        px(ctx, P.outline, 9, y0 - 1, 2, 1);
+      }
+      break;
+    }
     case "lamp": {
       // An old street lamp: a pointed roof, a glass lantern with two dark
       // bars, a collar, and a slim post with rings down to its foot.
@@ -755,20 +771,6 @@ export function decorTexture(kind: string, variant: number): Texture | null {
         const sx = (hash(i, v, 77) % 28) + 1;
         const sy = (hash(i, v, 78) % 28) + 6;
         px(ctx, i % 2 ? "#579463" : "#2f5e34", sx, sy, 3, 2);
-      }
-      break;
-    }
-    case "apple_tree": {
-      [c, ctx] = makeCanvas(40, 56);
-      px(ctx, "rgba(0,0,0,0.18)", 8, 50, 24, 4);
-      px(ctx, P.outline, 17, 34, 7, 18);
-      px(ctx, P.trunk, 18, 34, 5, 17);
-      circle(ctx, P.outline, 20, 22, 16);
-      circle(ctx, "#6aa24e", 20, 22, 15);
-      circle(ctx, P.leafLight, 14, 16, 6);
-      for (const [ax, ay] of [[10, 22], [27, 17], [22, 29], [15, 30], [29, 26], [19, 12]]) {
-        px(ctx, "#d94a4a", ax, ay, 3, 3);
-        px(ctx, "#ff8a7a", ax, ay, 1, 1);
       }
       break;
     }
@@ -1083,6 +1085,20 @@ export function decorTexture(kind: string, variant: number): Texture | null {
 }
 
 // ---- multi-tile objects ----------------------------------------------------
+
+/** A leaderboard sign's layout: how far it reaches above its tiles, and where its top five are written (px, in its picture). */
+export const LEADER_SIGN = { overhang: 60, textX: 5, textY: 25, textW: 54, textH: 34, rowH: 7 };
+
+/** Which board a leaderboard sign is (by its label): coins, arena, fish or paintball. */
+export function leaderKind(label: string): "coins" | "arena" | "fish" | "paintball" {
+  const l = label.toLowerCase();
+  return l.includes("arena") ? "arena" : l.includes("angler") ? "fish" : l.includes("paintball") ? "paintball" : "coins";
+}
+
+/** What a leaderboard sign says across its top. */
+export function leaderTitle(label: string): string {
+  return { coins: "LEADERBOARD", arena: "ARENA WINS", fish: "TOP ANGLERS", paintball: "PAINTBALL" }[leaderKind(label)];
+}
 
 function label(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, color = "#3b3a2e", size = 12) {
   if (canPixel(text)) {
@@ -1614,6 +1630,53 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, accent, 4, 4, w - 8, 9);
       const title = o.kind === "notice_board" ? "NOTICES" : o.kind === "story_board" ? "OUR TOWN" : slug.toUpperCase();
       label(ctx, title, w / 2, 9, "#fff9ec", 7);
+      break;
+    }
+    case "leaderboard": {
+      // A leaderboard (on the green, by the arena, the pond, the Splat
+      // Yard): a plank board in the other boards' wood, a golden crown on
+      // top, its title in gold; the top five are written on the planks
+      // (live: world/leadersigns.ts writes them on).
+      [c, ctx] = makeCanvas(w, h + LEADER_SIGN.overhang);
+      overhang = LEADER_SIGN.overhang;
+      const H = h + LEADER_SIGN.overhang;
+      const top = 10;
+      const bottom = LEADER_SIGN.overhang;
+      const plank = ["#b07d4f", "#a3714a", "#bc8a5a", "#9c6b42", "#c49462"];
+      px(ctx, "rgba(0,0,0,0.15)", 6, H - 6, w - 12, 5);
+      // The two posts, as the other boards have.
+      px(ctx, P.outline, 8, bottom, 4, H - bottom - 2);
+      px(ctx, P.outline, w - 12, bottom, 4, H - bottom - 2);
+      // The board: planks in light wood, the grain in streaks.
+      px(ctx, P.outline, 2, top, w - 4, bottom - top + 1);
+      px(ctx, plank[0], 3, top + 1, w - 6, bottom - top - 1);
+      for (let y = top + 12; y < bottom; y++) {
+        let x = 3;
+        let i = y * 7;
+        while (x < w - 3) {
+          const len = 4 + ((i * 37 + y * 13) % 14);
+          px(ctx, plank[(i * 3 + y) % plank.length], x, y, Math.min(len, w - 3 - x), 1);
+          x += len;
+          i++;
+        }
+      }
+      // The title band: darker wood, so the gold shows.
+      px(ctx, P.woodDark, 3, top + 1, w - 6, 10);
+      px(ctx, P.outline, 3, top + 11, w - 6, 1);
+      const title = leaderTitle(o.label ?? "");
+      label(ctx, title, w / 2 + 1, top + 7, "#4a3010", 7);
+      label(ctx, title, w / 2, top + 6, "#f2c230", 7);
+      // The crown on top: gold, rubies, a shine.
+      const cx = w / 2;
+      px(ctx, "#8a6a10", cx - 8, 3, 16, 8);
+      px(ctx, "#f2c230", cx - 7, 4, 14, 6);
+      for (const dx of [-7, -1, 5]) {
+        px(ctx, "#8a6a10", cx + dx - 1, 0, 4, 4);
+        px(ctx, "#f2c230", cx + dx, 1, 2, 3);
+      }
+      px(ctx, "#ffe680", cx - 7, 4, 14, 1);
+      for (const dx of [-5, -1, 3]) px(ctx, "#9a1c10", cx + dx, 6, 2, 3);
+      px(ctx, "#ffe680", cx - 6, 5, 1, 1);
       break;
     }
     case "goal": {

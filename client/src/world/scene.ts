@@ -1,7 +1,7 @@
 // The rendered world: ground chunks baked as they come into view, y-sorted
 // props and avatars, and a camera that follows the player.
 
-import { type Application, Container, Graphics, Sprite } from "pixi.js";
+import { type Application, Container, Graphics, Sprite, type Texture } from "pixi.js";
 import { TILE, bakeChunk, decorTexture, hash, newTagTexture, objectTexture } from "./art";
 import { itemTexture } from "./items";
 import { type MapObject, type ZoneMap, groundAt } from "./map";
@@ -13,7 +13,7 @@ const WALL_ABOVE = 1.5;
 const HUD_PX = 72;
 /** Decor drawn flat on the ground. */
 /** Objects that lie flat (people stand on them): the dance floor, the paintball field's markings, pads and bases. */
-const FLAT_OBJECTS = new Set(["dance_floor", "concert_stage", "pb_field", "pb_pad", "pb_spawn", "arena_spikes", "arena_carpet"]);
+const FLAT_OBJECTS = new Set(["dance_floor", "concert_stage", "pb_field", "pb_pad", "pb_spawn", "arena_spikes", "arena_carpet", "arena_bowl"]);
 const FLAT = new Set(["blanket", "lilypad", "mushrooms", "wildflowers", "daisies", "clover", "pebbles", "bones"]);
 /** Decor that sways in the wind. */
 const SWAY = new Set(["tree", "pine", "apple_tree", "bush", "tallgrass", "reeds", "willow", "willow_curtain", "pine_secret", "fern", "palm", "dry_shrub"]);
@@ -24,6 +24,14 @@ function benchPiece(map: ZoneMap, x: number, y: number): string {
   const l = bench(x - 1);
   const r = bench(x + 1);
   return l && r ? "bench_mid" : l ? "bench_right" : r ? "bench_left" : "bench";
+}
+
+/** Upright bench tiles, one above another, draw as one long bench too. */
+function benchVPiece(map: ZoneMap, x: number, y: number): string {
+  const bench = (yy: number) => yy >= 0 && yy < map.height && map.decor_legend[map.decor[yy * map.width + x]] === "bench_v";
+  const t = bench(y - 1);
+  const b = bench(y + 1);
+  return t && b ? "bench_v_mid" : t ? "bench_v_bot" : b ? "bench_v_top" : "bench_v";
 }
 
 /** How far the wheel zooms, in steps either side of the default. */
@@ -37,7 +45,8 @@ const ZOOM_KEY = "commons.zoom";
 
 function loadZoom(): number {
   try {
-    return Math.round(Number(localStorage.getItem(ZOOM_KEY)) || 0);
+    // (In quarter steps: the wheel zooms finely.)
+    return Math.round((Number(localStorage.getItem(ZOOM_KEY)) || 0) * 4) / 4;
   } catch {
     return 0;
   }
@@ -45,7 +54,9 @@ function loadZoom(): number {
 
 /** Chunks kept loaded around the view, and how many to bake per frame. */
 const MARGIN = 1;
-const BAKE_PER_FRAME = 4;
+const BAKE_PER_FRAME = 2;
+/** Objects' art kept out of range, for walking back (the rest is drawn again). */
+const KEEP_ART = 80;
 
 interface Chunk {
   ground: Sprite;
@@ -61,6 +72,10 @@ interface Placed {
   x1: number;
   y1: number;
   sprite: Sprite | null;
+  /** Its art, kept a while after it goes out of range (drawing it again as you walk back is what made the walk hitch). */
+  art: { texture: Texture; overhang: number; left: number } | null;
+  /** When it last went out of range (its art goes first, when too much is kept). */
+  hiddenAt: number;
   /** A mall display's item (and its "new" tag), drawn on the stand. */
   extras: Sprite[];
 }
@@ -115,7 +130,7 @@ export class Scene {
     this.placed = map.objects
       // Drawn elsewhere, or invisible.
       .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot" && o.kind !== "forage" && o.kind !== "arena" && o.kind !== "yard_stand" && o.kind !== "boat_lake")
-      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, extras: [] }));
+      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, art: null, hiddenAt: 0, extras: [] }));
     this.resize();
   }
 
@@ -169,7 +184,8 @@ export class Scene {
 
   /** Draws a placed object (and what's on show on it). */
   private show(p: (typeof this.placed)[number]) {
-    const { texture, overhang, left } = objectTexture(p.o);
+    p.art ??= objectTexture(p.o);
+    const { texture, overhang, left } = p.art;
     const s = new Sprite(texture);
     s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
     // The dance floor lies flat: people stand on it, not behind it.
@@ -200,18 +216,33 @@ export class Scene {
   }
 
   private hide(p: (typeof this.placed)[number]) {
-    p.sprite?.destroy({ texture: true, textureSource: true });
+    // (Its art's kept for when we come back, up to a point: the longest
+    // gone go first.)
+    p.sprite?.destroy();
     p.sprite = null;
+    p.hiddenAt = performance.now();
     for (const e of p.extras) e.destroy();
     p.extras = [];
+    const kept = this.placed.filter((q) => q.art && !q.sprite);
+    if (kept.length > KEEP_ART) {
+      kept.sort((a, b) => a.hiddenAt - b.hiddenAt);
+      for (const q of kept.slice(0, kept.length - KEEP_ART)) this.dropArt(q);
+    }
+  }
+
+  private dropArt(p: (typeof this.placed)[number]) {
+    p.art?.texture.destroy(true);
+    p.art = null;
   }
 
   /** Draws `o` again (it changed: a house done up, a new postbox). */
   redraw(o: MapObject) {
     const p = this.placed.find((q) => q.o === o);
-    if (!p?.sprite) return;
+    if (!p) return;
+    const shown = !!p.sprite;
     this.hide(p);
-    this.show(p);
+    this.dropArt(p);
+    if (shown) this.show(p);
   }
 
   private load(cx: number, cy: number) {
@@ -228,7 +259,7 @@ export class Scene {
       for (let x = x0; x < x0 + w; x++) {
         const kind = map.decor_legend[map.decor[y * map.width + x]];
         if (kind === "none") continue;
-        const tex = decorTexture(kind === "bench" ? benchPiece(map, x, y) : kind, hash(x, y, 5));
+        const tex = decorTexture(kind === "bench" ? benchPiece(map, x, y) : kind === "bench_v" ? benchVPiece(map, x, y) : kind, hash(x, y, 5));
         if (!tex) continue;
         const s = new Sprite(tex);
         s.anchor.set(0.5, 1);
@@ -254,7 +285,8 @@ export class Scene {
   destroy() {
     for (const [key, c] of this.chunks) this.unload(key, c);
     for (const p of this.placed) {
-      p.sprite?.destroy({ texture: true, textureSource: true });
+      p.sprite?.destroy();
+      this.dropArt(p);
       for (const e of p.extras) e.destroy();
     }
     this.world.destroy({ children: true });
@@ -318,6 +350,26 @@ export class Scene {
     return true;
   }
 
+  /**
+   * A fine step in (+1) or out (−1): a quarter step, for a precise view
+   * (between the crisp ones). (Watching the arena, it may go a little
+   * closer still; `save`: kept for next time.)
+   */
+  zoomFine(dir: number, closer = true, save = false): boolean {
+    const [lo, hi] = this.zoomRange();
+    const next = Math.max(lo, Math.min(hi + (closer ? 2 : 0), this.zoomTo + Math.sign(dir) * 0.25));
+    if (next === this.zoomTo) return false;
+    this.zoomTo = next;
+    if (save) this.saveZoom();
+    return true;
+  }
+
+  /** Back within the usual range (after watching the arena close up). */
+  zoomSnap() {
+    const [lo, hi] = this.zoomRange();
+    this.zoomTo = Math.max(lo, Math.min(hi, this.zoomTo));
+  }
+
   /** The zoom now (for a pinch to start from). */
   get zoomLevel(): number {
     return this.zoom;
@@ -331,9 +383,9 @@ export class Scene {
     this.resize();
   }
 
-  /** The pinch let go: glide to the nearest crisp step. */
+  /** The pinch let go: settle on the nearest quarter step. */
   pinchEnd() {
-    this.zoomTo = Math.round(this.zoom);
+    this.zoomTo = Math.round(this.zoom * 4) / 4;
     this.saveZoom();
   }
 

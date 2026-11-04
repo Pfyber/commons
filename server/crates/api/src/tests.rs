@@ -374,6 +374,79 @@ async fn home_place_and_pickup() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn fish_go_in_a_tank_and_back_out() {
+    let Some(db) = db().await else { return };
+    let s = state(db.clone(), 1000).await;
+    let p = player(&s).await;
+    let owner = p.to_string();
+    sqlx::query("INSERT INTO leases (kind, plot, player_id, tier, paid_until) VALUES ('home', $1, $2, 1, now() + interval '7 days')")
+        .bind(format!("test:{p}"))
+        .bind(p)
+        .execute(&s.db)
+        .await
+        .unwrap();
+    // A round fish bowl (it holds three), and four fish.
+    apply_tx(
+        &s.db,
+        &s.catalog,
+        p,
+        &[
+            Op {
+                item: 444,
+                delta: 1,
+            },
+            Op {
+                item: 100,
+                delta: 4,
+            },
+        ],
+        "test",
+        &format!("{p}:give"),
+    )
+    .await
+    .unwrap();
+    let (st, r) = call(&s, "/home/place", serde_json::json!({ "owner": owner, "item": 444, "x": 2, "y": 2, "key": format!("{p}:bowl") })).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    for i in 0..3 {
+        let (st, r) = call(&s, "/home/tank/put", serde_json::json!({ "owner": owner, "x": 2, "y": 2, "fish": 100, "key": format!("{p}:in{i}") })).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["fish"].as_array().unwrap().len(), i + 1);
+    }
+    let (st, r) = call(&s, "/home/tank/put", serde_json::json!({ "owner": owner, "x": 2, "y": 2, "fish": 100, "key": format!("{p}:in3") })).await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("tank_full"))
+    );
+    // Not picked up with fish in it.
+    let (st, r) = call(
+        &s,
+        "/home/pickup",
+        serde_json::json!({ "owner": owner, "x": 2, "y": 2, "key": format!("{p}:up") }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("tank_full"))
+    );
+    let (st, r) = call(&s, "/home/tank/take", serde_json::json!({ "owner": owner, "x": 2, "y": 2, "index": 0, "key": format!("{p}:out") })).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["fish"], serde_json::json!([100, 100]));
+    assert_eq!(r["applied"]["totals"][0], serde_json::json!([100, 2]));
+    let fish: Vec<i32> =
+        sqlx::query_scalar("SELECT fish FROM home_objects WHERE owner_id = $1 AND x = 2 AND y = 2")
+            .bind(p)
+            .fetch_one(&s.db)
+            .await
+            .unwrap();
+    assert_eq!(fish, vec![100, 100]);
+    sqlx::query("DELETE FROM leases WHERE player_id = $1")
+        .bind(p)
+        .execute(&s.db)
+        .await
+        .unwrap();
+}
+
 // ---- town life ------------------------------------------------------------------
 
 mod town_life {
@@ -2556,7 +2629,7 @@ mod mall_shop {
             ("tools", "carbon_rod"),
             ("tools", "copper_can"),
             ("toys", "kite"),
-            ("music", "ukulele"),
+            ("toys", "ukulele"),
             ("exterior", "picket_fence"),
         ] {
             let (st, r) = call(&app, &auth, "POST", "/api/mall/buy", buy(dept, key)).await;
@@ -3133,4 +3206,201 @@ async fn club_rooms_are_arranged_by_members_and_pieces_go_back_to_their_placers(
         (st, r["error"].as_str()),
         (StatusCode::CONFLICT, Some("room_full"))
     );
+}
+
+mod leaderboards {
+    use super::town_life::{bearer_for, call};
+    use super::*;
+    use crate::economy::COIN;
+    use axum::Router;
+    use commons_common::token::{self, ServiceClaims};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn the_boards_rank_coins_and_wins_and_say_where_you_stand() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = Router::new()
+            .nest("/api", crate::leaderboards::routes())
+            .nest("/internal", crate::internal::routes())
+            .with_state(s.clone());
+        let (a, b) = (player(&s).await, player(&s).await);
+        // A good deal richer than anyone a test made before.
+        for (p, n) in [(a, 9_000_000), (b, 8_000_000)] {
+            apply_tx(
+                &s.db,
+                &s.catalog,
+                p,
+                &[Op {
+                    item: COIN,
+                    delta: n,
+                }],
+                "test",
+                &format!("{p}:rich"),
+            )
+            .await
+            .unwrap();
+        }
+        let svc = format!(
+            "Bearer {}",
+            token::sign(&s.secret, &ServiceClaims { svc: "zone".into() }, 60)
+        );
+        for _ in 0..2 {
+            let (st, r) = call(
+                &app,
+                &svc,
+                "POST",
+                "/internal/stats/add",
+                json!({ "player": b.to_string(), "stat": "arena_wins" }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+        }
+        let (st, _) = call(
+            &app,
+            &svc,
+            "POST",
+            "/internal/stats/add",
+            json!({ "player": b.to_string(), "stat": "made_up" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "only the known tallies");
+        // A swarm bot, richer than anyone: never on the boards.
+        let bot = player(&s).await;
+        let bot_name = format!("Bot {}", bot.as_u128() % 1_000_000_000);
+        sqlx::query("UPDATE players SET display_name = $2 WHERE id = $1")
+            .bind(bot)
+            .bind(&bot_name)
+            .execute(&s.db)
+            .await
+            .unwrap();
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            bot,
+            &[Op {
+                item: COIN,
+                delta: 50_000_000,
+            }],
+            "test",
+            &format!("{bot}:rich"),
+        )
+        .await
+        .unwrap();
+        let me = bearer_for(&s, b, "b");
+        let (st, r) = call(&app, &me, "GET", "/api/leaderboards", json!({})).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let coins = r["coins"]["top"].as_array().unwrap();
+        // (Everyone starts with 100.)
+        let ia = coins
+            .iter()
+            .position(|x| x["value"].as_i64() == Some(9_000_100))
+            .unwrap();
+        let ib = coins
+            .iter()
+            .position(|x| x["value"].as_i64() == Some(8_000_100))
+            .unwrap();
+        assert!(ia < ib, "the richer first");
+        assert!(
+            coins.iter().all(|x| x["name"] != bot_name.as_str()),
+            "no bots"
+        );
+        assert_eq!(r["coins"]["me"]["value"], 8_000_100);
+        assert_eq!(r["arena"]["me"]["value"], 2);
+        for k in ["fish", "paintball"] {
+            assert!(r[k]["top"].is_array(), "{k}");
+        }
+    }
+}
+
+mod fish_quest {
+    use super::town_life::{bearer_for, call};
+    use super::*;
+    use axum::Router;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn the_fisherman_orders_three_fish_and_pays_triple_for_them() {
+        let Some(db) = db().await else { return };
+        let s = state(db, 1000).await;
+        let app = Router::new()
+            .nest("/api", crate::fishquest::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let me = bearer_for(&s, p, "angler");
+        let (st, q) = call(&app, &me, "GET", "/api/fisherman/quest", json!({})).await;
+        assert_eq!(st, StatusCode::OK, "{q}");
+        let items = q["items"].as_array().unwrap().clone();
+        assert_eq!(items.len(), 3, "three fish: {q}");
+        let ids: Vec<i64> = items.iter().map(|i| i["item"].as_i64().unwrap()).collect();
+        assert!(
+            ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2],
+            "all different"
+        );
+        // The same order all period.
+        let (_, again) = call(&app, &me, "GET", "/api/fisherman/quest", json!({})).await;
+        assert_eq!(again["items"], q["items"]);
+        // Plenty of the fish he wants; hand them all in (he takes only what he asked).
+        let ops: Vec<Op> = items
+            .iter()
+            .map(|i| Op {
+                item: i["item"].as_i64().unwrap() as i32,
+                delta: 9,
+            })
+            .collect();
+        apply_tx(&s.db, &s.catalog, p, &ops, "test", &format!("{p}:fish"))
+            .await
+            .unwrap();
+        let first = &items[0];
+        let (item, need) = (
+            first["item"].as_i64().unwrap() as i32,
+            first["need"].as_i64().unwrap() as i32,
+        );
+        let sell = s.catalog.get(item).unwrap().sell().unwrap();
+        let (st, r) = call(
+            &app,
+            &me,
+            "POST",
+            "/api/fisherman/quest/deliver",
+            json!({ "item": item, "qty": 99, "key": "a" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let coins = r["applied"]["totals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t[0] == 1)
+            .unwrap()[1]
+            .as_i64()
+            .unwrap();
+        assert_eq!(
+            coins,
+            100 + sell * 3 * need as i64,
+            "triple, for as many as he asked"
+        );
+        assert_eq!(r["quest"]["items"][0]["given"], need);
+        let (st, _) = call(
+            &app,
+            &me,
+            "POST",
+            "/api/fisherman/quest/deliver",
+            json!({ "item": item, "qty": 1, "key": "b" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "no more of that one");
+        for (i, it) in items.iter().enumerate().skip(1) {
+            let (st, r) = call(
+                &app,
+                &me,
+                "POST",
+                "/api/fisherman/quest/deliver",
+                json!({ "item": it["item"], "qty": 99, "key": format!("k{i}") }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{r}");
+        }
+        let (_, q) = call(&app, &me, "GET", "/api/fisherman/quest", json!({})).await;
+        assert_eq!(q["done"], true, "{q}");
+    }
 }

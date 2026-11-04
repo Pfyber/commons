@@ -7,6 +7,8 @@ export const LEVELS = [
   { name: "Easy", icon: "😌", blurb: "slow to react, shaky aim: good for learning" },
   { name: "Medium", icon: "😐", blurb: "a fair fight" },
   { name: "Hard", icon: "😈", blurb: "quick, sharp and ruthless" },
+  // The arena's only: they read you, wait their moment and work together.
+  { name: "Extreme", icon: "💀", blurb: "patient and cunning: they read your wind-ups, take turns, punish every slip" },
 ];
 
 /** The level's label, e.g. "😈 Hard". */
@@ -16,14 +18,17 @@ export function levelLabel(level: number): string {
 }
 
 /**
- * Bot difficulty: Easy · Medium · Hard, the current one lit (and what it
- * means under them). With `pick`, they're buttons; without, just shown.
+ * Bot difficulty: Easy · Medium · Hard (· Extreme, where `extreme`), the
+ * current one lit (and what it means under them). With `pick`, they're
+ * buttons; without, just shown.
  */
-export function levelPicker(level: number, pick: ((level: number) => void) | null): HTMLElement {
+export function levelPicker(level: number, pick: ((level: number) => void) | null, extreme = false): HTMLElement {
+  const levels = extreme ? LEVELS : LEVELS.slice(0, 3);
+  const at = Math.min(levels.length - 1, Math.max(0, level));
   const box = el("div", "bot-level");
-  const row = el("div", "bot-level-row");
+  const row = el("div", `bot-level-row${extreme ? " four" : ""}`);
   row.append(el("span", "bot-level-title", "🤖 Bots"));
-  LEVELS.forEach((l, k) => {
+  levels.forEach((l, k) => {
     const b = el("button", `bot-level-btn l${k}${k === level ? " on" : ""}`, `${l.icon} ${l.name}`);
     b.type = "button";
     b.disabled = !pick;
@@ -31,6 +36,6 @@ export function levelPicker(level: number, pick: ((level: number) => void) | nul
     if (pick) b.addEventListener("click", () => k !== level && pick(k));
     row.append(b);
   });
-  box.append(row, el("div", "bot-level-blurb", LEVELS[Math.min(2, Math.max(0, level))].blurb));
+  box.append(row, el("div", "bot-level-blurb", levels[at].blurb));
   return box;
 }

@@ -7,14 +7,20 @@
 import type { Auth } from "../net/api";
 import { ApiError } from "../net/api";
 import type { Social } from "../social";
+import * as cs from "../ambient/casinosfx";
 import { Panel, button, el } from "./panels";
+import { Wheel3D } from "./wheel3d";
 
 export interface CasinoStatus {
   can_play: boolean;
   why: string | null;
   today: { bet: number; won: number; net: number; loss_left: number };
-  limits: { slots: [number, number]; roulette: [number, number]; roulette_round: number; blackjack: [number, number]; daily_loss: number };
+  limits: { slots: [number, number]; mega?: [number, number]; race?: [number, number]; roulette: [number, number]; roulette_round: number; blackjack: [number, number]; daily_loss: number };
   slots: { symbols: string[]; three: number[]; two_cherries: number };
+  /** The big machine: its symbols, how many pay, and what (tenths of the bet). */
+  mega?: { symbols: string[]; min: number[]; pays: number[][] };
+  /** The horses: names, chances (of 100), what a win pays (tenths of the bet). */
+  horses?: { names: string[]; chance: number[]; pays: number[] };
   break_until: number | null;
 }
 
@@ -44,14 +50,26 @@ export class Casino {
     return r;
   }
 
+  async mega(bet: number): Promise<{ outcome: { cells: string[]; pays: number }; payout: number }> {
+    const r = await this.auth.send<{ outcome: { cells: string[]; pays: number }; payout: number }>("/api/social/casino/mega", { bet, key: key() });
+    this.onPlayed();
+    return r;
+  }
+
+  async race(bet: number, horse: number): Promise<{ outcome: { order: number[]; horse: number; pays: number }; payout: number }> {
+    const r = await this.auth.send<{ outcome: { order: number[]; horse: number; pays: number }; payout: number }>("/api/social/casino/race", { bet, horse, key: key() });
+    this.onPlayed();
+    return r;
+  }
+
   takeBreak(days: 1 | 7) {
     return this.auth.send<{ until: number }>("/api/social/casino/break", { days });
   }
 }
 
-const errText = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : "That didn't work.");
+export const errText = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : "That didn't work.");
 
-function todayLine(s: CasinoStatus | null): string {
+export function todayLine(s: CasinoStatus | null): string {
   if (!s) return "";
   const net = s.today.net;
   return `Today: ${net >= 0 ? "+" : ""}${net} coins · you can lose ${s.today.loss_left} more today`;
@@ -113,7 +131,13 @@ export class SlotsPanel extends Panel {
     btn.disabled = true;
     this.msg.textContent = "";
     const all = Object.values(SYMBOL_ICONS);
-    const timers = this.reels.map((r, i) => window.setInterval(() => (r.textContent = all[(Math.random() * all.length) | 0]), 70 + i * 10));
+    cs.pull();
+    const timers = this.reels.map((r, i) =>
+      window.setInterval(() => {
+        r.textContent = all[(Math.random() * all.length) | 0];
+        if (i === 2) cs.reelTick(0.8);
+      }, 70 + i * 10),
+    );
     this.reels.forEach((r) => r.classList.add("spinning"));
     try {
       const res = await this.casino.slots(this.bet);
@@ -123,11 +147,14 @@ export class SlotsPanel extends Panel {
         window.clearInterval(timers[i]);
         this.reels[i].classList.remove("spinning");
         this.reels[i].textContent = SYMBOL_ICONS[res.outcome.reels[i]] ?? "?";
+        cs.reelStop(i);
       }
       if (res.payout > 0) {
         this.msg.textContent = `✨ You win ${res.payout} coins!`;
         this.msg.className = "casino-msg win";
+        cs.win(res.payout / this.bet);
       } else {
+        cs.lose(0.7);
         this.msg.textContent = "No luck this time.";
         this.msg.className = "casino-msg";
       }
@@ -378,8 +405,7 @@ export function betPays(b: RouletteBet, n: number): number {
 
 // ---- roulette ---------------------------------------------------------------------
 
-/** The pockets round a European wheel, in order. */
-const WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
+/** The red numbers. */
 const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 
 /**
@@ -388,8 +414,7 @@ const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 
  */
 export class RoulettePanel extends Panel {
   private amount = 10;
-  private angle = 0;
-  private canvas = el("canvas", "wheel");
+  private w3d = new Wheel3D();
   private msg = el("p", "casino-msg");
   private clock = el("p", "table-clock");
   private foot = el("p", "hint");
@@ -404,8 +429,6 @@ export class RoulettePanel extends Panel {
     private tables: Tables,
   ) {
     super("🎡 Roulette", "casino roulette");
-    this.canvas.width = 170;
-    this.canvas.height = 170;
   }
 
   show() {
@@ -455,12 +478,12 @@ export class RoulettePanel extends Panel {
     const self = this.tables.selfId;
     const spinning = w?.phase === "spinning";
     const canPlay = !s || s.can_play;
-    this.draw();
+    this.w3d.rest(this.landed);
     // The wheel; beside it the clock, who's playing (each in their colour)
     // and the board of the last numbers.
     const top = el("div", "wheel-row");
     const side = el("div", "wheel-side");
-    top.append(this.canvas, side);
+    top.append(this.w3d.canvas, side);
     this.body.append(top);
     side.append(this.clock);
     this.clock.textContent =
@@ -581,86 +604,18 @@ export class RoulettePanel extends Panel {
   /** Turns the wheel so pocket `n` ends under the ball, over `dur` ms; then says how we did. */
   private async spinTo(n: number, dur: number) {
     const mine = (this.wheel?.chips ?? []).filter((c) => c.player === this.tables.selfId);
-    const step = (Math.PI * 2) / WHEEL.length;
-    const target = -WHEEL.indexOf(n) * step;
-    const start = this.angle;
-    const turns = Math.PI * 2 * 5;
-    let end = target;
-    while (end > start - turns) end -= Math.PI * 2;
-    const t0 = performance.now();
-    await new Promise<void>((done) => {
-      const frame = (now: number) => {
-        const t = Math.min(1, (now - t0) / dur);
-        const ease = 1 - (1 - t) ** 3;
-        this.angle = start + (end - start) * ease;
-        this.draw();
-        if (t < 1) requestAnimationFrame(frame);
-        else done();
-      };
-      requestAnimationFrame(frame);
-    });
-    this.angle = target;
+    await this.w3d.spin(n, dur);
     this.landed = n;
-    this.draw();
     const colour = n === 0 ? "green" : RED.has(n) ? "red" : "black";
     const won = mine.reduce((sum, c) => sum + c.amount * betPays(c.bet, n), 0);
+    const bet = mine.reduce((sum, c) => sum + c.amount, 0);
     if (!mine.length) this.msg.textContent = `${n} ${colour}!`;
     else this.msg.textContent = won > 0 ? `${n} ${colour}! ✨ You win ${won} coins.` : `${n} ${colour}. Not this time.`;
     this.msg.className = won > 0 ? "casino-msg win" : "casino-msg";
+    if (won > 0) cs.win(won / Math.max(1, bet));
+    else if (mine.length) cs.lose();
     await this.casino.load().catch(() => {});
     if (this.open) this.render();
-  }
-
-  private draw() {
-    const c = this.canvas;
-    const ctx = c.getContext("2d")!;
-    const r = c.width / 2;
-    ctx.clearRect(0, 0, c.width, c.height);
-    ctx.save();
-    ctx.translate(r, r);
-    ctx.rotate(this.angle);
-    const step = (Math.PI * 2) / WHEEL.length;
-    ctx.fillStyle = "#3b3a2e";
-    ctx.beginPath();
-    ctx.arc(0, 0, r - 2, 0, Math.PI * 2);
-    ctx.fill();
-    WHEEL.forEach((n, i) => {
-      ctx.fillStyle = n === 0 ? "#2f8f4f" : RED.has(n) ? "#c8553d" : "#2b2723";
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, r - 6, i * step - step / 2 - Math.PI / 2, i * step + step / 2 - Math.PI / 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.save();
-      ctx.rotate(i * step);
-      ctx.fillStyle = "#fff8e3";
-      ctx.font = "bold 10px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(String(n), 0, -r + 20);
-      ctx.restore();
-    });
-    ctx.fillStyle = "#8a5a33";
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#d8b45a";
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    // The ball, at the top, and the number it landed on.
-    ctx.fillStyle = "#fff8e3";
-    ctx.strokeStyle = "#3b3a2e";
-    ctx.beginPath();
-    ctx.arc(r, 30, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    if (this.landed !== null) {
-      ctx.fillStyle = "#fff8e3";
-      ctx.font = "bold 22px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(String(this.landed), r, r + 8);
-    }
   }
 }
 

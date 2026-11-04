@@ -15,6 +15,9 @@ const ROAD = 3;
 const KERB = 4;
 const PAVED = 5;
 const SOIL = 6;
+/** The ring roads' brick, and grass under woods (thick with trees round about). */
+const BRICK = 7;
+const WOODS = 8;
 
 const GROUND_KIND: Record<string, number> = {
   water: WATER,
@@ -28,14 +31,16 @@ const GROUND_KIND: Record<string, number> = {
   floor: PAVED,
   track: PAVED,
   soil: SOIL,
+  brick: BRICK,
+  moss: WOODS,
 };
 const TREES = new Set(["tree", "pine", "apple_tree", "willow", "willow_curtain", "pine_secret", "bush", "hedge"]);
 /** Objects with no symbol of their own (markers, small props). */
 // (`boat_lake` only marks the water the rowboats go on, and `forage` where bugs and mushrooms turn up.)
 const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "arena", "lamp", "boat_lake", "boat_moored", "yard_stand", "forage"]);
 
-/** Ground colours: grass, trees (under their crowns), water, road, kerb, paving, soil. */
-const PAPER = ["#cfd3a0", "#bcc48c", "#9cbfc0", "#a3927a", "#e6d9b6", "#ece0c0", "#c8a878"];
+/** Ground colours: grass, trees (under their crowns), water, road, kerb, paving, soil, brick, woods. */
+const PAPER = ["#cfd3a0", "#bcc48c", "#9cbfc0", "#a3927a", "#e6d9b6", "#ece0c0", "#c8a878", "#b8705a", "#85a05c"];
 const INK = "#3a2a1a";
 
 function rnd(x: number, y: number, s = 0): number {
@@ -57,6 +62,17 @@ function kinds(map: ZoneMap): Uint8Array {
   const g = map.ground_legend.map((n) => GROUND_KIND[n] ?? GRASS);
   const d = map.decor_legend.map((n) => TREES.has(n));
   for (let i = 0; i < k.length; i++) k[i] = d[map.decor[i]] ? TREE : g[map.ground[i]];
+  // Woods: grass with trees thick about it (a seven-tile square holding eight or more).
+  const W = map.width;
+  const trees = new Uint16Array((W + 1) * (map.height + 1));
+  for (let y = 0; y < map.height; y++)
+    for (let x = 0; x < W; x++) trees[(y + 1) * (W + 1) + x + 1] = (k[y * W + x] === TREE ? 1 : 0) + trees[y * (W + 1) + x + 1] + trees[(y + 1) * (W + 1) + x] - trees[y * (W + 1) + x];
+  const sum = (x0: number, y0: number, x1: number, y1: number) => {
+    const [a, b, c, e] = [Math.max(0, x0), Math.max(0, y0), Math.min(W, x1), Math.min(map.height, y1)];
+    return trees[e * (W + 1) + c] - trees[b * (W + 1) + c] - trees[e * (W + 1) + a] + trees[b * (W + 1) + a];
+  };
+  for (let y = 0; y < map.height; y++)
+    for (let x = 0; x < W; x++) if (k[y * W + x] === GRASS && sum(x - 3, y - 3, x + 4, y + 4) >= 8) k[y * W + x] = WOODS;
   for (const o of map.objects) {
     if (o.kind !== "fountain") continue;
     for (let y = o.y; y < o.y + o.h; y++) for (let x = o.x; x < o.x + o.w; x++) k[y * map.width + x] = WATER;
@@ -81,13 +97,13 @@ function groundImage(map: ZoneMap): HTMLCanvasElement {
     for (let x = 0; x < W; x++) {
       const i = y * W + x;
       const kind = k[i];
-      let col = rgb[kind === TREE ? GRASS : kind];
-      // The road's edge, inked where it meets the kerb.
-      if (kind === ROAD) {
+      let col = rgb[kind === TREE ? WOODS : kind];
+      // The road's edge (cobbles or the rings' brick), inked where it meets the kerb.
+      if (kind === ROAD || kind === BRICK) {
         const n = (dx: number, dy: number) => {
           const nx = x + dx;
           const ny = y + dy;
-          return nx >= 0 && ny >= 0 && nx < W && ny < H && k[ny * W + nx] !== ROAD;
+          return nx >= 0 && ny >= 0 && nx < W && ny < H && k[ny * W + nx] !== ROAD && k[ny * W + nx] !== BRICK;
         };
         if (n(1, 0) || n(-1, 0) || n(0, 1) || n(0, -1)) col = ink;
       }
@@ -217,6 +233,19 @@ export function atlasMap(map: ZoneMap, size: number): HTMLCanvasElement {
       ctx.lineWidth = Math.max(0.8, k * 0.4);
       ctx.beginPath();
       ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
+      ctx.stroke();
+      continue;
+    }
+    // The amphitheatre: its stands, an oval ring round the sand.
+    if (o.kind === "arena_bowl") {
+      ctx.strokeStyle = "rgba(50,35,20,0.35)";
+      ctx.lineWidth = Math.max(1.5, w * 0.12);
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2 + 1, y + h / 2 + 1, w * 0.44, h * 0.42, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = "#c9a46a";
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, y + h / 2, w * 0.44, h * 0.42, 0, 0, Math.PI * 2);
       ctx.stroke();
       continue;
     }

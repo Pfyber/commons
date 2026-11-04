@@ -45,6 +45,10 @@ const GROUND: &[&str] = &[
     "parquet",
     "marble",
     "rug",
+    // The Ring Road's warm brick, round the town's heart.
+    "brick",
+    // The woods' floor: moss and fallen leaves.
+    "moss",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -95,6 +99,15 @@ const DECOR: &[&str] = &[
     "chair_n",
     // The gladiator arena's sandstone walls.
     "arena_wall",
+    // The amphitheatre: its podium wall, seats (cushioned: anyone's to
+    // watch from), and outer walls (tall arches north, low south).
+    "amph_podium",
+    "amph_seat",
+    "amph_seat_hi",
+    "amph_seat_pub",
+    "amph_seat_pub_hi",
+    "amph_wall",
+    "amph_wall_s",
     // Small nature to walk through: flowers, daisies, clover, pebbles, ferns.
     "wildflowers",
     "daisies",
@@ -109,6 +122,8 @@ const DECOR: &[&str] = &[
     "dry_shrub",
     "bones",
     "amphora",
+    // A bench stood north to south (seen side on), a seat on each tile.
+    "bench_v",
 ];
 
 fn g(name: &str) -> u8 {

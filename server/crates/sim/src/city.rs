@@ -593,9 +593,11 @@ mod tests {
             let (b, _) = c.blocks().find(|(_, t)| t.key == k).unwrap();
             assert_eq!(c.ring(b), 2, "{k} is in ring 2");
         }
-        // The pond is right above the market, the fairground below.
+        // The arena is right above the market (its parade marches down to it),
+        // the pond to the west, the fairground below.
         let at = |k: &str| c.blocks().find(|(_, t)| t.key == k).unwrap().0;
-        assert_eq!(at("pond"), BlockId { bx: 3, by: 2 });
+        assert_eq!(at("arena"), BlockId { bx: 3, by: 2 });
+        assert_eq!(at("pond"), BlockId { bx: 2, by: 3 });
         assert_eq!(at("fairground"), BlockId { bx: 3, by: 4 });
     }
 

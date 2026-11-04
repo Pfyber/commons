@@ -48,6 +48,8 @@ pub fn routes() -> Router<Arc<SocialState>> {
     Router::new()
         .route("/casino", get(status))
         .route("/casino/slots", post(slots))
+        .route("/casino/mega", post(mega))
+        .route("/casino/race", post(race))
         .route("/casino/break", post(take_break))
 }
 
@@ -119,16 +121,19 @@ async fn status(State(state): S, headers: HeaderMap) -> ApiResult<Json<Value>> {
         "today": { "bet": bet, "won": won, "net": won - bet, "loss_left": (DAILY_LOSS - (bet - won)).max(0) },
         "limits": {
             "slots": casino::SLOT_BET, "roulette": casino::ROULETTE_BET,
+            "mega": casino::MEGA_BET, "race": casino::RACE_BET,
             "roulette_round": crate::tables::ROUND_MAX,
             "blackjack": commons_sim::blackjack::BET, "daily_loss": DAILY_LOSS,
         },
         "slots": { "symbols": casino::SYMBOLS, "three": casino::THREE, "two_cherries": 2 },
+        "mega": { "symbols": casino::MEGA_SYMBOLS, "min": casino::MEGA_MIN, "pays": casino::MEGA_PAYS },
+        "horses": { "names": casino::HORSES, "chance": casino::HORSE_CHANCE, "pays": casino::HORSE_PAYS },
         "break_until": break_until,
     })))
 }
 
 /// Plays one round: checks, the coins, the record. `pays` is the payout
-/// (stake included) as a multiple of the bet; `outcome` what happened.
+/// (stake included) in tenths of the bet (rounded down); `outcome` what happened.
 async fn play(
     state: &SocialState,
     me: Uuid,
@@ -170,7 +175,7 @@ async fn play(
         ));
     }
     let (multiple, outcome) = draw();
-    let payout = bet * multiple;
+    let payout = bet * multiple / 10;
     let mut tx = state.db.begin().await.map_err(db_err)?;
     let applied = apply(
         &mut tx,
@@ -230,7 +235,7 @@ async fn slots(
             let mut rng = rand::rng();
             let (line, pays) = casino::spin([rng.random(), rng.random(), rng.random()]);
             (
-                pays,
+                pays * 10,
                 json!({ "reels": line.map(|s| casino::SYMBOLS[s]), "pays": pays }),
             )
         },
@@ -253,6 +258,110 @@ async fn slots(
                 "🎰 {} hit {} for {} coins!",
                 claims.name,
                 reels.join(" "),
+                r["payout"]
+            ),
+        );
+    }
+    Ok(Json(r))
+}
+
+#[derive(Deserialize)]
+struct MegaReq {
+    bet: i32,
+    key: String,
+}
+
+/// One spin of the big machine (twenty symbols).
+async fn mega(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<MegaReq>,
+) -> ApiResult<Json<Value>> {
+    let (me, claims) = me(&state, &headers)?;
+    let r = play(
+        &state,
+        me,
+        "mega",
+        req.bet,
+        casino::MEGA_BET,
+        &req.key,
+        || {
+            let mut rng = rand::rng();
+            let (cells, pays) = casino::mega_spin(std::array::from_fn(|_| rng.random()));
+            (
+                pays,
+                json!({ "cells": cells.map(|s| casino::MEGA_SYMBOLS[s]), "pays": pays }),
+            )
+        },
+    )
+    .await?;
+    if r["outcome"]["pays"].as_i64().unwrap_or(0) >= 200
+        && r["duplicate"] != true
+        && let Some(l) = state.hub.location(me).filter(|l| l.zone == ZONE)
+    {
+        crate::tables::cheer(
+            &state,
+            l.instance,
+            format!(
+                "🎰 {} won {} coins on the big machine!",
+                claims.name, r["payout"]
+            ),
+        );
+    }
+    Ok(Json(r))
+}
+
+#[derive(Deserialize)]
+struct RaceReq {
+    bet: i32,
+    horse: usize,
+    key: String,
+}
+
+/// A horse race: a bet on one horse to win.
+async fn race(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<RaceReq>,
+) -> ApiResult<Json<Value>> {
+    let (me, claims) = me(&state, &headers)?;
+    if req.horse >= casino::HORSES.len() {
+        return Err(ApiError::bad_request("bad_horse", "No such horse."));
+    }
+    let horse = req.horse;
+    let r = play(
+        &state,
+        me,
+        "race",
+        req.bet,
+        casino::RACE_BET,
+        &req.key,
+        || {
+            let mut rng = rand::rng();
+            let order = casino::race(rng.random(), std::array::from_fn(|_| rng.random()));
+            let pays = if order[0] == horse {
+                casino::HORSE_PAYS[horse]
+            } else {
+                0
+            };
+            (
+                pays,
+                json!({ "order": order, "horse": horse, "pays": pays }),
+            )
+        },
+    )
+    .await?;
+    if r["outcome"]["pays"].as_i64().unwrap_or(0) >= 70
+        && r["duplicate"] != true
+        && let Some(l) = state.hub.location(me).filter(|l| l.zone == ZONE)
+    {
+        crate::tables::cheer(
+            &state,
+            l.instance,
+            format!(
+                "🏇 {} backed {} and won {} coins!",
+                claims.name,
+                casino::HORSES[horse],
                 r["payout"]
             ),
         );

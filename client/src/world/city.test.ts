@@ -40,9 +40,10 @@ describe("city geometry (mirrors sim::city)", () => {
     expect(blocksNear(g, mid.x, mid.y, 12)).toEqual([{ bx: 3, by: 3 }]);
   });
 
-  it("puts the market at the centre, the pond just north and the games all round it", () => {
+  it("puts the market at the centre, the arena just north, the pond west and the games all round it", () => {
     expect(cityFile.blocks[3][3]).toBe("market");
-    expect(cityFile.blocks[2][3]).toBe("pond");
+    expect(cityFile.blocks[2][3]).toBe("arena");
+    expect(cityFile.blocks[3][2]).toBe("pond");
     expect(cityFile.blocks[4][3]).toBe("fairground");
     expect(cityFile.blocks[3][4]).toBe("arcade");
   });

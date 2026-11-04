@@ -8,7 +8,7 @@
 //! Caretaker's rounds, "Show me", gatherings), so no coordinates live in
 //! client code.
 
-use super::{Brush, Builder, d, g, hash, maze, noise, nook};
+use super::{Brush, Builder, d, g, hash, maze, noise, nook, spline};
 use commons_sim::city::{APARTMENTS, BlockId, City, STALLS, lot_key};
 use commons_sim::map::{MapFile, StreetGrid};
 use std::collections::VecDeque;
@@ -168,6 +168,41 @@ pub fn city() -> MapFile {
         .blocks()
         .map(|(id, t)| ((id.bx as i32, id.by as i32), t.name.clone()))
         .collect();
+    let last = geo.blocks as u8 - 2;
+    let mid = geo.blocks as u8 / 2;
+    // The Ring Road: a great circle round the town's heart, running into
+    // the square's edge street at the middle of each side (just as wide, so
+    // there it is that street), everything beyond it out to the square's
+    // corners woods.
+    let middle = geo.block_origin(BlockId { bx: mid, by: mid }).x as f32 + N as f32 / 2.0;
+    let street =
+        |b: u8| geo.block_origin(BlockId { bx: b, by: b }).x as f32 - geo.street_tiles as f32 / 2.0;
+    let ring = Ring {
+        cx: size as f32 / 2.0,
+        cy: size as f32 / 2.0,
+        r: middle - street(1),
+    };
+    // And the Inner Ring round the town centre: the Market and its eight
+    // neighbours, running into the streets round them at their middles.
+    let inner = Ring {
+        cx: size as f32 / 2.0,
+        cy: size as f32 / 2.0,
+        r: middle - street(2),
+    };
+    let (a, z) = (
+        geo.block_origin(BlockId { bx: 1, by: 1 }).x,
+        geo.block_origin(BlockId { bx: last, by: last }).x + N,
+    );
+    let plan = Plan {
+        ring: &ring,
+        inner: &inner,
+        a,
+        z,
+        pitch: geo.block_tiles + geo.street_tiles,
+        street: geo.street_tiles,
+    };
+    // Where the paths out of the buildings between the rings start.
+    let mut fronts = vec![];
     for (id, t) in city.blocks() {
         let o = geo.block_origin(id);
         let mut k = Blk {
@@ -177,6 +212,24 @@ pub fn city() -> MapFile {
             salt: (id.by as u32) << 8 | id.bx as u32,
         };
         sidewalk(&mut k);
+        // The eight blocks the Ring Road cuts across (between the middles of
+        // the square's sides and its corners): laid out to fit inside it.
+        let side = |v: u8| v == 1 || v == last;
+        let cut = side(id.bx) != side(id.by)
+            && id.bx != mid
+            && id.by != mid
+            && (1..=last).contains(&id.bx)
+            && (1..=last).contains(&id.by);
+        if cut {
+            fronts.push(fitted_edge(&mut k, &ring, &inner, id, &t.key, &t.name));
+            continue;
+        }
+        // The four town-centre corner blocks the Inner Ring cuts across.
+        let near = |v: u8| v == 2 || v == last - 1;
+        if near(id.bx) && near(id.by) {
+            fitted_inner(&mut k, &inner, id, &t.key, &t.name);
+            continue;
+        }
         match t.key.as_str() {
             "market" => {
                 market(&mut k);
@@ -198,7 +251,101 @@ pub fn city() -> MapFile {
             "arcade" => fun_corner(&mut k),
             _ => landmark(&mut k, &t.key, &t.name),
         }
-        // Where bugs and mushrooms turn up in the green blocks (ADR 0019).
+    }
+
+    for (id, _) in city.blocks() {
+        let o = geo.block_origin(id);
+        round_corners(&mut b, o.x, o.y);
+    }
+    // The big square's four outer corners, rounded off in a wide sweep, a
+    // little paved corner square in each, where the roads out of town meet.
+    for (bx, by, sx, sy) in [
+        (1, 1, 1, 1),
+        (last, 1, -1, 1),
+        (1, last, 1, -1),
+        (last, last, -1, -1),
+    ] {
+        let o = geo.block_origin(BlockId { bx, by });
+        corner_square(&mut b, o.x, o.y, sx, sy, 20.0);
+    }
+    // The rings through it all: the streets between them in the diagonals
+    // gone (the plots there run together), the corners where they meet the
+    // streets swept round, kerbs and lamps all along.
+    shape_town(&mut b, &plan);
+
+    for (id, t) in city.blocks() {
+        let o = geo.block_origin(id);
+        let mut k = Blk {
+            b: &mut b,
+            ox: o.x,
+            oy: o.y,
+            salt: (id.by as u32) << 8 | id.bx as u32,
+        };
+        // Every block names itself on its south pavement (the Market's a
+        // little to the side, clear of its south road's rounded corner), or,
+        // where that's gone or a ring road crosses it, its north one, or
+        // its east or west one.
+        let sign_x = if t.key == "market" { 18 } else { 21 };
+        let sides = [
+            ((sign_x, N - 2), (25, N - 2), (27, N - 2)),
+            ((sign_x, 0), (25, 0), (27, 0)),
+            ((N - 2, sign_x), (N - 2, 25), (N - 2, 27)),
+            ((0, sign_x), (0, 25), (0, 27)),
+        ];
+        let fits = |k: &Blk, (sign, metro, spot): ((u16, u16), (u16, u16), (u16, u16))| {
+            [
+                sign,
+                spot,
+                metro,
+                (metro.0 + 1, metro.1),
+                (metro.0, metro.1 + 1),
+                (metro.0 + 1, metro.1 + 1),
+            ]
+            .iter()
+            .all(|&(x, y)| {
+                let (gx, gy) = (k.ox + x, k.oy + y);
+                let i = k.b.i(gx, gy);
+                k.b.ground[i] == g("curb")
+                    && !k.b.solid[i]
+                    && !ring.near(gx, gy)
+                    && !inner.near(gx, gy)
+            })
+        };
+        let (sign, metro, spot) = sides
+            .iter()
+            .copied()
+            .find(|&s| fits(&k, s))
+            .unwrap_or(sides[0]);
+        k.decor(sign.0, sign.1, "none");
+        k.object("signpost", sign.0, sign.1, 1, 1, &t.name);
+        // A metro station's entrance beside the signpost on some (ADR 0016):
+        // stairs down to the underground; you come up at `door:metro_<key>`.
+        if let Some((_, _, key, name)) = STATIONS.iter().find(|s| (s.0, s.1) == (id.bx, id.by)) {
+            for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                k.decor(metro.0 + x, metro.1 + y, "none");
+            }
+            k.object("metro_entrance", metro.0, metro.1, 2, 2, name);
+            k.spot(&format!("door:metro_{key}"), spot.0, spot.1);
+            k.spot(&format!("metro_{key}"), spot.0, spot.1);
+        }
+    }
+
+    // Between the rings, the plots run together: a green in each, paths
+    // to it, trees and benches. Beyond the Ring Road, the woods.
+    greens(&mut b, &plan, &fronts);
+    wildwood(&mut b, &plan, &geo);
+    avenue(&mut b, &plan, &ring);
+    avenue(&mut b, &plan, &inner);
+
+    // Where bugs and mushrooms turn up in the green blocks (ADR 0019).
+    for (id, t) in city.blocks() {
+        let o = geo.block_origin(id);
+        let mut k = Blk {
+            b: &mut b,
+            ox: o.x,
+            oy: o.y,
+            salt: (id.by as u32) << 8 | id.bx as u32,
+        };
         match t.key.as_str() {
             "park" => forage(&mut k, "park", 12, 6),
             "pond" => forage(&mut k, "park", 10, 4),
@@ -208,22 +355,6 @@ pub fn city() -> MapFile {
             "meadow" => forage(&mut k, "meadow", 14, 8),
             _ => {}
         }
-        // Every block names itself on its south sidewalk (the Market's a
-        // little to the side, clear of its south road's rounded corner).
-        let sign_x = if t.key == "market" { 18 } else { 21 };
-        k.object("signpost", sign_x, N - 2, 1, 1, &t.name);
-        // A metro station's entrance beside the signpost on some (ADR 0016):
-        // stairs down to the underground; you come up at `door:metro_<key>`.
-        if let Some((_, _, key, name)) = STATIONS.iter().find(|s| (s.0, s.1) == (id.bx, id.by)) {
-            k.object("metro_entrance", 25, N - 2, 2, 2, name);
-            k.spot(&format!("door:metro_{key}"), 27, N - 2);
-            k.spot(&format!("metro_{key}"), 27, N - 2);
-        }
-    }
-
-    for (id, _) in city.blocks() {
-        let o = geo.block_origin(id);
-        round_corners(&mut b, o.x, o.y);
     }
 
     let spawn = geo.block_origin(city.spawn_block);
@@ -236,40 +367,1365 @@ pub fn city() -> MapFile {
 /// Rounds a block's four corners where the streets cross: the road sweeps
 /// round in an arc and the pavement follows it (a lamp on it stays put).
 fn round_corners(b: &mut Builder, ox: u16, oy: u16) {
-    const R: f32 = 6.0;
-    let r = R as u16;
+    for (sx, sy) in [(1, 1), (-1, 1), (1, -1), (-1, -1)] {
+        round_corner(b, ox, oy, sx, sy, 6.0);
+    }
+}
+
+/// Rounds one corner of the block at (ox, oy) with radius `r`: the one
+/// toward −x if `sx` is 1 (+x if −1), −y if `sy` is 1 (+y if −1).
+fn round_corner(b: &mut Builder, ox: u16, oy: u16, sx: i32, sy: i32, r: f32) {
     let (road, curb, lamp) = (g("road"), g("curb"), super::d("lamp"));
-    for (px, py, sx, sy) in [
-        (0u16, 0u16, 1i32, 1i32),
-        (N, 0, -1, 1),
-        (0, N, 1, -1),
-        (N, N, -1, -1),
-    ] {
-        let (fx, fy) = (px as f32 + sx as f32 * R, py as f32 + sy as f32 * R);
-        for j in 0..r {
-            for i in 0..r {
-                let x = if sx > 0 { px + i } else { px - 1 - i };
-                let y = if sy > 0 { py + j } else { py - 1 - j };
-                let d = ((x as f32 + 0.5 - fx).powi(2) + (y as f32 + 0.5 - fy).powi(2)).sqrt();
-                if d <= R - 2.0 {
-                    continue;
-                }
-                let k = b.i(ox + x, oy + y);
-                if b.solid[k] {
-                    continue;
-                }
-                if d > R {
-                    b.ground[k] = road;
+    let (px, py) = (if sx > 0 { 0 } else { N }, if sy > 0 { 0 } else { N });
+    let (fx, fy) = (px as f32 + sx as f32 * r, py as f32 + sy as f32 * r);
+    let n = r.ceil() as u16;
+    for j in 0..n {
+        for i in 0..n {
+            let x = if sx > 0 { px + i } else { px - 1 - i };
+            let y = if sy > 0 { py + j } else { py - 1 - j };
+            let d = ((x as f32 + 0.5 - fx).powi(2) + (y as f32 + 0.5 - fy).powi(2)).sqrt();
+            // (Only the corner's own quarter: beyond the arc's centre, it's straight.)
+            if d <= r - 2.0
+                || (x as f32 + 0.5 - fx) * sx as f32 > 0.0
+                || (y as f32 + 0.5 - fy) * sy as f32 > 0.0
+            {
+                continue;
+            }
+            let k = b.i(ox + x, oy + y);
+            if b.solid[k] {
+                continue;
+            }
+            if d > r {
+                b.ground[k] = road;
+                b.decor[k] = 0;
+            } else {
+                b.ground[k] = curb;
+                if b.decor[k] != lamp {
                     b.decor[k] = 0;
-                } else {
-                    b.ground[k] = curb;
-                    if b.decor[k] != lamp {
-                        b.decor[k] = 0;
-                    }
                 }
             }
         }
     }
+}
+
+/// One of the big square's four outer corners rounded off in a wide sweep
+/// (radius `r`): beyond the kerb, where the corner was, a little paved
+/// square where the roads out of town meet, with a shady willow in a bed,
+/// a bench under it, and a lamp.
+fn corner_square(b: &mut Builder, ox: u16, oy: u16, sx: i32, sy: i32, r: f32) {
+    round_corner(b, ox, oy, sx, sy, r);
+    let (px, py) = (
+        if sx > 0 { 0i32 } else { N as i32 },
+        if sy > 0 { 0i32 } else { N as i32 },
+    );
+    let (fx, fy) = (px as f32 + sx as f32 * r, py as f32 + sy as f32 * r);
+    let n = r.ceil() as i32;
+    let mut paved = vec![];
+    for j in 0..n {
+        for i in 0..n {
+            let x = if sx > 0 { px + i } else { px - 1 - i };
+            let y = if sy > 0 { py + j } else { py - 1 - j };
+            let d = ((x as f32 + 0.5 - fx).powi(2) + (y as f32 + 0.5 - fy).powi(2)).sqrt();
+            if d <= r
+                || (x as f32 + 0.5 - fx) * sx as f32 > 0.0
+                || (y as f32 + 0.5 - fy) * sy as f32 > 0.0
+            {
+                continue;
+            }
+            let k = b.i(ox + x as u16, oy + y as u16);
+            if b.solid[k] {
+                continue;
+            }
+            // (The street's own lanes stay road: the square's the swept-off part.)
+            if x >= 2 && y >= 2 && x < N as i32 - 2 && y < N as i32 - 2 {
+                b.ground[k] = g("plaza");
+                paved.push((x, y));
+            }
+        }
+    }
+    // Its furniture, along the diagonal from the corner.
+    let at = |t: i32| {
+        (
+            (if sx > 0 { 2 + t } else { N as i32 - 3 - t }),
+            (if sy > 0 { 2 + t } else { N as i32 - 3 - t }),
+        )
+    };
+    let (tx, ty) = at(2);
+    if paved.contains(&(tx, ty)) {
+        let (gx, gy) = ((ox as i32 + tx) as u16, (oy as i32 + ty) as u16);
+        b.ground(gx, gy, "grass");
+        b.decor(gx, gy, "willow");
+        for (dx, dy) in [(1, 0), (0, 1), (1, 1)] {
+            let (x, y) = (tx + dx * sx, ty + dy * sy);
+            if paved.contains(&(x, y)) {
+                b.ground((ox as i32 + x) as u16, (oy as i32 + y) as u16, "flowers");
+            }
+        }
+    }
+    let (bx, by) = at(5);
+    if paved.contains(&(bx, by)) && paved.contains(&(bx + 1, by)) {
+        b.decor((ox as i32 + bx) as u16, (oy as i32 + by) as u16, "bench");
+        b.decor(
+            (ox as i32 + bx + 1) as u16,
+            (oy as i32 + by) as u16,
+            "bench",
+        );
+    }
+    let (lx, ly) = at(0);
+    if paved.contains(&(lx, ly)) {
+        b.decor((ox as i32 + lx) as u16, (oy as i32 + ly) as u16, "lamp");
+    }
+}
+
+/// The Ring Road: a circle round the town's heart (global tiles).
+struct Ring {
+    cx: f32,
+    cy: f32,
+    /// To the road's middle.
+    r: f32,
+}
+
+impl Ring {
+    /// The road's half-width, and its kerbs either side.
+    const HALF: f32 = 2.0;
+    const KERB: f32 = 2.0;
+
+    /// How far tile (x, y)'s middle is from the circle's centre.
+    fn d(&self, x: u16, y: u16) -> f32 {
+        ((x as f32 + 0.5 - self.cx).powi(2) + (y as f32 + 0.5 - self.cy).powi(2)).sqrt()
+    }
+    /// On the road or its kerbs.
+    fn near(&self, x: u16, y: u16) -> bool {
+        (self.d(x, y) - self.r).abs() <= Self::HALF + Self::KERB
+    }
+    /// Beyond it (out in the woods).
+    fn beyond(&self, x: u16, y: u16) -> bool {
+        self.d(x, y) > self.r + Self::HALF + Self::KERB
+    }
+    /// Safely inside it, `margin` tiles in from its inner kerb.
+    fn inside(&self, x: u16, y: u16, margin: f32) -> bool {
+        self.d(x, y) < self.r - Self::HALF - Self::KERB - margin
+    }
+}
+
+/// The town's plan: its two rings, the square inside its edge street (`a`
+/// to `z` each way), and the grid's streets, `pitch` apart, `street` wide.
+/// Between the rings in the four diagonals (off the cross of streets
+/// through the middle) the grid's streets are gone: the plots there run
+/// together, and beyond the Ring Road they're the woods'.
+struct Plan<'a> {
+    ring: &'a Ring,
+    inner: &'a Ring,
+    a: u16,
+    z: u16,
+    pitch: u16,
+    street: u16,
+}
+
+impl Plan<'_> {
+    /// How far (x, y) is off the middle, across and down.
+    fn off(&self, x: f32, y: f32) -> (f32, f32) {
+        ((x - self.ring.cx).abs(), (y - self.ring.cy).abs())
+    }
+    /// Whether the street stretch (between two crossings, or a crossing)
+    /// with its middle at (mx, my) is gone: in the square, off the cross
+    /// through the middle, outside the Inner Ring.
+    fn gone(&self, mx: f32, my: f32) -> bool {
+        let (dx, dy) = self.off(mx, my);
+        let (a, z) = (self.a as f32, self.z as f32);
+        (a..z).contains(&mx)
+            && (a..z).contains(&my)
+            && dx > 30.0
+            && dy > 30.0
+            && dx.hypot(dy) > self.inner.r
+    }
+    /// The middle of street `i` (counting the outermost as 0).
+    fn lane(&self, i: u16) -> f32 {
+        (i * self.pitch) as f32 + self.street as f32 / 2.0
+    }
+    /// The middle of block `b`'s side (counting the outermost as 0).
+    fn mid(&self, b: u16) -> f32 {
+        (self.street + b * self.pitch) as f32 + N as f32 / 2.0
+    }
+    /// On one of the streets' middle lines, which long walks follow.
+    fn on_lane(&self, x: u16, y: u16) -> bool {
+        let l = self.street / 2;
+        x % self.pitch == l || y % self.pitch == l
+    }
+    /// Whether tile (x, y) belongs to a street stretch that's gone: it's on
+    /// it, on the pavement along it, or on a block's rounded corner where
+    /// it met another.
+    fn joined(&self, x: u16, y: u16) -> bool {
+        let (p, s) = (self.pitch, self.street);
+        let (on_v, on_h) = (x % p < s, y % p < s);
+        if on_v || on_h {
+            let mx = if on_v {
+                self.lane(x / p)
+            } else {
+                self.mid((x - s) / p)
+            };
+            let my = if on_h {
+                self.lane(y / p)
+            } else {
+                self.mid((y - s) / p)
+            };
+            return self.gone(mx, my);
+        }
+        let (bx, by) = ((x - s) / p, (y - s) / p);
+        let (lx, ly) = ((x - s) % p, (y - s) % p);
+        let side = |l: u16, b: u16| {
+            if l < 6 {
+                Some(b)
+            } else if l >= N - 6 {
+                Some(b + 1)
+            } else {
+                None
+            }
+        };
+        let (vi, hj) = (side(lx, bx), side(ly, by));
+        let edge = |l: u16| !(2..N - 2).contains(&l);
+        let v =
+            vi.is_some_and(|i| (edge(lx) || hj.is_some()) && self.gone(self.lane(i), self.mid(by)));
+        let h =
+            hj.is_some_and(|j| (edge(ly) || vi.is_some()) && self.gone(self.mid(bx), self.lane(j)));
+        let c = vi
+            .zip(hj)
+            .is_some_and(|(i, j)| self.gone(self.lane(i), self.lane(j)));
+        v || h || c
+    }
+    /// Between the rings in a diagonal, clear of their kerbs: where the
+    /// plots run together. Which diagonal: 0 north-west, 1 north-east, 2
+    /// south-west, 3 south-east.
+    fn lens(&self, x: u16, y: u16) -> Option<usize> {
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        let (dx, dy) = self.off(fx, fy);
+        let clear = Ring::HALF + Ring::KERB;
+        ((self.a..self.z).contains(&x)
+            && (self.a..self.z).contains(&y)
+            && dx > 30.0
+            && dy > 30.0
+            && self.inner.d(x, y) > self.inner.r + clear
+            && self.ring.d(x, y) < self.ring.r - clear)
+            .then(|| self.quarter(x, y))
+    }
+    /// Which diagonal (x, y) is toward.
+    fn quarter(&self, x: u16, y: u16) -> usize {
+        (x as f32 + 0.5 > self.ring.cx) as usize + 2 * (y as f32 + 0.5 > self.ring.cy) as usize
+    }
+}
+
+/// Shapes the town round its rings (in the square inside its edge
+/// street): the street stretches between the rings in the diagonals, and
+/// beyond the Ring Road, gone to lawn (the plots either side joined); both
+/// rings laid, each a street as wide as the grid's, so where one runs into
+/// a street it is that street; the corners where they meet the streets
+/// swept round; and the kerbs redrawn along every road's edge (and taken
+/// up where there's no road any more), lamps every so far along them.
+fn shape_town(b: &mut Builder, plan: &Plan) {
+    let (road, curb, lamp) = (g("road"), g("curb"), d("lamp"));
+    let (ring, inner, a, z) = (plan.ring, plan.inner, plan.a, plan.z);
+    for y in a..z {
+        for x in a..z {
+            let i = b.i(x, y);
+            if [road, curb].contains(&b.ground[i]) && plan.joined(x, y) {
+                b.ground[i] = g("grass");
+                if b.decor[i] == lamp {
+                    b.decor[i] = 0;
+                }
+            }
+        }
+    }
+    for r in [ring, inner] {
+        for y in a..z {
+            for x in a..z {
+                if (r.d(x, y) - r.r).abs() <= Ring::HALF {
+                    let i = b.i(x, y);
+                    assert!(
+                        !b.solid[i],
+                        "a ring road runs into something built at ({x}, {y})"
+                    );
+                    b.ground[i] = road;
+                    b.decor[i] = 0;
+                }
+            }
+        }
+    }
+    let (w, h) = (b.w as i32, b.h as i32);
+    let is_road = |b: &Builder, x: i32, y: i32| {
+        x >= 0 && y >= 0 && x < w && y < h && b.ground[b.i(x as u16, y as u16)] == road
+    };
+    // The corners where the rings meet the streets swept round: any plot a
+    // disc this wide can't sit in goes to the road. (Not out in the woods:
+    // their ends tapering in to where the Ring Road meets the edge street
+    // stay, kerbed.)
+    const SWEEP: i32 = 5;
+    let disc: Vec<(i32, i32)> = (-SWEEP..=SWEEP)
+        .flat_map(|dy| (-SWEEP..=SWEEP).map(move |dx| (dx, dy)))
+        .filter(|&(dx, dy)| dx * dx + dy * dy <= SWEEP * SWEEP)
+        .collect();
+    let mut sits = vec![false; b.ground.len()];
+    for y in a as i32 - SWEEP..z as i32 + SWEEP {
+        for x in a as i32 - SWEEP..z as i32 + SWEEP {
+            if disc.iter().all(|&(dx, dy)| !is_road(b, x + dx, y + dy)) {
+                sits[b.i(x as u16, y as u16)] = true;
+            }
+        }
+    }
+    let swept = |x: u16, y: u16| {
+        ring.d(x, y) < ring.r
+            && ((ring.d(x, y) - ring.r).abs() <= 12.0 || (inner.d(x, y) - inner.r).abs() <= 12.0)
+    };
+    for y in a..z {
+        for x in a..z {
+            let i = b.i(x, y);
+            if b.ground[i] == road || b.ground[i] == g("water") || b.solid[i] || !swept(x, y) {
+                continue;
+            }
+            let held = disc.iter().any(|&(dx, dy)| {
+                let (u, v) = (x as i32 + dx, y as i32 + dy);
+                u >= 0 && v >= 0 && u < w && v < h && sits[b.i(u as u16, v as u16)]
+            });
+            if !held {
+                b.ground[i] = road;
+                b.decor[i] = 0;
+            }
+        }
+    }
+    // (And no lone tile left standing in the road where the curve's edge
+    // steps: one with road on three sides goes to the road too.)
+    for _ in 0..3 {
+        for y in a..z {
+            for x in a..z {
+                let i = b.i(x, y);
+                let edge =
+                    (ring.d(x, y) - ring.r).abs() <= 4.0 || (inner.d(x, y) - inner.r).abs() <= 4.0;
+                if b.ground[i] == road
+                    || b.ground[i] == g("water")
+                    || b.solid[i]
+                    || !(swept(x, y) || edge)
+                {
+                    continue;
+                }
+                let sides = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .filter(|&&(dx, dy)| is_road(b, x as i32 + dx, y as i32 + dy))
+                    .count();
+                if sides >= 3 {
+                    b.ground[i] = road;
+                    b.decor[i] = 0;
+                }
+            }
+        }
+    }
+    // The kerbs: a pavement two tiles wide along every road's edge round
+    // the rings, the joined plots and the woods.
+    let redrawn = |x: u16, y: u16| {
+        let (dx, dy) = plan.off(x as f32 + 0.5, y as f32 + 0.5);
+        (ring.d(x, y) - ring.r).abs() <= 16.0
+            || (inner.d(x, y) - inner.r).abs() <= 16.0
+            || (dx > 30.0 && dy > 30.0 && inner.d(x, y) > inner.r)
+    };
+    let mut kerbs = vec![];
+    for y in a..z {
+        for x in a..z {
+            let i = b.i(x, y);
+            if !redrawn(x, y)
+                || b.solid[i]
+                || [road, g("water"), g("bridge")].contains(&b.ground[i])
+            {
+                continue;
+            }
+            let near = (-2i32..=2).any(|dy| {
+                (-2i32..=2)
+                    .any(|dx| dx * dx + dy * dy <= 5 && is_road(b, x as i32 + dx, y as i32 + dy))
+            });
+            kerbs.push((i, near));
+        }
+    }
+    for (i, near) in kerbs {
+        if near {
+            b.ground[i] = curb;
+            if b.decor[i] != lamp {
+                b.decor[i] = 0;
+            }
+        } else if b.ground[i] == curb {
+            b.ground[i] = g("grass");
+            if b.decor[i] == lamp {
+                b.decor[i] = 0;
+            }
+        }
+    }
+    // Lamps along the kerbs' edges, every ten tiles or so.
+    let lit = |b: &Builder, x: u16, y: u16| {
+        (-10i32..=10).any(|dy| {
+            (-10i32..=10).any(|dx| {
+                let (u, v) = (x as i32 + dx, y as i32 + dy);
+                dx * dx + dy * dy <= 100
+                    && u >= 0
+                    && v >= 0
+                    && u < w
+                    && v < h
+                    && b.decor[b.i(u as u16, v as u16)] == lamp
+            })
+        })
+    };
+    for y in a..z {
+        for x in a..z {
+            let i = b.i(x, y);
+            if !redrawn(x, y)
+                || b.ground[i] != curb
+                || b.solid[i]
+                || b.decor[i] != 0
+                || plan.on_lane(x, y)
+            {
+                continue;
+            }
+            let edge = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dy)| is_road(b, x as i32 + dx, y as i32 + dy));
+            if edge && !lit(b, x, y) {
+                b.decor[i] = lamp;
+            }
+        }
+    }
+}
+
+/// Plants (trees, bushes, the little things underfoot) a footpath clears.
+fn soft(decor: u8) -> bool {
+    [
+        "none",
+        "tree",
+        "pine",
+        "bush",
+        "apple_tree",
+        "willow",
+        "tallgrass",
+        "wildflowers",
+        "daisies",
+        "clover",
+        "pebbles",
+        "fern",
+        "mushrooms",
+    ]
+    .iter()
+    .any(|k| d(k) == decor)
+}
+
+/// Within a tile of anything that isn't lawn (paths, kerbs, anything
+/// built, other trees): keeps trees from blocking ways through.
+fn near_built(b: &Builder, x: u16, y: u16) -> bool {
+    (-1i32..=1).any(|dy| {
+        (-1i32..=1).any(|dx| {
+            let i = b.i((x as i32 + dx) as u16, (y as i32 + dy) as u16);
+            let lawn = [g("grass"), g("grass_dark"), g("flowers")].contains(&b.ground[i]);
+            !lawn || b.solid[i] || (b.decor[i] != 0 && (dx, dy) != (0, 0))
+        })
+    })
+}
+
+/// The way on foot from any of `from` to the nearest tile `to` says,
+/// within `max` steps: over lawn, paths and paving (through plants, which
+/// make way), not through anything built, water, a road or its kerb, or a
+/// fence or hedge. The tiles there, from a `from` to the one next to the
+/// tile found.
+fn trail(
+    b: &Builder,
+    from: &[(u16, u16)],
+    to: &dyn Fn(&Builder, u16, u16) -> bool,
+    max: u32,
+) -> Option<Vec<(u16, u16)>> {
+    let over = [
+        g("grass"),
+        g("grass_dark"),
+        g("flowers"),
+        g("moss"),
+        g("path"),
+        g("plaza"),
+    ];
+    let (w, h) = (b.w as i32, b.h as i32);
+    let ok = |x: i32, y: i32| {
+        x >= 0 && y >= 0 && x < w && y < h && {
+            let i = b.i(x as u16, y as u16);
+            !b.solid[i] && over.contains(&b.ground[i]) && soft(b.decor[i])
+        }
+    };
+    let mut came = vec![u32::MAX; b.ground.len()];
+    let mut steps = vec![0u32; b.ground.len()];
+    let mut q = VecDeque::new();
+    for &(x, y) in from {
+        let i = b.i(x, y);
+        came[i] = i as u32;
+        q.push_back((x, y));
+    }
+    while let Some((x, y)) = q.pop_front() {
+        let i = b.i(x, y);
+        if steps[i] >= max {
+            continue;
+        }
+        for (dx, dy) in [
+            (1i32, 0i32),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ] {
+            let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+            if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                continue;
+            }
+            let j = b.i(nx as u16, ny as u16);
+            if came[j] != u32::MAX
+                || (dx != 0
+                    && dy != 0
+                    && !(ok(x as i32 + dx, y as i32) && ok(x as i32, y as i32 + dy)))
+            {
+                continue;
+            }
+            if to(b, nx as u16, ny as u16) {
+                let mut route = vec![(x, y)];
+                let mut c = i;
+                while came[c] as usize != c {
+                    c = came[c] as usize;
+                    route.push(((c % b.w as usize) as u16, (c / b.w as usize) as u16));
+                }
+                route.reverse();
+                return Some(route);
+            }
+            if !ok(nx, ny) {
+                continue;
+            }
+            came[j] = i as u32;
+            steps[j] = steps[i] + 1;
+            q.push_back((nx as u16, ny as u16));
+        }
+    }
+    None
+}
+
+/// Lays a footpath along `route`, smoothed into a gentle curve, two tiles
+/// wide, on the lawn and moss (the plants there making way); marks it in
+/// `laid`.
+fn lay(b: &mut Builder, route: &[(u16, u16)], laid: &mut [bool]) {
+    let at = |&(x, y): &(u16, u16)| (x as f32 + 0.5, y as f32 + 0.5);
+    let mut pts: Vec<(f32, f32)> = route.iter().step_by(4).map(at).collect();
+    let end = at(route.last().unwrap());
+    if pts.last() != Some(&end) {
+        pts.push(end);
+    }
+    if pts.len() < 2 {
+        pts.push(end);
+    }
+    let floor = [g("grass"), g("grass_dark"), g("flowers"), g("moss")];
+    let mut put = |b: &mut Builder, x: i32, y: i32| {
+        if x < 0 || y < 0 || x >= b.w as i32 || y >= b.h as i32 {
+            return;
+        }
+        let i = b.i(x as u16, y as u16);
+        if !b.solid[i] && floor.contains(&b.ground[i]) && soft(b.decor[i]) {
+            b.ground[i] = g("path");
+            b.decor[i] = 0;
+            laid[i] = true;
+        }
+    };
+    for (px, py) in spline(&pts, 0.25) {
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                let (x, y) = (px.floor() as i32 + dx, py.floor() as i32 + dy);
+                if (x as f32 + 0.5 - px).hypot(y as f32 + 0.5 - py) <= 1.0 {
+                    put(b, x, y);
+                }
+            }
+        }
+    }
+    for &(x, y) in route {
+        put(b, x as i32, y as i32);
+    }
+}
+
+/// Between the rings in each diagonal, where the streets are gone and the
+/// plots run together: a little green on the lawn (a ring of paving round
+/// a lawn and a flower bed, with benches and lamps, and something in the
+/// middle to gather round, each its own), paths from it in to the Inner
+/// Ring and out to the Ring Road (and on, a trail into the woods to the
+/// paths of the green block out there), paths from the buildings' fronts
+/// to it, and trees, flowers and benches over the lawn. The old streets'
+/// middle lines stay clear underfoot (long walks follow them).
+fn greens(b: &mut Builder, plan: &Plan, fronts: &[(u16, u16)]) {
+    let (ring, inner) = (plan.ring, plan.inner);
+    let lawn = [g("grass"), g("grass_dark"), g("flowers")];
+    let walls = [d("fence"), d("hedge"), d("wall")];
+    let mut taken = vec![false; b.ground.len()];
+    for o in &b.objects {
+        for y in o.y.saturating_sub(1)..(o.y + o.h + 1).min(b.h) {
+            for x in o.x.saturating_sub(1)..(o.x + o.w + 1).min(b.w) {
+                taken[b.i(x, y)] = true;
+            }
+        }
+    }
+    let mut laid = vec![false; b.ground.len()];
+    let greens = [
+        (
+            "Apple Green: a picnic under the old apple tree, by the Orchard",
+            "apple_tree",
+        ),
+        (
+            "Lantern Ring: logs to sit on round the lantern, by the Woods",
+            "lantern",
+        ),
+        (
+            "Swing Green: swings among the daisies, by the Meadow",
+            "swing",
+        ),
+        (
+            "Willow Green: a willow to sit under, and chess, by the Lake",
+            "willow",
+        ),
+    ];
+    let mid = (ring.r + inner.r) / 2.0 / std::f32::consts::SQRT_2;
+    for (q, &(about, middle)) in greens.iter().enumerate() {
+        let (sx, sy) = (
+            if q % 2 == 1 { 1.0 } else { -1.0 },
+            if q >= 2 { 1.0 } else { -1.0 },
+        );
+        let ideal = (ring.cx + sx * mid, ring.cy + sy * mid);
+        // Where it goes: as near the middle of the lawn as it'll fit, all of
+        // it on the lawn with nothing on it, its middle off the old
+        // streets' lines.
+        let fits = |b: &Builder, gx: u16, gy: u16| {
+            (-3i32..=3).all(|t| {
+                !plan.on_lane((gx as i32 + t) as u16, gy)
+                    && !plan.on_lane(gx, (gy as i32 + t) as u16)
+            }) && (-6i32..=6).all(|dy| {
+                (-6i32..=6).all(|dx| {
+                    let (x, y) = ((gx as i32 + dx) as u16, (gy as i32 + dy) as u16);
+                    let i = b.i(x, y);
+                    dx * dx + dy * dy > 36
+                        || (plan.lens(x, y) == Some(q)
+                            && lawn.contains(&b.ground[i])
+                            && !b.solid[i]
+                            && !taken[i]
+                            && !walls.contains(&b.decor[i]))
+                })
+            })
+        };
+        let mut best: Option<(f32, u16, u16)> = None;
+        for gy in ideal.1 as u16 - 18..=ideal.1 as u16 + 18 {
+            for gx in ideal.0 as u16 - 18..=ideal.0 as u16 + 18 {
+                let far = (gx as f32 + 0.5 - ideal.0).hypot(gy as f32 + 0.5 - ideal.1);
+                if best.is_none_or(|b| far < b.0) && fits(b, gx, gy) {
+                    best = Some((far, gx, gy));
+                }
+            }
+        }
+        let (_, gx, gy) = best.unwrap_or_else(|| panic!("no room for green {q} between the rings"));
+        let at = |dx: i32, dy: i32| ((gx as i32 + dx) as u16, (gy as i32 + dy) as u16);
+        let mut paving = vec![];
+        for dy in -5i32..=5 {
+            for dx in -5i32..=5 {
+                let r = ((dx * dx + dy * dy) as f32).sqrt();
+                if r > 5.2 {
+                    continue;
+                }
+                let (x, y) = at(dx, dy);
+                b.decor(x, y, "none");
+                let ground = if r > 3.4 {
+                    paving.push((x, y));
+                    laid[b.i(x, y)] = true;
+                    "plaza"
+                } else if r > 2.4 {
+                    "flowers"
+                } else {
+                    "grass"
+                };
+                b.ground(x, y, ground);
+            }
+        }
+        // Lamps round it, benches north and south, its sign.
+        for (dx, dy) in [(-4, -3), (4, -3), (-4, 3), (4, 3)] {
+            let (x, y) = at(dx, dy);
+            if !plan.on_lane(x, y) {
+                b.decor(x, y, "lamp");
+            }
+        }
+        for dy in [-5, 5] {
+            let ((x0, y), (x1, _)) = (at(-1, dy), at(0, dy));
+            if !plan.on_lane(x0, y) && !plan.on_lane(x1, y) {
+                b.decor(x0, y, "bench");
+                b.decor(x1, y, "bench");
+            }
+        }
+        if let Some(&(x, y)) = [at(3, -4), at(-3, -4), at(3, 4), at(-3, 4)]
+            .iter()
+            .find(|&&(x, y)| !plan.on_lane(x, y))
+        {
+            b.object("signpost", x, y, 1, 1, Some(about), true);
+        }
+        // What's in the middle.
+        match middle {
+            "swing" => {
+                for dx in [-1, 1] {
+                    let (x, y) = at(dx, 0);
+                    b.decor(x, y, "swing");
+                }
+                for (dx, dy) in [(0, -2), (0, 2), (-2, 1), (2, -1), (-1, -2), (1, 2)] {
+                    let (x, y) = at(dx, dy);
+                    b.decor(x, y, "daisies");
+                }
+            }
+            "lantern" => {
+                let (x, y) = at(0, 0);
+                b.decor(x, y, "lantern");
+                for (dx, dy) in [(-2, 0), (2, 0), (0, -2), (0, 2)] {
+                    let (x, y) = at(dx, dy);
+                    b.decor(x, y, "log_seat");
+                }
+                for (dx, dy) in [(-1, -1), (1, 1)] {
+                    let (x, y) = at(dx, dy);
+                    b.decor(x, y, "mushrooms");
+                }
+            }
+            kind => {
+                let (x, y) = at(0, 0);
+                b.decor(x, y, kind);
+                if kind == "apple_tree" {
+                    for (dx, dy) in [(-2, 1), (-1, 1), (1, -2), (2, -2)] {
+                        let (x, y) = at(dx, dy);
+                        b.decor(x, y, "blanket");
+                    }
+                } else {
+                    for (dx, dy) in [(-2, -1), (2, 1)] {
+                        let (x, y) = at(dx, dy);
+                        b.decor(x, y, "chess_table");
+                    }
+                }
+            }
+        }
+        for &(x, y) in &paving {
+            taken[b.i(x, y)] = true;
+        }
+        // In to the Inner Ring, and out to the Ring Road, and on into the
+        // woods out there along a trail, to the green block's own paths.
+        for (r, out) in [(inner, false), (ring, true)] {
+            let Some(route) = trail(
+                b,
+                &paving,
+                &|b, x, y| b.ground[b.i(x, y)] == g("curb") && r.near(x, y),
+                70,
+            ) else {
+                continue;
+            };
+            lay(b, &route, &mut laid);
+            if !out {
+                continue;
+            }
+            let &(ex, ey) = route.last().unwrap();
+            let (ux, uy) = (ex as f32 + 0.5 - ring.cx, ey as f32 + 0.5 - ring.cy);
+            let len = ux.hypot(uy);
+            let mut s = 1.0;
+            let start = loop {
+                let (x, y) = (
+                    (ex as f32 + 0.5 + ux / len * s) as u16,
+                    (ey as f32 + 0.5 + uy / len * s) as u16,
+                );
+                if ring.beyond(x, y) || s > 20.0 {
+                    break (x, y);
+                }
+                s += 0.5;
+            };
+            let bush = trail(
+                b,
+                &[start],
+                &|b, x, y| b.ground[b.i(x, y)] == g("path") && ring.beyond(x, y),
+                45,
+            );
+            if let Some(route) = bush {
+                lay(b, &route, &mut laid);
+            }
+        }
+        // From each building's front between the rings here to the paths.
+        for &(fx, fy) in fronts.iter().filter(|&&(x, y)| plan.quarter(x, y) == q) {
+            let to = |b: &Builder, x: u16, y: u16| {
+                let i = b.i(x, y);
+                laid[i] || b.ground[i] == g("curb")
+            };
+            if let Some(route) = trail(b, &[(fx, fy)], &to, 90) {
+                lay(b, &route, &mut laid);
+            }
+        }
+    }
+    // Over the lawn: trees (each diagonal its own mix), flowers in the
+    // grass, a bench now and then beside a path, facing it.
+    let trees = [
+        ["apple_tree", "tree", "apple_tree", "bush"],
+        ["pine", "tree", "pine", "bush"],
+        ["tree", "willow", "bush", "tree"],
+        ["willow", "tree", "bush", "apple_tree"],
+    ];
+    for y in plan.a..plan.z {
+        for x in plan.a..plan.z {
+            let Some(q) = plan.lens(x, y) else {
+                continue;
+            };
+            let i = b.i(x, y);
+            if !b.free(x, y) || taken[i] || plan.on_lane(x, y) {
+                continue;
+            }
+            let h = hash(x, y, 4242);
+            if h.is_multiple_of(13) && !near_built(b, x, y) {
+                b.decor(x, y, trees[q][(h / 13) as usize % 4]);
+            } else if h % 9 == 4 {
+                b.decor(
+                    x,
+                    y,
+                    ["wildflowers", "daisies", "clover"][(h / 9) as usize % 3],
+                );
+            }
+        }
+    }
+    let seat =
+        |b: &Builder, x: u16, y: u16| b.free(x, y) && !plan.on_lane(x, y) && !taken[b.i(x, y)];
+    let mut benches: Vec<(u16, u16)> = vec![];
+    for y in plan.a + 1..plan.z {
+        for x in plan.a..plan.z - 1 {
+            let i = b.i(x, y);
+            if !laid[i]
+                || !laid[b.i(x + 1, y)]
+                || b.ground[i] != g("path")
+                || plan.lens(x, y).is_none()
+                || !hash(x, y, 4343).is_multiple_of(7)
+                || benches
+                    .iter()
+                    .any(|&(u, v)| u.abs_diff(x) < 10 && v.abs_diff(y) < 10)
+            {
+                continue;
+            }
+            if seat(b, x, y - 1) && seat(b, x + 1, y - 1) {
+                b.decor(x, y - 1, "bench");
+                b.decor(x + 1, y - 1, "bench");
+                benches.push((x, y));
+            }
+        }
+    }
+}
+
+/// The woods beyond the Ring Road, out to the square's edge street (and
+/// over where the streets out there were): thick in the blocks it cuts
+/// across, thinner in the four green corner blocks (round what's already
+/// there), the floor moss and fallen leaves.
+fn wildwood(b: &mut Builder, plan: &Plan, geo: &commons_sim::city::Geometry) {
+    let ring = plan.ring;
+    let (a, z) = (plan.a, plan.z);
+    let pitch = geo.block_tiles + geo.street_tiles;
+    // In a block's interior (inside its pavement), and which block.
+    let interior = |x: u16, y: u16| {
+        let (lx, ly) = (
+            (x - geo.street_tiles) % pitch,
+            (y - geo.street_tiles) % pitch,
+        );
+        ((2..N - 2).contains(&lx) && (2..N - 2).contains(&ly)).then(|| {
+            (
+                (x - geo.street_tiles) / pitch,
+                (y - geo.street_tiles) / pitch,
+            )
+        })
+    };
+    let corner =
+        |bx: u16, by: u16| (bx == 1 || bx == geo.blocks - 2) && (by == 1 || by == geo.blocks - 2);
+    // Anywhere something's been put (a nook, a spot, a building, a seat),
+    // and a tile round it: the woods leave it be.
+    let mut kept = vec![false; b.ground.len()];
+    for o in &b.objects {
+        for y in o.y.saturating_sub(1)..(o.y + o.h + 1).min(b.h) {
+            for x in o.x.saturating_sub(1)..(o.x + o.w + 1).min(b.w) {
+                kept[b.i(x, y)] = true;
+            }
+        }
+    }
+    for y in a..z {
+        for x in a..z {
+            if !ring.beyond(x, y) {
+                continue;
+            }
+            let i = b.i(x, y);
+            let block = interior(x, y);
+            // (All the lawn out here the deep green of the woods.)
+            if b.ground[i] == g("grass") {
+                b.ground[i] = g("grass_dark");
+            }
+            if !b.free(x, y) || kept[i] {
+                continue;
+            }
+            let h = hash(x, y, 909);
+            // (The four green corner blocks are orchard and woods, meadow
+            // and lake already, with their hidden ways through: they only
+            // thicken, well clear of anything there.)
+            let thick = !block.is_some_and(|(bx, by)| corner(bx, by));
+            let trees = [
+                d("tree"),
+                d("pine"),
+                d("bush"),
+                d("willow"),
+                d("apple_tree"),
+                d("tallgrass"),
+            ];
+            if !thick
+                && (-2i32..=2).any(|dy| {
+                    (-2i32..=2).any(|dx| {
+                        let j = b.i((x as i32 + dx) as u16, (y as i32 + dy) as u16);
+                        let lawn = [g("grass"), g("grass_dark")].contains(&b.ground[j]);
+                        !lawn || b.solid[j] || (b.decor[j] != 0 && !trees.contains(&b.decor[j]))
+                    })
+                })
+            {
+                continue;
+            }
+            // (Not hard against anything made: keep the paths and places open.)
+            // (Nor in a maze's or a fenced lot's ways.)
+            let walls = [d("hedge"), d("fence"), d("wall")];
+            let near_made = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                .iter()
+                .any(|&(dx, dy)| {
+                    let j = b.i((x as i32 + dx) as u16, (y as i32 + dy) as u16);
+                    let lawn = [g("grass"), g("grass_dark"), g("flowers")].contains(&b.ground[j]);
+                    !lawn || b.solid[j] || walls.contains(&b.decor[j])
+                });
+            if near_made {
+                continue;
+            }
+            if !thick {
+                if h % 5 < 2 {
+                    let kinds = ["tree", "pine", "tree", "bush", "willow"];
+                    b.decor(x, y, kinds[(h / 7) as usize % kinds.len()]);
+                }
+                continue;
+            }
+            // Walkable woods: tall trees one or two to each three-by-three
+            // patch (so there's always a way between them, and you pass
+            // behind them), undergrowth you wade through, sunny glades
+            // of wildflowers here and there, the odd log or rock.
+            let glade = noise(x as f32, y as f32, 9.0, 78) > 0.7;
+            let deep = noise(x as f32, y as f32, 6.0, 77) > 0.25;
+            b.ground[i] = if glade {
+                g("flowers")
+            } else if deep {
+                g("grass_dark")
+            } else {
+                g("grass")
+            };
+            let (cx, cy) = (x / 3, y / 3);
+            let cell = hash(cx, cy, 911);
+            let pick = |n: u32| ((cx * 3 + (n % 3) as u16), (cy * 3 + ((n / 3) % 3) as u16));
+            let first = !cell.is_multiple_of(9) && pick(cell / 7) == (x, y);
+            let second = cell % 5 < 3 && pick(cell / 97 + 4) == (x, y);
+            if !glade && (first || second) {
+                let kinds = [
+                    "tree",
+                    "pine",
+                    "pine",
+                    "tree",
+                    "willow",
+                    "pine",
+                    "tree",
+                    "apple_tree",
+                ];
+                b.decor(x, y, kinds[(h / 7) as usize % kinds.len()]);
+            } else if h % 61 == 7 && !glade {
+                b.decor(x, y, ["log", "stump", "rock"][(h / 61) as usize % 3]);
+            } else if h.is_multiple_of(3) {
+                let under = if glade {
+                    [
+                        "wildflowers",
+                        "daisies",
+                        "wildflowers",
+                        "clover",
+                        "daisies",
+                        "wildflowers",
+                    ]
+                } else {
+                    [
+                        "fern",
+                        "tallgrass",
+                        "clover",
+                        "fern",
+                        "mushrooms",
+                        "pebbles",
+                    ]
+                };
+                b.decor(x, y, under[(h / 3) as usize % under.len()]);
+            } else if h % 17 == 5 && !glade {
+                b.decor(x, y, "mushrooms");
+            }
+        }
+    }
+    // The woods' floor: all the lawn out there moss and fallen leaves.
+    for y in a..z {
+        for x in a..z {
+            let i = b.i(x, y);
+            if ring.beyond(x, y) && [g("grass"), g("grass_dark")].contains(&b.ground[i]) {
+                b.ground[i] = g("moss");
+            }
+        }
+    }
+}
+
+/// Trees along a ring road's inside, every so far round, where there's
+/// lawn for one (off the old streets' lines).
+fn avenue(b: &mut Builder, plan: &Plan, ring: &Ring) {
+    let r = ring.r - Ring::HALF - Ring::KERB - 2.0;
+    let steps = (std::f32::consts::TAU * ring.r / 13.0) as usize;
+    for s in 0..steps {
+        let a = std::f32::consts::TAU * (s as f32 + 0.5) / steps as f32;
+        let (x, y) = (
+            (ring.cx + a.cos() * r).floor() as u16,
+            (ring.cy + a.sin() * r).floor() as u16,
+        );
+        if b.free(x, y) && !near_built(b, x, y) && !plan.on_lane(x, y) {
+            b.decor(x, y, "tree");
+        }
+    }
+}
+
+/// What a landmark's info signpost says.
+fn about(key: &str, name: &str) -> String {
+    match key {
+        "town_hall" => "Town Hall: the town's votes and proposals".to_string(),
+        "gallery" => {
+            "Gallery: paint in the Studio, hang it in the Salon, and see everyone's work. Easels out here for painting together"
+                .to_string()
+        }
+        "museum" => {
+            "Museum: the town's natural history, given by its people, and the Hall of Fame".to_string()
+        }
+        "theater" => "Concert Hall: take the stage and everyone inside hears you".to_string(),
+        "cinema" => "Cinema: the big screen plays outside; the cinema opens soon".to_string(),
+        "arcade" => {
+            "Arcade: pong, light cycles, racers, a dance-off and more inside; word games out here"
+                .to_string()
+        }
+        "cafe" => "The Mossy Mug: drinks, the pool table and pinball inside".to_string(),
+        "library" => {
+            "Library: every book in Project Gutenberg, in every language. Browse the wings, or ask at the desk"
+                .to_string()
+        }
+        "casino" => {
+            "Casino: slots and roulette, coins only, never real money. 16 and over".to_string()
+        }
+        "bowling" => "Bowling: four lanes inside; rent shoes at the counter".to_string(),
+        "paintball" => {
+            "Splat Yard: paintball inside, Blue against Red, three a side. First to ten!".to_string()
+        }
+        "club_hall" => {
+            "Club Hall: found a club, rent its room, and meet up with your members".to_string()
+        }
+        _ => format!("{name}: opening soon"),
+    }
+}
+
+/// Where a fitted building is (x, y, w, h), its door, and the tile in front
+/// of its forecourt or gate (global).
+type Fitted = ((u16, u16, u16, u16), (u16, u16), (u16, u16));
+
+/// A block a ring road cuts across, its building (or a club's lot) placed
+/// as near the block's middle as it'll go where `ok` says it's clear (all
+/// of it, and its forecourt or fence, and a margin): with its door, a
+/// forecourt or fence round it, its info signpost, benches and lamps, paths
+/// out to the streets (only where `walk` says, a ring road's side of it;
+/// none past the forecourt or the gate if there's no `walk`: they're
+/// laid later). Returns where the building is, its door, and the tile in
+/// front of its forecourt or gate (global).
+fn fit_building(
+    k: &mut Blk,
+    ok: &dyn Fn(u16, u16) -> bool,
+    walk: Option<&dyn Fn(u16, u16) -> bool>,
+    id: BlockId,
+    key: &str,
+    name: &str,
+) -> Fitted {
+    k.lawn();
+    // A path, on the tiles of it `walk` allows.
+    let path = |k: &mut Blk, x0: u16, y0: u16, w: u16, h: u16| {
+        let Some(walk) = walk else {
+            return;
+        };
+        for y in y0..y0 + h {
+            for x in x0..x0 + w {
+                if walk(k.ox + x, k.oy + y) {
+                    k.ground(x, y, "path");
+                }
+            }
+        }
+    };
+    let lot = key == "club_lot";
+    // The building: its kind, size, label, and its door's place (if it has one).
+    let (kind, w, h, label, door_name): (&str, u16, u16, String, Option<&str>) = match key {
+        "club_lot" => ("club_house", 20, 10, String::new(), None),
+        "club_hall" => ("club_hall", 20, 10, "Club Hall".into(), Some("club_hall")),
+        "casino" => ("casino", 20, 11, "Casino".into(), Some("casino")),
+        "museum" => ("museum", 24, 11, "Museum & Gallery".into(), Some("museum")),
+        "cafe" => ("bar", 16, 9, "The Mossy Mug".into(), Some("bar")),
+        "bowling" => ("bowling_alley", 16, 9, "Bowling".into(), Some("bowling")),
+        "town_hall" => ("town_hall", 10, 7, "Town Hall".into(), None),
+        "cinema" => ("building", 18, 9, name.to_string(), None),
+        _ => ("building", 24, 11, name.to_string(), None),
+    };
+    let m = if lot { 5 } else { 3 };
+    let clear = |x0: u16, y0: u16| {
+        if x0 < 2 + m || y0 < 2 + m || x0 + w + m > N - 2 || y0 + h + 2 + m > N - 2 {
+            return false;
+        }
+        (y0 - m..y0 + h + 2 + m).all(|y| (x0 - m..x0 + w + m).all(|x| ok(k.ox + x, k.oy + y)))
+    };
+    let mut best: Option<(u32, u16, u16)> = None;
+    for y0 in 2..N {
+        for x0 in 2..N {
+            if !clear(x0, y0) {
+                continue;
+            }
+            let (cx, cy) = (x0 as i32 * 2 + w as i32, y0 as i32 * 2 + h as i32 + 6);
+            let score = ((cx - 48).pow(2) + (cy - 48).pow(2)) as u32;
+            if best.is_none_or(|b| score < b.0) {
+                best = Some((score, x0, y0));
+            }
+        }
+    }
+    let (_, x0, y0) = best.unwrap_or_else(|| panic!("no room for the {key} inside its ring road"));
+    let door = (x0 + w / 2, y0 + h);
+    if lot {
+        let lot = commons_sim::city::club_lot_key(id);
+        k.object("club_house", x0, y0, w, h, &lot);
+        k.spot(&format!("door:{lot}"), door.0, door.1);
+        k.spot(&lot, door.0, door.1 + 1);
+        // The fence round the lot, a gate south.
+        let (fx0, fy0, fx1, fy1) = (x0 - 4, y0 - 4, x0 + w + 3, y0 + h + 4);
+        for x in fx0..=fx1 {
+            k.decor(x, fy0, "fence");
+            if !(door.0 - 2..door.0 + 2).contains(&x) {
+                k.decor(x, fy1, "fence");
+            }
+        }
+        for y in fy0..=fy1 {
+            k.decor(fx0, y, "fence");
+            k.decor(fx1, y, "fence");
+        }
+        k.rect(door.0 - 2, door.1 + 1, 4, fy1 - door.1, "path");
+        path(k, door.0 - 2, fy1 + 1, 4, N - 2 - fy1 - 1);
+        k.object(
+            "signpost",
+            door.0 + 3,
+            fy1 - 1,
+            1,
+            1,
+            "Club lot: a club can rent this land for its clubhouse, at the Club Hall's desk",
+        );
+    } else {
+        // A forecourt round the front, lamps at its corners, benches, the
+        // info sign; the building and its door.
+        k.rect(x0 - 2, y0 + h, w + 4, 4, "plaza");
+        k.object(kind, x0, y0, w, h, &label);
+        if let Some(place) = door_name {
+            k.spot(&format!("door:{place}"), door.0, door.1);
+            k.spot(place, door.0, door.1 + 1);
+        }
+        for (x, y) in [
+            (x0 - 2, y0 + h),
+            (x0 + w + 1, y0 + h),
+            (x0 - 2, y0 + h + 3),
+            (x0 + w + 1, y0 + h + 3),
+        ] {
+            k.decor(x, y, "lamp");
+        }
+        k.bench(x0, y0 + h + 3, 3);
+        k.bench(x0 + w - 3, y0 + h + 3, 3);
+        k.object("signpost", door.0 - 4, y0 + h + 1, 1, 1, &about(key, name));
+        path(k, door.0 - 2, door.1 + 4, 4, N - 2 - door.1 - 4);
+    }
+    // A path across the block (the streets either side), a row below the
+    // forecourt.
+    let py = (door.1 + 6).min(N - 6);
+    path(k, 2, py, N - 4, 2);
+    k.scatter(3, 3, N - 3, N - 3, 9, &["tree", "bush"]);
+    let front = (k.ox + door.0, k.oy + door.1 + if lot { 5 } else { 4 });
+    ((x0, y0, w, h), door, front)
+}
+
+/// One of the eight blocks the Ring Road cuts across (between the middles
+/// of the square's sides and its corners): its building inside the road,
+/// and out in the woods it cuts off, a little clearing to find, with a
+/// lantern and somewhere to sit (a nook), a trail to it from the road.
+fn fitted_edge(
+    k: &mut Blk,
+    ring: &Ring,
+    inner: &Ring,
+    id: BlockId,
+    key: &str,
+    name: &str,
+) -> (u16, u16) {
+    let clear = Ring::HALF + Ring::KERB + 1.0;
+    let (_, _, front) = fit_building(
+        k,
+        &|x, y| ring.inside(x, y, 1.0) && inner.d(x, y) > inner.r + clear,
+        None,
+        id,
+        key,
+        name,
+    );
+    // The clearing: along the line from the block's furthest corner in
+    // toward the town's middle, a few tiles past the road.
+    let corners = [(4u16, 4u16), (N - 5, 4), (4, N - 5), (N - 5, N - 5)];
+    let (fx, fy) = *corners
+        .iter()
+        .max_by(|a, b| {
+            ring.d(k.ox + a.0, k.oy + a.1)
+                .total_cmp(&ring.d(k.ox + b.0, k.oy + b.1))
+        })
+        .unwrap();
+    let d0 = ring.d(k.ox + fx, k.oy + fy);
+    let reach = ring.r + Ring::HALF + Ring::KERB + 6.0;
+    let fits = |v: f32| (4.0..N as f32 - 5.0).contains(&v);
+    let (gx, gy) = (k.ox as f32 + fx as f32 + 0.5, k.oy as f32 + fy as f32 + 0.5);
+    let (ux, uy) = ((ring.cx - gx) / d0, (ring.cy - gy) / d0);
+    let t = d0 - reach;
+    if d0 <= reach + 1.0 || !fits(fx as f32 + ux * t) || !fits(fy as f32 + uy * t) {
+        return front;
+    }
+    let (mx, my) = ((fx as f32 + ux * t) as u16, (fy as f32 + uy * t) as u16);
+    let mut inside = vec![];
+    for dy in -2i32..=2 {
+        for dx in -2i32..=2 {
+            if dx * dx + dy * dy > 5 {
+                continue;
+            }
+            let (x, y) = ((mx as i32 + dx) as u16, (my as i32 + dy) as u16);
+            k.decor(x, y, "none");
+            k.ground(x, y, "flowers");
+            inside.push((k.ox + x, k.oy + y));
+        }
+    }
+    // Somewhere to sit, a lantern, toadstools; and each its own little
+    // something to find there.
+    k.decor(mx - 1, my, "log_seat");
+    k.decor(mx + 1, my, "log_seat");
+    k.decor(mx, my - 2, "lantern");
+    k.decor(mx - 2, my + 1, "mushrooms");
+    let order = [
+        (2u8, 1u8),
+        (4, 1),
+        (1, 2),
+        (5, 2),
+        (1, 4),
+        (5, 4),
+        (2, 5),
+        (4, 5),
+    ];
+    let n = order.iter().position(|&p| p == (id.bx, id.by)).unwrap_or(0);
+    let (place, extra) = [
+        ("Fox Den", "stump"),
+        ("Badger's Bank", "rock"),
+        ("Hedgehog Hollow", "clover"),
+        ("Robin's Glade", "daisies"),
+        ("Toadstool Ring", "mushrooms"),
+        ("Squirrel's Rest", "stump"),
+        ("Bluebell Nook", "wildflowers"),
+        ("Mossy Stump", "stump"),
+    ][n % 8];
+    k.decor(mx + 2, my + 1, extra);
+    // The trail in to it from the road.
+    let mut s = 2.5f32;
+    loop {
+        let (x, y) = (
+            (mx as f32 + 0.5 + ux * s) as u16,
+            (my as f32 + 0.5 + uy * s) as u16,
+        );
+        if !ring.beyond(k.ox + x, k.oy + y) || x < 2 || y < 2 || x >= N - 2 || y >= N - 2 {
+            break;
+        }
+        k.decor(x, y, "none");
+        k.ground(x, y, "path");
+        s += 0.5;
+    }
+    nook(k.b, &inside, place);
+    k.spot(&format!("woods_{}_{}", id.bx, id.by), mx, my);
+    front
+}
+
+/// One of the four blocks the Inner Ring cuts across (the town centre's
+/// corners): its building inside the ring, and the part of it beyond the
+/// ring a garden: flower beds, shrubs and a few trees, benches looking
+/// onto the ring. The Cinema's big screen plays out on its garden lawn;
+/// the Town Hall's wishing well stands on its forecourt.
+fn fitted_inner(k: &mut Blk, inner: &Ring, id: BlockId, key: &str, name: &str) {
+    let ((x0, y0, w, h), door, _) = fit_building(
+        k,
+        &|x, y| inner.inside(x, y, 1.0),
+        Some(&|x, y| inner.d(x, y) < inner.r),
+        id,
+        key,
+        name,
+    );
+    if key == "town_hall" {
+        // (On its own paving beside the forecourt.)
+        k.clear(x0 + w + 2, y0 + h - 1, 3, 5, "plaza");
+        k.object("well", x0 + w + 2, y0 + h, 2, 2, "Wishing Well");
+        k.spot("well", x0 + w + 2, y0 + h + 2);
+    }
+    // The garden beyond the ring.
+    let past = |k: &Blk, x: u16, y: u16| {
+        inner.d(k.ox + x, k.oy + y) > inner.r + Ring::HALF + Ring::KERB + 1.0
+    };
+    if key == "cinema" {
+        // The outdoor big screen on a lawn, blankets in front of it: the
+        // most room there is out there for it.
+        let (sw, sh) = (17u16, 8u16);
+        let mut spot = None;
+        'find: for yy in 2..N - 2 - sh {
+            for xx in 2..N - 2 - sw {
+                if (yy..yy + sh).all(|y| {
+                    (xx..xx + sw).all(|x| past(k, x, y) && !k.b.solid[k.b.i(k.ox + x, k.oy + y)])
+                }) {
+                    spot = Some((xx, yy));
+                    break 'find;
+                }
+            }
+        }
+        let (sx, sy) = spot.unwrap_or_else(|| panic!("no room for the big screen"));
+        k.clear(sx, sy, sw, sh, "grass");
+        k.object("big_screen", sx + 2, sy + 1, 13, 3, "Big Screen");
+        for (x, y) in [(sx + 2, sy + 6), (sx + 8, sy + 6), (sx + 13, sy + 6)] {
+            k.decor(x, y, "blanket");
+            k.decor(x + 1, y, "blanket");
+        }
+        k.spot("screen", sx + 8, sy + 5);
+    }
+    for y in 3..N - 3 {
+        for x in 3..N - 3 {
+            if !past(k, x, y) || !k.free(x, y) {
+                continue;
+            }
+            let (gx, gy) = ((k.ox + x) as f32, (k.oy + y) as f32);
+            let bed = noise(gx, gy, 4.0, 41) > 0.62;
+            let hh = k.hash(x, y, 43);
+            if bed {
+                k.ground(x, y, "flowers");
+                if hh.is_multiple_of(3) {
+                    k.decor(x, y, ["wildflowers", "daisies"][(hh / 3) as usize % 2]);
+                }
+            } else if hh.is_multiple_of(19) && !k.near_built(x, y) {
+                k.decor(
+                    x,
+                    y,
+                    ["tree", "willow", "apple_tree"][(hh / 19) as usize % 3],
+                );
+            } else if hh % 13 == 2 && !k.near_built(x, y) {
+                k.decor(x, y, "bush");
+            } else if hh % 9 == 4 {
+                k.decor(x, y, "clover");
+            }
+        }
+    }
+    let _ = door;
 }
 
 /// Pavement around the block with street lamps along the kerb.
@@ -278,7 +1734,7 @@ fn round_corners(b: &mut Builder, ox: u16, oy: u16) {
 /// the Meadow), each a few tiles from the next. A bug spot by the water
 /// is the water's edge's, whatever the block.
 fn forage(k: &mut Blk, habitat: &str, bugs: usize, shrooms: usize) {
-    let lawn = [g("grass"), g("grass_dark"), g("flowers")];
+    let lawn = [g("grass"), g("grass_dark"), g("flowers"), g("moss")];
     let woody = [
         "tree",
         "pine",
@@ -448,6 +1904,8 @@ fn market(k: &mut Blk) {
     k.spot("fountain", 23, 27);
     k.object("story_board", 16, 23, 2, 1, "Story of the Town");
     k.object("notice_board", 30, 23, 2, 1, "Notice Board");
+    // The Leaderboard, up on the green between the north lamps.
+    k.object("leaderboard", 23, 17, 2, 1, "Leaderboard");
     // Street lamps round the green, and round the ring.
     for i in 0..8 {
         let a = (i as f32 + 0.5) * std::f32::consts::FRAC_PI_4;
@@ -746,7 +2204,8 @@ fn park(k: &mut Blk) {
     k.object("founders_stone", stone.0, stone.1, 2, 1, "Founders' Stone");
     k.spot("grove", 36, 21);
     let mut slots = vec![];
-    for (x0, y0, x1, y1) in [(27u16, 3u16, 45u16, 17u16), (27, 27, 45, 44)] {
+    // (Clear of the Inner Ring, sweeping past the block's north side.)
+    for (x0, y0, x1, y1) in [(27u16, 7u16, 45u16, 17u16), (27, 27, 45, 44)] {
         for (r, y) in (y0 + 1..=y1).step_by(2).enumerate() {
             for x in (x0 + 1 + (r % 2) as u16..=x1).step_by(2) {
                 if k.free(x, y) {
@@ -827,17 +2286,25 @@ fn pond(k: &mut Blk) {
             }
         }
     }
-    k.rect(22, 38, 4, 8, "path");
+    // The way in, straight from the east street to the pier.
+    k.rect(42, 21, 4, 4, "path");
     reeds(k);
-    // The pier reaches into the pond from the south path.
-    k.clear(23, 27, 2, 9, "bridge");
-    k.spot("pier", 24, 30);
-    k.object("bottles", 27, 37, 1, 1, "Messages in bottles");
-    // The fisherman, at the foot of the pier: he buys your catch.
-    k.marker("fisherman", 21, 37, 1, 1, Some("Fisherman"));
-    k.spot("fisherman", 22, 38);
+    // The pier reaches into the pond from the east path.
+    k.clear(29, 22, 11, 2, "bridge");
+    k.spot("pier", 31, 22);
+    // The fisherman, at the foot of the pier on a bit of trodden ground
+    // just south of it: he buys your catch. The bottles beside him.
+    k.clear(38, 24, 4, 3, "path");
+    k.marker("fisherman", 39, 25, 1, 1, Some("Fisherman"));
+    k.spot("fisherman", 40, 26);
+    // The anglers' leaderboard (fish caught), on the bank by the fisherman.
+    k.object("leaderboard", 43, 21, 2, 1, "Anglers Leaderboard");
+    k.object("bottles", 42, 25, 1, 1, "Messages in bottles");
     k.bench(5, 22, 3);
-    k.bench(40, 22, 3);
+    // A bench up the east path, side on, looking out over the water.
+    for y in 16..19 {
+        k.decor(41, y, "bench_v");
+    }
     k.scatter(3, 3, N - 3, N - 3, 13, &["tree", "bush", "willow"]);
 }
 
@@ -845,14 +2312,16 @@ fn pond(k: &mut Blk) {
 /// boat hire by the pier, and the campfire circle on the south-west shore.
 fn lake(k: &mut Blk) {
     k.lawn();
-    water(k, 24.0, 22.0, 19.0, 16.0);
+    // (Drawn toward the south-east, clear of the Ring Road across the
+    // block's north-west corner.)
+    water(k, 28.0, 27.0, 16.0, 14.0);
     reeds(k);
     k.scatter(3, 3, N - 3, N - 3, 11, &["pine", "tree", "bush"]);
     // The Little Island: chat there stays there.
     let mut inside = vec![];
-    for y in 10..21u16 {
-        for x in 25..38u16 {
-            let (dx, dy) = ((x as f32 + 0.5 - 31.5) / 4.0, (y as f32 + 0.5 - 15.5) / 2.8);
+    for y in 19..29u16 {
+        for x in 28..40u16 {
+            let (dx, dy) = ((x as f32 + 0.5 - 33.5) / 4.0, (y as f32 + 0.5 - 23.5) / 2.8);
             let e = dx * dx + dy * dy;
             if e <= 1.0 {
                 k.ground(x, y, if e < 0.55 { "grass" } else { "sand" });
@@ -861,37 +2330,38 @@ fn lake(k: &mut Blk) {
             }
         }
     }
-    k.bench(30, 14, 2);
-    k.decor(34, 15, "lamp");
-    k.decor(32, 17, "willow");
+    k.bench(31, 22, 2);
+    k.decor(35, 23, "lamp");
+    k.decor(33, 25, "willow");
     nook(k.b, &inside, "The Little Island");
-    k.spot("island", 30, 16);
-    // The pier, and stepping stones on from its end to the island.
-    k.clear(23, 30, 2, 14, "bridge");
-    k.rect(22, 44, 4, 2, "path");
-    let mut y = 29;
-    while k.ground_at(24, y) == g("water") && y > 15 {
-        k.clear(24, y, 1, 1, "stones");
+    k.spot("island", 34, 24);
+    // The pier from the south shore, and stepping stones on from its end to
+    // the island.
+    k.clear(27, 33, 2, 11, "bridge");
+    k.rect(26, 44, 4, 2, "path");
+    let mut y = 32;
+    while k.ground_at(28, y) == g("water") && y > 24 {
+        k.clear(28, y, 1, 1, "stones");
         y -= 1;
     }
-    let mut x = 24;
-    while k.ground_at(x, 15) != g("grass") && k.ground_at(x, 15) != g("sand") && x < 30 {
-        k.clear(x, 15, 1, 1, "stones");
+    let mut x = 28;
+    while k.ground_at(x, 24) != g("grass") && k.ground_at(x, 24) != g("sand") && x < 33 {
+        k.clear(x, 24, 1, 1, "stones");
         x += 1;
     }
     // The boat hire: a hut on the bank by the pier, rowboats tied up on the
     // water beside it, where hired boats set out (and people are set down on
     // the pier when the hire's up), and the lake's bounds for the boats.
-    k.clear(26, 40, 4, 3, "grass");
-    k.object("boat_hire", 26, 40, 3, 2, "Boat hire");
-    for x in 19..23 {
-        k.decor(x, 36, "none");
+    k.clear(29, 42, 5, 4, "grass");
+    k.object("boat_hire", 30, 43, 3, 2, "Boat hire");
+    for x in 23..27 {
         k.decor(x, 37, "none");
+        k.decor(x, 38, "none");
     }
-    k.marker("boat_moored", 19, 36, 2, 1, None);
-    k.spot("boat_launch", 22, 36);
-    k.spot("boat_dock", 23, 36);
-    k.marker("boat_lake", 4, 5, 41, 35, None);
+    k.marker("boat_moored", 24, 38, 2, 1, None);
+    k.spot("boat_launch", 26, 38);
+    k.spot("boat_dock", 27, 38);
+    k.marker("boat_lake", 12, 13, 33, 29, None);
     // The campfire: logs to sit on, and a question to talk about.
     let (fx, fy) = (9u16, 41u16);
     k.clear(fx - 2, fy - 2, 5, 5, "sand");
@@ -906,7 +2376,7 @@ fn lake(k: &mut Blk) {
     ] {
         k.decor(x, y, "log_seat");
     }
-    k.clear(fx + 3, fy, 9, 1, "path");
+    k.clear(fx + 3, fy, 15, 1, "path");
     k.spot("campfire", fx + 3, fy + 1);
 }
 
@@ -914,27 +2384,30 @@ fn lake(k: &mut Blk) {
 fn orchard(k: &mut Blk) {
     k.lawn();
     k.rect(22, 2, 4, N - 4, "path");
-    for y in 4..44u16 {
+    // The apple trees (north-west), the Greenhouse (north-east), and the
+    // Community Garden's rows (south-west); the Ring Road cuts across the
+    // block's south-east corner.
+    for y in 4..27u16 {
         for x in 4..20u16 {
             if x % 5 == 4 && y % 5 == 3 {
                 k.decor(x, y, "apple_tree");
             }
         }
     }
-    k.object("building", 30, 8, 13, 8, "Greenhouse");
-    k.rect(30, 16, 13, 3, "plaza");
-    k.rect(26, 17, 4, 2, "path");
-    for y in 24..42u16 {
-        for x in 29..44u16 {
+    k.object("building", 31, 8, 13, 8, "Greenhouse");
+    k.rect(31, 16, 13, 3, "plaza");
+    k.rect(26, 17, 5, 2, "path");
+    for y in 31..44u16 {
+        for x in 4..20u16 {
             if y % 3 == 0 {
                 k.ground(x, y, "soil");
             }
         }
     }
-    k.rect(26, 22, 3, 2, "path");
-    k.object("garden_sign", 29, 21, 1, 1, "Community Garden");
-    k.spot("garden", 30, 23);
-    k.bench(32, 20, 3);
+    k.rect(20, 33, 2, 2, "path");
+    k.object("garden_sign", 20, 30, 1, 1, "Community Garden");
+    k.spot("garden", 12, 30);
+    k.bench(6, 29, 3);
 }
 
 /// The Woods: winding paths through pines, the Moss Grotto behind a pine
@@ -948,6 +2421,7 @@ fn woods(k: &mut Blk) {
         .map(|&(x, y)| (ox + x, oy + y))
         .collect();
     k.b.stroke(&brook, 0.9, Brush::Water);
+    // Paths across (in off the Ring Road, south-west).
     k.path(
         &[(2.0, 24.0), (14.0, 16.0), (28.0, 30.0), (46.0, 22.0)],
         1.2,
@@ -987,12 +2461,12 @@ fn woods(k: &mut Blk) {
         false,
     );
     k.path(&[(36.5, 15.5), (37.0, 20.0), (37.5, 25.5)], 0.8);
-    // The Moss Grotto (west): a ring of pines; the middle one on its west
-    // side lets you through.
+    // The Moss Grotto (north-west): a ring of pines; the middle one on its
+    // west side lets you through.
     let mut inside = vec![];
-    for y in 29..=37u16 {
+    for y in 3..=11u16 {
         for x in 6..=12u16 {
-            if (7..=11).contains(&x) && (30..=36).contains(&y) {
+            if (7..=11).contains(&x) && (4..=10).contains(&y) {
                 k.ground(x, y, "grass_dark");
                 k.decor(x, y, "none");
                 inside.push((k.ox + x, k.oy + y));
@@ -1001,18 +2475,19 @@ fn woods(k: &mut Blk) {
             }
         }
     }
-    k.decor(6, 33, "pine_secret");
-    k.clear(4, 33, 2, 1, "grass_dark");
-    k.path(&[(4.5, 33.5), (3.5, 29.0), (3.5, 25.0)], 0.6);
-    k.decor(9, 31, "log_seat");
-    k.decor(10, 31, "log_seat");
-    k.decor(8, 31, "lamp");
-    for (x, y) in [(8u16, 34u16), (10, 35), (8, 35), (11, 33)] {
+    k.decor(6, 7, "pine_secret");
+    k.clear(4, 7, 2, 1, "grass_dark");
+    k.path(&[(4.5, 7.5), (3.5, 12.0), (3.5, 20.0), (2.5, 24.0)], 0.6);
+    k.decor(9, 5, "log_seat");
+    k.decor(10, 5, "log_seat");
+    k.decor(8, 5, "lamp");
+    for (x, y) in [(8u16, 8u16), (10, 9), (8, 9), (11, 7)] {
         k.decor(x, y, "mushrooms");
     }
     nook(k.b, &inside, "The Moss Grotto");
-    // A fairy ring in a little clearing (south), found by walking into it.
-    let (rx, ry) = (15u16, 41u16);
+    // A fairy ring in a little clearing where the paths cross, found by
+    // walking into it.
+    let (rx, ry) = (24u16, 28u16);
     k.clear(rx - 3, ry - 3, 7, 7, "grass");
     for (dx, dy) in [
         (-2i32, 0i32),
@@ -1032,7 +2507,6 @@ fn woods(k: &mut Blk) {
             "mushrooms",
         );
     }
-    k.path(&[(18.5, 41.5), (24.5, 41.5)], 0.6);
     k.spot("fairy_ring", rx, ry);
     // A tiny door in an old tree by the path.
     k.clear(8, 17, 1, 2, "grass_dark");
@@ -1123,79 +2597,232 @@ fn fairground(k: &mut Blk) {
     k.scatter(37, 20, N - 3, N - 3, 6, &["tree", "bush"]);
 }
 
-/// The gladiator arena: a great walled ring you walk right into, out in the
-/// open so anyone passing sees the fight. Sandstone walls with a gate north
-/// and south; a paved band round the inside for the crowd to stand on;
-/// and the sand in the middle, where the fighters face off along the middle
-/// row. The sign by the north gate is where you step up to fight.
+/// The gladiator arena: an amphitheatre in the desert, a rounded square of
+/// stands round the sand, its grand arch facing south. Down from the
+/// arch the red carpet, and Caesar on his dais beside it: talk to him to
+/// fight. An oasis off to the south-west, cacti and palms about.
 fn arena(k: &mut Blk) {
-    // The whole block's desert: sand, a paved way to each gate.
+    // The whole block's desert: sand everywhere.
     for y in 2..N - 2 {
         for x in 2..N - 2 {
             k.ground(x, y, "sand");
         }
     }
-    let (ax, ay, aw, ah) = (11u16, 12u16, 26u16, 17u16);
-    k.rect(ax, ay, aw, ah, "plaza");
-    k.rect(ax + 2, ay + 2, aw - 4, ah - 4, "sand");
-    let gate = ax + aw / 2 - 1;
-    for x in ax..ax + aw {
-        if x != gate && x != gate + 1 {
-            k.decor(x, ay, "arena_wall");
-            k.decor(x, ay + ah - 1, "arena_wall");
+    // The amphitheatre, 38×28 tiles: an oval bowl (a little squared: a
+    // superellipse) of stands round the sand, painted client side
+    // (world/amphitheatre.ts); here, what each tile is, by its middle, as
+    // the art has it. Out from the sand, ring by ring: the podium wall; a
+    // row of seats (the emperor's box in it, north); a walkway all the way
+    // round; a second row of seats; the outer wall. The sand's closed to
+    // anyone not fighting. Into the stands: the grand arch in the middle of
+    // the south wall, and a little arch through each side. The south seats
+    // (red cushions) are for watching from; the rest are the crowd's.
+    let (fx, fy, fw, fh) = (5u16, 4u16, 38u16, 28u16);
+    const RIM: u16 = 5;
+    k.marker("arena_bowl", fx, fy, fw, fh, Some("The Arena"));
+    let gate = fx + fw / 2 - 1;
+    let (cx, cy) = (fw as f64 / 2.0, fh as f64 / 2.0);
+    let (a, b) = ((fw / 2 - RIM) as f64, (fh / 2 - RIM) as f64);
+    // How far out from the sand's edge a point is (tiles; below 0, on the sand).
+    let ring_u = |dx: f64, dy: f64| -> f64 {
+        let n = commons_sim::arena::ROUNDNESS;
+        let f = |u: f64| (dx.abs() / (a + u)).powf(n) + (dy.abs() / (b + u)).powf(n);
+        if f(0.0) <= 1.0 {
+            return -1.0;
+        }
+        let (mut lo, mut hi) = (0.0, 20.0);
+        for _ in 0..30 {
+            let mid = (lo + hi) / 2.0;
+            if f(mid) > 1.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    };
+    let solid = |k: &mut Blk, x: u16, y: u16| {
+        let i = k.b.i(k.ox + x, k.oy + y);
+        k.b.solid[i] = true;
+    };
+    // Each tile's ring, by its middle; then wherever the walkway only
+    // meets itself corner to corner (round the curves), the tile between
+    // that's nearest the walkway joins it, so it runs unbroken right round
+    // (nobody steps across corners).
+    let (w, h) = (fw as usize, fh as usize);
+    let mut ring = vec![0i32; w * h];
+    let mut out_u = vec![0f64; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            let u = ring_u(i as f64 + 0.5 - cx, j as f64 + 0.5 - cy);
+            out_u[j * w + i] = u;
+            ring[j * w + i] = if u < 0.0 { -1 } else { u.floor() as i32 };
         }
     }
-    for y in ay..ay + ah {
-        k.decor(ax, y, "arena_wall");
-        k.decor(ax + aw - 1, y, "arena_wall");
+    for j in 0..h - 1 {
+        for i in 0..w {
+            for di in [-1i32, 1] {
+                let i2 = i as i32 + di;
+                if i2 < 0 || i2 >= w as i32 {
+                    continue;
+                }
+                let i2 = i2 as usize;
+                let (p, q) = (j * w + i, (j + 1) * w + i2);
+                let (side_a, side_b) = (j * w + i2, (j + 1) * w + i);
+                if ring[p] == 2 && ring[q] == 2 && ring[side_a] != 2 && ring[side_b] != 2 {
+                    let near = |k: usize| (out_u[k] - 2.5).abs();
+                    let pick = if near(side_a) <= near(side_b) {
+                        side_a
+                    } else {
+                        side_b
+                    };
+                    ring[pick] = 2;
+                }
+            }
+        }
     }
-    // The ring itself (invisible: it marks where the fight is).
+    for y in fy..fy + fh {
+        for x in fx..fx + fw {
+            let dx = (x - fx) as f64 + 0.5 - cx;
+            let dy = (y - fy) as f64 + 0.5 - cy;
+            let r = ring[(y - fy) as usize * w + (x - fx) as usize];
+            // The way in from the south (to the portcullis), the side arches (to the walkway).
+            let way = dy > 0.0 && dx.abs() < 1.0;
+            let side = dy.abs() < 1.0 && (3..=4).contains(&r);
+            let public = dy > b * 0.45;
+            match r {
+                -1 => {
+                    // The sand: only for those fighting.
+                    k.ground(x, y, "sand");
+                    solid(k, x, y);
+                }
+                0 if way => {
+                    // The gate onto the sand (its portcullis drawn live).
+                    k.ground(x, y, "plaza");
+                    solid(k, x, y);
+                }
+                1..=4 if way || side => k.ground(x, y, "plaza"),
+                // The podium wall, the emperor's box, the outer wall: solid.
+                0 | 4 => solid(k, x, y),
+                1 if dy < 0.0 && dx.abs() < 2.5 => solid(k, x, y),
+                1 => k.decor(x, y, if public { "amph_seat_pub" } else { "amph_seat" }),
+                3 => k.decor(
+                    x,
+                    y,
+                    if public {
+                        "amph_seat_pub_hi"
+                    } else {
+                        "amph_seat_hi"
+                    },
+                ),
+                2 => k.ground(x, y, "plaza"),
+                _ => {}
+            }
+        }
+    }
+    // The ring itself (invisible: it marks where the fight is), its podium
+    // wall round the sand's rectangle; the sand inside, 28×18, rounded.
+    let (ax, ay, aw, ah) = (
+        fx + RIM - 1,
+        fy + RIM - 1,
+        fw - 2 * (RIM - 1),
+        fh - 2 * (RIM - 1),
+    );
     k.marker("arena", ax, ay, aw, ah, Some("Arena"));
-    // Two stone pillars on the sand, to dodge round (or be slammed into),
-    // and four spike plates that rise in turn (see commons_sim::arena). The
-    // sand inside is 24×15: all of it mirrored, side to side and top to bottom.
-    let (sx, sy) = (ax + 1, ay + 1);
-    for (px, py) in [(5u16, 7u16), (17, 7)] {
-        k.object("arena_pillar", sx + px, sy + py, 2, 2, "Pillar");
+    // The gladiators' gates, in the podium wall either side, halfway down,
+    // facing the middle: great iron doors, opened each round for the
+    // fighters to march out of to their places.
+    let gy = fy + fh / 2 - 1;
+    k.marker(
+        "arena_gate_w",
+        ax - 1,
+        gy - 1,
+        2,
+        3,
+        Some("The gladiators' gate"),
+    );
+    k.marker(
+        "arena_gate_e",
+        ax + aw - 1,
+        gy - 1,
+        2,
+        3,
+        Some("The gladiators' gate"),
+    );
+    // (The gatehouses stand on the front-row seats there: solid stone now.)
+    for (x, y) in [
+        (ax - 1, gy - 1),
+        (ax - 1, gy),
+        (ax - 1, gy + 1),
+        (ax + aw, gy - 1),
+        (ax + aw, gy),
+        (ax + aw, gy + 1),
+    ] {
+        k.decor(x, y, "none");
+        solid(k, x, y);
     }
-    for (px, py) in [(11u16, 1u16), (11, 12), (1, 6), (21, 6)] {
+    // Two stone pillars on the sand (above and below its middle), to dodge
+    // round (or be slammed into),
+    // and four spike plates that rise in turn (see commons_sim::arena): all
+    // mirrored, side to side and top to bottom.
+    let (sx, sy) = (ax + 1, ay + 1);
+    // (A tile thick each, in a place two wide so they stand square on the
+    // middle line: above and below the middle.)
+    for (px, py) in [(13u16, 5u16), (13, 12)] {
+        k.object("arena_pillar", sx + px, sy + py, 2, 1, "Pillar");
+    }
+    for (px, py) in [(13u16, 1u16), (13, 15), (2, 8), (24, 8)] {
         k.marker("arena_spikes", sx + px, sy + py, 2, 2, None);
     }
-    k.object("arena_sign", gate + 3, ay - 2, 2, 1, "Arena");
-    k.spot("arena", gate, ay - 1);
-    // Flagstone ways in at both gates.
-    k.rect(gate, 2, 2, ay - 2, "plaza");
-    k.rect(gate, ay + ah, 2, N - 2 - (ay + ah), "plaza");
-    // The grand south entrance: an archway over the way in (its two piers
-    // solid, the way under it open), a red carpet out from it, and on a dais
-    // beside the carpet Caesar with two legionaries: talk to Caesar to fight.
-    k.marker("arena_gate", gate - 3, ay + ah + 1, 8, 2, Some("The Arena"));
-    for (px, py) in [
-        (gate - 3, ay + ah + 1),
-        (gate - 2, ay + ah + 1),
-        (gate + 3, ay + ah + 1),
-        (gate + 4, ay + ah + 1),
-    ] {
-        for dy in 0..2 {
-            let i = k.b.i(k.ox + px, k.oy + py + dy);
-            k.b.solid[i] = true;
+    // The grand arch in the south wall (its piers solid, the way under it
+    // open); down from it the red carpet, and on a dais beside the carpet
+    // Caesar with two legionaries: talk to Caesar to fight. Bystanders are
+    // shown out to the carpet's side.
+    let wall_row = fy + fh - 1;
+    for x in gate - 3..=gate + 4 {
+        k.decor(x, wall_row, "none");
+    }
+    k.marker("arena_gate", gate - 3, wall_row, 8, 2, Some("The Arena"));
+    for px in [gate - 3, gate - 2, gate + 3, gate + 4] {
+        for py in [wall_row, wall_row + 1] {
+            solid(k, px, py);
         }
     }
-    k.marker("arena_carpet", gate - 1, ay + ah + 3, 4, 7, None);
-    k.object("arena_court", gate + 5, ay + ah + 3, 5, 2, "Caesar");
-    k.spot("caesar", gate + 7, ay + ah + 5);
+    let below = fy + fh;
+    k.rect(gate, below, 2, N - 2 - below, "plaza");
+    k.marker("arena_carpet", gate - 1, below + 1, 4, 7, None);
+    k.spot("arena", gate - 2, below + 2);
+    k.object("arena_court", gate + 5, below + 1, 5, 2, "Caesar");
+    k.spot("caesar", gate + 7, below + 3);
+    // The arena's leaderboard (gladiator wins), just right of Caesar.
+    k.object(
+        "leaderboard",
+        gate + 11,
+        below + 2,
+        2,
+        1,
+        "Arena Leaderboard",
+    );
     k.object(
         "signpost",
         gate - 4,
-        ay + ah + 4,
+        below + 2,
         1,
         1,
-        "The Arena: talk to Caesar (on his dais by the red carpet) to join the games. Duel, three-way or a four-gladiator brawl; bots if you like",
+        "The Arena: talk to Caesar (on his dais by the red carpet) to fight: a duel, a three-way or a four-gladiator brawl, bots if you like. To watch, go in under the arches and sit on a red-cushioned seat",
     );
-    // An oasis in the north-west corner: a pool, palms round it, reeds.
-    for y in 3..9u16 {
-        for x in 3..10u16 {
-            let (dx, dy) = ((x as f32 - 6.0) / 3.2, (y as f32 - 5.8) / 2.6);
+    for (x, y) in [
+        (gate - 2, below + 4),
+        (gate + 3, below + 4),
+        (gate - 2, below + 7),
+        (gate + 3, below + 7),
+    ] {
+        k.decor(x, y, "lantern");
+    }
+    // An oasis in the south-west corner: a pool, palms round it, reeds.
+    for y in below + 2..N - 2 {
+        for x in 2..13u16 {
+            let (dx, dy) = ((x as f32 - 7.5) / 3.4, (y as f32 - 39.5) / 2.8);
             let d = dx * dx + dy * dy;
             if d < 1.0 {
                 k.ground(x, y, "water");
@@ -1204,64 +2831,49 @@ fn arena(k: &mut Blk) {
             }
         }
     }
-    for (x, y) in [(2u16, 4u16), (9, 3), (10, 7), (3, 9), (8, 9)] {
+    for (x, y) in [(3u16, 37u16), (11, 36), (12, 41), (4, 43), (10, 44)] {
         k.decor(x, y, "palm");
     }
-    for (x, y) in [(3u16, 7u16), (9, 5)] {
+    for (x, y) in [(4u16, 40u16), (11, 39)] {
         k.decor(x, y, "reeds");
     }
-    // The desert's bits and pieces, on open sand, clear of the ways through.
+    // The desert's bits and pieces, on open sand, clear of the ways through
+    // and the bowl.
     let open = |k: &Blk, x: u16, y: u16| -> bool {
         let i = k.b.i(k.ox + x, k.oy + y);
         k.b.decor[i] == 0 && !k.b.solid[i] && [g("sand"), g("soil")].contains(&k.b.ground[i])
     };
-    let clear_of_ways = |x: u16, y: u16| {
-        !(gate.saturating_sub(1)..=gate + 2).contains(&x)
-            && !(ax.saturating_sub(1)..=ax + aw).contains(&x)
-            || y < ay.saturating_sub(3)
-            || y > ay + ah + 1
-    };
     for y in 3..N - 3 {
         for x in 3..N - 3 {
-            if !open(k, x, y) || !clear_of_ways(x, y) {
+            if !open(k, x, y) {
                 continue;
             }
-            // Nothing right against the arena's walls.
-            if x + 1 >= ax && x <= ax + aw && y + 1 >= ay && y <= ay + ah {
+            // Nothing against the bowl, on the way in, by the side arches or by Caesar.
+            if x + 1 >= fx && x <= fx + fw && y + 1 >= fy && y <= fy + fh {
+                continue;
+            }
+            if (gate.saturating_sub(3)..=gate + 10).contains(&x) && y < below + 9 {
                 continue;
             }
             let h = k.hash(x, y, 41) % 1000;
             let kind = match h {
-                0..=18 => "cactus",
-                19..=42 => "cactus_small",
-                43..=80 => "dry_shrub",
-                81..=89 => "bones",
-                90..=99 => "rock",
-                100..=107 => "palm",
-                108..=112 => "amphora",
+                0..=22 => "cactus",
+                23..=50 => "cactus_small",
+                51..=95 => "dry_shrub",
+                96..=105 => "bones",
+                106..=116 => "rock",
+                117..=126 => "palm",
+                127..=133 => "amphora",
                 _ => continue,
             };
             k.decor(x, y, kind);
         }
     }
-    // Clay pots and torches by the north gate, either side.
-    for (x, y) in [(gate - 2, ay - 2), (gate + 3, ay - 3)] {
-        k.decor(x, y, "amphora");
-    }
+    // A palm or two along the way in, for shade.
     for (x, y) in [
-        (gate - 1, ay - 1),
-        (gate + 2, ay - 1),
-        (gate - 1, ay + ah),
-        (gate + 2, ay + ah),
-    ] {
-        k.decor(x, y, "lantern");
-    }
-    // A palm or two by each gate's way, for shade.
-    for (x, y) in [
-        (gate - 3, 4),
-        (gate + 4, 7),
-        (gate - 3, ay + ah + 3),
-        (gate + 4, ay + ah + 6),
+        (gate - 4, below + 6),
+        (gate + 5, below + 7),
+        (gate - 3, N - 4),
     ] {
         let i = k.b.i(k.ox + x, k.oy + y);
         if k.b.decor[i] == 0 && !k.b.solid[i] {
@@ -1330,6 +2942,8 @@ fn fun_corner(k: &mut Blk) {
         1,
         "Splat Yard: paintball inside, Blue against Red, three a side. First to ten!",
     );
+    // The Splat Yard's leaderboard (paintball wins), by its door.
+    k.object("leaderboard", 31, 18, 2, 1, "Paintball Leaderboard");
     // Snack carts in the middle, lanterns along the front.
     k.object("market_cart", 20, 18, 2, 1, "Snacks");
     k.object("market_cart", 26, 23, 2, 1, "Snacks");
@@ -1616,38 +3230,7 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
         }
         _ => k.object("building", 12, 7, 24, 11, name),
     }
-    let sign = match key {
-        "town_hall" => "Town Hall: the town's votes and proposals".to_string(),
-        "gallery" => {
-            "Gallery: paint in the Studio, hang it in the Salon, and see everyone's work. Easels out here for painting together"
-                .to_string()
-        }
-        "museum" => {
-            "Museum: the town's natural history, given by its people, and the Hall of Fame".to_string()
-        }
-        "theater" => {
-            "Concert Hall: take the stage and everyone inside hears you".to_string()
-        }
-        "cinema" => "Cinema: the big screen plays outside; the cinema opens soon".to_string(),
-        "arcade" => {
-            "Arcade: pong, light cycles, racers, a dance-off and more inside; word games out here"
-                .to_string()
-        }
-        "cafe" => "The Mossy Mug: drinks, the pool table and pinball inside".to_string(),
-        "library" => {
-            "Library: every book in Project Gutenberg, in every language. Browse the wings, or ask at the desk"
-                .to_string()
-        }
-        "casino" => {
-            "Casino: slots and roulette, coins only, never real money. 16 and over".to_string()
-        }
-        "bowling" => "Bowling: four lanes inside; rent shoes at the counter".to_string(),
-        "paintball" => "Splat Yard: paintball inside, Blue against Red, three a side. First to ten!".to_string(),
-        "club_hall" => {
-            "Club Hall: found a club, rent its room, and meet up with your members".to_string()
-        }
-        _ => format!("{name}: opening soon"),
-    };
+    let sign = about(key, name);
     k.object("signpost", 20, 19, 1, 1, &sign);
     if key == "arcade" {
         k.object("arcade", 27, 19, 3, 1, "");

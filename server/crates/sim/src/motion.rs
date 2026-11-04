@@ -22,6 +22,55 @@ const SKATE_TOP: f64 = 3.0;
 /// Braking on a skateboard, in tiles per ms² (42 tiles/s²).
 const SKATE_BRAKE: f64 = 42e-6;
 
+/// The Vespa: quick off the mark, and it keeps on pulling, to well past the
+/// skateboard's best and sooner (`VESPA_TOP` times its start, over
+/// `VESPA_RAMP_MS`), braking harder at the end. Ramps as a skate does
+/// (`sprint_in`: how far along its ramp it starts).
+pub const VESPA_SPEED_X10: u8 = 130;
+pub const VESPA_RAMP_MS: u32 = 4_500;
+const VESPA_TOP: f64 = 3.2;
+const VESPA_BRAKE: f64 = 70e-6;
+
+/// A ride that picks up speed as it goes (a skateboard, a Vespa): its
+/// setting-off speed (tiles per ms), top speed (times that), how long the
+/// ramp up takes, and how hard it brakes.
+#[derive(Debug, Clone, Copy)]
+struct RampRide {
+    base: f64,
+    top: f64,
+    ramp_ms: f64,
+    brake: f64,
+}
+
+/// The ramp of a motion at `speed_x10`, if it's a ramped ride.
+fn ramp_ride(speed_x10: u8) -> Option<RampRide> {
+    match speed_x10 {
+        SKATE_SPEED_X10 => Some(RampRide {
+            base: SKATE_SPEED_X10 as f64 / 10_000.0,
+            top: SKATE_TOP,
+            ramp_ms: SKATE_RAMP_MS as f64,
+            brake: SKATE_BRAKE,
+        }),
+        VESPA_SPEED_X10 => Some(RampRide {
+            base: VESPA_SPEED_X10 as f64 / 10_000.0,
+            top: VESPA_TOP,
+            ramp_ms: VESPA_RAMP_MS as f64,
+            brake: VESPA_BRAKE,
+        }),
+        _ => None,
+    }
+}
+
+/// Whether a motion at `speed_x10` picks up speed as it goes (and carries it on to the next stretch).
+pub fn is_ramped(speed_x10: u8) -> bool {
+    ramp_ride(speed_x10).is_some()
+}
+
+/// Turning less than this far into a step, a walk turns from the tile it's
+/// just left (a step's worth back at most half a tile) instead of walking
+/// on into the next first: keys and taps answer at once.
+pub const TURN_EARLY: f64 = 0.5;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Motion {
     pub path: Vec<TilePos>,
@@ -55,25 +104,25 @@ struct Skate {
 }
 
 impl Skate {
-    fn new(ramp0: f64, len: f64) -> Skate {
-        let base = SKATE_SPEED_X10 as f64 / 10_000.0;
-        let top = base * SKATE_TOP;
-        let acc = (top - base) / SKATE_RAMP_MS as f64;
-        let ramp0 = ramp0.clamp(0.0, SKATE_RAMP_MS as f64);
+    fn new(ride: RampRide, ramp0: f64, len: f64) -> Skate {
+        let base = ride.base;
+        let top = base * ride.top;
+        let acc = (top - base) / ride.ramp_ms;
+        let ramp0 = ramp0.clamp(0.0, ride.ramp_ms);
         let mut s = Skate {
             v0: base + acc * ramp0,
             acc,
-            ramp_left: SKATE_RAMP_MS as f64 - ramp0,
+            ramp_left: ride.ramp_ms - ramp0,
             brake_at: 0.0,
             brake_t: 0.0,
             brake_v: 0.0,
-            brake: SKATE_BRAKE,
+            brake: ride.brake,
             len,
         };
         // Brake where the glide just reaches the end: s + v(s)²/2b = len.
         let stops = |s: &Skate, d: f64| {
             let v = s.speed_after(s.time_to(d));
-            d + v * v / (2.0 * SKATE_BRAKE)
+            d + v * v / (2.0 * ride.brake)
         };
         if stops(&s, 0.0) >= len {
             // Too short to glide at the usual rate: brake just hard enough.
@@ -154,16 +203,17 @@ impl Motion {
     }
 
     fn skate(&self) -> Option<Skate> {
-        (self.speed_x10 == SKATE_SPEED_X10).then(|| Skate::new(self.sprint_in as f64, self.len()))
+        ramp_ride(self.speed_x10).map(|r| Skate::new(r, self.sprint_in as f64, self.len()))
     }
 
     /// For a skate, how far along its ramp its speed at `t` is (ms of pushing):
     /// a new stretch joining it at `t` carries on at that speed. 0 otherwise.
     pub fn skate_ramp_at(&self, t: u32) -> u16 {
-        let Some(s) = self.skate() else { return 0 };
+        let (Some(s), Some(r)) = (self.skate(), ramp_ride(self.speed_x10)) else {
+            return 0;
+        };
         let v = s.speed_at(t.saturating_sub(self.t0) as f64);
-        let base = SKATE_SPEED_X10 as f64 / 10_000.0;
-        (((v - base) / s.acc).clamp(0.0, SKATE_RAMP_MS as f64)).round() as u16
+        (((v - r.base) / s.acc).clamp(0.0, r.ramp_ms)).round() as u16
     }
 
     fn ms_per_tile(&self) -> f64 {
@@ -202,7 +252,7 @@ impl Motion {
     /// Whether they're sprinting at `t`.
     pub fn sprinting_at(&self, t: u32) -> bool {
         self.speed_x10 == SPRINT_SPEED_X10
-            || (self.speed_x10 != SKATE_SPEED_X10
+            || (!is_ramped(self.speed_x10)
                 && self.sprint_in > 0
                 && t > self.t0 + self.sprint_in as u32)
     }
@@ -253,6 +303,13 @@ impl Motion {
     /// time reproduces the current motion exactly up to `next`.
     /// `None` if the walk hasn't started yet or has finished.
     pub fn splice(&self, t: u32) -> Option<(TilePos, TilePos, u32)> {
+        self.splice_at(t)
+            .map(|(prev, next, t_prev, _)| (prev, next, t_prev))
+    }
+
+    /// [`Motion::splice`], and how far into the step from `prev` to `next`
+    /// the avatar is at `t` (0 just left `prev`, 1 at `next`).
+    pub fn splice_at(&self, t: u32) -> Option<(TilePos, TilePos, u32, f64)> {
         if t <= self.t0 || self.is_done(t) {
             return None;
         }
@@ -274,10 +331,12 @@ impl Motion {
                 let prev = (a.0 as i32 + dx * k, a.1 as i32 + dy * k);
                 let next = (prev.0 + dx, prev.1 + dy);
                 let t_prev = self.t0 + self.time_for(before + k as f64 * step_len).round() as u32;
+                let into = ((travelled - before) / step_len - k as f64).clamp(0.0, 1.0);
                 return Some((
                     (prev.0 as u16, prev.1 as u16),
                     (next.0 as u16, next.1 as u16),
                     t_prev,
+                    into,
                 ));
             }
             before += len;
@@ -297,6 +356,47 @@ mod tests {
             speed_x10: SKATE_SPEED_X10,
             sprint_in: ramp0,
         }
+    }
+
+    /// The Vespa: quick off the mark, and quicker as it goes (pinned for
+    /// motion.test.ts too, which checks the client mirror gives the same).
+    #[test]
+    fn a_vespa_sets_off_quick_and_keeps_pulling() {
+        for (len, ramp0, end, mid, at3000) in [
+            (200u16, 0u16, 7652u32, 78.391455, 67.6),
+            (10, 3000, 1541, 7.443125, 10.0),
+            (3, 0, 1320, 2.108376, 3.0),
+            (60, 4500, 2740, 36.192, 60.0),
+        ] {
+            let m = Motion {
+                path: vec![(0, 0), (len, 0)],
+                t0: 1000,
+                speed_x10: VESPA_SPEED_X10,
+                sprint_in: ramp0,
+            };
+            assert_eq!(m.end_t(), end);
+            assert!((m.pos_at(1000 + (end - 1000) / 2).0 - mid).abs() < 1e-5);
+            assert!((m.pos_at(4000).0 - at3000).abs() < 1e-5);
+        }
+        let m = Motion {
+            path: vec![(0, 0), (300, 0)],
+            t0: 1000,
+            speed_x10: VESPA_SPEED_X10,
+            sprint_in: 0,
+        };
+        let speed = |t: u32| (m.pos_at(t + 100).0 - m.pos_at(t).0) * 10.0;
+        assert!(speed(1000) > 12.0, "quick off the mark");
+        assert!(
+            speed(1000 + VESPA_RAMP_MS) > 40.0,
+            "and really fast once it's going"
+        );
+        assert!(
+            speed(1000 + VESPA_RAMP_MS) > SKATE_SPEED_X10 as f64 / 10.0 * SKATE_TOP,
+            "past the skateboard's best"
+        );
+        assert!(
+            is_ramped(VESPA_SPEED_X10) && is_ramped(SKATE_SPEED_X10) && !is_ramped(WALK_SPEED_X10)
+        );
     }
 
     /// Pinned for motion.test.ts, which checks the client mirror gives the same.

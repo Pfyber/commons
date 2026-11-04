@@ -184,7 +184,7 @@ pub fn mall() -> MapFile {
 }
 
 /// Where a shop's goods stand. Showrooms (furniture) are four carpeted
-/// model rooms with three pieces each; racks are mannequins; pens hold the
+/// model rooms with up to four pieces each; racks are mannequins; pens hold the
 /// Pets shop's animals; shelves stand in rows. Each display is
 /// labelled `<dept>:<slot>`; what's on it comes from the stock.
 fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
@@ -193,7 +193,7 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
     let mut spots: Vec<Tile> = vec![];
     let kind = match d.kind.as_str() {
         "showroom" => {
-            let mut rooms: Vec<[Tile; 3]> = vec![];
+            let mut rooms: Vec<[Tile; 4]> = vec![];
             for (vx, vy) in [
                 (ix0 + 1, iy0 + 1),
                 (ix1 - 6, iy0 + 1),
@@ -205,10 +205,15 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
                         b.ground(x, y, "carpet");
                     }
                 }
-                rooms.push([(vx + 1, vy + 1), (vx + 4, vy + 1), (vx + 2, vy + 3)]);
+                rooms.push([
+                    (vx + 1, vy + 1),
+                    (vx + 4, vy + 1),
+                    (vx + 1, vy + 3),
+                    (vx + 4, vy + 3),
+                ]);
             }
             // Take one piece from each room in turn, so no room stands empty.
-            for i in 0..3 {
+            for i in 0..4 {
                 spots.extend(rooms.iter().map(|r| r[i]));
             }
             "display"
@@ -274,6 +279,23 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
             }
             "display"
         }
+        "gallery" => {
+            // Everything on show at once: rows of displays packed either
+            // side of a walkway down the middle from the door, an aisle
+            // after each row to stand in and look.
+            let cx = (x0 + x1) / 2;
+            for y in gallery_rows(iy0, iy1) {
+                for x in (ix0..=cx - 2).chain(cx + 3..=ix1) {
+                    spots.push((x, y));
+                }
+            }
+            for y in iy0..=iy1 {
+                for x in ix0..=ix1 {
+                    b.ground(x, y, "carpet");
+                }
+            }
+            "display"
+        }
         "pens" => {
             // Low fenced pens on straw, two rows either side of the way in
             // to the counter, each with an animal waiting for a home.
@@ -317,6 +339,11 @@ fn displays(b: &mut Builder, d: &Department, counter_y: u16) {
     for (slot, &(x, y)) in spots.iter().take(d.slots as usize).enumerate() {
         b.object(kind, x, y, w, h, Some(&format!("{}:{slot}", d.key)), true);
     }
+}
+
+/// A gallery's rows of displays: every other row, from just inside the door.
+fn gallery_rows(iy0: u16, iy1: u16) -> impl Iterator<Item = u16> {
+    (iy0 + 1..=iy1).step_by(2)
 }
 
 /// Every spot can be walked to from the entrance, and so can each shop.

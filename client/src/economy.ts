@@ -41,6 +41,16 @@ export interface Applied {
   firsts: number[];
 }
 
+/** The fisherman's daily order (server `fishquest`): three fish, how many of each, handed in so far. */
+export interface FishQuest {
+  items: { item: number; need: number; given: number; price: number }[];
+  need: number;
+  given: number;
+  done: boolean;
+  /** When it's replaced by a new one (unix seconds). */
+  ends: number;
+}
+
 export const COIN = 1;
 /** The arcade's tickets (protocol `arcade::TICKET`). */
 export const TICKET = 900;
@@ -124,6 +134,18 @@ export class Economy {
   applyResult(r: Pick<Applied, "totals">) {
     for (const [item, qty] of r.totals) this.inventory.set(item, qty);
     this.emit();
+  }
+
+  /** The fisherman's order for today. */
+  fishQuest(): Promise<FishQuest> {
+    return this.auth.get<FishQuest>("/api/fisherman/quest");
+  }
+
+  /** Hands `qty` of fish `item` in for the order (paid triple); the order as it stands now. */
+  async deliverFish(item: number, qty: number): Promise<FishQuest> {
+    const r = await this.auth.send<{ applied: Applied; quest: FishQuest }>("/api/fisherman/quest/deliver", { item, qty, key: crypto.randomUUID() });
+    this.applyResult(r.applied);
+    return r.quest;
   }
 
   async sell(item: number, qty: number) {

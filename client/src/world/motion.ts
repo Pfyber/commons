@@ -37,6 +37,31 @@ const segLen = (a: TileXY, b: TileXY) => Math.hypot(b.x - a.x, b.y - a.y);
 export const SKATE_RAMP_MS = 7_000;
 const SKATE_TOP = 3;
 const SKATE_BRAKE = 42e-6;
+/** The Vespa (sim::VESPA_*): quicker off the mark, and it pulls on to well past the skateboard. */
+export const VESPA_SPEED_X10 = 130;
+export const VESPA_RAMP_MS = 4_500;
+const VESPA_TOP = 3.2;
+const VESPA_BRAKE = 70e-6;
+
+/** A ride that picks up speed as it goes (sim::RampRide): setting off (tiles per ms), top (times that), ramp, braking. */
+interface RampRide {
+  base: number;
+  top: number;
+  rampMs: number;
+  brake: number;
+}
+
+/** The ramp of a motion at `speedX10` (sim::ramp_ride), if it's a ramped ride. */
+function rampRide(speedX10: number): RampRide | null {
+  if (speedX10 === SKATE_SPEED_X10) return { base: SKATE_SPEED_X10 / 10_000, top: SKATE_TOP, rampMs: SKATE_RAMP_MS, brake: SKATE_BRAKE };
+  if (speedX10 === VESPA_SPEED_X10) return { base: VESPA_SPEED_X10 / 10_000, top: VESPA_TOP, rampMs: VESPA_RAMP_MS, brake: VESPA_BRAKE };
+  return null;
+}
+
+/** Whether a motion at `speedX10` picks up speed as it goes (a skateboard, a Vespa). */
+export function isRamped(speedX10: number | undefined): boolean {
+  return speedX10 !== undefined && rampRide(speedX10) !== null;
+}
 
 /**
  * The skating profile (sim::Skate, in lockstep): picking up speed from the
@@ -50,21 +75,23 @@ class Skate {
   brakeAt = 0;
   brakeT = 0;
   brakeV = 0;
-  brake = SKATE_BRAKE;
+  brake: number;
 
   constructor(
+    ride: RampRide,
     ramp0: number,
     private len: number,
   ) {
-    const base = SKATE_SPEED_X10 / 10_000;
-    const top = base * SKATE_TOP;
-    this.acc = (top - base) / SKATE_RAMP_MS;
-    const r = Math.max(0, Math.min(SKATE_RAMP_MS, ramp0));
+    this.brake = ride.brake;
+    const base = ride.base;
+    const top = base * ride.top;
+    this.acc = (top - base) / ride.rampMs;
+    const r = Math.max(0, Math.min(ride.rampMs, ramp0));
     this.v0 = base + this.acc * r;
-    this.rampLeft = SKATE_RAMP_MS - r;
+    this.rampLeft = ride.rampMs - r;
     const stops = (d: number) => {
       const v = this.speedAfter(this.timeTo(d));
-      return d + (v * v) / (2 * SKATE_BRAKE);
+      return d + (v * v) / (2 * ride.brake);
     };
     if (stops(0) >= len) {
       this.brake = len > 0 ? (this.v0 * this.v0) / (2 * len) : 1;
@@ -123,16 +150,17 @@ const pathLen = (m: Motion) => {
 };
 
 function skateOf(m: Motion): Skate | null {
-  return m.speedX10 === SKATE_SPEED_X10 ? new Skate(m.sprintIn ?? 0, pathLen(m)) : null;
+  const ride = rampRide(m.speedX10);
+  return ride ? new Skate(ride, m.sprintIn ?? 0, pathLen(m)) : null;
 }
 
 /** For a skate, how far along its ramp its speed at `t` is (sim::Motion::skate_ramp_at); 0 otherwise. */
 export function skateRampAt(m: Motion | null, t: number): number {
   const s = m ? skateOf(m) : null;
-  if (!m || !s) return 0;
+  const ride = m ? rampRide(m.speedX10) : null;
+  if (!m || !s || !ride) return 0;
   const v = s.speedAt(Math.max(0, t - m.t0));
-  const base = SKATE_SPEED_X10 / 10_000;
-  return Math.round(Math.max(0, Math.min(SKATE_RAMP_MS, (v - base) / s.acc)));
+  return Math.round(Math.max(0, Math.min(ride.rampMs, (v - ride.base) / s.acc)));
 }
 
 /** How fast a motion is going at `t`, in tiles a second (0 standing). */
@@ -143,10 +171,10 @@ export function speedAt(m: Motion, t: number): number {
   return sprintingAt(m, t) ? SPRINT_SPEED_X10 / 10 : m.speedX10 / 10;
 }
 
-/** How far a skate going `tilesPerSec` glides before it stops (tiles). */
-export function glideTiles(tilesPerSec: number): number {
+/** How far a skate (or a Vespa: `speedX10`) going `tilesPerSec` glides before it stops (tiles). */
+export function glideTiles(tilesPerSec: number, speedX10 = SKATE_SPEED_X10): number {
   const v = tilesPerSec / 1000;
-  return (v * v) / (2 * SKATE_BRAKE);
+  return (v * v) / (2 * (rampRide(speedX10)?.brake ?? SKATE_BRAKE));
 }
 const msPerTile = (m: Motion) => 10_000 / Math.max(1, m.speedX10);
 const SPRINT_MS_PER_TILE = 10_000 / SPRINT_SPEED_X10;
@@ -174,7 +202,7 @@ function timeFor(m: Motion, d: number): number {
 
 /** Whether they're sprinting at `t`. */
 export function sprintingAt(m: Motion, t: number): boolean {
-  return m.speedX10 === SPRINT_SPEED_X10 || (m.speedX10 !== SKATE_SPEED_X10 && !!m.sprintIn && t > m.t0 + m.sprintIn);
+  return m.speedX10 === SPRINT_SPEED_X10 || (!isRamped(m.speedX10) && !!m.sprintIn && t > m.t0 + m.sprintIn);
 }
 
 export function durationMs(m: Motion): number {
@@ -254,7 +282,13 @@ export function headingAt(m: Motion, t: number): TileXY | null {
  * into, and when the avatar was at the former. A new path [prev, next, ...]
  * starting then continues the current walk without a seam.
  */
-export function splice(m: Motion, t: number): { prev: TileXY; next: TileXY; tPrev: number } | null {
+/**
+ * Mirror of sim::TURN_EARLY: turning less than this far into a step, a walk
+ * turns from the tile it's just left instead of walking on into the next.
+ */
+export const TURN_EARLY = 0.5;
+
+export function splice(m: Motion, t: number): { prev: TileXY; next: TileXY; tPrev: number; into: number } | null {
   if (t <= m.t0 || t >= endT(m)) return null;
   const travelled = distAt(m, t);
   let before = 0;
@@ -273,6 +307,7 @@ export function splice(m: Motion, t: number): { prev: TileXY; next: TileXY; tPre
         prev,
         next: { x: prev.x + dx, y: prev.y + dy },
         tPrev: m.t0 + Math.round(timeFor(m, before + k * stepLen)),
+        into: Math.min(1, Math.max(0, (travelled - before) / stepLen - k)),
       };
     }
     before += len;

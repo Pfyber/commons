@@ -40,8 +40,7 @@ use commons_protocol::{
     CELL_TILES, ClientMsg, EntityInfo, ServerMsg, Tile, emote, error_code, push_framed, state,
 };
 use commons_sim::{
-    Grid, Motion, SKATE_SPEED_X10, SPRINT_SPEED_X10, TilePos, WALK_SPEED_X10, compress, route,
-    vehicles,
+    Grid, Motion, SPRINT_SPEED_X10, TURN_EARLY, TilePos, WALK_SPEED_X10, compress, route, vehicles,
 };
 
 /// The zone where vehicles can be ridden (everywhere else is indoors: on
@@ -103,14 +102,16 @@ enum Pending {
         action: u8,
         item: u32,
     },
-    /// Throw a glimmer lure here on arrival.
+    /// Throw a glimmer lure (or the gold one) here on arrival.
     Lure {
         x: u16,
         y: u16,
+        gold: bool,
     },
     Cast {
         x: u16,
         y: u16,
+        magnet: bool,
     },
 }
 
@@ -318,6 +319,11 @@ pub struct Instance {
     soil: HashSet<TilePos>,
     plots: HashMap<TilePos, garden::PlotView>,
     objects: HashMap<TilePos, u32>,
+    /// Furniture turned on (lamps, the TV…), and fish tanks' fish.
+    lit: HashSet<TilePos>,
+    tanks: HashMap<TilePos, Vec<u32>>,
+    /// What stands on the tables (layer 1).
+    tops: HashMap<TilePos, u32>,
     /// Tiles with an economy call in flight, to refuse double actions.
     busy: HashSet<TilePos>,
     next_garden_tick: u32,
@@ -423,6 +429,9 @@ impl Instance {
             soil,
             plots: HashMap::new(),
             objects: HashMap::new(),
+            lit: HashSet::new(),
+            tanks: HashMap::new(),
+            tops: HashMap::new(),
             busy: HashSet::new(),
             next_garden_tick: 0,
         }
@@ -912,10 +921,11 @@ impl Instance {
             ClientMsg::Sit { seat } => self.sit(id, seat, now),
             ClientMsg::Stand {} => self.stand(id, now),
             ClientMsg::GameMove { table, uci } => self.game_move(id, table, &uci, now),
-            ClientMsg::FishCast { x, y } => self.fish_cast(id, (x, y), now),
+            ClientMsg::FishCast { x, y, magnet } => self.fish_cast(id, (x, y), magnet, now),
             ClientMsg::FishReel { quality } => self.fish_reel(id, quality, now),
+            ClientMsg::SalvageReel { target, extras } => self.salvage_reel(id, target, extras, now),
             ClientMsg::FishHit {} => self.fish_hit(id, now),
-            ClientMsg::ThrowLure { x, y } => self.throw_lure(id, (x, y), now),
+            ClientMsg::ThrowLure { x, y, gold } => self.throw_lure(id, (x, y), gold, now),
             ClientMsg::OpenCrate {} => self.open_crate(id, now),
             ClientMsg::BowlJoin { lane, vs_bot } => self.bowl_join(id, lane, vs_bot, now),
             ClientMsg::BowlLeave { lane } => self.bowl_leave(id, lane),
@@ -925,10 +935,15 @@ impl Instance {
             ClientMsg::ArenaStart { bots } => self.arena_start(id, bots, now),
             ClientMsg::ArenaBot { slot, on } => self.arena_bot(id, slot, on, now),
             ClientMsg::ArenaLevel { level } => self.arena_level(id, level, now),
+            ClientMsg::ArenaMode { mode, goliath } => self.arena_mode(id, mode, goliath, now),
+            ClientMsg::ArenaKits { on } => self.arena_kits(id, on, now),
+            ClientMsg::ArenaKit { kit } => self.arena_kit(id, kit, now),
+            ClientMsg::ArenaLobby {} => self.arena_lobby(id, now),
+            ClientMsg::ArenaWheel { on } => self.arena_wheel(id, on, now),
             ClientMsg::PbBot { slot, on } => self.pb_bot(id, slot, on, now),
             ClientMsg::PbLevel { level } => self.pb_level(id, level, now),
-            ClientMsg::ArenaMove { x, y, aim } => self.arena_move(id, x, y, aim, now),
-            ClientMsg::ArenaAct { act, aim } => self.arena_act(id, act, aim, now),
+            ClientMsg::ArenaMove { x, y, aim, reach } => self.arena_move(id, x, y, aim, reach, now),
+            ClientMsg::ArenaAct { act, aim, reach } => self.arena_act(id, act, aim, reach, now),
             ClientMsg::PbJoin { team } => self.pb_join(id, team, now),
             ClientMsg::PbLeave {} => self.pb_leave(id),
             ClientMsg::PbStart { bots } => self.pb_start(id, bots, now),
@@ -941,6 +956,9 @@ impl Instance {
             }
             ClientMsg::Place { item, x, y } => self.place(id, item, (x, y)),
             ClientMsg::Pickup { x, y } => self.pickup(id, (x, y)),
+            ClientMsg::UseObject { x, y } => self.use_object(id, (x, y)),
+            ClientMsg::TankPut { x, y, fish } => self.tank_put(id, (x, y), fish),
+            ClientMsg::TankTake { x, y, index } => self.tank_take(id, (x, y), index),
             ClientMsg::JamNote {
                 instrument,
                 pitch,
@@ -1023,8 +1041,9 @@ impl Instance {
         // Mid-walk, continue through the tile being walked into so the new path
         // joins the old one without a seam. Otherwise start shortly in the future
         // so observers receive the MoveStart before the walk begins.
-        let (prefix, start, t0) = match a.motion.as_ref().and_then(|m| m.splice(now)) {
-            Some((prev, next, t_prev)) => (Some(prev), next, t_prev),
+        let (mut prefix, mut start, mut t0) = match a.motion.as_ref().and_then(|m| m.splice_at(now))
+        {
+            Some((prev, next, t_prev, _)) => (Some(prev), next, t_prev),
             None => {
                 let from = match &a.motion {
                     Some(m) if !m.is_done(now) => m.path[0],
@@ -1033,6 +1052,19 @@ impl Instance {
                 (None, from, now + MOVE_LEAD_MS)
             }
         };
+        // Barely into a step and turning off it: turn from the tile just
+        // left, now (the client does the same, blending the half-step).
+        let mut turned_early = false;
+        if let Some((prev, next, _, into)) = a.motion.as_ref().and_then(|m| m.splice_at(now))
+            && into < TURN_EARLY
+            && let Some(back) = route(grid, prev, target, MAX_PATH_EXPANSIONS)
+            && back.get(1) != Some(&next)
+        {
+            prefix = None;
+            start = prev;
+            t0 = now;
+            turned_early = true;
+        }
         let Some(mut full) = route(grid, start, target, MAX_PATH_EXPANSIONS) else {
             self.error(id, error_code::NO_PATH, "can't get there");
             return;
@@ -1052,15 +1084,22 @@ impl Instance {
             .and_then(|&l| self.ride_speed(l, &full));
         let a = self.avatars.get_mut(&id).unwrap();
         let (speed_x10, sprint_in) = match own.max(leader) {
-            // A skate keeps the speed it had built up (joining a stretch in progress).
-            Some(s) if s == SKATE_SPEED_X10 => (
+            // A skate (or a Vespa) keeps the speed it had built up (joining a stretch in progress).
+            Some(s) if commons_sim::is_ramped(s) => (
                 s,
-                prefix
-                    .and(a.motion.as_ref())
+                (prefix.is_some() || turned_early)
+                    .then_some(a.motion.as_ref())
+                    .flatten()
                     .map_or(0, |m| m.skate_ramp_at(t0)),
             ),
             Some(s) => (s, 0),
-            None if sprint => sprint_profile(prefix.and(a.motion.as_ref()), t0, now),
+            None if sprint => sprint_profile(
+                (prefix.is_some() || turned_early)
+                    .then_some(a.motion.as_ref())
+                    .flatten(),
+                t0,
+                now,
+            ),
             None => (WALK_SPEED_X10, 0),
         };
         let motion = Motion {
@@ -1178,8 +1217,8 @@ impl Instance {
                     Pending::Plot { x, y, action, item } => {
                         self.do_plot_action(id, (x, y), action, item)
                     }
-                    Pending::Cast { x, y } => self.do_cast(id, (x, y), now),
-                    Pending::Lure { x, y } => self.do_throw_lure(id, (x, y), now),
+                    Pending::Cast { x, y, magnet } => self.do_cast(id, (x, y), magnet, now),
+                    Pending::Lure { x, y, gold } => self.do_throw_lure(id, (x, y), gold, now),
                 }
             }
         }

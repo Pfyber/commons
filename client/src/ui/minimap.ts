@@ -16,6 +16,9 @@ export class Minimap {
   private lastName = "";
   private homeLot: string | null = null;
   private home: TileXY | null = null;
+  /** When it was last drawn (it's redrawn about 20 times a second, not every frame), and its size on screen. */
+  private drawnAt = -Infinity;
+  private css = 0;
 
   constructor(root: HTMLElement, onTap: () => void) {
     this.el.type = "button";
@@ -50,8 +53,13 @@ export class Minimap {
    */
   update(pos: TileXY, route: TileXY[] | null, now: number, heading = Math.PI / 2, others: TileXY[] = []) {
     const map = this.map;
-    if (!map) return;
-    const css = this.canvas.clientWidth || 160;
+    // (Hidden, nothing to draw; and 20 frames a second is plenty for a map
+    // the size of a stamp.)
+    if (!map || this.el.hidden || now - this.drawnAt < 50) return;
+    this.drawnAt = now;
+    // (Its size, read now and then: reading it forces the page to lay out.)
+    if (!this.css || now % 1000 < 50) this.css = this.canvas.clientWidth || 160;
+    const css = this.css;
     const dpr = window.devicePixelRatio || 1;
     const px = Math.round(css * dpr);
     if (this.canvas.width !== px) {

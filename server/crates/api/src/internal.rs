@@ -38,8 +38,11 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/look/{player}", get(player_look))
         .route("/home/place", post(place))
         .route("/home/pickup", post(pickup))
+        .route("/home/tank/put", post(tank_put))
+        .route("/home/tank/take", post(tank_take))
         .route("/activity", post(activity))
         .merge(crate::clubroom::routes())
+        .merge(crate::leaderboards::internal_routes())
 }
 
 pub(crate) fn service(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
@@ -406,6 +409,12 @@ pub struct HomeObject {
     pub x: i16,
     pub y: i16,
     pub item: i32,
+    /// 1: standing on the table under it (0: on the floor, or the wall).
+    #[serde(default)]
+    pub layer: i16,
+    /// A fish tank's fish (item ids).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fish: Vec<i32>,
 }
 
 /// A player's saved look, what they wear from the mall, the pet out with
@@ -445,17 +454,20 @@ async fn home_objects(
 ) -> ApiResult<Json<Vec<HomeObject>>> {
     service(&state, &headers)?;
     let owner = uuid(&owner)?;
-    let rows = sqlx::query("SELECT x, y, item_id FROM home_objects WHERE owner_id = $1")
-        .bind(owner)
-        .fetch_all(&state.db)
-        .await
-        .map_err(db_err)?;
+    let rows =
+        sqlx::query("SELECT x, y, item_id, fish, layer FROM home_objects WHERE owner_id = $1")
+            .bind(owner)
+            .fetch_all(&state.db)
+            .await
+            .map_err(db_err)?;
     Ok(Json(
         rows.iter()
             .map(|r| HomeObject {
                 x: r.get("x"),
                 y: r.get("y"),
                 item: r.get("item_id"),
+                fish: r.get("fish"),
+                layer: r.get("layer"),
             })
             .collect(),
     ))
@@ -467,6 +479,9 @@ struct PlaceReq {
     item: i32,
     x: i16,
     y: i16,
+    /// 1: on the table there (the zone checked it may go there).
+    #[serde(default)]
+    layer: i16,
     key: String,
 }
 
@@ -516,12 +531,13 @@ async fn place(
             ));
         }
         let r = sqlx::query(
-            "INSERT INTO home_objects (owner_id, x, y, item_id) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO home_objects (owner_id, x, y, item_id, layer) VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(owner)
         .bind(req.x)
         .bind(req.y)
         .bind(req.item)
+        .bind(req.layer.clamp(0, 1))
         .execute(&mut *tx)
         .await;
         match r {
@@ -557,6 +573,8 @@ struct PickupReq {
     owner: String,
     x: i16,
     y: i16,
+    #[serde(default)]
+    layer: i16,
     key: String,
 }
 
@@ -574,12 +592,28 @@ async fn pickup(
             ..Default::default()
         }));
     }
-    let item: Option<i32> = sqlx::query_scalar(
-        "DELETE FROM home_objects WHERE owner_id = $1 AND x = $2 AND y = $3 RETURNING item_id",
+    // (A tank with fish in it stays put: take them out first.)
+    let full: bool = sqlx::query_scalar(
+        "SELECT cardinality(fish) > 0 FROM home_objects WHERE owner_id = $1 AND x = $2 AND y = $3 AND layer = $4",
     )
     .bind(owner)
     .bind(req.x)
     .bind(req.y)
+    .bind(req.layer)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_err)?
+    .unwrap_or(false);
+    if full {
+        return Err(conflict("tank_full", "Take the fish out of it first."));
+    }
+    let item: Option<i32> = sqlx::query_scalar(
+        "DELETE FROM home_objects WHERE owner_id = $1 AND x = $2 AND y = $3 AND layer = $4 RETURNING item_id",
+    )
+    .bind(owner)
+    .bind(req.x)
+    .bind(req.y)
+    .bind(req.layer)
     .fetch_optional(&mut *tx)
     .await
     .map_err(db_err)?;
@@ -595,6 +629,162 @@ async fn pickup(
     .await?;
     tx.commit().await.map_err(db_err)?;
     Ok(Json(applied))
+}
+
+#[derive(Deserialize)]
+struct TankReq {
+    owner: String,
+    x: i16,
+    y: i16,
+    /// Put: the fish (an item). Take: which one (its place in the tank).
+    #[serde(default)]
+    fish: i32,
+    #[serde(default)]
+    index: i32,
+    #[serde(default)]
+    layer: i16,
+    key: String,
+}
+
+/// What a tank holds now, and the bag's change.
+#[derive(Serialize)]
+struct TankDone {
+    fish: Vec<i32>,
+    applied: Applied,
+}
+
+/// The tank at (x, y) in `owner`'s home: its item and fish, locked for the change.
+async fn tank_at(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    owner: Uuid,
+    x: i16,
+    y: i16,
+    layer: i16,
+) -> ApiResult<(i32, Vec<i32>)> {
+    let row: Option<(i32, Vec<i32>)> = sqlx::query_as(
+        "SELECT item_id, fish FROM home_objects WHERE owner_id = $1 AND x = $2 AND y = $3 AND layer = $4 FOR UPDATE",
+    )
+    .bind(owner)
+    .bind(x)
+    .bind(y)
+    .bind(layer)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_err)?;
+    row.ok_or_else(|| conflict("empty", "there's no tank there"))
+}
+
+/// A fish from the bag into a tank (as many as it holds).
+async fn tank_put(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<TankReq>,
+) -> ApiResult<Json<TankDone>> {
+    service(&state, &headers)?;
+    let owner = uuid(&req.owner)?;
+    if state.catalog.get(req.fish).map(|i| i.kind.as_str()) != Some("fish") {
+        return Err(ApiError::bad_request("not_fish", "Only fish go in a tank."));
+    }
+    let mut tx = state.db.begin().await.map_err(db_err)?;
+    let (item, mut fish) = tank_at(&mut tx, owner, req.x, req.y, req.layer).await?;
+    let holds = state
+        .catalog
+        .get(item)
+        .and_then(|i| i.meta.get("tank"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as usize;
+    if holds == 0 {
+        return Err(conflict("not_tank", "That isn't a fish tank."));
+    }
+    if key_used(&mut tx, &req.key).await.map_err(db_err)? {
+        return Ok(Json(TankDone {
+            fish,
+            applied: Applied {
+                duplicate: true,
+                ..Default::default()
+            },
+        }));
+    }
+    if fish.len() >= holds {
+        return Err(conflict(
+            "tank_full",
+            &format!("It holds {holds} fish: it's full."),
+        ));
+    }
+    fish.push(req.fish);
+    sqlx::query("UPDATE home_objects SET fish = $4 WHERE owner_id = $1 AND x = $2 AND y = $3 AND layer = $5")
+        .bind(owner)
+        .bind(req.x)
+        .bind(req.y)
+        .bind(&fish)
+        .bind(req.layer)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let applied = apply(
+        &mut tx,
+        &state.catalog,
+        owner,
+        &[Op {
+            item: req.fish,
+            delta: -1,
+        }],
+        "tank_put",
+        &req.key,
+    )
+    .await
+    .map_err(|e| match e {
+        EconError::Insufficient(_) => conflict("not_enough_items", "you don't have that fish"),
+        e => e.into(),
+    })?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(Json(TankDone { fish, applied }))
+}
+
+/// A fish out of a tank, back into the bag.
+async fn tank_take(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<TankReq>,
+) -> ApiResult<Json<TankDone>> {
+    service(&state, &headers)?;
+    let owner = uuid(&req.owner)?;
+    let mut tx = state.db.begin().await.map_err(db_err)?;
+    let (_, mut fish) = tank_at(&mut tx, owner, req.x, req.y, req.layer).await?;
+    if key_used(&mut tx, &req.key).await.map_err(db_err)? {
+        return Ok(Json(TankDone {
+            fish,
+            applied: Applied {
+                duplicate: true,
+                ..Default::default()
+            },
+        }));
+    }
+    let i = usize::try_from(req.index)
+        .ok()
+        .filter(|&i| i < fish.len())
+        .ok_or_else(|| conflict("no_fish", "that fish isn't in there"))?;
+    let item = fish.remove(i);
+    sqlx::query("UPDATE home_objects SET fish = $4 WHERE owner_id = $1 AND x = $2 AND y = $3 AND layer = $5")
+        .bind(owner)
+        .bind(req.x)
+        .bind(req.y)
+        .bind(&fish)
+        .bind(req.layer)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    let applied = apply(
+        &mut tx,
+        &state.catalog,
+        owner,
+        &[Op { item, delta: 1 }],
+        "tank_take",
+        &req.key,
+    )
+    .await?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(Json(TankDone { fish, applied }))
 }
 
 #[derive(Deserialize)]

@@ -7,8 +7,8 @@
   "blocks": [
     ["home", "home",      "home",      "home",       "home",     "home",     "home"],
     ["home", "orchard",   "club_hall", "theater",    "club_lot", "woods",    "home"],
-    ["home", "club_lot",  "arena",     "pond",       "cinema",    "club_lot", "home"],
-    ["home", "gallery",   "cafe",      "market",     "arcade",    "library",  "home"],
+    ["home", "club_lot",  "cafe",      "arena",      "cinema",    "club_lot", "home"],
+    ["home", "gallery",   "pond",      "market",     "arcade",    "library",  "home"],
     ["home", "club_lot",  "bowling",   "fairground", "town_hall", "casino",   "home"],
     ["home", "meadow",    "museum",    "park",       "club_lot",  "lake",     "home"],
     ["home", "home",      "home",      "home",       "home",     "home",     "home"]

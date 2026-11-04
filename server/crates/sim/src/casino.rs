@@ -123,6 +123,101 @@ pub fn is_red(n: u8) -> bool {
     RED.contains(&n)
 }
 
+// ---- the big machine: twenty symbols ---------------------------------------------
+
+/// The big machine: five reels four high (twenty symbols, read left to right
+/// a row at a time), each drawn on its own. Enough of one symbol anywhere pays.
+pub const MEGA_SYMBOLS: [&str; 7] = ["cherry", "lemon", "grape", "bell", "star", "gem", "seven"];
+pub const MEGA_WEIGHTS: [u32; 7] = [10, 8, 7, 6, 4, 3, 2];
+pub const MEGA_TOTAL: u32 = 40;
+pub const MEGA_CELLS: usize = 20;
+pub const MEGA_BET: (i32, i32) = (1, 20);
+/// How many of a symbol it takes to pay (the rarer, the fewer).
+pub const MEGA_MIN: [usize; 7] = [8, 8, 7, 7, 6, 5, 4];
+/// What it pays, in tenths of the bet: the fewest that pay (and one more),
+/// two more than that (and three), four more or better.
+pub const MEGA_PAYS: [[i32; 3]; 7] = [
+    [23, 80, 300],
+    [30, 100, 400],
+    [25, 100, 400],
+    [40, 120, 500],
+    [50, 150, 600],
+    [50, 200, 1000],
+    [60, 300, 1500],
+];
+
+/// The big machine's symbol for a roll.
+pub fn mega_symbol(roll: u32) -> usize {
+    let mut r = roll % MEGA_TOTAL;
+    for (i, w) in MEGA_WEIGHTS.iter().enumerate() {
+        if r < *w {
+            return i;
+        }
+        r -= w;
+    }
+    MEGA_WEIGHTS.len() - 1
+}
+
+/// What `n` of symbol `s` pays (tenths of the bet).
+pub fn mega_pays_for(s: usize, n: usize) -> i32 {
+    let min = MEGA_MIN[s];
+    match n {
+        _ if n < min => 0,
+        _ if n < min + 2 => MEGA_PAYS[s][0],
+        _ if n < min + 4 => MEGA_PAYS[s][1],
+        _ => MEGA_PAYS[s][2],
+    }
+}
+
+/// A spin of the big machine: the twenty symbols and what they pay (tenths of the bet).
+pub fn mega_spin(rolls: [u32; MEGA_CELLS]) -> ([usize; MEGA_CELLS], i32) {
+    let cells = rolls.map(mega_symbol);
+    let pays = (0..MEGA_SYMBOLS.len())
+        .map(|s| mega_pays_for(s, cells.iter().filter(|c| **c == s).count()))
+        .sum();
+    (cells, pays)
+}
+
+// ---- the horse races -------------------------------------------------------------
+
+/// Six horses: how often each wins (out of 100) and what a win pays (tenths
+/// of the bet); every horse returns about 94 %.
+pub const HORSES: [&str; 6] = [
+    "Thunder",
+    "Biscuit",
+    "Lady Luck",
+    "Old Rusty",
+    "Comet",
+    "Pickles",
+];
+pub const HORSE_CHANCE: [u32; 6] = [30, 22, 17, 13, 10, 8];
+pub const HORSE_PAYS: [i32; 6] = [31, 43, 55, 73, 95, 118];
+pub const RACE_BET: (i32, i32) = (1, 30);
+
+/// The winner from a roll; then the rest in the order the other rolls put them.
+pub fn race(win: u32, rest: [u32; 5]) -> [usize; 6] {
+    let mut r = win % 100;
+    let mut first = HORSES.len() - 1;
+    for (i, c) in HORSE_CHANCE.iter().enumerate() {
+        if r < *c {
+            first = i;
+            break;
+        }
+        r -= c;
+    }
+    let mut others: Vec<(u32, usize)> = (0..HORSES.len())
+        .filter(|&i| i != first)
+        .zip(rest)
+        .map(|(i, k)| (k, i))
+        .collect();
+    others.sort();
+    let mut order = [first; 6];
+    for (k, (_, i)) in others.into_iter().enumerate() {
+        order[k + 1] = i;
+    }
+    order
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +273,37 @@ mod tests {
         assert!(!Bet::Dozen { n: 4 }.valid() && !Bet::Number { n: 37 }.valid());
         assert_eq!(Bet::Red.pays(0), 0, "zero is neither");
         assert!(is_red(1) && !is_red(2));
+    }
+    #[test]
+    fn the_big_machine_returns_about_ninety_five_percent() {
+        // Each symbol's count is binomial (twenty draws), so it's exact.
+        let choose = |n: u64, k: u64| (1..=k).fold(1f64, |r, i| r * (n - k + i) as f64 / i as f64);
+        let mut back = 0f64;
+        for (s, w) in MEGA_WEIGHTS.iter().enumerate() {
+            let p = *w as f64 / MEGA_TOTAL as f64;
+            for n in 0..=MEGA_CELLS {
+                let pr = choose(20, n as u64) * p.powi(n as i32) * (1.0 - p).powi(20 - n as i32);
+                back += pr * mega_pays_for(s, n) as f64 / 10.0;
+            }
+        }
+        assert!((0.93..0.97).contains(&back), "returns {back:.4}");
+        assert_eq!(MEGA_WEIGHTS.iter().sum::<u32>(), MEGA_TOTAL);
+        let (cells, pays) = mega_spin([0; MEGA_CELLS]);
+        assert_eq!(cells, [0; MEGA_CELLS]);
+        assert_eq!(pays, MEGA_PAYS[0][2]);
+    }
+
+    #[test]
+    fn horses_return_about_ninety_four_percent_and_all_finish() {
+        assert_eq!(HORSE_CHANCE.iter().sum::<u32>(), 100);
+        for i in 0..6 {
+            let back = HORSE_CHANCE[i] as f64 / 100.0 * HORSE_PAYS[i] as f64 / 10.0;
+            assert!((0.92..0.96).contains(&back), "horse {i}: {back}");
+        }
+        let order = race(99, [5, 1, 4, 2, 3]);
+        assert_eq!(order[0], 5);
+        let mut all = order.to_vec();
+        all.sort();
+        assert_eq!(all, vec![0, 1, 2, 3, 4, 5]);
     }
 }

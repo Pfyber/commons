@@ -5,6 +5,7 @@
 // (a riveted grate with its holes, a band of warning paint round it; the
 // spikes themselves come up out of it in the show, see activities/arena.ts).
 
+import { bowlArt } from "./amphitheatre";
 import { disc, oval } from "./pixeldraw";
 import { drawPixelText, pixelWidth } from "./pixelfont";
 
@@ -30,18 +31,120 @@ function canvas(w: number, h: number): [HTMLCanvasElement, Ctx] {
 export function arenaObject(o: { kind: string; x: number; y: number; w: number; h: number }): { c: HTMLCanvasElement; overhang: number } | null {
   const w = o.w * T;
   const h = o.h * T;
-  if (o.kind === "arena_pillar") return pillar(w, h, (o.x * 7 + o.y) % 2);
+  if (o.kind === "arena_pillar") return smallPillar(w, h, (o.x * 7 + o.y) % 2);
   if (o.kind === "arena_spikes") return plate(w, h);
   if (o.kind === "arena_gate") return gate(w, h);
   if (o.kind === "arena_court") return court(w, h);
   if (o.kind === "arena_carpet") return carpet(w, h);
+  if (o.kind === "arena_gate_w" || o.kind === "arena_gate_e") return sideGate(w, h, o.kind === "arena_gate_e");
+  if (o.kind === "arena_bowl") return bowlArt(o.w, o.h);
   return null;
 }
 
+/**
+ * A gladiators' gate: its art stands this far above its footprint; where its
+ * two torches burn and where its iron doors close (from the art's top-left,
+ * for the west gate, whose doors face east: the east gate's mirrored).
+ */
+export const SIDE_GATE_OVERHANG = 10;
+export const SIDE_GATE_FIRES: [number, number][] = [
+  [52, 2],
+  [52, 98],
+];
+export const SIDE_GATE_DOOR = { x0: 20, x1: 60, y0: 16, y1: 90 };
+
+/**
+ * A gladiators' gate in the podium wall, facing the middle of the sand: a
+ * heavy frame of dressed stone round three sides (an arch at its back,
+ * iron-bolted, a keystone), and through it the dark of the tunnel the
+ * fighters come up out of. Its great iron doors are drawn live (they open
+ * for each round's march, see activities/arena.ts). `east`: mirrored, for
+ * the gate on the east side.
+ */
+function sideGate(w: number, h: number, east: boolean): { c: HTMLCanvasElement; overhang: number } {
+  const ov = SIDE_GATE_OVERHANG;
+  const H = h + ov;
+  const [c, ctx] = canvas(w, H);
+  if (east) {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
+  const stone = "#c9ad7a";
+  const hi = "#e2c896";
+  const lo = "#a08458";
+  const dk = "#7a6040";
+  const D = SIDE_GATE_DOOR;
+  // The frame: a block of dressed stone, outlined.
+  px(ctx, "rgba(0,0,0,0.25)", 2, H - 4, w - 2, 4);
+  px(ctx, OUTLINE, 0, 0, w, H - 2);
+  px(ctx, stone, 1, 1, w - 2, H - 4);
+  // Courses of big blocks.
+  for (let y = 1; y < H - 3; y += 9) {
+    px(ctx, dk, 1, y + 8, w - 2, 1);
+    const off = (y / 9) % 2 ? 0 : 7;
+    for (let x = 1 + off; x < w - 1; x += 14) px(ctx, dk, x, y, 1, 8);
+  }
+  px(ctx, hi, 1, 1, w - 2, 2);
+  px(ctx, lo, 1, H - 6, w - 2, 3);
+  // The opening: an arch at its back (west), open to the sand (east).
+  const r = (D.y1 - D.y0) / 2;
+  const cy = (D.y0 + D.y1) / 2;
+  for (let y = D.y0 - 3; y < D.y1 + 3; y++) {
+    const dy = y + 0.5 - cy;
+    const back = D.x0 + Math.round(Math.max(0, 10 - Math.sqrt(Math.max(0, (r + 3) * (r + 3) - dy * dy)) * (10 / (r + 3))) * 2);
+    if (y < D.y0 || y >= D.y1) {
+      // The arch's ring of voussoirs, over the opening's top and bottom.
+      px(ctx, (y >> 1) % 2 ? hi : stone, back - 2, y, w - back + 2, 1);
+      continue;
+    }
+    // The tunnel: dark, darker to the back.
+    for (let x = back; x < w; x++) {
+      const t = (x - back) / (w - back);
+      px(ctx, t < 0.25 ? "#120c0a" : t < 0.6 ? "#1d1410" : "#2b1d14", x, y, 1, 1);
+    }
+    px(ctx, OUTLINE, back - 1, y, 1, 1);
+  }
+  // A keystone at the back of the arch, iron bolts round the frame.
+  px(ctx, OUTLINE, 6, cy - 7, 10, 14);
+  px(ctx, hi, 7, cy - 6, 8, 12);
+  px(ctx, "#d9a83a", 9, cy - 2, 4, 4);
+  for (const [bx, by] of [
+    [24, 6],
+    [40, 6],
+    [56, 6],
+    [24, H - 12],
+    [40, H - 12],
+    [56, H - 12],
+  ]) {
+    px(ctx, OUTLINE, bx - 1, by - 1, 4, 4);
+    px(ctx, "#6a6a78", bx, by, 2, 2);
+  }
+  // The torches' brackets (their fire's live).
+  for (const [fx, fy] of SIDE_GATE_FIRES) {
+    px(ctx, OUTLINE, fx - 2, fy + 2, 4, 6);
+    px(ctx, "#6e4b30", fx - 1, fy + 3, 2, 4);
+  }
+  return { c, overhang: ov };
+}
+
 /** A pillar's art stands this far (px) above its footprint. */
-export const PILLAR_OVERHANG = 86;
+const PILLAR_ART_OVERHANG = 86;
+/** The pillars are drawn at this size (their art's made for a 2×2 footprint; they stand on one tile). */
+export const PILLAR_SCALE = 0.5;
+export const PILLAR_OVERHANG = PILLAR_ART_OVERHANG * PILLAR_SCALE;
 /** Where its brazier's fire sits, from the top of the art (px; centred). */
-export const PILLAR_FIRE_Y = 12;
+export const PILLAR_FIRE_Y = 12 * PILLAR_SCALE;
+
+/** A pillar a tile thick: the full-size art (made for 2×2), drawn down to size, in the middle of its place. */
+function smallPillar(w: number, h: number, v: number): { c: HTMLCanvasElement; overhang: number } {
+  const big = pillar(2 * T, 2 * T, v);
+  const bw = Math.round(big.c.width * PILLAR_SCALE);
+  const bh = Math.round(big.c.height * PILLAR_SCALE);
+  const [c, ctx] = canvas(w, h + PILLAR_OVERHANG);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(big.c, Math.round((w - bw) / 2), c.height - bh, bw, bh);
+  return { c, overhang: PILLAR_OVERHANG };
+}
 
 /**
  * A pillar: a twisted (Solomonic) sandstone column on a stepped plinth, its
@@ -50,7 +153,7 @@ export const PILLAR_FIRE_Y = 12;
  * live: see activities/arena.ts), and ivy winding down it, flowering.
  */
 function pillar(w: number, h: number, v: number): { c: HTMLCanvasElement; overhang: number } {
-  const over = PILLAR_OVERHANG;
+  const over = PILLAR_ART_OVERHANG;
   const H = h + over;
   const [c, ctx] = canvas(w, H);
   const cx = w / 2;
@@ -239,6 +342,51 @@ export const GATE_FIRES: [number, number][] = [
 /** Caesar's dais: its art's overhang, and where Caesar's head is (for his words), from the art's top-left. */
 export const COURT_OVERHANG = 78;
 export const COURT_CAESAR: [number, number] = [80, 46];
+/** The two candles on the dais, either side of Caesar: where their flames sit (x from the art's left, y up from its foot). */
+export const COURT_CANDLES: [number, number][] = [
+  [54, 59],
+  [106, 59],
+];
+/** The torches on their stands either side of the dais's foot: how far out past its sides, and down past its footprint, they stand. */
+export const COURT_TORCH_OUT = 10;
+export const COURT_TORCH_DOWN = 18;
+/** How tall a torch stand is, foot to the flame. */
+export const TORCH_HEIGHT = 46;
+
+/**
+ * A torch on its stand: three bronze feet, a slim pole with a collar and
+ * rings, and a flared cup of pitch at the top (its fire's live). 16 wide,
+ * its foot at the bottom middle.
+ */
+export function torchStand(): HTMLCanvasElement {
+  const H = TORCH_HEIGHT + 4;
+  const [c, ctx] = canvas(16, H);
+  const BRONZE = "#b07a34";
+  const BRONZE_L = "#e0a85a";
+  const BRONZE_D = "#6e4a1c";
+  oval(ctx, "rgba(0,0,0,0.3)", 8, H - 2, 7, 2);
+  // The feet.
+  px(ctx, OUTLINE, 1, H - 5, 14, 3);
+  px(ctx, BRONZE_D, 2, H - 4, 12, 1);
+  px(ctx, OUTLINE, 6, H - 8, 4, 4);
+  // The pole.
+  px(ctx, OUTLINE, 6, 9, 4, H - 16);
+  px(ctx, BRONZE, 7, 9, 2, H - 16);
+  px(ctx, BRONZE_L, 7, 9, 1, H - 16);
+  for (const y of [18, 30]) {
+    px(ctx, OUTLINE, 5, y, 6, 2);
+    px(ctx, GOLD, 6, y, 4, 1);
+  }
+  // The cup, flaring out, its pitch black.
+  px(ctx, OUTLINE, 2, 2, 12, 8);
+  px(ctx, BRONZE, 3, 3, 10, 6);
+  px(ctx, BRONZE_L, 3, 3, 2, 6);
+  px(ctx, BRONZE_D, 11, 3, 2, 6);
+  px(ctx, GOLD, 3, 3, 10, 1);
+  px(ctx, "#2a1a10", 4, 2, 8, 1);
+  px(ctx, OUTLINE, 5, 10, 6, 1);
+  return c;
+}
 
 const SAND = ["#f4dfae", "#e6c98f", "#d6b477", "#c09a5e", "#a07c46", "#7d5e34"];
 const GOLD = "#e8b828";
@@ -644,6 +792,22 @@ function court(w: number, h: number): { c: HTMLCanvasElement; overhang: number }
     px(ctx, GOLD, sx - 7, 32, 15, 1);
     inscribe(ctx, "SPQR", sx, 19);
     for (let x = sx - 7; x < sx + 8; x += 3) px(ctx, GOLD, x, 33, 1, 2);
+  }
+  // A candle either side of Caesar, on a little gold stand (their flames
+  // are live).
+  for (const [x, up] of COURT_CANDLES) {
+    const top = H - up;
+    px(ctx, OUTLINE, x - 4, fy - 5, 9, 3);
+    px(ctx, GOLD, x - 3, fy - 4, 7, 1);
+    px(ctx, OUTLINE, x - 1, fy - 9, 3, 5);
+    px(ctx, GOLD_DARK, x, fy - 8, 1, 4);
+    px(ctx, OUTLINE, x - 3, fy - 11, 7, 3);
+    px(ctx, GOLD, x - 2, fy - 10, 5, 1);
+    px(ctx, OUTLINE, x - 2, top + 1, 5, fy - 10 - top - 1);
+    px(ctx, "#f6efd8", x - 1, top + 1, 3, fy - 11 - top - 1);
+    px(ctx, "#ffffff", x - 1, top + 1, 1, fy - 11 - top - 1);
+    px(ctx, "#f6efd8", x + 1, top + 3, 1, 3);
+    px(ctx, OUTLINE, x, top, 1, 1);
   }
   // On the dais: a legionary either side of Caesar, facing in.
   legionary(ctx, 34, fy, 1);

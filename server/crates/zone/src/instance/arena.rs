@@ -24,7 +24,15 @@ pub(super) struct Arena {
     /// fighters come back out after.
     gate: TilePos,
     dirty: bool,
+    /// Nobody's played since then (or someone's just looked at the sign):
+    /// the bots put on a match of their own once it's been a while.
+    quiet_until: u32,
 }
+
+/// How long the arena stands empty before the bots put on a match; and
+/// after someone looks at the sign (and doesn't play), a while longer.
+const EXHIBIT_AFTER_MS: u32 = 12_000;
+const EXHIBIT_AFTER_LOOK_MS: u32 = 60_000;
 
 impl Arena {
     pub(super) fn new(objects: &[MapObject]) -> Option<Arena> {
@@ -41,6 +49,7 @@ impl Arena {
             ring: (a.x, a.y, a.w, a.h),
             gate,
             dirty: true,
+            quiet_until: EXHIBIT_AFTER_MS,
         })
     }
 
@@ -52,9 +61,19 @@ impl Arena {
         )
     }
 
+    /// Whether tile `t` is on the sand (or its wall): not the stands
+    /// round an oval ring, though they're within its corners.
     fn inside(&self, t: TilePos) -> bool {
         let (x, y, w, h) = self.ring;
-        t.0 >= x && t.1 >= y && t.0 < x + w && t.1 < y + h
+        t.0 >= x
+            && t.1 >= y
+            && t.0 < x + w
+            && t.1 < y + h
+            && self.m.ring.on_sand(
+                t.0 as f64 - self.origin.0 as f64 + 0.5,
+                t.1 as f64 - self.origin.1 as f64 + 0.5,
+                1.0,
+            )
     }
 
     fn state(&self, now: u32) -> ServerMsg {
@@ -78,7 +97,7 @@ impl Arena {
                     x: x100(f.x),
                     y: x100(f.y),
                     aim: sim::aim_to_u16(f.aim),
-                    hp: f.hp.max(0.0).ceil().min(255.0) as u8,
+                    hp: f.hp.max(0.0).ceil().min(65_535.0) as u16,
                     stamina: f.stamina.round().clamp(0.0, 100.0) as u8,
                     rage: f.rage.floor().clamp(0.0, 100.0) as u8,
                     act: f.act,
@@ -87,6 +106,7 @@ impl Arena {
                     flags: f.flags(now),
                     holding: f.holding,
                     fix: f.fix,
+                    kit: (m.picks.get(f.slot).copied().unwrap_or(0) & sim::kit::PICKED) | f.kit,
                 })
                 .collect(),
             gifts: m
@@ -101,6 +121,16 @@ impl Arena {
                 .collect(),
             winner: m.winner,
             level: m.level,
+            mode: m.mode,
+            goliath: m.goliath as u8,
+            kits: m.kits,
+            choose_ms: if m.choosing(now) {
+                m.choose_end.saturating_sub(now).min(65_535) as u16
+            } else {
+                0
+            },
+            exhibition: m.exhibition,
+            wheel: m.wheel,
         }
     }
 }
@@ -218,7 +248,12 @@ impl Instance {
         let inside: Vec<u32> = self
             .avatars
             .iter()
-            .filter(|(id, a)| ar.inside(a.tile) && !fighters.iter().any(|(f, _)| f == *id))
+            // (Anyone sitting watching stays put.)
+            .filter(|(id, a)| {
+                a.state != state::SITTING
+                    && ar.inside(a.tile)
+                    && !fighters.iter().any(|(f, _)| f == *id)
+            })
             .map(|(id, _)| *id)
             .collect();
         for (id, t) in fighters {
@@ -321,12 +356,64 @@ impl Instance {
         self.arena_send(now);
     }
 
+    /// Someone opened the sign: the bots' match (if one's on) is called off.
+    pub(super) fn arena_lobby(&mut self, _id: u32, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        ar.quiet_until = ar.quiet_until.max(now + EXHIBIT_AFTER_LOOK_MS);
+        if ar.m.call_off() {
+            ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
     pub(super) fn arena_bot(&mut self, id: u32, slot: u8, on: bool, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
         if ar.m.set_bot(id, slot as usize, on) {
             ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
+    pub(super) fn arena_mode(&mut self, id: u32, mode: u8, goliath: u8, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.set_mode(id, mode, goliath as usize) {
+            ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
+    pub(super) fn arena_kits(&mut self, id: u32, on: bool, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.set_kits(id, on) {
+            ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
+    pub(super) fn arena_wheel(&mut self, id: u32, on: bool, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.set_wheel(id, on) {
+            ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
+    /// A class picked for the round (shown at once to all).
+    pub(super) fn arena_kit(&mut self, id: u32, kit: u8, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.choose_kit(id, kit, now) {
             self.arena_send(now);
         }
     }
@@ -341,17 +428,26 @@ impl Instance {
         }
     }
 
-    pub(super) fn arena_move(&mut self, id: u32, x: u16, y: u16, aim: u16, now: u32) {
+    pub(super) fn arena_move(&mut self, id: u32, x: u16, y: u16, aim: u16, reach: u16, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
-        ar.m.claim_move(id, from100(x), from100(y), sim::aim_from_u16(aim), now);
+        // (How far off the mouse is, too: where the Goliath leaps, and hurls whoever it holds.)
+        ar.m.reach(id, reach as f64 / 100.0);
+        let evs =
+            ar.m.claim_move(id, from100(x), from100(y), sim::aim_from_u16(aim), now);
+        // (A heavy blow's lunge striking whoever it went through on the way.)
+        for e in &evs {
+            self.arena_broadcast(&event_msg(e));
+        }
     }
 
-    pub(super) fn arena_act(&mut self, id: u32, act: u8, aim: u16, now: u32) {
+    pub(super) fn arena_act(&mut self, id: u32, act: u8, aim: u16, reach: u16, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
+        // (How far off the mouse is, in hundredths of a tile: the Goliath leaps no further.)
+        ar.m.reach(id, reach as f64 / 100.0);
         let evs = ar.m.input(id, act, sim::aim_from_u16(aim), now);
         for e in &evs {
             self.arena_broadcast(&event_msg(e));
@@ -361,6 +457,33 @@ impl Instance {
     /// A tick of the match: it plays on, the fighters' avatars stand where
     /// they are on the sand, and everyone watching is told.
     pub(super) fn arena_tick(&mut self, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        let before = ar.m.status;
+        // Nobody playing, and someone about to watch: the bots fight it out.
+        if before == sim::LOBBY && ar.m.slots.iter().any(|&s| s != 0) {
+            ar.quiet_until = ar.quiet_until.max(now + EXHIBIT_AFTER_MS);
+        }
+        if before == sim::LOBBY && now >= ar.quiet_until && !self.avatars.is_empty() {
+            let mut rng = rand::rng();
+            if ar.m.exhibit(now, &mut || rng.random::<f64>()) {
+                self.arena_take_places(now);
+                self.arena_broadcast(&event_msg(&sim::Event {
+                    kind: sim::ev::ROUND_START,
+                    a: 0,
+                    b: 0,
+                    x: 0.0,
+                    y: 0.0,
+                    n: 1,
+                    m: 0,
+                    vx: 0.0,
+                    vy: 0.0,
+                }));
+                self.arena_send(now);
+                return;
+            }
+        }
         let Some(ar) = self.arena.as_mut() else {
             return;
         };
@@ -407,6 +530,13 @@ impl Instance {
         for e in &evs {
             self.arena_broadcast(&event_msg(e));
         }
+        // The match won: a gladiator's win, on the leaderboard (not a bot's).
+        if after == sim::OVER && before != sim::OVER {
+            let w = self.arena.as_ref().map_or(0, |ar| ar.m.winner);
+            if w != 0 && !sim::is_bot(w) {
+                self.count_stat(w, "arena_wins");
+            }
+        }
         // A new round: everyone back to their gates (and the ring cleared).
         if after == sim::COUNTDOWN && before != sim::COUNTDOWN {
             self.arena_take_places(now);
@@ -414,6 +544,9 @@ impl Instance {
         // Over: the parade's done; everyone stands where it ended, down the
         // red carpet (anyone not in it, out through the gate).
         if after == sim::LOBBY {
+            if let Some(ar) = self.arena.as_mut() {
+                ar.quiet_until = now + EXHIBIT_AFTER_MS;
+            }
             for id in people {
                 match parade.iter().find(|(p, _)| *p == id) {
                     Some(&(_, t)) => self.arena_place(id, t, now),
@@ -518,6 +651,7 @@ mod tests {
             ClientMsg::ArenaAct {
                 act: sim::input::LIGHT,
                 aim: 0,
+                reach: 0,
             },
         );
         inst.flush();

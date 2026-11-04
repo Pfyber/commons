@@ -44,6 +44,8 @@ async fn objects(
                 x: r.get("x"),
                 y: r.get("y"),
                 item: r.get("item_id"),
+                fish: Vec::new(),
+                layer: 0,
             })
             .collect(),
     ))

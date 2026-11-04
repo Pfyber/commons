@@ -164,7 +164,7 @@ export class Avatar {
    * walking), which way they face, their pose (null: standing or walking),
    * whether they're stepping, and whether they've just been hit (a red flash).
    */
-  private arena: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number } | null = null;
+  private arena: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number } | null = null;
   /** Bowling: when they began to throw (pick up, swing back, let go), 0 if not. */
   private bowlAt = 0;
   private snore: HTMLDivElement | null = null;
@@ -180,6 +180,8 @@ export class Avatar {
   private motion: Motion | null = null;
   private tile: TileXY;
   private blend = { x: 0, y: 0, until: 0 };
+  /** Where the name label was last put on screen (px). */
+  private labelAt = { x: NaN, y: NaN };
   pos: TileXY;
   private facing = 1;
   showName = true;
@@ -355,7 +357,7 @@ export class Avatar {
   }
 
   /** In the arena's fight (or out of it, with null). */
-  setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number } | null) {
+  setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number } | null) {
     this.arena = a;
     if (a) {
       this.motion = null;
@@ -682,6 +684,9 @@ export class Avatar {
     this.sprite.position.set(Math.round(feetX + sway), Math.round(feetY + bob + wave - (fighting?.lift ?? 0)));
     // The robot turns on the beat: every four beats it faces the other way.
     this.sprite.scale.x = robot && Math.floor(beat / 4) % 2 === 1 ? -this.facing : this.facing;
+    // (In the arena, the Goliath's drawn by the arena, in its place; its name goes over its head.)
+    this.sprite.visible = !fighting?.hide;
+    const height = fighting?.height ?? 34;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
     this.drawBoard(skating, feetX, feetY, push);
     this.drawRod(feetX, feetY + bob, walking, wallNow);
@@ -695,9 +700,15 @@ export class Avatar {
 
     // DOM label above the head.
     // Afloat, names spread along the boat (the front seat's a little higher, clear of the captain's).
-    const s = this.scene.tileToScreen(x + 0.5 + (seat >= 0 ? (SEAT_X[seat] ?? 0) / TILE : 0), y + 1 - 4 / TILE - 34 / TILE - (seat === 0 ? 12 / TILE : 0));
-    this.label.style.transform = `translate3d(${Math.round(s.x)}px, ${Math.round(s.y)}px, 0)`;
-    this.nameEl.hidden = !this.showName;
+    const s = this.scene.tileToScreen(x + 0.5 + (seat >= 0 ? (SEAT_X[seat] ?? 0) / TILE : 0), y + 1 - 4 / TILE - (height + (fighting?.lift ?? 0)) / TILE - (seat === 0 ? 12 / TILE : 0));
+    // (Only touching the page when it moves: unchanged writes still cost a restyle.)
+    const lx = Math.round(s.x);
+    const ly = Math.round(s.y);
+    if (lx !== this.labelAt.x || ly !== this.labelAt.y) {
+      this.labelAt = { x: lx, y: ly };
+      this.label.style.transform = `translate3d(${lx}px, ${ly}px, 0)`;
+    }
+    if (this.nameEl.hidden === this.showName) this.nameEl.hidden = !this.showName;
     if (this.bubble && wallNow > this.bubbleUntil) {
       if (!this.bubble.classList.contains("fade")) this.bubble.classList.add("fade");
       if (wallNow > this.bubbleUntil + 400) {
