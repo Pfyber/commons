@@ -1,0 +1,9 @@
+# LiveKit for Commons voice. Keys come from LIVEKIT_KEYS (see docker-compose.yml).
+port: 7880
+rtc:
+  tcp_port: 7881
+  # One muxed UDP port instead of a range, so it works behind Docker's NAT.
+  udp_port: 7882
+  use_external_ip: true
+logging:
+  level: info
