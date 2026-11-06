@@ -65,11 +65,13 @@ export class LaneBalls {
       // Just above the lane, under anyone standing at its foot.
       pins.zIndex = (obj.y + obj.h) * TILE - 0.5;
       this.scene.sorted.addChild(pins);
+      this.scene.lieFlat(pins);
       const board = new Sprite();
       // On the lane's screen (drawn on the back wall, above its top tile).
       board.position.set(obj.x * TILE + 8, obj.y * TILE - 38);
       board.zIndex = pins.zIndex + 0.1;
       this.scene.sorted.addChild(board);
+      this.scene.layOnGround(board);
       l = { obj, pins, standing: ALL, tumbling: null, inFlight: null, next: null, settleUntil: 0, board, boardKey: "" };
       this.lanes.set(obj, l);
       this.paint(l, performance.now());
@@ -128,6 +130,7 @@ export class LaneBalls {
     ball.visible = false;
     root.addChild(ball);
     this.scene.world.addChild(root);
+    this.scene.layer3d(root, false);
     const mid = (obj.x + obj.w / 2) * TILE;
     const half = (obj.w * TILE) / 2 - 18;
     // From the middle of the foul line, on a diagonal out to where it meets the pins.

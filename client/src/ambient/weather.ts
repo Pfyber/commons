@@ -59,6 +59,7 @@ export class Weather {
     const q = new URLSearchParams(location.search).get("weather");
     this.override = indoors ? "clear" : ((["clear", "cloudy", "rain", "mist"] as const).find((k) => k === q) ?? null);
     scene.world.addChild(this.ripples, this.shadows);
+    scene.lieFlat(this.ripples);
     this.sky.addChild(this.mist, this.rain);
     app.stage.addChild(this.sky);
   }

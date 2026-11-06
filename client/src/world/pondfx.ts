@@ -229,6 +229,7 @@ export class PondFx {
     for (const k of this.water) maxY = Math.max(maxY, Math.floor(k / this.map.width));
     this.spray.zIndex = (maxY + 1) * TILE;
     scene.sorted.addChild(this.spray);
+    scene.lieFlat(this.spray);
     const L = frogLooks();
     const now = performance.now();
     for (let i = 0; i < 3; i++) {

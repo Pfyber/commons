@@ -7,7 +7,7 @@
 // is drawn and undone just after, so the rest of the game only ever sees the
 // flat world and goes through `screenToWorld` / `tileToScreen` for the screen.
 
-import { type Application, Container, Graphics, Matrix, PerspectiveMesh, RenderTexture, Sprite, Texture, UPDATE_PRIORITY } from "pixi.js";
+import { type Application, Container, Graphics, Matrix, MeshPlane, Rectangle, RenderTexture, Sprite, Texture, UPDATE_PRIORITY } from "pixi.js";
 import { onSettings } from "../settings";
 import { TILE, bakeChunk, decorTexture, hash, newTagTexture, objectTexture } from "./art";
 import { itemTexture } from "./items";
@@ -30,12 +30,25 @@ const FAR = 60;
 const lying = new WeakSet<Container>();
 /** Flat things bigger than this (tiles, either way) are laid in true perspective, as the ground is. */
 const LAY_TILES = 1.5;
+/** Vertices along a ground chunk's edge (a chunk's bent a little between them). */
+const CHUNK_VERTS = 15;
+/** How much ground (px) one cell of a laid thing's grid spans. */
+const LAY_STEP = 64;
+
+/** A mesh laid on the ground in 3D, `n` vertices a side. */
+function groundMesh(texture: Texture, n: number): MeshPlane {
+  const m = new MeshPlane({ texture, verticesX: n, verticesY: n });
+  m.autoResize = false;
+  return m;
+}
 
 /** Something flat drawn in true perspective in 3D: its own texture, or one it's drawn into each frame. */
 interface Laid {
-  mesh: PerspectiveMesh;
+  mesh: MeshPlane;
   texture: Texture;
   rt: RenderTexture | null;
+  /** Vertices a side. */
+  n: number;
 }
 
 /** A transform the 3D view changed for this frame, to put back. */
@@ -55,6 +68,13 @@ const HUD_PX = 72;
 /** Decor drawn flat on the ground. */
 /** Objects that lie flat (people stand on them): the dance floor, the paintball field's markings, pads and bases. */
 const FLAT_OBJECTS = new Set(["dance_floor", "concert_stage", "pb_field", "pb_pad", "pb_spawn", "arena_spikes", "arena_carpet", "arena_bowl"]);
+/** Drawn from above and laid on the ground in 3D, though they sort like things standing there. */
+const LAID_OBJECTS = new Set(["arena_gate_w", "arena_gate_e", "goal", "pb_x", "pb_snake", "pb_hedge", "bowling_lane", "pool_table", "roulette_table", "blackjack_table"]);
+/** What's around a map smaller than the screen; indoors in 3D, the dark over the walls. */
+const HEDGE = "#6f8d62";
+const ROOF_DARK = "#17110c";
+/** Part stands and part lies: what's drawn above this many px stands up, the rest is floor. */
+const STANDS_ABOVE: Record<string, number> = { stall: 30 };
 const FLAT = new Set(["blanket", "lilypad", "mushrooms", "wildflowers", "daisies", "clover", "pebbles", "bones"]);
 /** Decor that sways in the wind. */
 const SWAY = new Set(["tree", "pine", "apple_tree", "bush", "tallgrass", "reeds", "willow", "willow_curtain", "pine_secret", "fern", "palm", "dry_shrub"]);
@@ -111,7 +131,7 @@ const KEEP_ART = 80;
 interface Chunk {
   ground: Sprite;
   /** The same ground in perspective (3D view only, made when first needed). */
-  mesh: PerspectiveMesh | null;
+  mesh: MeshPlane | null;
   props: Sprite[];
   sway: { s: Sprite; x: number; y: number; phase: number }[];
 }
@@ -130,6 +150,8 @@ interface Placed {
   hiddenAt: number;
   /** A mall display's item (and its "new" tag), drawn on the stand. */
   extras: Sprite[];
+  /** Bands cut from its picture, for those that part stand and part lie. */
+  parts: Texture[];
 }
 
 /** Inclusive chunk rectangle. */
@@ -174,11 +196,15 @@ export class Scene {
   closeView = false;
   /** The 3D view (⚙️ settings): on, and what it changed this frame. */
   private view3d = false;
+  /** What the setting says (a locked view is flat, whatever it says). */
+  private want3d = false;
   private ground3d = new Container();
   /** Who the 3D camera looks at (tile), not held back at the map's edge. */
   private focus: TileXY = { x: 0, y: 0 };
   /** Other layers drawn in world space (lamp light, fireflies): `whole` ones are tilted as one piece. */
-  private layers3d: { c: Container; whole: boolean }[] = [];
+  private layers3d: { c: Container; whole: boolean; stand: boolean }[] = [];
+  /** Where things stand that aren't drawn at their foot (see `standOn`). */
+  private feet = new WeakMap<Container, number>();
   private saved: Saved[] = [];
   private worldAt = { x: 0, y: 0, s: 1 };
   /** Where each thing was last drawn in 3D (for tapping an avatar). */
@@ -188,6 +214,7 @@ export class Scene {
   /** Flat things laid in perspective (3D), and the layers drawn in world coordinates that lie flat. */
   private laid = new Map<Container, Laid>();
   private flatLayers = new Set<Container>();
+  private flatOver = new WeakSet<Container>();
   private offSettings: () => void;
 
   constructor(
@@ -197,6 +224,7 @@ export class Scene {
     this.sorted.sortableChildren = true;
     this.ground3d.visible = false;
     this.world.addChild(this.ground, this.ground3d, this.marker, this.sorted);
+    this.flatLayers.add(this.marker);
     app.stage.addChild(this.world);
     // Tilt just before the frame is drawn (LOW), level again just after.
     app.ticker.add(this.tilt, this, UPDATE_PRIORITY.LOW + 1);
@@ -207,7 +235,7 @@ export class Scene {
     this.placed = map.objects
       // Drawn elsewhere, or invisible.
       .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot" && o.kind !== "forage" && o.kind !== "arena" && o.kind !== "yard_stand" && o.kind !== "boat_lake" && (!o.kind.startsWith("lab_") || o.kind === "lab_exit" || o.kind === "lab_heart"))
-      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, art: null, hiddenAt: 0, extras: [] }));
+      .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, art: null, hiddenAt: 0, parts: [], extras: [] }));
     this.resize();
   }
 
@@ -263,13 +291,24 @@ export class Scene {
   private show(p: (typeof this.placed)[number]) {
     p.art ??= objectTexture(p.o);
     const { texture, overhang, left } = p.art;
-    const s = new Sprite(texture);
+    const cut = STANDS_ABOVE[p.o.kind];
+    const s = new Sprite(cut ? this.artPart(p, 0, cut) : texture);
     s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
     // The dance floor lies flat: people stand on it, not behind it.
     s.zIndex = FLAT_OBJECTS.has(p.o.kind) ? p.o.y * TILE + 1 : (p.o.y + p.o.h) * TILE - 1;
-    if (FLAT_OBJECTS.has(p.o.kind)) lying.add(s);
+    if (FLAT_OBJECTS.has(p.o.kind) || LAID_OBJECTS.has(p.o.kind)) lying.add(s);
     this.sorted.addChild(s);
     p.sprite = s;
+    if (cut) {
+      // Its floor lies flat, and what stands, stands along the floor's back edge.
+      this.feet.set(s, s.position.y + cut);
+      const floor = new Sprite(this.artPart(p, cut, texture.height - cut));
+      floor.position.set(s.position.x, s.position.y + cut);
+      floor.zIndex = s.zIndex;
+      lying.add(floor);
+      this.sorted.addChild(floor);
+      p.extras.push(floor);
+    }
     if (p.o.item) {
       // Furniture stands on the floor; small goods sit on the shelf.
       const it = new Sprite(itemTexture(p.o.item, p.o.itemKind ?? ""));
@@ -293,6 +332,14 @@ export class Scene {
     }
   }
 
+  /** A band of a placed object's picture, `h` px from `y` down. */
+  private artPart(p: (typeof this.placed)[number], y: number, h: number): Texture {
+    const whole = p.art!.texture;
+    const part = new Texture({ source: whole.source, frame: new Rectangle(0, y, whole.width, h) });
+    p.parts.push(part);
+    return part;
+  }
+
   private hide(p: (typeof this.placed)[number]) {
     // (Its art's kept for when we come back, up to a point: the longest
     // gone go first.)
@@ -301,6 +348,8 @@ export class Scene {
     p.hiddenAt = performance.now();
     for (const e of p.extras) e.destroy();
     p.extras = [];
+    for (const t of p.parts) t.destroy();
+    p.parts = [];
     const kept = this.placed.filter((q) => q.art && !q.sprite);
     if (kept.length > KEEP_ART) {
       kept.sort((a, b) => a.hiddenAt - b.hiddenAt);
@@ -456,14 +505,15 @@ export class Scene {
 
   /**
    * Fixes the view at `w` × `h` tiles, whatever the screen, as big as fits
-   * (a quarter step at a time, and no zooming till it's let go): paintball,
-   * where seeing further is winning. Null lets it go.
+   * (a quarter step at a time, no zooming till it's let go, and flat: the 3D
+   * view sees further): paintball, where seeing further is winning. Null lets it go.
    */
   lockView(box: { w: number; h: number } | null) {
     const same = box?.w === this.locked?.w && box?.h === this.locked?.h;
     // (Asked every frame: the screen may have changed under it.)
     if (same && (!box || Math.abs(this.lockedStep(box) - this.scale * this.app.renderer.resolution) < 1e-3)) return;
     this.locked = box;
+    this.apply3d();
     this.resize();
   }
 
@@ -585,6 +635,7 @@ export class Scene {
    */
   onGround(c: Container) {
     this.world.addChildAt(c, this.world.getChildIndex(this.ground3d) + 1);
+    this.flatLayers.add(c);
   }
 
   /** Screen position of a world point given in tile units (tile centre = +0.5), on the ground. */
@@ -612,29 +663,56 @@ export class Scene {
   /**
    * A layer drawn in world space outside the scene (lamp light, fireflies)
    * that copies the world's position and scale: in 3D it's tilted too, each
-   * child laid on the ground where it is, or (`whole`) all of it as one.
+   * child laid on the ground where it is (or, `stand`, stood up there), or
+   * (`whole`) all of it as one. A child that's in world coordinates itself
+   * tilts as one.
    */
-  layer3d(c: Container, whole: boolean) {
-    this.layers3d.push({ c, whole });
+  layer3d(c: Container, whole: boolean, stand = false) {
+    this.layers3d.push({ c, whole, stand });
+  }
+
+  /** `c` is part of something standing on the ground at depth `foot` (world px): a flame on a pillar. */
+  standOn(c: Container, foot: number) {
+    this.feet.set(c, foot);
   }
 
   /**
    * `c` (in `sorted`, drawn in world coordinates: the arena's burning sand,
    * petals on the ground) lies flat: in 3D it's drawn into a texture each
    * frame and laid on the ground in perspective, like the ground itself.
+   * (A sprite is laid as it is.) `over`: drawn over everything, an overlay
+   * that needs to stay on the spot it's drawn at.
    */
-  lieFlat(c: Container) {
+  lieFlat(c: Container, over = false) {
     this.flatLayers.add(c);
+    if (over) this.flatOver.add(c);
   }
 
   // ---- the 3D view ----
 
   private set3d(on: boolean) {
-    this.view3d = on;
-    if (!on) {
+    this.want3d = on;
+    this.apply3d();
+  }
+
+  /** The setting, unless the view's locked (it must be the same for everyone). */
+  private apply3d() {
+    this.view3d = this.want3d && !this.locked;
+    this.app.renderer.background.color = this.view3d && !this.map.streets ? ROOF_DARK : HEDGE;
+    if (!this.view3d) {
       this.ground3d.visible = false;
       if (this.haze) this.haze.visible = false;
     }
+  }
+
+  /** Whether the camera's tilted (the 3D view) just now. */
+  get tilted(): boolean {
+    return this.view3d;
+  }
+
+  /** `s` lies on the ground: in 3D it's laid in perspective, not stood up. */
+  layOnGround(s: Sprite) {
+    lying.add(s);
   }
 
   /** The camera, for this frame: screen centre, distance (art pixels), zoom, and who it looks at. */
@@ -658,6 +736,26 @@ export class Scene {
     if (den < cam.d * NEAR) return null;
     const s = (cam.d / den) * cam.z;
     return { x: cam.ox + (wx - cam.fx) * s, y: cam.oy + dy * SIN * s, s };
+  }
+
+  /** A ground point on screen for a mesh: one behind the lens is held at its edge (off screen, whatever's near it). */
+  private projectMesh(wx: number, wy: number, cam: ReturnType<Scene["camera"]>): { x: number; y: number } {
+    return this.project(wx, Math.min(wy, cam.fy + (cam.d * (1 - NEAR)) / COS - 1), cam)!;
+  }
+
+  /** Lays `m` (a grid `n` vertices a side) over world rectangle (x0, y0)–(x1, y1). */
+  private layMesh(m: MeshPlane, n: number, x0: number, y0: number, x1: number, y1: number, cam: ReturnType<Scene["camera"]>) {
+    const pos = m.geometry.positions;
+    let k = 0;
+    for (let j = 0; j < n; j++) {
+      const wy = y0 + ((y1 - y0) * j) / (n - 1);
+      for (let i = 0; i < n; i++) {
+        const p = this.projectMesh(x0 + ((x1 - x0) * i) / (n - 1), wy, cam);
+        pos[k++] = p.x;
+        pos[k++] = p.y;
+      }
+    }
+    m.geometry.getBuffer("aPosition").update();
   }
 
   /** The ground point (art pixels) under a screen point (past the horizon: as far as the view reaches). */
@@ -695,30 +793,26 @@ export class Scene {
 
   /** `c` (hidden this frame) drawn instead as a mesh with `texture`, its corners at world rectangle (x0, y0)–(x1, y1). */
   private lay(c: Container, texture: Texture, rt: RenderTexture | null, x0: number, y0: number, x1: number, y1: number, cam: ReturnType<Scene["camera"]>) {
+    // (Big things need more vertices for the perspective to bend smoothly.)
+    const n = Math.min(33, Math.max(3, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / LAY_STEP) + 1));
     let l = this.laid.get(c);
-    if (l && l.texture !== texture) {
+    if (l && (l.texture !== texture || l.n !== n)) {
       l.mesh.destroy();
       if (l.rt && l.rt !== rt) l.rt.destroy(true);
       l = undefined;
     }
     if (!l) {
-      // (Big things need more vertices for the perspective to bend smoothly.)
-      const n = Math.abs(x1 - x0) > 4 * TILE || Math.abs(y1 - y0) > 4 * TILE ? 8 : 3;
-      l = { mesh: new PerspectiveMesh({ texture, verticesX: n, verticesY: n }), texture, rt };
+      l = { mesh: groundMesh(texture, n), texture, rt, n };
       this.laid.set(c, l);
       this.sorted.addChild(l.mesh);
     }
-    const a = this.project(x0, y0, cam);
-    const b = this.project(x1, y0, cam);
-    const r = this.project(x1, y1, cam);
-    const d = this.project(x0, y1, cam);
     const m = l.mesh;
-    m.zIndex = c.zIndex;
+    m.zIndex = this.flatOver.has(c) ? 1e9 : c.zIndex;
     m.alpha = c.alpha;
     m.blendMode = c.blendMode;
     if (c instanceof Sprite) m.tint = c.tint;
-    m.visible = c.visible && !!(a && b && r && d);
-    if (a && b && r && d) m.setCorners(a.x, a.y, b.x, b.y, r.x, r.y, d.x, d.y);
+    m.visible = c.visible;
+    this.layMesh(m, n, x0, y0, x1, y1, cam);
     this.save(c);
     c.visible = false;
   }
@@ -759,6 +853,21 @@ export class Scene {
     this.lay(c, rt, rt, x0, y0, x0 + rt.width, y0 + rt.height, cam);
   }
 
+  /** Where something standing has its foot: its sort depth, kept on it if it's drawn in world coordinates. */
+  private footOf(c: Container): number {
+    const foot = this.feet.get(c);
+    if (foot !== undefined) return foot;
+    if (c.position.x !== 0 || c.position.y !== 0) return c.zIndex;
+    const b = c.getLocalBounds();
+    return b.maxY > b.minY ? Math.max(b.minY, Math.min(b.maxY + TILE, c.zIndex)) : c.zIndex;
+  }
+
+  /** Something that lies flat, whichever it is. */
+  private layFlat(c: Container, cam: ReturnType<Scene["camera"]>) {
+    if (c instanceof Sprite) this.laySprite(c, cam);
+    else this.layLayer(c, cam);
+  }
+
   /** Meshes for things that went away go too. */
   private pruneLaid() {
     for (const [c, l] of this.laid) {
@@ -793,18 +902,11 @@ export class Scene {
       const g = c.ground;
       const x0 = g.position.x;
       const y0 = g.position.y;
-      const x1 = x0 + g.texture.width;
-      const y1 = y0 + g.texture.height;
-      const a = this.project(x0, y0, cam);
-      const b = this.project(x1, y0, cam);
-      const r = this.project(x1, y1, cam);
-      const l = this.project(x0, y1, cam);
       if (!c.mesh) {
-        c.mesh = new PerspectiveMesh({ texture: g.texture, verticesX: 8, verticesY: 8 });
+        c.mesh = groundMesh(g.texture, CHUNK_VERTS);
         this.ground3d.addChild(c.mesh);
       }
-      c.mesh.visible = !!(a && b && r && l);
-      if (a && b && r && l) c.mesh.setCorners(a.x, a.y, b.x, b.y, r.x, r.y, l.x, l.y);
+      this.layMesh(c.mesh, CHUNK_VERTS, x0, y0, x0 + g.texture.width, y0 + g.texture.height, cam);
     }
 
     // Standing things stand up; flat things lie down. (Sorted by foot, so
@@ -813,27 +915,39 @@ export class Scene {
     // Big flat things (a carpet, the dance floor, burning sand) are laid in
     // true perspective, as the ground is, so they stay put on it.
     this.pruneLaid();
+    for (const c of this.flatLayers) if (c.destroyed) this.flatLayers.delete(c);
     for (const c of [...this.sorted.children]) {
-      if (c instanceof PerspectiveMesh) continue;
-      if (this.flatLayers.has(c)) this.layLayer(c, cam);
+      if (c instanceof MeshPlane) continue;
+      if (this.flatLayers.has(c)) this.layFlat(c, cam);
       else if (lying.has(c) && c instanceof Sprite && (Math.abs(c.width) > LAY_TILES * TILE || Math.abs(c.height) > LAY_TILES * TILE)) this.laySprite(c, cam);
       else if (c.zIndex === 0 && c.position.x === 0 && c.position.y === 0) this.placeWhole(c, cam);
       else if (lying.has(c)) this.place(c, c.position.y, true, cam);
-      else this.place(c, c.zIndex, false, cam);
-    }
-    for (const c of w.children) {
-      if (c === this.ground || c === this.ground3d || c === this.sorted) continue;
-      if (c.position.x === 0 && c.position.y === 0) this.placeWhole(c, cam);
-      else this.place(c, c.position.y, true, cam);
+      else this.place(c, this.footOf(c), false, cam);
     }
     this.layers3d = this.layers3d.filter((l) => !l.c.destroyed);
-    for (const { c, whole } of this.layers3d) {
+    const inLayer = new Set(this.layers3d.map((l) => l.c));
+    for (const c of w.children) {
+      if (c === this.ground || c === this.ground3d || c === this.sorted || inLayer.has(c)) continue;
+      if (this.flatLayers.has(c)) this.layFlat(c, cam);
+      else if (c.position.x === 0 && c.position.y === 0) this.placeWhole(c, cam);
+      else this.place(c, c.position.y, false, cam);
+    }
+    for (const { c, whole, stand } of this.layers3d) {
       if (!c.visible) continue;
       this.save(c);
       c.position.set(0, 0);
       c.scale.set(1);
-      if (whole) this.placeWhole(c, cam);
-      else for (const k of c.children) this.place(k, k.position.y, true, cam);
+      if (whole) {
+        this.placeWhole(c, cam);
+        continue;
+      }
+      for (const k of c.children) {
+        const foot = this.feet.get(k);
+        if (this.flatLayers.has(k)) this.layFlat(k, cam);
+        else if (foot !== undefined) this.place(k, foot, false, cam);
+        else if (k.position.x === 0 && k.position.y === 0) this.placeWhole(k, cam);
+        else this.place(k, k.position.y, !stand, cam);
+      }
     }
 
     // Outdoors, the far distance fades into haze.
@@ -870,8 +984,8 @@ export class Scene {
     cv.height = 128;
     const g = cv.getContext("2d")!;
     const grad = g.createLinearGradient(0, 0, 0, 128);
-    grad.addColorStop(0, "rgba(206, 226, 240, 0.92)");
-    grad.addColorStop(0.35, "rgba(206, 226, 240, 0.45)");
+    grad.addColorStop(0, "rgba(206, 226, 240, 0.16)");
+    grad.addColorStop(0.35, "rgba(206, 226, 240, 0.07)");
     grad.addColorStop(1, "rgba(206, 226, 240, 0)");
     g.fillStyle = grad;
     g.fillRect(0, 0, 1, 128);
@@ -903,6 +1017,7 @@ export class Scene {
     }
     const left = this.markerUntil - now;
     this.marker.alpha = left > 0 ? Math.min(1, left / 300) : 0;
+    this.marker.visible = left > 0;
     this.stream();
     // Wind: plants on screen lean gently, each a little out of step.
     const v = this.viewRect();

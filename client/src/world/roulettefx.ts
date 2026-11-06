@@ -59,6 +59,7 @@ export class RouletteFx {
     this.oy = table.y * TILE - OVERHANG;
     this.g.zIndex = (table.y + table.h) * TILE + 0.4;
     scene.sorted.addChild(this.g);
+    scene.lieFlat(this.g);
     this.off = tables.onChange(() => this.changed());
     this.changed(true);
   }

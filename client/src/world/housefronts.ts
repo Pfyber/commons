@@ -76,6 +76,7 @@ export class HouseFronts {
       s.position.set(door.x * TILE - 20, top * TILE);
       // Flat on the ground: under everyone walking on it.
       s.zIndex = top * TILE - 30;
+      this.scene.layOnGround(s);
       made.push(s);
     }
     if (looks.yard) {

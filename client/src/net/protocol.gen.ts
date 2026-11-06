@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 50;
+export const PROTOCOL_VERSION = 51;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -1066,6 +1066,7 @@ export type ServerMsg =
   | { t: "LabEvent"; kind: number; id: number; n: number }
   | { t: "ArenaBetPlaced"; pick: number; pays: number }
   | { t: "ArenaBetSettled"; coins: number; refund: boolean }
+  | { t: "ArenaStoodDown" }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -1487,6 +1488,9 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.coins);
       w.bool(m.refund);
       break;
+    case "ArenaStoodDown":
+      w.u8(57);
+      break;
   }
   return w.finish();
 }
@@ -1663,6 +1667,9 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 56:
       m = { t: "ArenaBetSettled", coins: r.u16(), refund: r.bool() };
+      break;
+    case 57:
+      m = { t: "ArenaStoodDown" };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

@@ -71,6 +71,7 @@ export class FlopShows {
     const line = new Graphics();
     root.addChild(line, ring, fish, pips, sign);
     this.scene.world.addChild(root);
+    this.scene.layer3d(root, false, true);
     const now = performance.now();
     this.flops.set(id, {
       root,

@@ -807,12 +807,14 @@ export class Game {
         const lights = new Graphics();
         lights.zIndex = floor.y * TILE + 2;
         this.scene.sorted.addChild(lights);
+        this.scene.lieFlat(lights);
         const board = new Text({ text: "", style: { fontFamily: "ui-monospace, monospace", fontSize: 9, fontWeight: "bold", fill: 0xfff1b0, stroke: { color: 0x05030c, width: 3 }, align: "center" } });
         board.anchor.set(0.5, 1);
         board.resolution = 4;
         board.position.set((machine.x + machine.w / 2) * TILE, machine.y * TILE - 50);
         board.zIndex = 1e6;
         this.scene.sorted.addChild(board);
+        this.scene.standOn(board, (machine.y + machine.h) * TILE);
         this.dance = { cab: cabinets.indexOf(machine), floor, lights, board };
       }
     }
@@ -2667,6 +2669,9 @@ export class Game {
         break;
       case "ArenaEvent":
         this.arena?.onEvent(m);
+        break;
+      case "ArenaStoodDown":
+        this.hud.toast("Nobody started the match, so you've stepped out of the games.", 4000);
         break;
       case "ArenaBetPlaced":
         this.arena?.onBetPlaced(m.pick, m.pays);

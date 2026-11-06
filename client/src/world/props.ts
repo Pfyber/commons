@@ -142,6 +142,7 @@ export class Props {
     s.position.set(x * TILE + TILE / 2, y * TILE + TILE - lift);
     const flat = FLAT.has(itemKey);
     const wall = WALLS.has(itemKey) && this.baseCollision[y * this.map.width + x] !== 0;
+    if (flat) this.scene.layOnGround(s);
     s.zIndex = flat ? y * TILE - 30 : wall ? y * TILE + TILE + 4 : y * TILE + TILE - 2 + (lift ? 1 : 0);
     this.scene.sorted.addChild(s);
     // Its live part (a lamp's glow, the fire, a tank's fish, a pet on its bed), over it.
@@ -196,6 +197,7 @@ export class Props {
     g.alpha = ok ? 0.6 : 0.45;
     g.tint = ok ? 0xffffff : 0xff6a6a;
     g.zIndex = 1e8;
+    this.scene.standOn(g, y * TILE + TILE - 2);
     g.visible = true;
   }
 

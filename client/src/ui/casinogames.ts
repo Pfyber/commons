@@ -4,7 +4,7 @@
 // show it happening.
 
 import * as cs from "../ambient/casinosfx";
-import { type Casino, errText, todayLine } from "./casino";
+import { type Casino, type RaceState, type Tables, errText, todayLine } from "./casino";
 import { Panel, button, el } from "./panels";
 
 const MEGA_ICONS: Record<string, string> = { cherry: "🍒", lemon: "🍋", grape: "🍇", bell: "🔔", star: "⭐", gem: "💎", seven: "7️⃣" };
@@ -265,21 +265,35 @@ const TRACK_W = 320;
 const TRACK_H = 200;
 const START_X = 26;
 const FINISH_X = TRACK_W - 34;
-const RACE_MS = 6800;
 
+/**
+ * The horse races: one race for the whole floor, on a loop. You back a horse
+ * while betting's open, and everyone watches the same race together; open
+ * this halfway through one and you're halfway through it too.
+ */
 export class RacePanel extends Panel {
   private bet = 5;
   private horse = 0;
   private canvas = el("canvas", "race-track");
   private msg = el("p", "casino-msg");
   private call = el("p", "race-call");
+  private clock = el("p", "table-clock");
   private foot = el("p", "hint");
-  private racing = false;
-  /** The race being shown: each horse's time to the line, and the wiggle in its pace. */
-  private run: { finish: number[]; phase: number[]; t0: number; order: number[] } | null = null;
+  /** The race on screen, from the server. */
+  private run: { finish: number[]; stride: number[]; starts: number; ends: number; order: number[] } | null = null;
   private raf = 0;
+  private off: (() => void) | null = null;
+  private timer = 0;
+  /** The race whose result has been told. */
+  private told = 0;
+  private leader = -1;
+  private roared = false;
+  private lastHoof = 0;
 
-  constructor(private casino: Casino) {
+  constructor(
+    private casino: Casino,
+    private tables: Tables,
+  ) {
     super("🏇 Horse Races", "casino races");
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.width = TRACK_W * dpr;
@@ -290,34 +304,136 @@ export class RacePanel extends Panel {
 
   show() {
     super.show();
-    void this.casino
-      .load()
-      .then(() => this.open && this.render())
+    this.off ??= this.tables.onChange(() => this.open && this.update());
+    window.clearInterval(this.timer);
+    this.timer = window.setInterval(() => this.tick(), 250);
+    void Promise.all([this.casino.load(), this.tables.load()])
+      .then(() => this.open && this.update())
       .catch(() => {});
   }
 
   hide() {
     super.hide();
+    this.off?.();
+    this.off = null;
+    window.clearInterval(this.timer);
     cancelAnimationFrame(this.raf);
     this.raf = 0;
+  }
+
+  private get state(): RaceState | null {
+    return this.tables.floor?.races ?? null;
+  }
+
+  /** What we've got on this race, by horse. */
+  private mine(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (const c of this.state?.slips ?? []) if (c.player === this.tables.selfId) out.set(c.horse, (out.get(c.horse) ?? 0) + c.amount);
+    return out;
+  }
+
+  /** News from the floor: the off, or the result. */
+  private update() {
+    const r = this.state;
+    if (r?.phase === "running" && r.starts && r.finish && r.stride && r.order && r.ends && this.run?.starts !== r.starts) {
+      this.run = { finish: r.finish, stride: r.stride, starts: r.starts, ends: r.ends, order: r.order };
+      this.leader = -1;
+      this.roared = false;
+      this.msg.textContent = "";
+      this.msg.className = "casino-msg";
+      // (Only if we were here for the off.)
+      if (this.tables.now() - r.starts < 1000) cs.raceBell();
+      cancelAnimationFrame(this.raf);
+      this.raf = requestAnimationFrame((t) => this.frame(t));
+    }
+    if (r?.phase === "betting" && this.run && this.told !== this.run.starts) this.result(r);
+    this.render();
+  }
+
+  /** The race is run: how it went, for us. */
+  private result(r: RaceState) {
+    const run = this.run!;
+    this.told = run.starts;
+    const names = this.casino.status?.horses?.names ?? [];
+    const o = r.last?.order ?? run.order;
+    this.call.textContent = `🏁 ${names[o[0]] ?? "?"} wins! Then ${names[o[1]] ?? "?"}, ${names[o[2]] ?? "?"}.`;
+    const staked = this.staked;
+    const on = staked.get(o[0]);
+    const won = on ? Math.floor((on * (this.casino.status?.horses?.pays[o[0]] ?? 0)) / 10) : 0;
+    if (won) {
+      this.msg.textContent = `✨ ${names[o[0]]} came in first! You win ${won} coins.`;
+      this.msg.className = "casino-msg win";
+      cs.win(won / on!);
+    } else if (staked.size) {
+      const h = [...staked.keys()].sort((a, b) => o.indexOf(a) - o.indexOf(b))[0];
+      this.msg.textContent = `${names[h]} came in ${ordinal(o.indexOf(h) + 1)}. Not this time.`;
+      cs.lose(0.7);
+    }
+    this.staked = new Map();
+    void this.casino.load().then(() => this.open && this.render()).catch(() => {});
+  }
+
+  /** What we had on the race being run, by horse. */
+  private staked = new Map<number, number>();
+
+  private frame(now: number) {
+    const r = this.run;
+    if (!r || !this.open) return;
+    const ms = this.tables.now() - r.starts;
+    this.draw(ms);
+    const names = this.casino.status?.horses?.names ?? [];
+    const mine = this.mine();
+    if (mine.size) this.staked = mine;
+    if (now - this.lastHoof > 230) {
+      this.lastHoof = now;
+      cs.hooves(ms < Math.max(...r.finish) ? 0.9 : 0.3);
+    }
+    // Who's in front (called when it changes).
+    const front = [...r.finish.keys()].sort((a, b) => this.progress(b, ms) - this.progress(a, ms))[0];
+    if (front !== this.leader && ms < r.finish[r.order[0]]) {
+      this.leader = front;
+      this.call.textContent = `${names[front] ?? "?"} ${ms < 800 ? "breaks in front!" : "takes the lead!"}${mine.has(front) ? " (That's yours!)" : ""}`;
+    }
+    if (!this.roared && ms > r.finish[r.order[0]] - 1500 && ms < r.finish[r.order[0]]) {
+      this.roared = true;
+      cs.crowd(2.2);
+    }
+    if (ms < r.ends - r.starts) this.raf = requestAnimationFrame((t) => this.frame(t));
+    else this.raf = 0;
+  }
+
+  /** Four times a second: the clock. */
+  private tick() {
+    const r = this.state;
+    if (r?.phase === "betting" && r.closes) {
+      const left = Math.max(0, Math.ceil((r.closes - this.tables.now()) / 1000));
+      this.clock.textContent = `Next race in ${left}s`;
+    } else if (r) this.clock.textContent = "They're off! No more bets.";
   }
 
   render() {
     this.body.replaceChildren();
     const s = this.casino.status;
-    this.body.append(this.canvas, this.call);
-    this.draw(this.racing ? performance.now() : 0);
+    const r = this.state;
+    this.tick();
+    this.body.append(this.canvas, this.call, this.clock);
+    if (!this.raf) this.draw(this.run ? this.tables.now() - this.run.starts : 0);
     if (s && !s.can_play) {
       this.body.append(el("p", "hint warn", s.why ?? "You can't play just now."));
       return;
     }
+    const open = r?.phase === "betting";
+    const mine = this.mine();
+    const crowd = new Map<number, number>();
+    for (const c of r?.slips ?? []) crowd.set(c.horse, (crowd.get(c.horse) ?? 0) + c.amount);
     const h = s?.horses;
     if (h) {
       const list = el("div", "race-horses");
       h.names.forEach((name, i) => {
         const b = button("", () => ((this.horse = i), this.render()), i === this.horse ? "small on" : "small");
-        b.innerHTML = `<span class="silk" style="background:${SILKS[i]}"></span>${i + 1}. ${name} <small>pays ${h.pays[i] / 10}×</small>`;
-        b.disabled = this.racing;
+        const on = mine.get(i);
+        b.innerHTML = `<span class="silk" style="background:${SILKS[i]}"></span>${i + 1}. ${name} <small>pays ${h.pays[i] / 10}×${on ? ` · you: ${on}` : ""}${crowd.get(i) ? ` · 🪙${crowd.get(i)}` : ""}</small>`;
+        b.disabled = !open;
         list.append(b);
       });
       this.body.append(el("p", "hint", "Back a horse to win:"), list);
@@ -328,52 +444,24 @@ export class RacePanel extends Panel {
       bets.append(button(`${b}`, () => ((this.bet = b), this.render()), b === this.bet ? "small on" : "small"));
     }
     const name = h?.names[this.horse] ?? "your horse";
-    const go = button(`Race! (${this.bet} coins on ${name})`, () => void this.race(go), "primary");
-    go.disabled = this.racing;
+    const go = button(`Bet ${this.bet} coins on ${name}`, () => void this.place(go), "primary");
+    go.disabled = !open;
     this.body.append(el("p", "hint", "Bet:"), bets, go, this.msg);
     this.foot.textContent = todayLine(s);
     this.body.append(this.foot);
   }
 
-  private async race(btn: HTMLButtonElement) {
-    if (this.racing) return;
-    this.racing = true;
+  private async place(btn: HTMLButtonElement) {
     btn.disabled = true;
-    this.msg.textContent = "";
-    this.msg.className = "casino-msg";
-    const horse = this.horse;
-    const bet = this.bet;
     try {
-      const res = await this.casino.race(bet, horse);
-      const order = res.outcome.order;
-      // Times to the line in finishing order, a little apart (closer at the front).
-      const finish: number[] = [];
-      let t = RACE_MS * (0.94 + Math.random() * 0.05);
-      order.forEach((h, k) => {
-        finish[h] = t;
-        t += 90 + Math.random() * 260 + k * 40;
-      });
-      this.run = { finish, phase: order.map(() => Math.random() * Math.PI * 2), t0: performance.now(), order };
-      this.render();
-      cs.raceBell();
-      await this.animate(horse);
-      const names = this.casino.status?.horses?.names ?? [];
-      this.call.textContent = `🏁 ${names[order[0]] ?? "?"} wins! Then ${names[order[1]] ?? "?"}, ${names[order[2]] ?? "?"}.`;
-      if (res.payout > 0) {
-        this.msg.textContent = `✨ ${names[horse]} came in first! You win ${res.payout} coins.`;
-        this.msg.className = "casino-msg win";
-        cs.win(res.payout / bet);
-      } else {
-        this.msg.textContent = `${names[horse]} came in ${ordinal(order.indexOf(horse) + 1)}. Not this time.`;
-        cs.lose(0.7);
-      }
+      await this.tables.raceBet(this.bet, this.horse);
+      this.msg.textContent = "";
+      this.msg.className = "casino-msg";
       await this.casino.load().catch(() => {});
     } catch (e) {
       this.msg.textContent = errText(e);
-    } finally {
-      this.racing = false;
-      if (this.open) this.render();
     }
+    if (this.open) this.render();
   }
 
   /** How far horse `i` is (0 at the start, 1 at the line) `ms` into the race. */
@@ -381,41 +469,10 @@ export class RacePanel extends Panel {
     const r = this.run;
     if (!r) return 0;
     const T = r.finish[i];
-    const u = Math.min(ms / T, 1.15);
+    const u = Math.max(0, Math.min(ms / T, 1.15));
     if (u >= 1) return 1 + (u - 1) * 0.6;
     // A steady pace with surges and fades, pinned to the start and the line.
-    return u + 0.055 * Math.sin(u * Math.PI * 2.3 + r.phase[i]) * u * (1 - u) * 4;
-  }
-
-  private animate(mine: number): Promise<void> {
-    const r = this.run!;
-    let lastHoof = 0;
-    let roared = false;
-    let leader = -1;
-    const names = this.casino.status?.horses?.names ?? [];
-    return new Promise((done) => {
-      const frame = (now: number) => {
-        const ms = now - r.t0;
-        this.draw(ms);
-        if (now - lastHoof > 230) {
-          lastHoof = now;
-          cs.hooves(ms < Math.max(...r.finish) ? 0.9 : 0.3);
-        }
-        // Who's in front (called when it changes).
-        const front = [...r.finish.keys()].sort((a, b) => this.progress(b, ms) - this.progress(a, ms))[0];
-        if (front !== leader && ms < r.finish[r.order[0]]) {
-          leader = front;
-          this.call.textContent = `${names[front] ?? "?"} ${ms < 800 ? "breaks in front!" : "takes the lead!"}${front === mine ? " 🙌" : ""}`;
-        }
-        if (!roared && ms > r.finish[r.order[0]] - 1500) {
-          roared = true;
-          cs.crowd(2.2);
-        }
-        if (ms < Math.max(...r.finish) + 600 && this.open) this.raf = requestAnimationFrame(frame);
-        else done();
-      };
-      this.raf = requestAnimationFrame(frame);
-    });
+    return u + 0.055 * Math.sin(u * Math.PI * 2.3 + r.stride[i]) * u * (1 - u) * 4;
   }
 
   private draw(ms: number) {
@@ -452,12 +509,13 @@ export class RacePanel extends Panel {
     }
     // The horses, back to front.
     const run = this.run;
+    const backed = this.mine();
     for (let i = 0; i < 6; i++) {
       const p = run ? this.progress(i, ms) : 0;
       const x = START_X - 18 + p * (FINISH_X - START_X);
       const y = top + i * lane + lane * 0.62;
       const moving = run !== null && ms > 0 && p < 1.14;
-      horseArt(ctx, x, y, i, moving ? ms / 70 + i : 0, i === this.horse);
+      horseArt(ctx, x, y, i, moving ? ms / 70 + i : 0, backed.has(i) || (!run && i === this.horse));
     }
   }
 }

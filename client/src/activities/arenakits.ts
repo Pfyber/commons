@@ -34,7 +34,7 @@ export const ARROW_SPEED = 22;
 export const ARROW_RANGE = 14;
 /** The archer's and the bomber's stab (as `arena::STAB`, `STAB_COST`). */
 export const STAB: [number, number, number] = [40, 50, 90];
-export const STAB_COST = 3.5;
+export const STAB_COST = 4.5;
 export const BURST_GAP_MS = 110;
 export const BURST_COST = 26;
 export const BURST_MIN_COST = 10;
@@ -96,7 +96,7 @@ export const KITS: KitInfo[] = [
     icon: "🏹",
     role: "Long range",
     blurb: "Light on their feet, deadly from afar. Keep your distance: up close, it's a quick blade and quicker feet.",
-    quick: "Sword stab: lightning fast, a scratch and a shove, next to no stamina",
+    quick: "Sword stab: lightning fast, with a little shove, for very little stamina",
     charged: "Draw the bow: one arrow, two half drawn, three fast ones fully drawn, flying till they hit something",
     ultimate: "Arrow storm: untouchable, three rings of arrows all round you, half a second apart",
     stats: [2, 4, 2, 5],
@@ -107,7 +107,7 @@ export const KITS: KitInfo[] = [
     icon: "💣",
     role: "Area damage",
     blurb: "Bombs for everyone. Lob them where they'll stand, but mind your own blast.",
-    quick: "Sword stab: lightning fast, a scratch and a shove, next to no stamina",
+    quick: "Sword stab: lightning fast, with a little shove, for very little stamina",
     charged: "Bomb: lands where you aim. Hold (up to ~3 s) for a bigger blast and more damage (and more stamina)",
     ultimate: "Big bang: a huge blast all round you (you're unharmed). Picked-up bombs: thrown three at a time",
     stats: [2, 3, 4, 4],

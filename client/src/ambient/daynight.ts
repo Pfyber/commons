@@ -215,13 +215,15 @@ export class DayNight {
     const pool = poolTexture();
     const lamp = map.decor_legend.indexOf("lamp");
     const lantern = map.decor_legend.indexOf("lantern");
-    const add = (t: Texture, x: number, y: number, sx: number, sy: number, alpha: number) => {
+    const add = (t: Texture, x: number, y: number, sx: number, sy: number, alpha: number, foot?: number) => {
       const s = new Sprite(t);
       s.anchor.set(0.5);
       s.scale.set(sx, sy);
       s.position.set(x, y);
       s.alpha = alpha;
       this.lights.addChild(s);
+      // (Up on a lamp or a wall, it stands there in 3D; what's lit on the ground lies on it.)
+      if (foot !== undefined) scene.standOn(s, foot);
       this.flicker.push({ s, base: alpha, phase: (x * 0.37 + y * 0.11) % 6.28 });
     };
     map.decor.forEach((d, i) => {
@@ -232,13 +234,13 @@ export class DayNight {
         // A street lamp: a small warm bulb up top, and its light spread wide
         // and soft over the ground around it (lighting the place up, rather
         // than one blown-out spot).
-        add(tex, x, foot - 20, 4.2, 3.6, 0.16);
+        add(tex, x, foot - 20, 4.2, 3.6, 0.16, foot);
         add(pool, x, foot - 6, 5.2, 3.2, 0.62);
-        add(bulb, x, foot - 38, 0.45, 0.45, 0.8);
+        add(bulb, x, foot - 38, 0.45, 0.45, 0.8, foot);
       } else {
         // A garden lantern: smaller and more orange.
         add(pool, x, foot - 2, 2.2, 1.4, 0.7);
-        add(bulb, x, foot - 32, 0.5, 0.5, 0.9);
+        add(bulb, x, foot - 32, 0.5, 0.5, 0.9, foot);
       }
     });
     for (const o of map.objects) {
@@ -255,9 +257,10 @@ export class DayNight {
       }
       // The lanterns either side of a building's door: a warm little glow each.
       for (const p of buildingLanterns(o)) {
-        add(tex, p.x, p.y, 0.95, 0.95, 0.5);
-        add(bulb, p.x, p.y, 0.3, 0.3, 0.9);
-        add(pool, p.x, p.y + 30, 1.6, 0.8, 0.35);
+        const wall = (o.y + o.h) * TILE;
+        add(tex, p.x, p.y, 0.95, 0.95, 0.5, wall);
+        add(bulb, p.x, p.y, 0.3, 0.3, 0.9, wall);
+        add(pool, p.x, wall + 6, 1.6, 0.8, 0.35);
       }
       // Things that are themselves alight: a campfire, the lantern stand. (Not
       // the middle of a building: a glow there sat on its wall like a lamp

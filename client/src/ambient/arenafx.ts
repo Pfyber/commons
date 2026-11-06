@@ -243,16 +243,32 @@ export function ko(vol = 1) {
   play(pick("arena-ko", renderKo, 2), at(0), 0.62 * vol, { wet: 0.32 });
 }
 
+/** Adds a ring that blooms rather than strikes: two sines `beat` Hz apart, so it shimmers. */
+function shine(d: Float32Array, sr: number, t0: number, hz: number, tau: number, amp: number, beat: number) {
+  const start = Math.floor(t0 * sr);
+  const end = Math.min(d.length, start + Math.floor(tau * 7 * sr));
+  const [p, q] = [rand(0, 2 * Math.PI), rand(0, 2 * Math.PI)];
+  for (let i = start; i < end; i++) {
+    const t = (i - start) / sr;
+    const e = (1 - Math.exp(-t / 0.005)) * Math.exp(-t / tau);
+    d[i] += (amp / 2) * e * (Math.sin(p + 2 * Math.PI * (hz - beat / 2) * t) + Math.sin(q + 2 * Math.PI * (hz + beat / 2) * t));
+  }
+}
+
 function renderChargeFull(): AudioBuffer {
   return render(0.6, (d, sr) => {
-    // Full: a quick glint, up the scale.
-    for (const [t, hz] of [[0, 1319], [0.07, 1976], [0.14, 2637]]) mode(d, sr, t, hz, 0.14, 0.3);
+    // Full: the light glinting off the blade.
+    hit(d, sr, 0, 0.01, 0.4, 0.95);
+    hit(d, sr, 0, 0.04, 0.1, 0.95);
+    for (const [hz, tau, amp, beat] of [[4186, 0.108, 1, 5], [5920, 0.081, 0.6, 9], [7902, 0.054, 0.38, 13], [11175, 0.032, 0.18, 17]]) {
+      shine(d, sr, 0, hz, tau, amp, beat);
+    }
   });
 }
 
 /** Your charge is full. */
 export function chargeFull(vol = 1) {
-  play(pick("arena-full", renderChargeFull, 1), at(0), 0.32 * vol, { wet: 0.24 });
+  play(pick("arena-full", renderChargeFull, 3), at(0), 0.2 * vol, { wet: 0.24 });
 }
 
 function renderBodyHit(): AudioBuffer {

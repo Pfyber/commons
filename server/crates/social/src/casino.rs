@@ -49,7 +49,6 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/casino", get(status))
         .route("/casino/slots", post(slots))
         .route("/casino/mega", post(mega))
-        .route("/casino/race", post(race))
         .route("/casino/break", post(take_break))
 }
 
@@ -305,64 +304,6 @@ async fn mega(
             format!(
                 "🎰 {} won {} coins on the big machine!",
                 claims.name, r["payout"]
-            ),
-        );
-    }
-    Ok(Json(r))
-}
-
-#[derive(Deserialize)]
-struct RaceReq {
-    bet: i32,
-    horse: usize,
-    key: String,
-}
-
-/// A horse race: a bet on one horse to win.
-async fn race(
-    State(state): S,
-    headers: HeaderMap,
-    Json(req): Json<RaceReq>,
-) -> ApiResult<Json<Value>> {
-    let (me, claims) = me(&state, &headers)?;
-    if req.horse >= casino::HORSES.len() {
-        return Err(ApiError::bad_request("bad_horse", "No such horse."));
-    }
-    let horse = req.horse;
-    let r = play(
-        &state,
-        me,
-        "race",
-        req.bet,
-        casino::RACE_BET,
-        &req.key,
-        || {
-            let mut rng = rand::rng();
-            let order = casino::race(rng.random(), std::array::from_fn(|_| rng.random()));
-            let pays = if order[0] == horse {
-                casino::HORSE_PAYS[horse]
-            } else {
-                0
-            };
-            (
-                pays,
-                json!({ "order": order, "horse": horse, "pays": pays }),
-            )
-        },
-    )
-    .await?;
-    if r["outcome"]["pays"].as_i64().unwrap_or(0) >= 70
-        && r["duplicate"] != true
-        && let Some(l) = state.hub.location(me).filter(|l| l.zone == ZONE)
-    {
-        crate::tables::cheer(
-            &state,
-            l.instance,
-            format!(
-                "🏇 {} backed {} and won {} coins!",
-                claims.name,
-                casino::HORSES[horse],
-                r["payout"]
             ),
         );
     }

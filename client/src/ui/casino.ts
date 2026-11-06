@@ -56,12 +56,6 @@ export class Casino {
     return r;
   }
 
-  async race(bet: number, horse: number): Promise<{ outcome: { order: number[]; horse: number; pays: number }; payout: number }> {
-    const r = await this.auth.send<{ outcome: { order: number[]; horse: number; pays: number }; payout: number }>("/api/social/casino/race", { bet, horse, key: key() });
-    this.onPlayed();
-    return r;
-  }
-
   takeBreak(days: 1 | 7) {
     return this.auth.send<{ until: number }>("/api/social/casino/break", { days });
   }
@@ -261,9 +255,33 @@ export interface TableState {
   seats: (SeatState | null)[];
 }
 
+/** A bet on a horse. */
+export interface RaceSlip {
+  player: string;
+  name: string;
+  horse: number;
+  amount: number;
+}
+
+/** The floor's horse races: the same for everyone. */
+export interface RaceState {
+  phase: "betting" | "running";
+  /** Betting: when it closes. */
+  closes?: number;
+  /** Running: how it finishes, each horse's time to the line (ms), the surge in its stride, when it began and ends. */
+  order?: number[];
+  finish?: number[];
+  stride?: number[];
+  starts?: number;
+  ends?: number;
+  slips: RaceSlip[];
+  last: { order: number[]; winners: { name: string; coins: number }[] } | null;
+}
+
 export interface Floor {
   instance: number | null;
   roulette: WheelState;
+  races?: RaceState;
   blackjack: TableState[];
   /** Bumped on every change: an older one (a slow reply) is ignored. */
   seq: number;
@@ -314,7 +332,7 @@ export class Tables {
     this.skew = f.now - Date.now();
     // Our chips were paid (the wheel landed), or a hand of ours was.
     const paid = (had?.roulette.phase === "spinning" && f.roulette.phase !== "spinning") || f.blackjack.some((t, i) => t.phase === "done" && had?.blackjack[i]?.phase !== "done" && t.seats.some((s) => s?.player === this.selfId));
-    if (paid) this.onCoins();
+    if (paid || (had?.races?.phase === "running" && f.races?.phase === "betting")) this.onCoins();
     this.listeners.forEach((fn) => fn());
   }
 
@@ -330,6 +348,11 @@ export class Tables {
 
   async rouletteBet(bet: RouletteBet, amount: number) {
     await this.send("roulette/bet", { bet, amount, key: key() });
+    this.onCoins();
+  }
+  /** A bet on a horse in the next race. */
+  async raceBet(bet: number, horse: number) {
+    await this.send("race", { bet, horse, key: key() });
     this.onCoins();
   }
   rouletteSpin() {

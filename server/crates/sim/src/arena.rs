@@ -129,9 +129,17 @@ pub const LION_STUN_MS: u32 = 320;
 pub const LION_STAGGER_MS: u32 = 520;
 /// What the disasters do to the Goliath, against what they do to a gladiator
 /// (tuned on bot matches so that neither side's handed the round).
-pub const GIANT_METEOR_X: f64 = 0.9;
+pub const GIANT_METEOR_X: f64 = 1.3;
 pub const GIANT_LION_X: f64 = 8.0;
-pub const GIANT_STING_X: f64 = 5.0;
+pub const GIANT_STING_X: f64 = 3.2;
+/// The lava burns the Goliath this much quicker than anyone else.
+pub const GIANT_LAVA_X: f64 = 1.5;
+pub const GIANT_LAVA_REACH: f64 = 0.1;
+/// The lion that comes out for the Goliath: a great brown brute of a thing,
+/// tougher and harder hitting, and a bigger target, but a lion in all else.
+pub const BIG_LION_HP: f64 = 56.0;
+pub const BIG_LION_R: f64 = 0.52;
+pub const BIG_LION_X: f64 = 1.35;
 /// The scorpion: what comes up with the wheel. It's a long way from a lion:
 /// slow, huge, armoured. The wheel sinks, waits, and rises with it on board.
 pub const SCORPION_HP: f64 = 100.0;
@@ -191,8 +199,8 @@ pub const ACID_RX: f64 = 2.5;
 pub const ACID_RY: f64 = 1.5;
 /// How much later the last sets out than the first.
 pub const ACID_TICK_MS: u32 = 500;
-pub const ACID_DMG: f64 = 5.0;
-pub const GIANT_ACID_X: f64 = 2.2;
+pub const ACID_DMG: f64 = 9.0;
+pub const GIANT_ACID_X: f64 = 3.0;
 /// (What the scorpion signs its darts with.)
 pub const SCORPION_BY: u32 = 0xffff_ee00;
 /// `strike`-less shove off the wheel: a `HIT` of nothing, just the knock.
@@ -383,13 +391,13 @@ pub const ARROW_SPEED: f64 = 22.0;
 /// Arrows no heavier than this (the storm's) don't reel whoever they hit.
 pub const QUICK_ARROW_DMG: f64 = 6.0;
 /// The archer's and the bomber's quick blow, a short blade: wind-up, thrust,
-/// recovery. Hardly a scratch, but five a second for next to no stamina; a
+/// recovery. Not much alone, but five a second for very little stamina; a
 /// tiny shove, no reel (it's far too quick to be allowed to lock anyone down),
 /// and a guard shrugs it off (`STAB_BLOCK_COST`).
 pub const STAB: (u32, u32, u32) = (40, 50, 90);
-pub const STAB_DMG: f64 = 3.0;
+pub const STAB_DMG: f64 = 6.0;
 pub const STAB_KB: f64 = 1.3;
-pub const STAB_COST: f64 = 3.5;
+pub const STAB_COST: f64 = 4.5;
 pub const STAB_BLOCK_COST: f64 = 3.0;
 /// (`Event.m`:) a stab.
 const STAB_BIT: u16 = 8192;
@@ -474,6 +482,8 @@ pub mod mode {
     /// them by, the last team up takes a crown each, and three crowns wins it.
     pub const TEAMS: u8 = 2;
 }
+/// How often the bots' own matches have the disaster wheel on.
+pub const EXHIBIT_DISASTERS: f64 = 0.8;
 /// What a spectator stakes on a round, and how long after it's begun they have
 /// to make up their mind (and all the countdown before it).
 pub const BET_STAKE: i32 = 10;
@@ -821,6 +831,9 @@ pub struct Lion {
     /// It's a thief (`next_dart`: when it can sting again), and what it's dragging.
     pub thief: bool,
     pub item: u8,
+    /// (A lion:) the Goliath's own, the big brown one. (The scorpion:) still
+    /// after whoever it first went for, till it's stung.
+    pub big: bool,
 }
 
 impl Lion {
@@ -830,6 +843,8 @@ impl Lion {
             SCORPION_R
         } else if self.thief {
             THIEF_R
+        } else if self.big {
+            BIG_LION_R
         } else {
             LION_R
         }
@@ -2078,6 +2093,7 @@ impl Match {
         self.goliath = (rng() * n as f64) as usize % n;
         self.kits = rng() < 0.65;
         self.wheel = self.kits && rng() < 0.4;
+        self.disasters = rng() < EXHIBIT_DISASTERS;
         self.level = if rng() < 0.5 {
             crate::level::HARD
         } else {
@@ -2086,6 +2102,18 @@ impl Match {
         self.exhibition = true;
         self.begin_match(now);
         true
+    }
+
+    /// Nobody's left in the lobby but bots: them gone too, and the usual settings.
+    pub fn clear_lobby(&mut self) {
+        if self.status == LOBBY && self.humans() == 0 {
+            self.slots = [0; SLOTS];
+            self.mode = mode::CLASSIC;
+            self.kits = false;
+            self.wheel = false;
+            self.disasters = false;
+            self.level = crate::level::MEDIUM;
+        }
     }
 
     /// The bots' match called off (someone's come to play): back to an
@@ -3026,6 +3054,12 @@ impl Match {
             let f = &self.fighters[i];
             // (Up in the Goliath's grip, they're clear of the fire.)
             let out = self.ring.reach(f.x, f.y);
+            // (The lava reaches the Goliath first: it's a lot of giant to keep out of it.)
+            let lava = if f.giant && lava < 1.15 {
+                lava - GIANT_LAVA_REACH
+            } else {
+                lava
+            };
             if !f.down && !f.immune() && f.act != act::HELD && out > fire.min(lava) {
                 // (It burns everyone alike, the Goliath as much of its health as anyone.)
                 let k = if self.fighters[i].giant || self.fighters[i].max_hp != HP {
@@ -3033,7 +3067,13 @@ impl Match {
                 } else {
                     1.0
                 };
-                let dps = if out > lava { LAVA_DPS } else { FIRE_DPS };
+                let dps = if out <= lava {
+                    FIRE_DPS
+                } else if self.fighters[i].giant {
+                    LAVA_DPS * GIANT_LAVA_X
+                } else {
+                    LAVA_DPS
+                };
                 self.fighters[i].hp -= dps * k * dt;
                 if self.fighters[i].hp <= 0.0 {
                     self.knock_down(i, 0, now, &mut evs);
@@ -3242,7 +3282,15 @@ impl Match {
             }
             disaster::SCORPION => {
                 let (x, y) = (self.ring.w / 2.0, self.ring.h / 2.0);
-                let target = self.nearest_fighter(x, y).map_or(0, |f| f.id);
+                // The Goliath first, if there is one (it's the one with the most to lose).
+                let giant = self
+                    .fighters
+                    .iter()
+                    .find(|f| f.giant && !f.down)
+                    .map(|f| f.id);
+                let target = giant
+                    .or(self.nearest_fighter(x, y).map(|f| f.id))
+                    .unwrap_or(0);
                 self.lions.push(Lion {
                     id: 1,
                     x,
@@ -3263,6 +3311,7 @@ impl Match {
                     next_rush: now + SCORPION_EMERGE_MS + 800,
                     thief: false,
                     item: 0,
+                    big: giant.is_some(),
                 });
             }
             disaster::ACID => {
@@ -3307,12 +3356,13 @@ impl Match {
                     .collect();
                 for (k, &target) in alive.iter().enumerate() {
                     let (x, y) = self.ring.entrance(k).unwrap_or(self.ring.gate(k));
+                    let big = self.fighter(target).is_some_and(|f| f.giant);
                     let l = Lion {
                         id: k as u8 + 1,
                         x,
                         y,
                         aim: (self.ring.h / 2.0 - y).atan2(self.ring.w / 2.0 - x),
-                        hp: LION_HP,
+                        hp: if big { BIG_LION_HP } else { LION_HP },
                         act: lion::EMERGE,
                         act_at: now,
                         act_until: now + LION_EMERGE_MS,
@@ -3327,6 +3377,7 @@ impl Match {
                         next_rush: 0,
                         thief: false,
                         item: 0,
+                        big,
                     };
                     evs.push(Event::new(ev::LION_OUT, 0, l.id as u32, x, y, 0));
                     self.lions.push(l);
@@ -3640,7 +3691,9 @@ impl Match {
                     .filter(|t| !t.down && t.act != act::HELD);
                 let near = self.nearest_fighter(l.x, l.y);
                 let d = |f: &Fighter| (f.x - l.x).hypot(f.y - l.y);
+                // (Its first sting's for the one it came for, whoever's in the way.)
                 let t = match (mine, near) {
+                    (Some(m), _) if l.big => m,
                     (Some(m), Some(n)) => {
                         if d(n) + 0.5 < d(m) {
                             n
@@ -3671,7 +3724,7 @@ impl Match {
                     };
                     self.lion_set(k, lion::CROUCH, now, now + wind);
                     evs.push(Event::new(ev::SCORPION_WIND, l.id as u32, tid, l.x, l.y, 0));
-                } else if dist > DART_FROM && now >= l.next_dart && clear {
+                } else if dist > DART_FROM && now >= l.next_dart && clear && !l.big {
                     let lead = dist / DART_SPEED * 0.6;
                     self.lions[k].to = (tx + tvx * lead, ty + tvy * lead);
                     self.lions[k].next_dart = now + DART_EVERY_MS;
@@ -3717,6 +3770,7 @@ impl Match {
                     // (`pounced`: the first of the two.)
                     let first = !l.pounced;
                     self.lions[k].pounced = first;
+                    self.lions[k].big = false;
                     let rest = if first { STING_CHAIN_MS } else { STING_REST_MS };
                     self.lion_set(k, lion::RECOVER, now, now + rest);
                     for j in 0..self.fighters.len() {
@@ -3988,7 +4042,8 @@ impl Match {
         for j in 0..self.fighters.len() {
             let f = &self.fighters[j];
             if f.reach_to(x, y) < LION_BITE_R + f.body() {
-                let m = if f.giant { GIANT_LION_X } else { 1.0 };
+                let m = if f.giant { GIANT_LION_X } else { 1.0 }
+                    * if self.lions[k].big { BIG_LION_X } else { 1.0 };
                 let from = if (f.x - x).hypot(f.y - y) < 0.05 {
                     (x - 0.05, y)
                 } else {
@@ -6322,6 +6377,7 @@ impl Match {
                 next_rush: 0,
                 thief: true,
                 item: 0,
+                big: false,
             });
             evs.push(Event::new(
                 ev::THIEF_OUT,
@@ -8533,6 +8589,107 @@ mod tests {
         assert_eq!(m.won_by(0), None, "nobody left: bets back");
     }
 
+    /// A Goliath match, with this disaster just struck.
+    fn goliath_disaster(kind: u8) -> (Match, u32) {
+        let mut m = goliath_match(0);
+        m.disasters = true;
+        let now = m.round_at;
+        m.reset_disaster(now);
+        for id in 50..53 {
+            m.vote(id, kind);
+        }
+        let mut r = rng(95);
+        let mut t = now;
+        while m.disaster_stage != disaster::ON {
+            t += 100;
+            m.fighters.iter_mut().for_each(|f| f.hp = f.max_hp);
+            m.step(t, 100, &mut r);
+        }
+        (m, t)
+    }
+
+    #[test]
+    fn the_scorpion_goes_for_the_goliath_first_then_for_whoever_is_nearest() {
+        let (mut m, t) = goliath_disaster(disaster::SCORPION);
+        let gid = m.fighters.iter().find(|f| f.giant).unwrap().id;
+        assert_eq!(m.lions[0].target, gid);
+        assert!(m.lions[0].big, "after it");
+        // Someone right beside it: it pays them no mind.
+        let l = &mut m.lions[0];
+        l.act = lion::PROWL;
+        l.act_until = u32::MAX;
+        (l.x, l.y) = (4.0, 11.5);
+        l.next_rush = u32::MAX;
+        let (giant, other) = (
+            m.fighters.iter().position(|f| f.giant).unwrap(),
+            m.fighters.iter().position(|f| !f.giant).unwrap(),
+        );
+        let oid = m.fighters[other].id;
+        let mut r = rng(96);
+        let mut tt = t;
+        let hold = |m: &mut Match| {
+            (m.fighters[other].x, m.fighters[other].y) = (m.lions[0].x + 2.0, m.lions[0].y);
+            (m.fighters[giant].x, m.fighters[giant].y) = (m.lions[0].x + 8.0, m.lions[0].y);
+            m.fighters.iter_mut().for_each(|f| f.hp = f.max_hp);
+        };
+        for _ in 0..10 {
+            tt += 100;
+            hold(&mut m);
+            m.step(tt, 100, &mut r);
+        }
+        assert_eq!(m.lions[0].target, gid, "not distracted");
+        assert_eq!(m.lions[0].act, lion::PROWL);
+        // Stung: from now on, whoever's nearest.
+        m.lions[0].big = false;
+        for _ in 0..3 {
+            tt += 100;
+            hold(&mut m);
+            m.step(tt, 100, &mut r);
+        }
+        assert_eq!(m.lions[0].target, oid);
+    }
+
+    #[test]
+    fn the_goliaths_lion_is_bigger_tougher_and_bites_harder() {
+        let (mut m, t) = goliath_disaster(disaster::LIONS);
+        let gid = m.fighters.iter().find(|f| f.giant).unwrap().id;
+        let l = m.lions.iter().find(|l| l.target == gid).unwrap();
+        assert!(l.big && l.hp == BIG_LION_HP && l.r() > LION_R);
+        assert_eq!(m.lions.iter().filter(|l| l.big).count(), 1, "only its own");
+        assert!(m.lions.iter().filter(|l| !l.big).all(|l| l.hp == LION_HP));
+        // Its bite.
+        let k = m.lions.iter().position(|l| l.big).unwrap();
+        let g = m.fighters.iter().position(|f| f.giant).unwrap();
+        let (x, y) = (m.fighters[g].x + 0.3, m.fighters[g].y);
+        let hp = m.fighters[g].hp;
+        m.lion_land(k, x, y, t, &mut vec![]);
+        let bite = hp - m.fighters[g].hp;
+        assert!(
+            (bite - LION_DMG * GIANT_LION_X * BIG_LION_X).abs() < 0.01,
+            "{bite}"
+        );
+    }
+
+    #[test]
+    fn disasters_hurt_the_goliath_by_a_good_share_of_its_health() {
+        // The lava: very fast, not instant.
+        let (mut m, t) = goliath_disaster(disaster::LAVA);
+        let g = m.fighters.iter().position(|f| f.giant).unwrap();
+        let mut r = rng(97);
+        let tt = t + LAVA_CLOSE_MS;
+        m.fighters[g].x = 1.0;
+        let hp = m.fighters[g].hp;
+        for f in m.fighters.iter_mut().filter(|f| !f.giant) {
+            (f.x, f.y) = (14.0, 9.0);
+        }
+        m.step(tt, 100, &mut r);
+        let lost = hp - m.fighters[g].hp;
+        assert!(lost > 0.1 * GIANT_HP && lost < 0.25 * GIANT_HP, "{lost}");
+        // A meteor, a tick of acid: a good bite out of it.
+        assert!(METEOR_DMG * GIANT_METEOR_X / GIANT_HP > 0.04);
+        assert!(ACID_DMG * GIANT_ACID_X / GIANT_HP > 0.04);
+    }
+
     #[test]
     fn the_lions_are_gone_with_the_round_and_decide_nothing() {
         let (mut m, t) = fixed_disaster(disaster::LIONS);
@@ -10582,7 +10739,7 @@ mod kit_tests {
                 "next to no wind: {wind}"
             );
             // (Dealt in the time a knight lands a combo or two.)
-            assert!(dmg < 60.0, "{dmg}");
+            assert!(dmg < 130.0, "{dmg}");
             assert_ne!(m.fighters[1].act, act::STUN, "no stun-lock");
         }
         // A tiny shove, not a reel.
@@ -10923,6 +11080,18 @@ mod kit_tests {
         );
         // And with someone in the lobby, no exhibition.
         assert!(!m.exhibit(now, &mut r));
+        // Four in five of them have the disasters on, and it doesn't stick.
+        let on = (0..400)
+            .filter(|_| {
+                let mut m = Match::new(sand());
+                m.exhibit(0, &mut r);
+                let on = m.disasters;
+                m.call_off();
+                assert!(!m.disasters, "the lobby's as it was");
+                on
+            })
+            .count();
+        assert!((280..=360).contains(&on), "{on} of 400");
         // Called off by the sign: an empty lobby.
         let mut m = Match::new(sand());
         m.exhibit(0, &mut r);

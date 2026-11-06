@@ -167,6 +167,7 @@ export class LureShows {
     });
     top.addChild(timer);
     this.scene.world.addChild(top);
+    this.scene.layer3d(top, false, true);
     const glow = this.nightGlow(centre.x, centre.y, kind === LURE.MAGNET ? 0xb060ff : 0x5ff0ff);
     this.lures.set(key, { water, top, timer, shown: "", glimmer, tiles, area: this.reach(at), centre, ends, nextLeap: 0, leaps: [], rings: [], glow, kind, appearAt });
   }
@@ -251,8 +252,10 @@ export class LureShows {
     p?.g.destroy();
     const g = new Graphics();
     const edge = this.over();
-    if (edge?.parent === this.scene.world) this.scene.world.addChildAt(g, this.scene.world.getChildIndex(edge) + 1);
-    else this.scene.onGround(g);
+    if (edge?.parent === this.scene.world) {
+      this.scene.world.addChildAt(g, this.scene.world.getChildIndex(edge) + 1);
+      this.scene.lieFlat(g);
+    } else this.scene.onGround(g);
     const now = performance.now();
     this.preview = { g, tiles: this.circle(at), area: this.reach(at), centre: { x: at.x * TILE + TILE / 2, y: at.y * TILE + TILE / 2 }, at, shownAt: now, goneAt: 0 };
   }
@@ -443,8 +446,10 @@ export class LureShows {
       if (!l.water.parent && l.water.context.instructions.length) {
         const edge = this.over();
         const world = this.scene.world;
-        if (edge?.parent === world) world.addChildAt(l.water, world.getChildIndex(edge) + 1);
-        else this.scene.onGround(l.water);
+        if (edge?.parent === world) {
+          world.addChildAt(l.water, world.getChildIndex(edge) + 1);
+          this.scene.lieFlat(l.water);
+        } else this.scene.onGround(l.water);
       }
     }
   }

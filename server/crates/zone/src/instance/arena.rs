@@ -41,6 +41,8 @@ pub(super) struct Arena {
     dirty: bool,
     /// The spectators' bets on this round.
     bets: Vec<Bet>,
+    /// When anyone last did anything in the lobby.
+    lobby_at: u32,
     /// Nobody's played since then (or someone's just looked at the sign):
     /// the bots put on a match of their own once it's been a while.
     quiet_until: u32,
@@ -48,8 +50,10 @@ pub(super) struct Arena {
 
 /// How long the arena stands empty before the bots put on a match; and
 /// after someone looks at the sign (and doesn't play), a while longer.
-const EXHIBIT_AFTER_MS: u32 = 12_000;
-const EXHIBIT_AFTER_LOOK_MS: u32 = 60_000;
+const EXHIBIT_AFTER_MS: u32 = 5000;
+/// Places taken in the lobby and nothing happening for this long (a rematch
+/// nobody's started, say): they're stood down, and the sand's free again.
+const LOBBY_IDLE_MS: u32 = 20_000;
 
 impl Arena {
     pub(super) fn new(objects: &[MapObject]) -> Option<Arena> {
@@ -67,6 +71,7 @@ impl Arena {
             gate,
             dirty: true,
             bets: Vec::new(),
+            lobby_at: 0,
             quiet_until: EXHIBIT_AFTER_MS,
         })
     }
@@ -183,7 +188,13 @@ impl Arena {
                 .iter()
                 .map(|l| ArenaLion {
                     id: l.id,
-                    kind: if l.thief { 2 } else { l.scorpion as u8 },
+                    kind: if l.thief {
+                        2
+                    } else if l.big && !l.scorpion {
+                        3
+                    } else {
+                        l.scorpion as u8
+                    },
                     x: x100(l.x),
                     y: x100(l.y),
                     aim: sim::aim_to_u16(l.aim),
@@ -420,16 +431,10 @@ impl Instance {
         self.arena_send(now);
     }
 
-    /// Someone opened the sign: the bots' match (if one's on) is called off.
+    /// Someone opened the sign: the lobby's state, for them to look at. (The
+    /// bots' match plays on: it only makes way when someone takes a place.)
     pub(super) fn arena_lobby(&mut self, _id: u32, now: u32) {
-        let Some(ar) = self.arena.as_mut() else {
-            return;
-        };
-        ar.quiet_until = ar.quiet_until.max(now + EXHIBIT_AFTER_LOOK_MS);
-        if ar.m.call_off() {
-            ar.dirty = true;
-            self.arena_send(now);
-        }
+        self.arena_send(now);
     }
 
     pub(super) fn arena_bot(&mut self, id: u32, slot: u8, on: bool, now: u32) {
@@ -702,10 +707,33 @@ impl Instance {
             return;
         };
         let before = ar.m.status;
-        // Nobody playing, and someone about to watch: the bots fight it out.
+        // Places taken, and nobody doing anything with them: stood down.
         if before == sim::LOBBY && ar.m.slots.iter().any(|&s| s != 0) {
+            if ar.dirty {
+                ar.lobby_at = now;
+            }
             ar.quiet_until = ar.quiet_until.max(now + EXHIBIT_AFTER_MS);
+            if now >= ar.lobby_at + LOBBY_IDLE_MS {
+                let people: Vec<u32> =
+                    ar.m.slots
+                        .iter()
+                        .copied()
+                        .filter(|&s| s != 0 && !sim::is_bot(s))
+                        .collect();
+                for &id in &people {
+                    ar.m.leave(id);
+                }
+                ar.m.clear_lobby();
+                ar.dirty = true;
+                ar.quiet_until = now + EXHIBIT_AFTER_MS;
+                for id in people {
+                    self.send_to(id, &ServerMsg::ArenaStoodDown {});
+                }
+            }
         }
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
         if before == sim::LOBBY && now >= ar.quiet_until && !self.avatars.is_empty() {
             let mut rng = rand::rng();
             if ar.m.exhibit(now, &mut || rng.random::<f64>()) {
@@ -796,6 +824,7 @@ impl Instance {
         if after == sim::LOBBY {
             if let Some(ar) = self.arena.as_mut() {
                 ar.quiet_until = now + EXHIBIT_AFTER_MS;
+                ar.lobby_at = now;
             }
             for id in people {
                 match parade.iter().find(|(p, _)| *p == id) {

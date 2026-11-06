@@ -22,6 +22,10 @@ export const THIEF_ID = 200;
 
 /** As `arena::LION_HP`, `LION_CROUCH_MS`, `LION_LEAP_MS`, `LION_EMERGE_MS`, `METEOR_WARN_MS`, `METEOR_RAIN_MS`. */
 export const LION_HP = 24;
+/** The Goliath's own lion: as `arena::BIG_LION_HP`; how big it's drawn, and how brown. */
+export const BIG_LION_HP = 56;
+const BIG_LION_SCALE = 1.6;
+const BIG_LION_TINT = 0xc48a5c;
 export const LION_CROUCH_MS = 480;
 export const LION_LEAP_MS = 260;
 export const LION_EMERGE_MS = 1200;
@@ -157,6 +161,10 @@ export interface DisasterHost {
   light(x: number, y: number, tint: number, sx: number, sy: number, alpha: number): void;
   /** A gift's little picture. */
   giftTex(kind: number): Texture;
+  /** Whether the camera's tilted (the 3D view). */
+  tilted(): boolean;
+  /** `s` lies on the ground, in the 3D view too. */
+  layOnGround(s: Sprite): void;
 }
 
 export class DisasterShow {
@@ -223,6 +231,7 @@ export class DisasterShow {
     this.wheel.sprite.zIndex = host.floorZ + 0.2;
     this.wheel.sprite.visible = false;
     host.sorted.addChild(this.wheel.sprite);
+    host.layOnGround(this.wheel.sprite);
     this.wheel.onPeg = (speed, kind, left) => fx.peg(speed, kind - 1, left);
   }
 
@@ -473,7 +482,7 @@ export class DisasterShow {
   private drawLions(s: DisasterState, serverNow: number, wallNow: number, dt: number) {
     const { wx, wy, tile } = this.bound();
     const seen = new Set<number>();
-    this.gatesOpen = s.lions.some((l) => l.act === LION.EMERGE && l.kind === 0);
+    this.gatesOpen = s.lions.some((l) => l.act === LION.EMERGE && (l.kind === 0 || l.kind === 3));
     const thieves = new Set<number>();
     // The clouds: gliding between what we're told.
     const ease0 = 1 - Math.exp(-dt * 9);
@@ -541,6 +550,12 @@ export class DisasterShow {
       const fx0 = wx(v.x);
       const feet = wy(v.y);
       g.zIndex = feet;
+      const big = l.kind === 3;
+      const size = big ? BIG_LION_SCALE : 1;
+      g.pivot.set(fx0, feet);
+      g.position.set(fx0, feet);
+      g.scale.set(size);
+      g.tint = big ? BIG_LION_TINT : 0xffffff;
       let act: LionAct = "idle";
       let k = 0;
       let lift = 0;
@@ -576,15 +591,15 @@ export class DisasterShow {
       g.ellipse(fx0, feet + 1, 16 * shadow, 5 * shadow).fill({ color: 0x000000, alpha: 0.28 });
       // Where it's going to land: a red ring, claw marks across it.
       if (l.act === LION.CROUCH || l.act === LION.LEAP) {
-        const [tx, ty] = [wx(l.toX), wy(l.toY)];
+        const [tx, ty] = [fx0 + (wx(l.toX) - fx0) / size, feet + (wy(l.toY) - feet) / size];
         const p = 0.5 + 0.5 * Math.sin(wallNow / 45);
-        const r = 0.75 * tile;
+        const r = 0.75 * tile * (big ? 1.2 / size : 1);
         g.ellipse(tx, ty, r, r * 0.65).fill({ color: 0xff2a1a, alpha: 0.14 + 0.14 * p });
         g.ellipse(tx, ty, r, r * 0.65).stroke({ width: 2, color: 0xff5a2a, alpha: 0.6 + 0.4 * p });
         for (const dx of [-6, 0, 6]) g.moveTo(tx + dx - 3, ty - 6).lineTo(tx + dx + 3, ty + 6).stroke({ width: 2, color: 0xffe14f, alpha: 0.8 });
       }
       g.alpha = v.deadFade;
-      this.host.light(fx0, feet - lift - 13, 0xffb648, 1, 0.8, 0.34 * v.deadFade);
+      this.host.light(fx0, feet - lift * size - 13 * size, big ? 0xd8863a : 0xffb648, size, 0.8 * size, 0.34 * v.deadFade);
       drawLion(g, fx0, feet - lift, v.rig, v.face, wallNow, wallNow < v.hurtUntil);
       // Streaks behind it in the air, and three claw-rakes as it lands.
       if (l.act === LION.LEAP) {
@@ -603,12 +618,13 @@ export class DisasterShow {
         }
       }
       // Its health (once it's been hurt: until then, it's one more thing on screen).
-      if (l.act !== LION.DEAD && l.hp < LION_HP) {
+      const full = big ? BIG_LION_HP : LION_HP;
+      if (l.act !== LION.DEAD && l.hp < full) {
         const w = 26;
         const by = Math.round(feet - lift - LION_HEIGHT - 7);
         g.rect(fx0 - w / 2 - 1, by - 1, w + 2, 5).fill({ color: 0x1a1020 });
         g.rect(fx0 - w / 2, by, w, 3).fill({ color: 0x4a2020 });
-        g.rect(fx0 - w / 2, by, Math.round((w * l.hp) / LION_HP), 3).fill({ color: l.hp < LION_HP * 0.35 ? 0xff5a3a : 0xffb03a });
+        g.rect(fx0 - w / 2, by, Math.round((w * l.hp) / full), 3).fill({ color: l.hp < full * 0.35 ? 0xff5a3a : 0xffb03a });
       }
       if (act === "run" && Math.random() < 0.18) this.host.dust(v.x, v.y, 1);
     }
@@ -720,15 +736,18 @@ export class DisasterShow {
     const g = v.g.clear();
     g.position.set(fx0, feet + drop);
     g.scale.set(scale);
-    g.zIndex = inShaft ? this.host.floorZ + 0.3 : feet;
-    g.alpha = v.fade;
+    // (In 3D a thing's depth is where it's drawn, so no tucking it under the
+    // floor, and the shaft's lip can't be cut out: it comes up out of the dark.)
+    const tilted = this.host.tilted();
+    g.zIndex = inShaft && !tilted ? this.host.floorZ + 0.3 : feet;
+    g.alpha = v.fade * (inShaft && tilted ? Math.min(1, (1 - sink) * 1.4 + 0.15) : 1);
     // Hidden till the wheel's at the bottom; then in the dark, then in the light.
     g.visible = !(l.act === LION.EMERGE && since < up + 200);
     const light = 0.1 + 0.9 * (1 - sink) ** 1.3;
     const shade = Math.round(255 * light);
     g.tint = (shade << 16) | (shade << 8) | shade;
     // (The near lip of the shaft hides whatever's still below it.)
-    if (inShaft) {
+    if (inShaft && !tilted) {
       const [cx, cy] = [wx(this.host.mid.x), wy(this.host.mid.y)];
       const [rx, ry] = [size * 0.425, size * 0.35];
       v.mask.clear().rect(cx - 400, cy - 400, 800, 400).fill({ color: 0xffffff }).ellipse(cx, cy, rx, ry).fill({ color: 0xffffff });
@@ -746,7 +765,7 @@ export class DisasterShow {
     if (g.visible) drawScorpion(g, 0, 0, v.rig, v.face, v.step, wallNow, wallNow < v.hurtUntil);
     // Eyes opening down in the dark, before anything else of it can be seen.
     const eyes = v.eyes.clear();
-    eyes.zIndex = this.host.floorZ + 0.4;
+    eyes.zIndex = tilted ? feet + 1 : this.host.floorZ + 0.4;
     if (inShaft && sink > 0.45 && g.visible) {
       const blink = Math.sin(wallNow / 240) > -0.8 ? 1 : 0;
       const alpha = Math.min(1, (sink - 0.45) * 3) * blink;

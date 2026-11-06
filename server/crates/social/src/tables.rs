@@ -12,6 +12,11 @@
 //!   first); each plays in turn (hit, stand, double; `TURN_MS` each, then
 //!   it stands for you); the dealer plays out and every hand is paid.
 //!
+//! - **The horse races:** one race at a time for the whole floor, on a loop
+//!   while anyone's there: `RACE_BETTING_MS` to back a horse, then the race,
+//!   the same for everyone, wherever they join it. It's decided only when
+//!   the betting closes.
+//!
 //! Coins leave when a bet is placed (a `casino_rounds` row, unsettled) and
 //! come back when it's settled, so the daily loss limit counts bets on the
 //! table. If the gateway restarts mid-round, unsettled bets are refunded.
@@ -43,6 +48,12 @@ pub const BETTING_MS: u64 = 20_000;
 pub const SPIN_MS: u64 = 5_000;
 /// The most one player can have on a roulette round.
 pub const ROUND_MAX: i32 = 100;
+/// The horse races: how long betting's open between races, about how long a
+/// race takes, what one player can have on a race, and a moment at the end.
+pub const RACE_BETTING_MS: u64 = 25_000;
+pub const RACE_MS: u64 = 6_800;
+pub const RACE_ROUND_MAX: i32 = 100;
+pub const RACE_AFTER_MS: u64 = 900;
 /// Blackjack: the deal after the first bet, each turn, and the pause after.
 pub const DEAL_MS: u64 = 15_000;
 pub const TURN_MS: u64 = 20_000;
@@ -109,6 +120,50 @@ struct Seat {
     leaving: bool,
 }
 
+/// A bet on a horse to win.
+struct Slip {
+    player: Uuid,
+    name: String,
+    horse: usize,
+    amount: i32,
+    round: i64,
+}
+
+enum Gate {
+    Betting {
+        closes: u64,
+    },
+    /// Running: how it'll finish, each horse's time to the line and the
+    /// surge in its stride (the same on every screen).
+    Running {
+        order: [usize; 6],
+        finish: [u64; 6],
+        stride: [f64; 6],
+        starts: u64,
+        ends: u64,
+    },
+}
+
+/// The floor's races.
+struct Stable {
+    gate: Gate,
+    slips: Vec<Slip>,
+    /// The last result, and who won what on it.
+    last: Option<([usize; 6], Vec<(String, i32)>)>,
+}
+
+impl Default for Stable {
+    fn default() -> Stable {
+        Stable {
+            gate: Gate::Betting {
+                closes: now_ms() + RACE_BETTING_MS,
+            },
+            slips: Vec::new(),
+            last: None,
+        }
+    }
+}
+
 #[derive(Default, PartialEq)]
 enum Phase {
     #[default]
@@ -132,6 +187,7 @@ struct Table {
 #[derive(Default)]
 struct Floor {
     wheel: Wheel,
+    stable: Stable,
     tables: [Table; BJ_TABLES],
     /// Bumped on every change, so a client can tell a late reply from news.
     seq: u64,
@@ -373,6 +429,35 @@ fn wheel_json(w: &Wheel) -> Value {
     })
 }
 
+fn stable_json(s: &Stable) -> Value {
+    let slips: Vec<Value> = s
+        .slips
+        .iter()
+        .map(|c| json!({ "player": c.player.to_string(), "name": c.name, "horse": c.horse, "amount": c.amount }))
+        .collect();
+    let last = s.last.as_ref().map(|(order, won)| {
+        json!({
+            "order": order,
+            "winners": won.iter().map(|(name, coins)| json!({ "name": name, "coins": coins })).collect::<Vec<_>>(),
+        })
+    });
+    match &s.gate {
+        Gate::Betting { closes } => {
+            json!({ "phase": "betting", "closes": closes, "slips": slips, "last": last })
+        }
+        Gate::Running {
+            order,
+            finish,
+            stride,
+            starts,
+            ends,
+        } => json!({
+            "phase": "running", "order": order, "finish": finish, "stride": stride,
+            "starts": starts, "ends": ends, "slips": slips, "last": last,
+        }),
+    }
+}
+
 fn table_json(t: &Table) -> Value {
     // The dealer's hole card stays face down until the players are done.
     let dealer = match t.phase {
@@ -405,6 +490,7 @@ fn floor_json(instance: u16, f: &Floor) -> Value {
     json!({
         "t": "casino_tables", "instance": instance,
         "roulette": wheel_json(&f.wheel),
+        "races": stable_json(&f.stable),
         "blackjack": f.tables.iter().map(table_json).collect::<Vec<_>>(),
         "seq": f.seq,
         "now": now_ms(),
@@ -434,6 +520,7 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/casino/tables", get(view))
         .route("/casino/roulette/bet", post(roulette_bet))
         .route("/casino/roulette/spin", post(roulette_ready))
+        .route("/casino/race", post(race_bet))
         .route("/casino/blackjack/sit", post(sit))
         .route("/casino/blackjack/stand_up", post(stand_up))
         .route("/casino/blackjack/bet", post(bj_bet))
@@ -586,6 +673,141 @@ async fn land(state: &SocialState, instance: u16, w: &mut Wheel, number: u8) {
     w.history.truncate(HISTORY);
     w.ready.clear();
     w.spin = Spin::Open;
+}
+
+#[derive(Deserialize)]
+struct RaceBetReq {
+    bet: i32,
+    horse: usize,
+    key: String,
+}
+
+/// A bet on a horse in the next race.
+async fn race_bet(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<RaceBetReq>,
+) -> ApiResult<Json<Value>> {
+    let (me, claims) = me(&state, &headers)?;
+    let instance = floor_of(&state, me).await?;
+    let (lo, hi) = casino::RACE_BET;
+    if req.horse >= casino::HORSES.len() || !(lo..=hi).contains(&req.bet) {
+        return Err(ApiError::bad_request(
+            "bad_bet",
+            format!("Bets here are {lo} to {hi} coins, on one of the horses."),
+        ));
+    }
+    let key = our_key(me, &req.key)?;
+    let mut floors = state.tables.0.lock().await;
+    let f = floors.entry(instance).or_insert_with(Floor::new);
+    if key_used(&state, &key).await? {
+        return Ok(Json(floor_json(instance, f)));
+    }
+    if matches!(f.stable.gate, Gate::Running { .. }) {
+        return Err(conflict(
+            "no_more_bets",
+            "No more bets: they're off! The next race opens soon.",
+        ));
+    }
+    let mine: i32 = f
+        .stable
+        .slips
+        .iter()
+        .filter(|c| c.player == me)
+        .map(|c| c.amount)
+        .sum();
+    if mine + req.bet > RACE_ROUND_MAX {
+        return Err(conflict(
+            "round_max",
+            format!("Up to {RACE_ROUND_MAX} coins a race."),
+        ));
+    }
+    let round = charge(
+        &state,
+        me,
+        "race",
+        req.bet,
+        &key,
+        json!({ "horse": req.horse }),
+    )
+    .await?;
+    f.stable.slips.push(Slip {
+        player: me,
+        name: claims.name.clone(),
+        horse: req.horse,
+        amount: req.bet,
+        round,
+    });
+    announce(&state, instance, f);
+    Ok(Json(floor_json(instance, f)))
+}
+
+/// They're off: the result's drawn now, the betting being closed, and how
+/// each horse runs it, so that every screen shows the same race.
+fn start_race(s: &mut Stable, now: u64) {
+    let mut rng = rand::rng();
+    let order = casino::race(rng.random(), std::array::from_fn(|_| rng.random()));
+    let mut finish = [0u64; 6];
+    // Times to the line in finishing order, a little apart (closer at the front).
+    let mut t = RACE_MS as f64 * (0.94 + rng.random::<f64>() * 0.05);
+    for (k, &h) in order.iter().enumerate() {
+        finish[h] = t as u64;
+        t += 90.0 + rng.random::<f64>() * 260.0 + k as f64 * 40.0;
+    }
+    s.gate = Gate::Running {
+        order,
+        finish,
+        stride: std::array::from_fn(|_| rng.random::<f64>() * std::f64::consts::TAU),
+        starts: now,
+        ends: now + finish.iter().copied().max().unwrap_or(RACE_MS) + RACE_AFTER_MS,
+    };
+}
+
+/// Past the post: pays every slip, tells who won, and opens the next race.
+async fn finish_race(
+    state: &SocialState,
+    instance: u16,
+    s: &mut Stable,
+    order: [usize; 6],
+    now: u64,
+) {
+    let mut won: HashMap<Uuid, (String, i32)> = HashMap::new();
+    for c in std::mem::take(&mut s.slips) {
+        let pays = if order[0] == c.horse {
+            casino::HORSE_PAYS[c.horse]
+        } else {
+            0
+        };
+        let payout = c.amount * pays / 10;
+        pay(
+            state,
+            c.player,
+            c.round,
+            payout,
+            json!({ "order": order, "horse": c.horse, "pays": pays }),
+        )
+        .await;
+        if payout > 0 {
+            won.entry(c.player).or_insert((c.name.clone(), 0)).1 += payout;
+        }
+        if payout >= 70 {
+            cheer(
+                state,
+                instance,
+                format!(
+                    "🏇 {} backed {} and won {payout} coins!",
+                    c.name,
+                    casino::HORSES[c.horse]
+                ),
+            );
+        }
+    }
+    let mut winners: Vec<(String, i32)> = won.into_values().collect();
+    winners.sort_by_key(|w| std::cmp::Reverse(w.1));
+    s.last = Some((order, winners));
+    s.gate = Gate::Betting {
+        closes: now + RACE_BETTING_MS,
+    };
 }
 
 #[derive(Deserialize)]
@@ -947,6 +1169,24 @@ pub async fn tick(state: &SocialState, now: u64) {
             }
             Spin::Spinning { number, lands } if now >= lands => {
                 land(state, instance, w, number).await;
+                changed = true;
+            }
+            _ => {}
+        }
+        // The races: on a loop while anyone's there to see them.
+        match f.stable.gate {
+            Gate::Betting { closes } if now >= closes => {
+                if f.stable.slips.is_empty() && state.hub.in_zone(ZONE, instance).is_empty() {
+                    f.stable.gate = Gate::Betting {
+                        closes: now + RACE_BETTING_MS,
+                    };
+                } else {
+                    start_race(&mut f.stable, now);
+                    changed = true;
+                }
+            }
+            Gate::Running { order, ends, .. } if now >= ends => {
+                finish_race(state, instance, &mut f.stable, order, now).await;
                 changed = true;
             }
             _ => {}

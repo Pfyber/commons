@@ -41,6 +41,7 @@ export class Critters {
     scene.layer3d(this.glow, true);
     this.water.zIndex = 1;
     scene.sorted.addChild(this.water);
+    scene.lieFlat(this.water);
   }
 
   destroy() {

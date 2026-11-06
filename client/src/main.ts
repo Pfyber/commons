@@ -526,7 +526,7 @@ async function main() {
     leaders: new LeaderboardPanel(auth),
     slots: new SlotsPanel(casino),
     mega: new MegaSlotsPanel(casino),
-    race: new RacePanel(casino),
+    race: new RacePanel(casino, tables),
     roulette: new RoulettePanel(casino, tables),
     blackjack: new BlackjackPanel(casino, tables),
     tables,

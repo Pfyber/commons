@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 50;
+pub const PROTOCOL_VERSION: u16 = 51;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -430,6 +430,8 @@ message_enum! {
         /// How your bet came out: `coins` back (0: lost), the stake only if
         /// `refund` (the round came to nothing).
         56 ArenaBetSettled { coins: u16, refund: bool }
+        /// Nobody started the match: you've been stood down from your place.
+        57 ArenaStoodDown {}
     }
 }
 

@@ -138,6 +138,7 @@ export class LibraryRoom {
     this.glow?.destroy();
     const r = slotRect(slot);
     const g = new Graphics();
+    this.scene.standOn(g, (o.y + o.h) * TILE);
     const x = o.x * TILE + r.x;
     const y = o.y * TILE + r.y;
     g.rect(x - 1, y - 1, r.w + 2, r.h + 2).fill({ color: 0xfff2b8, alpha: 0.45 });

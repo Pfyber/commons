@@ -499,10 +499,13 @@ interface Fire {
   phase: number;
   /** How big it burns: 1 a brazier, less a torch or a candle. */
   s: number;
+  /** Its flames, drawn each frame (world px). */
+  g: Graphics;
 }
 
 /** A tongue of flame, a spark or a wisp of smoke off a brazier (world px). */
 interface Flame {
+  fire: Fire;
   x: number;
   y: number;
   vx: number;
@@ -685,7 +688,6 @@ export class ArenaShow {
   private gates: { x: number; y: number; w: number; east: boolean; g: Graphics }[] = [];
   private gatesOpen = 0;
   private flames: Flame[] = [];
-  private flamesG = new Graphics();
   /** Whether any fire was drawn last frame (they're skipped off screen). */
   private firesShown = true;
   /** The torches' stands by Caesar's dais. */
@@ -815,16 +817,22 @@ export class ArenaShow {
       ring: (x, y, color, r) => this.ringFx(x, y, color, r),
       glow: (x, y) => nightGlow(x, y),
       giftTex: (kind) => giftTexture(kind),
+      tilted: () => this.scene.tilted,
+      layOnGround: (s) => this.scene.layOnGround(s),
       light: (x, y, tint, sx, sy, alpha) => this.glows.add(x, y, tint, sx, sy, alpha),
     });
     // On the sand: the fire's glow and the spikes over the floor, under the fighters; effects over all.
     this.floor.zIndex = this.oy * TILE + 2;
     this.lavaG.zIndex = this.floor.zIndex - 0.5;
+    this.scene.lieFlat(this.lavaG);
     this.scene.sorted.addChild(this.lavaG);
     this.scene.sorted.addChild(this.floor);
     this.top.zIndex = 1e9;
     this.top.addChild(this.fx);
+    // (Bombs, arrows, meteors: they have to line up with the sand under them, however far off.)
+    this.scene.lieFlat(this.fx, true);
     this.scene.world.addChild(this.top);
+    this.scene.layer3d(this.top, false, true);
     // The braziers on the pillars: their fire (live), their glow by day and their light by night.
     for (const o of map.objects.filter((q) => q.kind === "arena_pillar")) {
       const x = o.x * TILE + (o.w * TILE) / 2;
@@ -837,8 +845,7 @@ export class ArenaShow {
       // (Small pillars, small fires.)
       const night = nightGlow(x, y + 6);
       night?.scale.set(0.6);
-      this.fires.push({ x, y, glow, night, phase: Math.random() * 10, s: 0.55 });
-      this.flamesG.zIndex = Math.max(this.flamesG.zIndex, (o.y + o.h) * TILE);
+      this.addFire(x, y, glow, night, 0.55, (o.y + o.h) * TILE);
     }
     // The grand entrance's braziers.
     const gateObj = map.objects.find((q) => q.kind === "arena_gate");
@@ -851,9 +858,8 @@ export class ArenaShow {
         glow.blendMode = "add";
         glow.position.set(x, y - 6);
         this.top.addChildAt(glow, 0);
-        this.fires.push({ x, y, glow, night: nightGlow(x, y + 10), phase: Math.random() * 10, s: 1 });
+        this.addFire(x, y, glow, nightGlow(x, y + 10), 1, (gateObj.y + gateObj.h) * TILE);
       }
-      this.flamesG.zIndex = Math.max(this.flamesG.zIndex, (gateObj.y + gateObj.h) * TILE);
     }
     // The amphitheatre: its crowd, a spectator to each of the stands' seats
     // as they're painted (bar the cushioned ones, for people), drawn as they
@@ -874,6 +880,7 @@ export class ArenaShow {
       this.masts = bowlMasts(bowl.w, bowl.h).map(([x, y]) => [bx + x, by - BOWL_OVERHANG + y]);
       this.pennants.zIndex = by + 2;
       this.scene.sorted.addChild(this.pennants);
+      this.scene.lieFlat(this.pennants);
     }
     // The gladiators' gates: their torches, their iron doors.
     for (const sg of map.objects.filter((q) => q.kind === "arena_gate_w" || q.kind === "arena_gate_e")) {
@@ -881,6 +888,7 @@ export class ArenaShow {
       const doors = new Graphics();
       doors.zIndex = (sg.y + sg.h) * TILE + 1;
       this.scene.sorted.addChild(doors);
+      this.scene.lieFlat(doors);
       this.gates.push({ x: sg.x * TILE, y: sg.y * TILE - SIDE_GATE_OVERHANG, w: sg.w * TILE, east, g: doors });
       for (const [fx, fy] of SIDE_GATE_FIRES) {
         const x = sg.x * TILE + (east ? sg.w * TILE - fx : fx);
@@ -890,9 +898,9 @@ export class ArenaShow {
         glow.blendMode = "add";
         glow.position.set(x, y - 6);
         this.top.addChildAt(glow, 0);
-        this.fires.push({ x, y, glow, night: nightGlow(x, y + 10), phase: Math.random() * 10, s: 1 });
+        // (These gates lie flat in 3D, so the fire stands right where it burns.)
+        this.addFire(x, y, glow, nightGlow(x, y + 10), 1, y, (sg.y + sg.h) * TILE + 2);
       }
-      this.flamesG.zIndex = Math.max(this.flamesG.zIndex, (sg.y + sg.h) * TILE);
     }
     // Caesar, on his dais: where his head is (for the prompt over him, and his words).
     const court = map.objects.find((q) => q.kind === "arena_court");
@@ -901,9 +909,11 @@ export class ArenaShow {
       this.prompt.anchor.set(0.5, 1);
       this.prompt.scale.set(1.4);
       this.top.addChild(this.prompt, this.promptArrow);
+      this.scene.standOn(this.prompt, (court.y + court.h) * TILE);
+      this.scene.standOn(this.promptArrow, (court.y + court.h) * TILE);
       // A torch on its stand either side of the dais's foot, and the
       // candles either side of Caesar: their fires live, small.
-      const flame = (x: number, y: number, s: number) => {
+      const flame = (x: number, y: number, s: number, at: number) => {
         const glow = new Sprite(fireGlow());
         glow.anchor.set(0.5);
         glow.blendMode = "add";
@@ -911,7 +921,7 @@ export class ArenaShow {
         this.top.addChildAt(glow, 0);
         const night = nightGlow(x, y + 10 * s);
         night?.scale.set(s);
-        this.fires.push({ x, y, glow, night, phase: Math.random() * 10, s });
+        this.addFire(x, y, glow, night, s, at);
       };
       const foot = (court.y + court.h) * TILE + COURT_TORCH_DOWN;
       for (const x of [court.x * TILE - COURT_TORCH_OUT, (court.x + court.w) * TILE + COURT_TORCH_OUT]) {
@@ -921,12 +931,10 @@ export class ArenaShow {
         stand.zIndex = foot;
         this.scene.sorted.addChild(stand);
         this.torchStands.push(stand);
-        flame(x, foot - TORCH_HEIGHT + 2, 0.5);
+        flame(x, foot - TORCH_HEIGHT + 2, 0.5, foot);
       }
-      for (const [cx, up] of COURT_CANDLES) flame(court.x * TILE + cx, (court.y + court.h) * TILE - up, 0.2);
-      this.flamesG.zIndex = Math.max(this.flamesG.zIndex, foot);
+      for (const [cx, up] of COURT_CANDLES) flame(court.x * TILE + cx, (court.y + court.h) * TILE - up, 0.2, (court.y + court.h) * TILE);
     }
-    if (this.fires.length) this.scene.sorted.addChild(this.flamesG);
     // Petals lying on the sand and the carpet: over the floor, under the people.
     this.petalsG.zIndex = this.oy * TILE + 3;
     const carpet = map.objects.find((q) => q.kind === "arena_carpet");
@@ -3588,6 +3596,7 @@ export class ArenaShow {
     s.anchor.set(0.5, 1);
     s.scale.set(1.3);
     this.top.addChild(s);
+    this.scene.standOn(s, c.ty * TILE);
     this.floaters.push({ sprite: s, x: c.x, y: c.y - 24, at: performance.now(), life });
   }
 
@@ -3751,6 +3760,8 @@ export class ArenaShow {
         sp = new Sprite();
         sp.anchor.set(0.5, 1);
         this.scene.sorted.addChild(sp);
+        // (The stands are drawn flat: in 3D they sit where they're drawn.)
+        this.scene.standOn(sp, p.y + 4);
         p.sprite = sp;
       }
       sp.visible = true;
@@ -3855,11 +3866,21 @@ export class ArenaShow {
       const s = new Sprite(word(lines[Math.floor(Math.random() * lines.length)], "#fff6d8"));
       s.anchor.set(0.5, 1);
       this.top.addChild(s);
+      this.scene.standOn(s, c.ty * TILE);
       this.floaters.push({ sprite: s, x: c.x + 18, y: c.y - 40, at: wallNow, life: 2600 });
     }
   }
 
   // ---- the braziers ---------------------------------------------------------------
+
+  /** A fire at (x, y) on something whose foot's at `foot` (world px), drawn over what's sorted at `z`. */
+  private addFire(x: number, y: number, glow: Sprite, night: Sprite | null, s: number, foot: number, z = foot) {
+    const g = new Graphics();
+    g.zIndex = z;
+    this.scene.sorted.addChild(g);
+    for (const c of [g, glow, night]) if (c) this.scene.standOn(c, foot);
+    this.fires.push({ x, y, glow, night, phase: Math.random() * 10, s, g });
+  }
 
   /**
    * Each brazier's fire, alive: a flickering core of nested flame shapes,
@@ -3875,16 +3896,18 @@ export class ArenaShow {
     const anySeen = this.fires.some(seen);
     if (!anySeen && !this.flames.length) {
       if (this.firesShown) {
-        this.flamesG.clear();
-        for (const f of this.fires) f.glow.visible = false;
+        for (const f of this.fires) {
+          f.g.clear();
+          f.glow.visible = false;
+        }
         this.firesShown = false;
       }
       return;
     }
     this.firesShown = true;
-    const g = this.flamesG.clear();
     const t = wallNow / 1000;
     for (const f of this.fires) {
+      const g = f.g.clear();
       f.glow.visible = seen(f);
       if (!f.glow.visible) {
         if (f.night) f.night.alpha = 0.7;
@@ -3895,10 +3918,10 @@ export class ArenaShow {
       const rate = dt * 130 * s;
       const n = Math.random() < rate % 1 ? Math.ceil(rate) : Math.floor(rate);
       for (let i = 0; i < n; i++) {
-        this.flames.push({ x: f.x + (Math.random() - 0.5) * 20 * s, y: f.y + 2 * s, vx: (Math.random() - 0.5) * 8 * s, vy: -(30 + Math.random() * 30) * Math.sqrt(s), born: wallNow, life: (320 + Math.random() * 320) * Math.sqrt(s), kind: 0, size: s < 0.4 ? 1 : s < 0.8 ? (Math.random() < 0.5 ? 2 : 3) : Math.random() < 0.5 ? 4 : 3 });
+        this.flames.push({ fire: f, x: f.x + (Math.random() - 0.5) * 20 * s, y: f.y + 2 * s, vx: (Math.random() - 0.5) * 8 * s, vy: -(30 + Math.random() * 30) * Math.sqrt(s), born: wallNow, life: (320 + Math.random() * 320) * Math.sqrt(s), kind: 0, size: s < 0.4 ? 1 : s < 0.8 ? (Math.random() < 0.5 ? 2 : 3) : Math.random() < 0.5 ? 4 : 3 });
       }
-      if (Math.random() < dt * 5 * s) this.flames.push({ x: f.x + (Math.random() - 0.5) * 10 * s, y: f.y - 6 * s, vx: (Math.random() - 0.5) * 18 * s, vy: -(40 + Math.random() * 40) * s, born: wallNow, life: 700 + Math.random() * 600, kind: 1, size: 1 });
-      if (Math.random() < dt * 4 * s) this.flames.push({ x: f.x + (Math.random() - 0.5) * 6 * s, y: f.y - 18 * s, vx: (Math.random() - 0.5) * 4, vy: -(10 + Math.random() * 8), born: wallNow, life: 1200 + Math.random() * 600, kind: 2, size: s < 0.4 ? 1 : 3 });
+      if (Math.random() < dt * 5 * s) this.flames.push({ fire: f, x: f.x + (Math.random() - 0.5) * 10 * s, y: f.y - 6 * s, vx: (Math.random() - 0.5) * 18 * s, vy: -(40 + Math.random() * 40) * s, born: wallNow, life: 700 + Math.random() * 600, kind: 1, size: 1 });
+      if (Math.random() < dt * 4 * s) this.flames.push({ fire: f, x: f.x + (Math.random() - 0.5) * 6 * s, y: f.y - 18 * s, vx: (Math.random() - 0.5) * 4, vy: -(10 + Math.random() * 8), born: wallNow, life: 1200 + Math.random() * 600, kind: 2, size: s < 0.4 ? 1 : 3 });
       // The core: nested flame shapes (red outside, white at the heart), swaying.
       const layers: [number, number, number][] = [
         [12, 29, 0xd8341a],
@@ -3928,6 +3951,7 @@ export class ArenaShow {
     // The tongues, sparks and smoke, rising and fading.
     this.flames = this.flames.filter((p) => wallNow - p.born < p.life);
     for (const p of this.flames) {
+      const g = p.fire.g;
       const a = (wallNow - p.born) / p.life;
       p.x += (p.vx + Math.sin(t * 8 + p.born) * (p.kind === 1 ? 14 : 6)) * dt;
       p.y += p.vy * dt;
@@ -4492,14 +4516,16 @@ export class ArenaShow {
     this.floor.destroy();
     this.lavaG.destroy();
     this.spikesG.destroy();
-    this.flamesG.destroy();
     for (const t of this.torchStands) t.destroy({ texture: true, textureSource: true });
     for (const p of this.crowd) p.sprite?.destroy();
     for (const gate of this.gates) gate.g.destroy();
     this.pennants.destroy();
     this.petalsG.destroy();
     this.petalsOutG.destroy();
-    for (const f of this.fires) f.night?.destroy();
+    for (const f of this.fires) {
+      f.g.destroy();
+      f.night?.destroy();
+    }
     this.top.destroy({ children: true });
     for (const e of [this.hud, this.lobby, this.results, this.vignette, this.watchBar]) e.remove();
     window.removeEventListener("keydown", this.onWatchKey, true);

@@ -59,6 +59,7 @@ export class CatchShows {
     label.visible = false;
     root.addChild(rays, glow, fish, label);
     this.scene.world.addChild(root);
+    this.scene.layer3d(root, false, true);
     const from = { x: water.x * TILE + TILE / 2, y: water.y * TILE + TILE / 2 };
     // Splash where it comes out.
     const sparks: Show["sparks"] = [];

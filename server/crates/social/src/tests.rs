@@ -2157,6 +2157,114 @@ async fn the_casino_is_for_grown_ups_inside_it_within_limits_and_lets_you_take_a
 }
 
 #[tokio::test]
+async fn the_horse_races_are_one_race_for_the_whole_floor() {
+    use crate::tables::{RACE_BETTING_MS, RACE_ROUND_MAX, now_ms, tick};
+    use commons_sim::casino::HORSE_PAYS;
+    let Some(s) = state().await else { return };
+    let (a, b) = (player(&s).await, player(&s).await);
+    let tag = &a.name[1..7];
+    for p in [&a, &b] {
+        grant(&s, p, 1, 1000, "test", &format!("races:{}", &p.name[1..7])).await;
+        in_zone(&s, p, "casino");
+    }
+    let post = |p: &P, body: Value| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move { call(&s, "POST", "/api/social/casino/race", &tok, Some(body)).await }
+    };
+    let view = |p: &P| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        async move {
+            call(&s, "GET", "/api/social/casino/tables", &tok, None)
+                .await
+                .1
+        }
+    };
+    // Betting's open before anyone's bet; both back a horse in the same race.
+    assert_eq!(view(&a).await["races"]["phase"], "betting");
+    let (ca, cb) = (coins(&s, &a).await, coins(&s, &b).await);
+    let (st, r) = post(
+        &a,
+        json!({ "bet": 10, "horse": 0, "key": format!("ha:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (st, _) = post(
+        &a,
+        json!({ "bet": 10, "horse": 0, "key": format!("ha:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "pressed twice");
+    let (st, r) = post(
+        &b,
+        json!({ "bet": 5, "horse": 1, "key": format!("hb:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(
+        r["races"]["slips"].as_array().unwrap().len(),
+        2,
+        "once each: {r}"
+    );
+    assert_eq!(coins(&s, &a).await, ca - 10, "it's on the race");
+    assert!(RACE_ROUND_MAX >= 30);
+    let (st, _) = post(
+        &a,
+        json!({ "bet": 500, "horse": 0, "key": format!("big:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    let (st, _) = post(
+        &a,
+        json!({ "bet": 5, "horse": 9, "key": format!("bad:{tag}") }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    // The betting closes: they're off, and both see the very same race.
+    tick(&s, now_ms() + RACE_BETTING_MS + 1).await;
+    let (ra, rb) = (view(&a).await, view(&b).await);
+    assert_eq!(ra["races"]["phase"], "running");
+    for k in ["order", "finish", "stride", "starts", "ends"] {
+        assert!(!ra["races"][k].is_null(), "{k}");
+        assert_eq!(ra["races"][k], rb["races"][k], "{k}");
+    }
+    let (st, r) = post(
+        &a,
+        json!({ "bet": 5, "horse": 2, "key": format!("late:{tag}") }),
+    )
+    .await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::CONFLICT, Some("no_more_bets"))
+    );
+    // Past the post: paid by what the horse pays, and the next one opens.
+    let order: Vec<usize> = ra["races"]["order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as usize)
+        .collect();
+    tick(&s, ra["races"]["ends"].as_u64().unwrap() + 1).await;
+    let r = view(&b).await;
+    assert_eq!(r["races"]["phase"], "betting");
+    assert_eq!(r["races"]["last"]["order"], json!(order));
+    assert_eq!(r["races"]["slips"], json!([]));
+    let a_won = if order[0] == 0 {
+        10 * HORSE_PAYS[0] / 10
+    } else {
+        0
+    };
+    let b_won = if order[0] == 1 {
+        5 * HORSE_PAYS[1] / 10
+    } else {
+        0
+    };
+    assert_eq!(coins(&s, &a).await, ca - 10 + a_won);
+    assert_eq!(coins(&s, &b).await, cb - 5 + b_won);
+}
+
+#[tokio::test]
 async fn casino_tables_are_played_together_roulette_and_blackjack() {
     use crate::tables::{BETTING_MS, DEAL_MS, DONE_MS, SPIN_MS, now_ms, tick};
     let Some(s) = state().await else { return };
