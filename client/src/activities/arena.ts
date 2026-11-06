@@ -779,6 +779,8 @@ export class ArenaShow {
     this.carpetY = carpet ? carpet.y - this.oy - 0.5 : Infinity;
     this.petalsOutG.zIndex = carpet ? carpet.y * TILE + 2 : this.petalsG.zIndex;
     this.scene.sorted.addChild(this.petalsG, this.petalsOutG);
+    // In the 3D view these lie on the sand in perspective (they're drawn in world coordinates).
+    for (const g of [this.floor, this.petalsG, this.petalsOutG]) this.scene.lieFlat(g);
     this.buildHud();
     window.addEventListener("keydown", this.onKey, true);
     window.addEventListener("keyup", this.onKeyUp, true);
@@ -832,9 +834,8 @@ export class ArenaShow {
 
   private aimPoint(): { x: number; y: number } | null {
     if (!this.mouse) return null;
-    const s = this.scene.scale;
-    const w = this.scene.world.position;
-    return { x: (this.mouse.sx - w.x) / s / TILE - this.ox, y: (this.mouse.sy - w.y) / s / TILE - this.oy };
+    const w = this.scene.screenToWorld(this.mouse.sx, this.mouse.sy);
+    return { x: w.x / TILE - this.ox, y: w.y / TILE - this.oy };
   }
 
   /** Where the camera looks: a little toward the aim, shaking on big blows. */

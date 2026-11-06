@@ -1,5 +1,6 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
+import { Labyrinth } from "./labyrinth";
 import { type Application, type FederatedPointerEvent, Graphics, Sprite, Text } from "pixi.js";
 import { Ball } from "./activities/ball";
 import { ChessPanel, type GameStateMsg } from "./activities/chess";
@@ -108,6 +109,8 @@ import type { JournalPanel, NetGame } from "./ui/nature";
 import { NatureFx } from "./world/naturefx";
 import { YardStands } from "./world/yardstands";
 import type { ConcertPanel } from "./ui/concert";
+import type { Consent, Lounge } from "./lounge";
+import { CAFE_WARNING, LoungeBar, cafeChoices } from "./ui/lounge";
 
 /** Error codes from server/crates/protocol (error_code). */
 const ERR = { NO_PATH: 4, RATE_LIMITED: 5, REPLACED: 6, UNAUTHORIZED: 2, VERSION_MISMATCH: 3 };
@@ -191,6 +194,8 @@ export interface Ui {
   clubsPanel: ClubsPanel;
   concert: Concert;
   concertPanel: ConcertPanel;
+  /** The café's open voice (ADR 0021). */
+  lounge: Lounge;
   yard: YardPanel;
   metro: MetroPanel;
   casino: Casino;
@@ -353,6 +358,13 @@ const carried = {
 };
 /** How long after going through a door the two find each other again. */
 const CARRY_MS = 20_000;
+/**
+ * What you said at the café's door (ADR 0021): kept for the walk in, so
+ * the café's Game joins its voice the way you chose. Anyone arriving
+ * without it (joining a friend, a reload) is asked inside before anything
+ * is heard.
+ */
+let cafeConsent: { c: Consent; until: number } | null = null;
 /** Further behind than this (tiles), a follower runs to catch up. */
 const FOLLOW_CATCH_UP = 5;
 /** Two key presses or taps closer together than this ask for a sprint. */
@@ -501,6 +513,8 @@ export class Game {
   private richToast: { item: number; text: string; until: number } | null = null;
   /** The lucky crate sitting somewhere in the park, if any. */
   private lucky: LuckyCrate;
+  /** The Glowroot Labyrinth's lanterns, glimmers and lights (in it only). */
+  private lab: Labyrinth | null = null;
   /** The Market fountain's running water, where the map has one. */
   private fountain: FountainFx | null = null;
   /** Rare fish flopping on the bank, to be hit; and where each angler's line went in. */
@@ -530,6 +544,8 @@ export class Game {
   private leaving: { exit: MapObject; spot: TileXY } | null = null;
   /** Where the last tap on the world landed, in world pixels (for things that need a precise hit). */
   private lastTapWorld: { x: number; y: number } | null = null;
+  /** What we last ordered that isn't beer (☕, 🫖 or 💧), shown as we sip it. */
+  private sip = "💧";
   /** When your own wooziness wears off. */
   private soberTimer = 0;
   private grove: Grove | null = null;
@@ -571,7 +587,8 @@ export class Game {
     // city's houses), and showing that for a frame or two flashes a stranger's street.
     this.scene.world.visible = false;
     this.waterMap = waterMapOf(map);
-    ui.minimap.setMap(map);
+    // (No minimap in the labyrinth: that would give the way away.)
+    ui.minimap.setMap(zoneId === "labyrinth" ? null : map);
     // Inside somewhere with a way out: the leave button in the corner.
     ui.hud.setExit(map.objects.some((o) => o.kind.endsWith("_exit")) ? "Leave" : null);
     this.fairyRing = spot(map, "fairy_ring");
@@ -588,8 +605,10 @@ export class Game {
     // on, no weather, no birds, no wheels, no sprinting; the arcade and the
     // bowling alley are lit by neon.
     const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club") || zoneId === "bowling" || zoneId === "concert_hall" || zoneId === "casino" || zoneId === "museum" || zoneId === "paintball";
-    this.ambient = new Ambient(this.scene, map, indoors);
-    this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade" || zoneId === "bowling");
+    // Under the hedge maze, the labyrinth: always dusk, no weather, no birds.
+    const underground = zoneId === "labyrinth";
+    this.ambient = new Ambient(this.scene, map, indoors || underground);
+    this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade" || zoneId === "bowling", underground ? 22.5 : null);
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     if (zoneId === "city") {
       ui.town
@@ -598,9 +617,26 @@ export class Game {
         .catch(() => {});
     }
     this.setupCorners(map);
-    this.weather = new Weather(app, this.scene, map, indoors);
+    this.weather = new Weather(app, this.scene, map, indoors || underground);
     this.catches = new CatchShows(this.scene);
     this.lucky = new LuckyCrate(this.scene);
+    if (underground) {
+      this.scene.closeView = true;
+      this.scene.zoomSnap();
+      this.scene.resize();
+      this.lab = new Labyrinth(this.scene, map, this.daynight, {
+        toast: (t, ms) => this.hud.toast(t, ms),
+        selfId: () => this.selfId,
+        nameOf: (id) => this.avatars.get(id)?.info.name ?? "Someone",
+        selfTile: () => {
+          const p = this.self?.pos;
+          return p ? { x: Math.round(p.x), y: Math.round(p.y) } : null;
+        },
+        people: () =>
+          [...this.avatars.values()].map((a) => ({ id: a.info.id, x: a.sprite.position.x, y: a.sprite.position.y, tile: { x: Math.round(a.pos.x), y: Math.round(a.pos.y) } })),
+        goUp: () => this.goTo("city"),
+      });
+    }
     const fountain = map.objects.find((o) => o.kind === "fountain");
     if (fountain) this.fountain = new FountainFx(this.scene, fountain);
     this.flops = new FlopShows(this.scene);
@@ -889,6 +925,8 @@ export class Game {
       this.disposers.push(ui.concert.onChange(() => this.showStage()));
       this.disposers.push(() => void ui.concert.leaveHall());
     }
+    // The café (ADR 0021): everyone hears everyone, once you've said yes.
+    if (zoneId === "bar") this.openCafeVoice();
     // The clubhouses on the club lots, as they change (C3).
     if (zoneId === "city") {
       this.dressLots(ui.clubs.lots);
@@ -971,6 +1009,7 @@ export class Game {
       a.setFounder(this.ui.welcome.founderNamed(info.name)?.no ?? null);
       a.setClub(this.ui.clubs.badgeOf(info.name));
       if (this.zoneId === "concert_hall") a.setPerforming(this.ui.concert.stage?.name === info.name);
+      if (this.zoneId === "bar") a.setPerforming(this.ui.lounge.speaking.has(info.name), "🗣️");
       this.avatars.set(info.id, a);
     }
   }
@@ -978,6 +1017,42 @@ export class Game {
   private applyFounders() {
     this.grove?.setFounders(this.ui.welcome.founders);
     for (const a of this.avatars.values()) a.setFounder(this.ui.welcome.founderNamed(a.info.name)?.no ?? null);
+  }
+
+  /**
+   * The café's voice: joined the way you chose at the door, or asked now if
+   * you came in another way; the bar along the top while you're in, 🗣️ by
+   * whoever's talking, and out of the voice as you leave.
+   */
+  private openCafeVoice() {
+    const lounge = this.ui.lounge;
+    const join = (c: Consent) =>
+      void lounge.join(c).catch((e) => this.hud.toast(`🎙️ ${e instanceof Error ? e.message : "The café's voice isn't answering."}`, 4500));
+    const ask = () =>
+      this.ui.menu.showWith("☕ Café voice", CAFE_WARNING, [
+        ["🎙️ Join, microphone on", () => join("mic")],
+        ["🔇 Join, muted (just listen)", () => join("muted")],
+        ["Not now", () => this.hud.toast("☕ No voice for you, then. Tap “Join voice” up top if you change your mind.", 4000)],
+      ]);
+    const bar = new LoungeBar(lounge, ask);
+    const said = cafeConsent && performance.now() < cafeConsent.until ? cafeConsent.c : null;
+    cafeConsent = null;
+    if (said) join(said);
+    else {
+      const t = window.setTimeout(ask, 900);
+      this.disposers.push(() => window.clearTimeout(t));
+    }
+    this.disposers.push(lounge.onChange(() => this.showSpeakers()));
+    this.disposers.push(() => {
+      bar.destroy();
+      void lounge.leave();
+    });
+  }
+
+  /** 🗣️ by the names of whoever's talking in the café. */
+  private showSpeakers() {
+    const talking = this.ui.lounge.speaking;
+    for (const a of this.avatars.values()) a.setPerforming(talking.has(a.info.name), "🗣️");
   }
 
   /** Lights the stage with the performer's name, and 🎤 by theirs. */
@@ -1095,8 +1170,9 @@ export class Game {
   /** Tapping the Caretaker opens their panel. */
   private tapCaretaker(sx: number, sy: number): boolean {
     if (!this.caretaker) return false;
-    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
-    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    const w = this.scene.screenToWorld(sx, sy);
+    const x = w.x / TILE;
+    const y = w.y / TILE;
     if (!this.caretaker.hit(x, y)) return false;
     const self = this.self;
     if (self && cheb(self.destination, this.caretaker.pos) > 3) this.walkTo(this.caretaker.avatar.destination);
@@ -1407,8 +1483,9 @@ export class Game {
   /** Tapping Fisherman Franci: a word from him, and his shop (sell fish, buy the rod and lures). */
   private tapFrancy(sx: number, sy: number): boolean {
     if (!this.francy) return false;
-    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
-    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    const w = this.scene.screenToWorld(sx, sy);
+    const x = w.x / TILE;
+    const y = w.y / TILE;
     if (!this.francy.hit(x, y)) return false;
     this.francy.chat();
     const at = this.francy.tile;
@@ -1427,8 +1504,9 @@ export class Game {
 
   private tapClerk(sx: number, sy: number): boolean {
     if (!this.clerk) return false;
-    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
-    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    const w = this.scene.screenToWorld(sx, sy);
+    const x = w.x / TILE;
+    const y = w.y / TILE;
     if (!this.clerk.hit(x, y)) return false;
     this.clerk.chat();
     const map = this.scene.map;
@@ -1564,11 +1642,14 @@ export class Game {
       const spot = nearestWalkable(this.scene.map, front.x, front.y, 2);
       if (spot) this.moveTo(spot, true);
     }
-    const order = (kind: number, line: string) => {
+    const order = (kind: number, line: string, sip = "💧") => {
+      this.sip = sip;
       this.socket?.send({ t: "Drink", kind });
       this.clerk?.say(line);
     };
-    this.near(this.ui.menu, front, 6).showWith("Bartender 🍺", "The Mossy Mug", [
+    this.near(this.ui.menu, front, 6).showWith("Barista ☕", "The Mossy Mug", [
+      ["☕ A coffee · free", () => order(WATER, "One flat white. Careful, it's hot!", "☕")],
+      ["🫖 A pot of tea · free", () => order(WATER, "Mint tea, from the garden.", "🫖")],
       ["🍺 A beer · 5 coins", () => order(BEER, "One cold one, coming up!")],
       ["💧 A glass of water · free", () => order(WATER, "Here you go. Sip slowly.")],
     ]);
@@ -1578,7 +1659,7 @@ export class Game {
   private onWoozy(id: number, ms: number) {
     const a = this.avatars.get(id);
     a?.setWoozy(ms);
-    a?.flash(ms ? "🍺" : "💧");
+    a?.flash(ms ? "🍺" : id === this.selfId ? this.sip : "💧");
     if (id !== this.selfId) return;
     window.clearTimeout(this.soberTimer);
     document.body.classList.toggle("woozy", ms > 0);
@@ -1698,6 +1779,17 @@ export class Game {
 
   /** Through a door to `zone`: anyone following us is told, so they come too. */
   private goTo(zone: string, arrive?: string) {
+    // The café's voice is open: say so at the door, before anyone's heard.
+    if (zone === "bar" && this.zoneId !== "bar" && !(cafeConsent && performance.now() < cafeConsent.until)) {
+      const d = this.self?.destination;
+      const go = (c: Consent) => {
+        cafeConsent = { c, until: performance.now() + 60_000 };
+        this.goTo(zone, arrive);
+      };
+      const menu = d ? this.near(this.ui.menu, { x: Math.round(d.x), y: Math.round(d.y) }, 4) : this.ui.menu;
+      menu.showWith("☕ The Mossy Mug", CAFE_WARNING, cafeChoices(go, () => this.hud.toast("☕ Another time, then.", 2000)));
+      return;
+    }
     const until = performance.now() + CARRY_MS;
     for (const id of this.followers) {
       const name = this.avatars.get(id)?.info.name;
@@ -2183,8 +2275,9 @@ export class Game {
 
   /** Tapping a pet: yours (a walk, home), or someone else's (a pat). */
   private tapPet(sx: number, sy: number): boolean {
-    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
-    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    const w = this.scene.screenToWorld(sx, sy);
+    const x = w.x / TILE;
+    const y = w.y / TILE;
     const ui = this.ui;
     const self = this.self;
     const fail = (e: unknown) => this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 4000);
@@ -2382,6 +2475,10 @@ export class Game {
         break;
       case "LureShown":
         this.lures.show({ x: m.x, y: m.y }, m.ends, m.kind);
+        break;
+      case "LabState":
+      case "LabEvent":
+        this.lab?.handle(m);
         break;
       case "LuckyShown":
         this.lucky.show({ x: m.x, y: m.y }, m.moves);
@@ -2659,8 +2756,9 @@ export class Game {
   /** Petting Biscuit. */
   private tapCat(sx: number, sy: number): boolean {
     if (!this.cat?.active) return false;
-    const x = (sx - this.scene.world.position.x) / this.scene.scale / TILE;
-    const y = (sy - this.scene.world.position.y) / this.scene.scale / TILE;
+    const w = this.scene.screenToWorld(sx, sy);
+    const x = w.x / TILE;
+    const y = w.y / TILE;
     if (!this.cat.hit(x, y)) return false;
     this.cat.hearts = performance.now() + 1500;
     this.hud.toast(`🐈 ${PURRS[Math.floor(Math.random() * PURRS.length)]}`, 3500);
@@ -2964,8 +3062,7 @@ export class Game {
       // Tapping anywhere else puts the lure back in the bag: its menu and highlight go.
       this.closeLureMenu();
       // Your fish flopping on the bank: hit it.
-      const wx = (e.global.x - this.scene.world.position.x) / this.scene.scale;
-      const wy = (e.global.y - this.scene.world.position.y) / this.scene.scale;
+      const { x: wx, y: wy } = this.scene.screenToWorld(e.global.x, e.global.y);
       this.lastTapWorld = { x: wx, y: wy };
       if (this.flops.hits(this.selfId, wx, wy)) {
         this.socket?.send({ t: "FishHit" });
@@ -3144,7 +3241,7 @@ export class Game {
   private tapAvatar(sx: number, sy: number): boolean {
     for (const a of this.avatars.values()) {
       if (a.info.id === this.selfId) continue;
-      const b = a.sprite.getBounds();
+      const b = this.scene.screenBounds(a.sprite);
       if (sx < b.minX || sx > b.maxX || sy < b.minY || sy > b.maxY) continue;
       const social = this.ui.social;
       const name = a.info.name;
@@ -3172,7 +3269,7 @@ export class Game {
         actions.push([`${t.icon} ${t.offer}`, () => this.offer(a.info.id, Number(kind), name)]);
       }
       actions.push(["Report", () => this.ui.report.openFor(name)]);
-      actions.push(["Block", () => confirm(`Block ${name}? You won't see their chat, and they can't contact you.`) && void say(social.block(name).then(() => `Blocked ${name}.`))]);
+      actions.push(["Block", () => confirm(`Block ${name}? You won't see their chat, and they can't contact you.`) && void say(social.block(name).then(() => (this.ui.lounge.block(name), `Blocked ${name}.`)))]);
       this.near(this.ui.menu, this.self?.destination ?? { x: 0, y: 0 }, 6).showWith(name, friend ? (friend.level >= 2 ? "Close friend" : "Friend") : "", actions);
       return true;
     }
@@ -3344,6 +3441,10 @@ export class Game {
       this.goTo("city");
       return true;
     }
+    if (obj?.kind === "menu_board") {
+      this.hud.toast("☕ Today: flat white · mint tea · strawberry cake · croissants · and the voice is open, so say hello!", 5000);
+      return true;
+    }
     if (obj && (obj.kind === "bar_counter" || obj.kind === "bottle_shelf")) {
       this.clerk?.chat();
       const counter = map.objects.find((o) => o.kind === "bar_counter");
@@ -3494,6 +3595,30 @@ export class Game {
     }
     if (obj && obj.kind === "signpost") {
       this.hud.toast(`🪧 ${obj.label ?? ""}`, 6000);
+      return true;
+    }
+    // The heart of the hedge maze: a mossy stair under the sundial, down to today's labyrinth.
+    if (obj?.kind === "maze_heart") {
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+        this.hud.toast("🌿 Find your way to the heart of the maze: there's something under the sundial.", 3500);
+        return true;
+      }
+      this.discover("maze_heart", DISCOVERIES.maze_heart);
+      this.hud.toast("🕯️ A mossy stair winds down under the sundial, into today's labyrinth…", 2500);
+      this.goTo("labyrinth");
+      return true;
+    }
+    // In the labyrinth: the stair back up, and the Glowroot (stepped into, not tapped).
+    if (obj?.kind === "lab_exit") {
+      this.goTo("city");
+      return true;
+    }
+    if (obj?.kind === "lab_heart") {
+      this.hud.toast("🌟 The Glowroot. Step into its light to go back up.", 3000);
+      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+        const spot = nearestWalkable(map, obj.x, obj.y, 2);
+        if (spot) this.moveTo(spot, true);
+      }
       return true;
     }
     if (obj && obj.kind in DISCOVERIES) {
@@ -4240,6 +4365,7 @@ export class Game {
     }
     this.lures.update(serverNow, wallNow);
     this.lucky.update(serverNow, wallNow);
+    this.lab?.update(wallNow, serverNow);
     this.fountain?.update(wallNow);
     this.pond?.update(performance.now());
     this.laneBalls.update(wallNow);
@@ -4299,6 +4425,7 @@ export class Game {
     this.flops.destroy();
     this.lures.destroy();
     this.lucky.destroy();
+    this.lab?.destroy();
     this.fountain?.destroy();
     this.laneBalls.destroy();
     this.danceBot?.destroy();

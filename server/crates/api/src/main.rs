@@ -67,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
                 .merge(mall::routes())
                 .merge(commons_api::leaderboards::routes())
                 .merge(commons_api::fishquest::routes())
+                .merge(commons_api::labyrinth::routes())
                 .merge(pets::routes())
                 .merge(vehicles::routes())
                 .merge(goods::routes())

@@ -54,6 +54,7 @@ export class Sky {
   ) {
     this.glowLayer.addChild(this.lanternGfx);
     app.stage.addChild(this.glowLayer, this.stars);
+    scene.layer3d(this.glowLayer, true);
   }
 
   /** A lantern rises from tile (x, y). */

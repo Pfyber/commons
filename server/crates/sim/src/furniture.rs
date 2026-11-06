@@ -47,6 +47,7 @@ impl Furniture {
         let bench_v = kind("bench_v");
         let (blanket, log_seat, stool) = (kind("blanket"), kind("log_seat"), kind("stool"));
         let (chair, chair_n, cushion) = (kind("chair"), kind("chair_n"), kind("cushion"));
+        let armchair = kind("armchair");
         let amph = [
             "amph_seat",
             "amph_seat_hi",
@@ -58,7 +59,7 @@ impl Furniture {
         for (i, &d) in map.decor.iter().enumerate() {
             let tile = ((i as u32 % w) as u16, (i as u32 / w) as u16);
             if [
-                bench, bench_v, swing, blanket, log_seat, stool, chair, chair_n, cushion,
+                bench, bench_v, swing, blanket, log_seat, stool, chair, chair_n, cushion, armchair,
             ]
             .contains(&Some(d))
                 || amph.contains(&Some(d))

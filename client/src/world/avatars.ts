@@ -316,7 +316,7 @@ export class Avatar {
   }
 
   /** On the Concert Hall's stage (ADR 0015): 🎤 by the name. */
-  setPerforming(on: boolean) {
+  setPerforming(on: boolean, icon = "🎤") {
     let mark = this.nameEl.querySelector<HTMLSpanElement>(".performing");
     if (!on) {
       if (mark) {
@@ -328,10 +328,10 @@ export class Avatar {
     if (!mark) {
       mark = document.createElement("span");
       mark.className = "performing";
-      mark.textContent = "🎤";
       this.nameEl.appendChild(mark);
       this.nameW = 0;
     }
+    mark.textContent = icon;
   }
 
   /** A library book open in their hands (ReadingShown; 0: closed), and 📖 by the name. */

@@ -11,6 +11,7 @@ mod concert;
 mod db;
 mod homes;
 mod hub;
+mod lounge;
 mod museum;
 mod nature;
 mod rent;
@@ -39,6 +40,8 @@ pub struct State {
     pub livekit: Option<commons_common::voice::LiveKit>,
     /// Who's on the Concert Hall's stages (ADR 0015).
     pub concert: concert::Stages,
+    /// Who's in the café's open voice (ADR 0021).
+    pub lounge: lounge::Lounge,
     /// The Casino's tables, every instance's (ADR 0017, K2).
     pub tables: tables::Tables,
     dm_limits: Mutex<HashMap<Uuid, Bucket>>,
@@ -56,6 +59,7 @@ impl State {
             calls: calls::Calls::default(),
             livekit: commons_common::voice::LiveKit::from_env(),
             concert: concert::Stages::default(),
+            lounge: lounge::Lounge::default(),
             tables: tables::Tables::default(),
             dm_limits: Mutex::new(HashMap::new()),
             ring_limits: Mutex::new(HashMap::new()),
@@ -79,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
     calls::spawn_ring_timeouts(state.clone());
     clublife::spawn_sweeper(state.clone());
     concert::spawn_ticker(state.clone());
+    lounge::spawn_ticker(state.clone());
     tables::spawn_ticker(state.clone());
     let app = routes::routes()
         .with_state(state)

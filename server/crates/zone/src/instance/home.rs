@@ -20,6 +20,10 @@ impl Instance {
     }
 
     pub(super) fn load_home(&self) {
+        // (Only homes and club rooms keep furniture; other zones' owners are something else, a labyrinth's day.)
+        if self.zone.id != "home" && !self.is_club_room() {
+            return;
+        }
         let (Some(econ), Some(owner)) = (self.economy.clone(), self.owner.clone()) else {
             return;
         };

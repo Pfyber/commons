@@ -163,13 +163,16 @@ export class DayNight {
     private indoors = false,
     /** A dim room lit by neon (the arcade). */
     neon = false,
+    /** Always this hour (the labyrinth: dusk, whatever the time up top). */
+    hour: number | null = null,
   ) {
     const q = new URLSearchParams(location.search).get("hour");
-    this.override = indoors ? 12 : q !== null && !Number.isNaN(Number(q)) ? Number(q) : null;
+    this.override = indoors ? 12 : hour ?? (q !== null && !Number.isNaN(Number(q)) ? Number(q) : null);
     this.shade.blendMode = "multiply";
     app.stage.addChild(this.shade);
     this.lights.blendMode = "add";
     app.stage.addChild(this.lights);
+    scene.layer3d(this.lights, false);
     // The whole picture, richer and punchier (see `gradeAt`).
     app.stage.filters = [this.grade];
     app.stage.filterArea = app.screen;
@@ -243,6 +246,7 @@ export class DayNight {
     const neon = new Container();
     neon.blendMode = "add";
     app.stage.addChild(neon);
+    this.scene.layer3d(neon, false);
     this.neon = neon;
     const tex = whiteGlow();
     const add = (x: number, y: number, color: number, scale: number) => {

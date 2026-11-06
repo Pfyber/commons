@@ -14,10 +14,12 @@ export interface Settings {
   daynight: boolean;
   names: boolean;
   fps: boolean;
+  /** The 3D view (2.5D): the camera tilts and the world stands up in perspective. */
+  view3d: boolean;
 }
 
 const KEY = "commons.settings";
-const DEFAULTS: Settings = { master: 0.8, sfx: 1, ambience: 0.8, music: 0.8, quality: "high", weather: true, daynight: true, names: true, fps: false };
+const DEFAULTS: Settings = { master: 0.8, sfx: 1, ambience: 0.8, music: 0.8, quality: "high", weather: true, daynight: true, names: true, fps: false, view3d: false };
 
 function load(): Settings {
   try {
@@ -34,10 +36,14 @@ export const settings: Settings = load();
 
 const listeners: ((s: Settings) => void)[] = [];
 
-/** Told whenever anything changes (and once now). */
-export function onSettings(f: (s: Settings) => void) {
+/** Told whenever anything changes (and once now). Returns a function to stop. */
+export function onSettings(f: (s: Settings) => void): () => void {
   listeners.push(f);
   f(settings);
+  return () => {
+    const i = listeners.indexOf(f);
+    if (i >= 0) listeners.splice(i, 1);
+  };
 }
 
 export function setSettings(patch: Partial<Settings>) {

@@ -1859,6 +1859,85 @@ async fn one_performer_on_stage_everyone_in_the_hall_listens() {
     assert!(s.concert.get(1).is_none());
 }
 
+// ---- the café's open voice (ADR 0021) ---------------------------------------------------
+
+/// `p` is in the café's instance `instance` (or out in the city).
+fn at_cafe(s: &State, p: &P, instance: Option<u16>) {
+    s.hub.set_location(
+        p.id,
+        crate::hub::Location {
+            zone: if instance.is_some() { "bar" } else { "city" }.into(),
+            instance: instance.unwrap_or(1),
+            owner: None,
+            label: "The Mossy Mug".into(),
+        },
+        true,
+        chrono::Utc::now().timestamp_millis(),
+    );
+}
+
+#[tokio::test]
+async fn everyone_in_the_cafe_shares_one_voice_room_and_leaving_takes_you_out() {
+    let Some(s) = state().await else { return };
+    let (a, b, outside) = (player(&s).await, player(&s).await, player(&s).await);
+    let kid = player_born(&s, chrono::Datelike::year(&chrono::Utc::now()) - 12).await;
+    for p in [&a, &b, &kid] {
+        at_cafe(&s, p, Some(3));
+    }
+    at_cafe(&s, &outside, None);
+    let post = |p: &P, path: &str| {
+        let s = s.clone();
+        let tok = p.token.clone();
+        let path = path.to_string();
+        async move { call(&s, "POST", &path, &tok, Some(json!({}))).await }
+    };
+
+    let (st, r) = post(&outside, "/api/social/lounge/join").await;
+    assert_eq!(
+        (st, r["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("not_in_cafe"))
+    );
+    // A and B: talk-and-listen passes into the same room.
+    let (st, ra) = post(&a, "/api/social/lounge/join").await;
+    assert_eq!(st, StatusCode::OK, "{ra}");
+    let (_, rb) = post(&b, "/api/social/lounge/join").await;
+    assert_eq!(ra["room"], "cafe-3");
+    assert_eq!(rb["room"], ra["room"]);
+    assert!(ra["token"].is_string() && ra["blocked"].as_array().unwrap().is_empty());
+    // Under-16s never join the adults' room.
+    let (st, r) = post(&kid, "/api/social/lounge/join").await;
+    if commons_common::voice::minors_enabled() {
+        assert!(
+            st == StatusCode::FORBIDDEN || r["room"] == "cafe-3-u16",
+            "{r}"
+        );
+    } else {
+        assert_eq!(st, StatusCode::FORBIDDEN);
+    }
+    let (_, k) = call(&s, "GET", "/api/social/lounge", &kid.token, None).await;
+    assert_eq!(k["in_cafe"], true);
+    // A blocks B: each pass names the other, so neither is played.
+    call(
+        &s,
+        "POST",
+        "/api/social/block",
+        &a.token,
+        Some(json!({ "name": b.name })),
+    )
+    .await;
+    let (_, ra) = post(&a, "/api/social/lounge/join").await;
+    assert_eq!(ra["blocked"], json!([b.id.to_string()]));
+    let (_, rb) = post(&b, "/api/social/lounge/join").await;
+    assert_eq!(rb["blocked"], json!([a.id.to_string()]));
+    // A walks out: the ticker takes them out of the room.
+    at_cafe(&s, &a, None);
+    crate::lounge::tick(&s).await;
+    let (_, r) = post(&a, "/api/social/lounge/leave").await;
+    assert_eq!(r["left"], false, "already out");
+    let (_, r) = post(&b, "/api/social/lounge/leave").await;
+    assert_eq!(r["left"], true);
+}
+
 // ---- yard stands -----------------------------------------------------------------------
 
 #[tokio::test]

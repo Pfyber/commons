@@ -2,6 +2,8 @@
 // soft outlines). Drawn once into canvases and turned into nearest-filtered
 // textures; replaced by real atlases from assets/ when they exist.
 
+import { cafeDecor, cafeObject } from "./cafeart";
+import { labDecor, labObject } from "./labart";
 import { FACADES, POSTBOX } from "./goods";
 import { BUILDINGS, drawFacade, lanternSpots } from "./facade";
 import { Texture } from "pixi.js";
@@ -450,6 +452,10 @@ export function decorTexture(kind: string, variant: number): Texture | null {
   // on the public ones and all (the tiles are only there to bump into and
   // sit on).
   if (kind.startsWith("amph_")) return null;
+  // The Glowroot Labyrinth's walls (labart.ts).
+  if (kind.startsWith("lab_")) return labDecor(kind, variant);
+  // The café's armchairs (cafeart.ts).
+  if (kind === "armchair") return cafeDecor(kind);
   // The trees, richer and in six shapes each (treeart.ts).
   const treeKey = `${kind}:t${variant % 6}`;
   const tree = decorCache.get(treeKey) ?? treeCanvas(kind, variant);
@@ -1210,6 +1216,12 @@ export function buildingLanterns(o: MapObject): { x: number; y: number }[] {
 }
 
 export function objectTexture(o: MapObject): { texture: Texture; overhang: number; left: number } {
+  // The Glowroot Labyrinth's stair and Glowroot (labart.ts).
+  const lab = labObject(o);
+  if (lab) return lab;
+  // The café's counter, shelves and menu board (cafeart.ts).
+  const cafe = cafeObject(o);
+  if (cafe) return cafe;
   const P = PALETTE;
   const w = o.w * TILE;
   const h = o.h * TILE;
@@ -2011,56 +2023,6 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       px(ctx, "#e9b949", w / 2 - 63, top + 3, 9, 9);
       px(ctx, "#fff8e3", w / 2 - 63, top + 1, 9, 3);
       px(ctx, P.outline, w / 2 - 53, top + 4, 3, 6);
-      break;
-    }
-    case "bottle_shelf": {
-      // Shelves on the back wall, crowded with bottles.
-      [c, ctx] = makeCanvas(w, h + 40);
-      overhang = 40;
-      const top = 40;
-      px(ctx, P.outline, 0, top - 38, w, h + 34);
-      px(ctx, "#6e4b30", 2, top - 36, w - 4, h + 30);
-      const colors = ["#5f8f4e", "#8f3a2b", "#e9b949", "#5f8fc4", "#9b7fd4", "#c8553d", "#3f7a4a"];
-      for (const sy of [top - 14, top + 14]) {
-        px(ctx, "#4e3420", 2, sy, w - 4, 3);
-        for (let x = 6; x < w - 8; x += 9) {
-          const k = (x * 7 + sy) % colors.length;
-          const tall = (x + sy) % 3 === 0 ? 14 : 11;
-          px(ctx, P.outline, x, sy - tall, 6, tall);
-          px(ctx, colors[k], x + 1, sy - tall + 1, 4, tall - 1);
-          px(ctx, P.outline, x + 2, sy - tall - 3, 2, 3);
-          px(ctx, "rgba(255,255,255,0.35)", x + 1, sy - tall + 3, 1, 4);
-        }
-      }
-      break;
-    }
-    case "bar_counter": {
-      // A long wooden counter: polished top, panelled front, beer taps and mugs.
-      [c, ctx] = makeCanvas(w, h + 24);
-      overhang = 24;
-      const top = 24;
-      px(ctx, P.outline, 0, top - 6, w, h + 4);
-      px(ctx, "#7d5232", 2, top, w - 4, h - 4);
-      for (let x = 10; x < w - 10; x += 32) {
-        px(ctx, "#5a3a22", x, top + 4, 24, h - 12);
-        px(ctx, "#8a5a33", x + 2, top + 6, 20, h - 16);
-      }
-      px(ctx, "#c99567", 0, top - 10, w, 6);
-      px(ctx, "#e0b47f", 0, top - 10, w, 2);
-      px(ctx, P.outline, 0, top - 11, w, 1);
-      // taps
-      for (const tx of [40, 52, 64]) {
-        px(ctx, "#9aa0a6", tx, top - 22, 4, 12);
-        px(ctx, P.outline, tx - 1, top - 26, 6, 5);
-        px(ctx, ["#c8553d", "#e9b949", "#5f8f4e"][(tx / 12) % 3], tx, top - 25, 4, 3);
-      }
-      // mugs on the counter
-      for (const mx of [120, 170, 214]) {
-        px(ctx, P.outline, mx, top - 20, 9, 11);
-        px(ctx, "#e9b949", mx + 1, top - 17, 7, 7);
-        px(ctx, "#fff8e3", mx + 1, top - 19, 7, 3);
-        px(ctx, P.outline, mx + 9, top - 16, 2, 5);
-      }
       break;
     }
     case "pool_table": {

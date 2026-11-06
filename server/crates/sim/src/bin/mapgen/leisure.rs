@@ -7,17 +7,20 @@
 use super::Builder;
 use commons_sim::map::MapFile;
 
-/// Inside the bar (spec: a cosy room of wood): log walls, a counter with
-/// shelves of bottles behind it and stools in front, two little tables,
-/// barrels, the pool table, and a pinball machine in the corner, played from
-/// its left side. The door leads back out to the city.
+/// Inside The Mossy Mug, the town's café (ADR 0021): log walls, a long
+/// counter (the bar's taps at one end, the coffee machine and cakes at the
+/// other) with shelves behind and stools in front, the menu on the wall, a
+/// fire with armchairs round it on a rug, café tables with chairs, the pool
+/// table, and the pinball machine in the corner, played from its left side.
+/// Its voice is open: everyone inside hears everyone. The door leads back out
+/// to the city.
 pub fn bar() -> MapFile {
-    let (w, h) = (20u16, 13u16);
+    let (w, h) = (28u16, 18u16);
     let mut b = Builder::new(w, h);
     b.rect(0, 0, w, h, "tavern_floor");
     for x in 0..w {
         b.decor(x, 0, "wood_wall");
-        if !(9..=10).contains(&x) {
+        if !(13..=14).contains(&x) {
             b.decor(x, h - 1, "wood_wall");
         }
     }
@@ -25,27 +28,40 @@ pub fn bar() -> MapFile {
         b.decor(0, y, "wood_wall");
         b.decor(w - 1, y, "wood_wall");
     }
-    // The bar: shelves on the back wall, the bartender's aisle, the counter.
-    b.object("bottle_shelf", 2, 1, 8, 1, Some("Bottles"), true);
-    b.object("bar_counter", 2, 3, 8, 1, Some("Bar"), true);
-    for x in [3, 5, 7, 9] {
+    // The counter: shelves on the back wall, the aisle behind, stools in front.
+    b.object("bottle_shelf", 2, 1, 14, 1, Some("Shelves"), true);
+    b.object("bar_counter", 2, 3, 14, 1, Some("Counter"), true);
+    for x in [3, 5, 7, 9, 11, 13, 15] {
         b.decor(x, 4, "stool");
     }
-    // Two little tables, a stool either side.
-    for (tx, ty) in [(4u16, 8u16), (8, 9)] {
-        b.decor(tx, ty, "bar_table");
-        b.decor(tx - 1, ty, "stool");
-        b.decor(tx + 1, ty, "stool");
+    b.object("menu_board", 17, 1, 3, 1, Some("Today's menu"), true);
+    // The fireside: the fire, a rug, armchairs round a little table.
+    b.object("fireplace", 21, 1, 4, 2, Some("Fireplace"), true);
+    b.rect(19, 3, 8, 6, "rug");
+    for (x, y) in [(20u16, 4u16), (25, 4), (20, 7), (25, 7)] {
+        b.decor(x, y, "armchair");
     }
-    b.object("pool_table", 12, 4, 4, 2, Some("Pool table"), true);
-    b.object("pinball", 16, 9, 3, 2, Some("Pinball"), true);
-    for (x, y) in [(1u16, 1u16), (1, 11), (18, 1), (11, 1)] {
+    b.decor(22, 5, "bar_table");
+    b.decor(23, 6, "cushion");
+    b.decor(22, 7, "cushion");
+    // Café tables, a chair either side.
+    for (tx, ty) in [(4u16, 8u16), (9, 8), (14, 8), (4, 12), (9, 12)] {
+        b.decor(tx, ty, "cafe_table");
+        b.decor(tx - 1, ty, "chair");
+        b.decor(tx + 1, ty, "chair");
+    }
+    b.object("pool_table", 17, 11, 4, 2, Some("Pool table"), true);
+    b.object("pinball", 23, 13, 3, 2, Some("Pinball"), true);
+    for (x, y) in [(1u16, 1u16), (1, 16), (26, 16)] {
         b.decor(x, y, "barrel");
     }
+    for (x, y) in [(11u16, 16u16), (16, 16), (26, 10), (1, 5)] {
+        b.decor(x, y, "potted_plant");
+    }
+    b.decor(1, 10, "lantern");
     b.decor(17, 6, "lantern");
-    b.decor(2, 6, "lantern");
-    b.object("bar_exit", 9, h - 1, 2, 1, Some("To the city"), true);
-    b.finish("The Mossy Mug", (9, 10))
+    b.object("bar_exit", 13, h - 1, 2, 1, Some("To the city"), true);
+    b.finish("The Mossy Mug", (13, 15))
 }
 
 /// Inside the arcade: a dim carpeted hall, seven cabinets along the back

@@ -36,6 +36,7 @@ export class Milestones {
     // Fireworks draw above the night shade (they're lights), following the
     // world's camera transform.
     overlay.addChild(this.sky);
+    scene.layer3d(this.sky, true);
     // Fireworks go up over the Pond, where the pier is.
     this.pond = spot(map, "pier");
   }
