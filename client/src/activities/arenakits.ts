@@ -16,8 +16,8 @@ export const KIT = { KNIGHT: 0, ARCHER: 1, BOMBER: 2, SPEARMAN: 3, TANK: 4, COUN
 /** Each class (by `KIT`): as `arena::KIT_*`. */
 export const KIT_HP = [162, 157, 143, 166, 226];
 export const KIT_SPEED = [1, 1.176, 1, 1, 0.84];
-export const KIT_LIGHT_REACH = [1.35, 1.3, 1.3, 1.95, 2.05];
-export const KIT_LIGHT_ARC = [1, 0.6, 0.6, 0.8, 1.35];
+export const KIT_LIGHT_REACH = [1.35, 1.75, 1.75, 1.95, 2.05];
+export const KIT_LIGHT_ARC = [1, 0.8, 0.8, 0.8, 1.35];
 export const KIT_LIGHT_TIME = [1, 0.45, 0.45, 1.08, 1.3];
 export const KIT_LIGHT_WINDUP = [1, 1, 1, 1, 1.5];
 export const KIT_HEAVY_COST = [1, 1, 1, 2, 1];

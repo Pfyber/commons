@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 51;
+export const PROTOCOL_VERSION = 52;
 export const CELL_TILES = 16;
 
 export class Writer {

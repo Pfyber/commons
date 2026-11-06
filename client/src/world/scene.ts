@@ -205,6 +205,7 @@ export class Scene {
   private layers3d: { c: Container; whole: boolean; stand: boolean }[] = [];
   /** Where things stand that aren't drawn at their foot (see `standOn`). */
   private feet = new WeakMap<Container, number>();
+  private asIs = new WeakSet<Container>();
   private saved: Saved[] = [];
   private worldAt = { x: 0, y: 0, s: 1 };
   /** Where each thing was last drawn in 3D (for tapping an avatar). */
@@ -862,6 +863,22 @@ export class Scene {
     return b.maxY > b.minY ? Math.max(b.minY, Math.min(b.maxY + TILE, c.zIndex)) : c.zIndex;
   }
 
+  /**
+   * Where a point's drawn: at (x, y), on something standing at depth `foot`,
+   * and how much bigger than world size it's drawn there. For a line between
+   * things at different depths, in something `drawnAsIs`: in 3D that's on
+   * screen, where no one tilt could put both of its ends right.
+   */
+  drawnAt(x: number, y: number, foot: number): { x: number; y: number; s: number } {
+    const p = this.view3d ? this.project(x, foot) : null;
+    return p ? { x: p.x, y: p.y + (y - foot) * p.s, s: p.s } : { x, y, s: 1 };
+  }
+
+  /** `c` is drawn in the coordinates `drawnAt` gives (the 3D view leaves it be). */
+  drawnAsIs(c: Container) {
+    this.asIs.add(c);
+  }
+
   /** Something that lies flat, whichever it is. */
   private layFlat(c: Container, cam: ReturnType<Scene["camera"]>) {
     if (c instanceof Sprite) this.laySprite(c, cam);
@@ -917,7 +934,7 @@ export class Scene {
     this.pruneLaid();
     for (const c of this.flatLayers) if (c.destroyed) this.flatLayers.delete(c);
     for (const c of [...this.sorted.children]) {
-      if (c instanceof MeshPlane) continue;
+      if (c instanceof MeshPlane || this.asIs.has(c)) continue;
       if (this.flatLayers.has(c)) this.layFlat(c, cam);
       else if (lying.has(c) && c instanceof Sprite && (Math.abs(c.width) > LAY_TILES * TILE || Math.abs(c.height) > LAY_TILES * TILE)) this.laySprite(c, cam);
       else if (c.zIndex === 0 && c.position.x === 0 && c.position.y === 0) this.placeWhole(c, cam);
@@ -943,6 +960,7 @@ export class Scene {
       }
       for (const k of c.children) {
         const foot = this.feet.get(k);
+        if (this.asIs.has(k)) continue;
         if (this.flatLayers.has(k)) this.layFlat(k, cam);
         else if (foot !== undefined) this.place(k, foot, false, cam);
         else if (k.position.x === 0 && k.position.y === 0) this.placeWhole(k, cam);

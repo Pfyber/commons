@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 51;
+pub const PROTOCOL_VERSION: u16 = 52;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -530,6 +530,8 @@ pub mod lure {
     pub const GOLD: u8 = 1;
     /// Rarer metals for a magnet, in purple water.
     pub const MAGNET: u8 = 2;
+    /// Epic metals and up for a magnet, in rose-gold water.
+    pub const GOLD_MAGNET: u8 = 3;
 }
 
 /// `Drink.kind`.
@@ -712,6 +714,9 @@ pub mod fish_event {
     /// The magnet's reel game won: down it goes for `item` (sent to the angler
     /// alone, after `SalvageJunk`): the salvage game starts.
     pub const SALVAGE: u8 = 7;
+    /// Something more out of the salvage game, with the `CAUGHT` one: held up
+    /// beside it over the angler's head.
+    pub const HAUL: u8 = 8;
     pub const FLOP_MS: u32 = 4_500;
 }
 

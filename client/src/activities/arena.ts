@@ -56,6 +56,8 @@ const OVER = 4;
 const SLOTS = 4;
 export const BOT_BASE = 0xffffff20;
 const TO_WIN = 3;
+/** How far ahead of the lava's true edge it's drawn (of the ring's radius). */
+const LAVA_SEEN_AHEAD = 0.02;
 /** How square an amphitheatre's sand is (as `arena::ROUNDNESS`: a superellipse's power). */
 const ROUNDNESS = 3.3;
 /**
@@ -3219,7 +3221,8 @@ export class ArenaShow {
     // (The lava's a lot of little blocks: redrawn a dozen times a second, no more.)
     if (s.lava < 1140 && wallNow - this.lavaAt > 80) {
       this.lavaAt = wallNow;
-      this.drawLava(this.lavaG.clear(), s.lava / 1000, wallNow);
+      // (Drawn a beat ahead of where it burns: you see it before it can touch you.)
+      this.drawLava(this.lavaG.clear(), s.lava / 1000 - LAVA_SEEN_AHEAD, wallNow);
     } else if (s.lava >= 1140 && this.lavaAt) {
       this.lavaAt = 0;
       this.lavaG.clear();
@@ -4104,7 +4107,7 @@ export class ArenaShow {
       const dy = (y + STEP / 2 - cy) / cy;
       const edge = this.ring.oval ? Math.max(0, 1 - Math.abs(dy) ** ROUNDNESS) ** (1 / ROUNDNESS) * cx : cx;
       // (The front of it heaves, row to row.)
-      const swell = lava + Math.sin(y * 1.3 + t * 1.7) * 0.012 + Math.sin(y * 3.1 - t * 2.3) * 0.006;
+      const swell = lava - 0.018 + Math.sin(y * 1.3 + t * 1.7) * 0.012 + Math.sin(y * 3.1 - t * 2.3) * 0.006;
       const inside = swell ** p - Math.abs(dy) ** p;
       const half = inside > 0 ? inside ** (1 / p) * cx : 0;
       for (const [from, to] of [[cx - edge, cx - half], [cx + half, cx + edge]]) {

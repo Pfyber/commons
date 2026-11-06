@@ -690,6 +690,23 @@ export class FishermanPanel extends Panel {
       card.append(buy);
       this.body.append(card);
     }
+    // …and the legendary one for the magnet.
+    const lm = this.eco.items.get(GOLD_MAGNET_LURE_ITEM);
+    if (lm) {
+      const have = this.eco.qty(GOLD_MAGNET_LURE_ITEM);
+      const price = lm.meta.buy ?? 0;
+      const card = el("div", "fisher-rod fisher-lure fisher-gold");
+      const text = el("div", "fisher-rod-text");
+      text.append(
+        el("b", "", `👑 ${lm.name} · $${price}${have ? ` · you have ${have}` : ""}`),
+        el("small", "", "Turns its circle of water rose-gold for 3 minutes: only epic metals and rarer lie there, and your magnet finds them sooner, for anyone dropping one in."),
+      );
+      card.append(icon(lm), text);
+      const buy = button(`Buy · $${price}`, () => this.buyLure(GOLD_MAGNET_LURE_ITEM), "primary");
+      buy.disabled = this.busy || this.eco.coins < price;
+      card.append(buy);
+      this.body.append(card);
+    }
     // The tiers, as a key.
     const key = el("div", "fisher-key");
     for (const t of TIERS) {
@@ -803,6 +820,8 @@ export const LURE_ITEM = 117;
 export const GOLD_LURE_ITEM = 119;
 /** The Glimmering Magnet Lure (server `fishing::MAGNET_LURE_ITEM`). */
 export const MAGNET_LURE_ITEM = 142;
+/** The Legendary Magnet Lure (server `fishing::GOLD_MAGNET_LURE_ITEM`). */
+export const GOLD_MAGNET_LURE_ITEM = 961;
 /** The salvage magnet (server `fishing::MAGNET_ITEM`). */
 export const MAGNET_ITEM = 120;
 const ROD_PACE = 0.85;

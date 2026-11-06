@@ -72,6 +72,7 @@ export class FlopShows {
     root.addChild(line, ring, fish, pips, sign);
     this.scene.world.addChild(root);
     this.scene.layer3d(root, false, true);
+    this.scene.drawnAsIs(line);
     const now = performance.now();
     this.flops.set(id, {
       root,
@@ -142,7 +143,7 @@ export class FlopShows {
   }
 
   /** `rodTip` gives where an angler's rod tip is this frame, for the line. */
-  update(now: number, rodTip: (id: number) => { x: number; y: number } | null = () => null) {
+  update(now: number, rodTip: (id: number) => { x: number; y: number; z: number } | null = () => null) {
     for (const [id, f] of this.flops) {
       const t = now - f.start;
       let x = f.spot.x;
@@ -193,11 +194,13 @@ export class FlopShows {
       if (tip) {
         const mx = x - Math.cos(rot) * 6 * flip;
         const my = y - Math.sin(rot) * 6 * flip - 2;
-        const sag = 3 + Math.sin(now / 90) * 1.5;
+        const from = this.scene.drawnAt(tip.x, tip.y, tip.z);
+        const to = this.scene.drawnAt(mx, my, y);
+        const sag = (3 + Math.sin(now / 90) * 1.5) * to.s;
         f.line
-          .moveTo(tip.x, tip.y)
-          .quadraticCurveTo((tip.x + mx) / 2, Math.max(tip.y, my) + sag, mx, my)
-          .stroke({ width: 1, color: 0xf2f2f2, alpha: 0.9 });
+          .moveTo(from.x, from.y)
+          .quadraticCurveTo((from.x + to.x) / 2, Math.max(from.y, to.y) + sag, to.x, to.y)
+          .stroke({ width: to.s, color: 0xf2f2f2, alpha: 0.9 });
       }
       // The sign, the pips and the time left, while it flops.
       const flopping = !f.backAt && t >= LEAP_MS;

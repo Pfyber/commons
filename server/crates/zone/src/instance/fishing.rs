@@ -60,6 +60,10 @@ const GOLD_LEAST: i16 = 3;
 /// purple and the rarer metals gather there, for a magnet dropped in it
 /// (nothing common, the rare and up more often; a line's no different).
 pub(crate) const MAGNET_LURE_ITEM: u32 = 142;
+/// The Legendary Magnet Lure: for three minutes only epic metals and up lie
+/// in its circle of rose-gold water, and a magnet finds them that much sooner.
+pub(crate) const GOLD_MAGNET_LURE_ITEM: u32 = 961;
+const GOLD_MAGNET_LURE_WAIT_PCT: u32 = 70;
 /// What lies on the bottom about what a magnet found (so 3 to 7 things in all).
 const SALVAGE_JUNK: std::ops::RangeInclusive<usize> = 2..=6;
 /// The fisherman's magnet (an item): dropped in instead of a line, it brings
@@ -223,6 +227,11 @@ impl Instance {
                 LURE_MS,
                 "you don't have a magnet lure: the fisherman sells them",
             ),
+            lure::GOLD_MAGNET => (
+                GOLD_MAGNET_LURE_ITEM,
+                GOLD_LURE_MS,
+                "you don't have a legendary magnet lure: the fisherman sells them",
+            ),
             _ => return self.error(id, error_code::BAD_MESSAGE, "that's no lure"),
         };
         if !self.is_water(target) {
@@ -355,12 +364,15 @@ impl Instance {
         let wait =
             rng.random_range(BITE_MIN_MS..=BITE_MAX_MS) + rng.random_range(0..=BITE_JITTER_MS);
         // (Rare metals gather quicker in a magnet lure's water.)
-        let lured = self
-            .lures
-            .iter()
-            .any(|l| l.until > now && l.kind == lure::MAGNET && l.covers(target));
+        let lured = |kind: u8| {
+            self.lures
+                .iter()
+                .any(|l| l.until > now && l.kind == kind && l.covers(target))
+        };
         let bite_at = now
-            + if magnet && lured {
+            + if magnet && lured(lure::GOLD_MAGNET) {
+                wait * MAGNET_SLOWER_HALVES / 2 * GOLD_MAGNET_LURE_WAIT_PCT / 100
+            } else if magnet && lured(lure::MAGNET) {
                 wait * MAGNET_SLOWER_HALVES / 2 * MAGNET_LURE_WAIT_PCT / 100
             } else if magnet {
                 wait * MAGNET_SLOWER_HALVES / 2
@@ -619,14 +631,28 @@ impl Instance {
         self.land_all(id, &items, session.target);
     }
 
-    /// Lands several things at once (the salvage game, greedy): the first shown, all granted.
+    /// Lands several things at once (the salvage game, greedy): all held up, all granted.
     fn land_all(&mut self, id: u32, items: &[u32], from: TilePos) {
         let Some(econ) = self.economy.clone() else {
             return self.stop_fishing(id, true);
         };
         self.land(id, items[0], from);
-        let player = self.avatars[&id].player_id.clone();
+        let (player, cell) = {
+            let a = &self.avatars[&id];
+            (a.player_id.clone(), a.cell)
+        };
         for &item in &items[1..] {
+            self.broadcast(
+                cell,
+                &ServerMsg::FishEvent {
+                    id,
+                    kind: fish_event::HAUL,
+                    x: from.0,
+                    y: from.1,
+                    item,
+                },
+                None,
+            );
             let econ = econ.clone();
             let player = player.clone();
             let key = self.next_key("fish");
@@ -796,11 +822,15 @@ impl Instance {
                 let catalog = self.economy.as_ref().and_then(|e| e.catalog());
                 // (In a magnet lure's water: the rarer metals, nothing common.)
                 let target = s.target;
-                let lured = self
-                    .lures
-                    .iter()
-                    .any(|l| l.until > now && l.kind == lure::MAGNET && l.covers(target));
-                let (luck, least) = if lured {
+                let lured = |kind: u8| {
+                    self.lures
+                        .iter()
+                        .any(|l| l.until > now && l.kind == kind && l.covers(target))
+                };
+                // (A legendary magnet lure's: epic and up, as a gold lure's fish.)
+                let (luck, least) = if lured(lure::GOLD_MAGNET) {
+                    (1.0, GOLD_LEAST)
+                } else if lured(lure::MAGNET) {
                     (LURE_LUCK, LURE_LEAST)
                 } else {
                     (1.0, 0)
@@ -988,6 +1018,39 @@ mod tests {
         // Salvaged, with two bits of junk: straight into the bag (an old safe never flops about).
         inst.salvage_reel(1, true, 0b11, at + 20_000);
         assert!(inst.avatars[&1].fish.is_none());
+    }
+
+    #[test]
+    fn a_legendary_magnet_lure_gathers_only_epic_metals_and_sooner() {
+        let mut inst = pond_instance();
+        let _a = connect(&mut inst, 1, "salvager", (20, 12));
+        place(&mut inst, 1, (5, 4));
+        inst.lures.push(Lure {
+            at: (5, 6),
+            until: u32::MAX,
+            kind: lure::GOLD_MAGNET,
+        });
+        let slowest = (BITE_MAX_MS + BITE_JITTER_MS) * MAGNET_SLOWER_HALVES / 2;
+        let catalog = inst.economy.as_ref().and_then(|e| e.catalog()).unwrap();
+        for _ in 0..30 {
+            let now = inst.clock.now_ms();
+            inst.handle(Cmd::Msg {
+                conn: 1,
+                msg: ClientMsg::FishCast {
+                    x: 5,
+                    y: 6,
+                    magnet: true,
+                },
+            });
+            let s = inst.avatars[&1].fish.clone().expect("dropped in");
+            assert!(s.bite_at - now <= slowest * 70 / 100 + 1, "sooner still");
+            inst.fish_tick(s.bite_at);
+            let s = inst.avatars[&1].fish.clone().unwrap();
+            let item = s.fish.expect("something's down there");
+            let rarity = catalog.scrap.iter().find(|f| f.id == item).unwrap().rarity;
+            assert!(rarity >= GOLD_LEAST, "nothing less than epic: {rarity}");
+            inst.stop_fishing(1, true);
+        }
     }
 
     #[test]

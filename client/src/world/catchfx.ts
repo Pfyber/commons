@@ -13,6 +13,9 @@ import type { Scene } from "./scene";
 
 const FLY_MS = 650;
 const OUT_MS = 350;
+/** A haul of several, held up side by side: how many to a row, and how far apart (px). */
+const HAUL_ROW = 4;
+const HAUL_GAP = 21;
 const RAINBOW = [0xff4fa3, 0xffb84f, 0xffe14f, 0x5fd07a, 0x4fa8ff, 0xb07bff];
 
 interface Show {
@@ -29,6 +32,9 @@ interface Show {
   hold: number;
   rarity: number;
   color: number;
+  /** One of a haul: whose (the rest of it are held up beside it). */
+  haul: number | null;
+  name: string;
 }
 
 export class CatchShows {
@@ -40,7 +46,7 @@ export class CatchShows {
    * A fish (`key`) of `rarity` caught at `water`, landing above wherever
    * `head` says the angler's head is.
    */
-  start(water: TileXY, head: () => { x: number; y: number } | null, key: string, name: string, rarity: number, kind = "fish", title?: string) {
+  start(water: TileXY, head: () => { x: number; y: number } | null, key: string, name: string, rarity: number, kind = "fish", title?: string, haul: number | null = null) {
     const t = tier(rarity);
     const color = Number.parseInt(t.color.slice(1), 16);
     const root = new Container();
@@ -72,7 +78,7 @@ export class CatchShows {
       const sp = 40 + Math.random() * 60;
       sparks.push({ g, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now });
     }
-    this.shows.push({ root, glow, rays, fish, label, sparks, from, head, start: now, hold: 1800 + rarity * 450, rarity, color });
+    this.shows.push({ root, glow, rays, fish, label, sparks, from, head, start: now, hold: 1800 + rarity * 450 + (haul === null ? 0 : 1200), rarity, color, haul, name: title ?? `${name}\n${t.name}` });
   }
 
   update(now: number) {
@@ -84,10 +90,18 @@ export class CatchShows {
         s.root.destroy({ children: true });
         return false;
       }
-      const over = { x: head.x, y: head.y - 26 };
+      // (One of a haul: its place in the rows held up over their head.)
+      const haul = s.haul === null ? [] : this.shows.filter((o) => o.haul === s.haul);
+      const at = haul.indexOf(s);
+      const row = Math.floor(at / HAUL_ROW);
+      const inRow = Math.min(HAUL_ROW, haul.length - row * HAUL_ROW);
+      const over = {
+        x: head.x + (haul.length > 1 ? (at % HAUL_ROW - (inRow - 1) / 2) * HAUL_GAP : 0),
+        y: head.y - 26 - (haul.length > 1 ? row * HAUL_GAP : 0),
+      };
       // (Sizes are for a 16-pixel icon; fish sprites are drawn at 32.)
       const k = 16 / s.fish.texture.width;
-      const big = (1.5 + s.rarity * 0.1) * k;
+      const big = (1.5 + s.rarity * 0.1) * k * (haul.length > 1 ? 0.85 : 1);
       // The colour: the tier's, or for the mythical a rainbow drifting round.
       const col = s.rarity >= 5 ? RAINBOW[Math.floor(now / 160) % RAINBOW.length] : s.color;
       let x: number;
@@ -146,8 +160,13 @@ export class CatchShows {
         }
       }
       // Its name, once it's up.
-      s.label.visible = t > FLY_MS;
-      s.label.position.set(x, y - 14 * scale);
+      // (A haul has the one name, the best of it, and how much else.)
+      s.label.visible = t > FLY_MS && at <= 0;
+      if (at === 0 && haul.length > 1) {
+        const text = `${s.name.split("\n")[0]}\n+ ${haul.length - 1} more`;
+        if (s.label.text !== text) s.label.text = text;
+      }
+      s.label.position.set(haul.length > 1 ? head.x : x, y - 14 * scale - (haul.length > 1 ? Math.floor((haul.length - 1) / HAUL_ROW) * HAUL_GAP : 0));
       if (s.rarity >= 5) s.label.style.fill = col;
       // Sparkles: the splash falling back, and for epic and up, a shower of stars.
       if (shown && s.rarity >= 3 && Math.random() < 0.12 + s.rarity * 0.06) {

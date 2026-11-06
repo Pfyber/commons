@@ -2,6 +2,7 @@
 // targets, nothing persistent beyond what's needed.
 
 import { EMOTES, FREE_EMOTES } from "../world/avatars";
+import { onSettings, setSettings, settings } from "../settings";
 import { EMOTE_ICONS, iconUrl, pxIcon } from "./icons";
 import { isTyping } from "./panels";
 
@@ -96,6 +97,7 @@ export class Hud {
           <button type="button" class="pill btn phone-btn" title="Phone" aria-label="Phone" hidden><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("phone")}" /></button>
           <button type="button" class="pill btn books-btn" title="Your library books" aria-label="Your library books" hidden><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("books")}" /><span class="badge-count"></span></button>
           <button type="button" class="pill btn sound-btn extra" title="Sound" aria-label="Sound"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("sound")}" /></button>
+          <button type="button" class="pill btn view-btn" title="Switch to 3D view" aria-label="Switch to 3D view"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("view3d")}" /></button>
           <button type="button" class="pill btn settings-btn" title="Settings" aria-label="Settings"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("gear")}" /></button>
           <button type="button" class="pill btn more-btn" title="More" aria-label="More" aria-expanded="false"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("more")}" /></button>
           <div class="pill nearby" title="People in view"></div>
@@ -155,6 +157,15 @@ export class Hud {
     const sound = () => this.setMuted(h.onSound());
     soundBtn.onclick = sound;
     root.querySelector<HTMLButtonElement>(".settings-btn")!.onclick = () => h.onSettings();
+    // 2D or 3D, at a press: it shows the view it'll switch to.
+    const viewBtn = root.querySelector<HTMLButtonElement>(".view-btn")!;
+    viewBtn.onclick = () => setSettings({ view3d: !settings.view3d });
+    onSettings((s) => {
+      const next = s.view3d ? "2D" : "3D";
+      viewBtn.title = `Switch to ${next} view`;
+      viewBtn.setAttribute("aria-label", viewBtn.title);
+      viewBtn.querySelector("img")!.src = iconUrl(s.view3d ? "view2d" : "view3d");
+    });
     window.addEventListener("keydown", (e) => {
       if (isTyping(e)) return;
       // M for the map (C too, as it was).

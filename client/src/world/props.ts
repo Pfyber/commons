@@ -292,6 +292,7 @@ export class Props {
     s.visible = false;
     const line = new Graphics();
     this.scene.sorted.addChild(s, line);
+    this.scene.drawnAsIs(line);
     this.bobbers.set(avatarId, { sprite: s, line, tile, castAt: performance.now(), biteAt: 0 });
   }
 
@@ -320,12 +321,12 @@ export class Props {
       const tip = rodTip(id);
       if (!tip || !b.sprite.visible) continue;
       // From the rod tip to the top of the bobber, sagging unless a fish pulls it taut.
-      const ex = b.sprite.x;
-      const ey = b.sprite.y - 8;
-      const sag = biting ? 1 : 7;
-      g.moveTo(tip.x, tip.y)
-        .quadraticCurveTo((tip.x + ex) / 2, Math.max(tip.y, ey) + sag, ex, ey)
-        .stroke({ width: 1, color: 0xf2f2f2, alpha: 0.85 });
+      const from = this.scene.drawnAt(tip.x, tip.y, tip.z);
+      const to = this.scene.drawnAt(b.sprite.x, b.sprite.y - 8, b.sprite.zIndex);
+      const sag = (biting ? 1 : 7) * to.s;
+      g.moveTo(from.x, from.y)
+        .quadraticCurveTo((from.x + to.x) / 2, Math.max(from.y, to.y) + sag, to.x, to.y)
+        .stroke({ width: to.s, color: 0xf2f2f2, alpha: 0.85 });
       b.line.zIndex = Math.max(tip.z, b.sprite.zIndex) + 0.2;
     }
   }

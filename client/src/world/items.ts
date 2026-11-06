@@ -62,7 +62,7 @@ function wearing(key: string, kind: string): HTMLCanvasElement {
 }
 
 /** Tools with art of their own (the rest are drawn from what they do). */
-const OWN_ART = new Set(["pro_rod", "bug_net", "magnet", "gold_lure", "magnet_lure", "fish_lure"]);
+const OWN_ART = new Set(["pro_rod", "bug_net", "magnet", "gold_lure", "magnet_lure", "legendary_magnet_lure", "fish_lure"]);
 
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
@@ -196,6 +196,34 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     px(ctx, "#ffffff", 13, 2, 3, 1);
     px(ctx, "#fff3a8", 1, 11, 1, 1);
     px(ctx, "#fff3a8", 14, 9, 1, 1);
+    return;
+  }
+  if (key === "legendary_magnet_lure") {
+    // The magnet lure's grand cousin: a gold spoon with a rose heart, horseshoe-tipped, crowned and blazing.
+    px(ctx, O, 5, 2, 6, 10);
+    px(ctx, O, 4, 4, 8, 6);
+    px(ctx, "#ffc23a", 5, 4, 6, 6);
+    px(ctx, "#ffc23a", 6, 3, 4, 8);
+    px(ctx, "#fff3a8", 6, 4, 2, 3);
+    px(ctx, "#ff5fb0", 8, 5, 2, 2);
+    px(ctx, "#c9862a", 9, 8, 1, 2);
+    px(ctx, "#d83a3a", 6, 8, 1, 2);
+    px(ctx, "#d83a3a", 8, 8, 1, 2);
+    px(ctx, "#d83a3a", 6, 7, 3, 1);
+    px(ctx, "#e2e6ef", 6, 10, 1, 1);
+    px(ctx, "#e2e6ef", 8, 10, 1, 1);
+    px(ctx, "#ffd23f", 5, 0, 1, 2);
+    px(ctx, "#ffd23f", 7, 0, 2, 2);
+    px(ctx, "#ffd23f", 10, 0, 1, 2);
+    px(ctx, "#ffd23f", 5, 1, 6, 1);
+    px(ctx, "#c8c8dc", 8, 12, 1, 3);
+    px(ctx, "#c8c8dc", 9, 14, 2, 1);
+    px(ctx, "#c8c8dc", 11, 12, 1, 2);
+    px(ctx, "#ffffff", 13, 2, 1, 3);
+    px(ctx, "#ffffff", 12, 3, 3, 1);
+    px(ctx, "#ff9ff0", 2, 12, 1, 1);
+    px(ctx, "#fff3a8", 1, 7, 1, 1);
+    px(ctx, "#ff9ff0", 14, 8, 1, 1);
     return;
   }
   if (key === "magnet_lure") {

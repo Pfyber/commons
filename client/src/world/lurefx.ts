@@ -30,10 +30,13 @@ const GOLD_SHEEN = [0xffffff, 0xfff3a8, 0xffe066, 0xffb020, 0xfff8e3];
 /** The magnet lure's water: deep purple, its shimmer lilac to violet. */
 const PURPLE = 0xa040ff;
 const PURPLE_SHEEN = [0xffffff, 0xe8c8ff, 0xc49bff, 0x8f5bff, 0xff9ff0];
+/** The legendary magnet lure's water: rose-gold, its shimmer gold through magenta. */
+const ROSE = 0xff5fb0;
+const ROSE_SHEEN = [0xffffff, 0xffd23f, 0xff9ff0, 0xff5fb0, 0xfff3a8];
 /** Which lure (`commons_protocol::lure`). */
-export const LURE = { GLIMMER: 0, GOLD: 1, MAGNET: 2 };
+export const LURE = { GLIMMER: 0, GOLD: 1, MAGNET: 2, GOLD_MAGNET: 3 };
 /** Each lure's item, as thrown. */
-const LURE_KEY = ["fish_lure", "gold_lure", "magnet_lure"];
+const LURE_KEY = ["fish_lure", "gold_lure", "magnet_lure", "legendary_magnet_lure"];
 /** A thrown lure's flight (ms), and how high it arcs (px). */
 const TOSS_MS = 650;
 const TOSS_HEIGHT = 34;
@@ -161,14 +164,14 @@ export class LureShows {
     const centre = { x: at.x * TILE + TILE / 2, y: at.y * TILE + TILE / 2 };
     timer.position.set(centre.x, centre.y);
     const glimmer = Array.from({ length: GLIMMERS }, (_, i) => {
-      const g = new Graphics().star(0, 0, 4, 2.6, 0.9).fill({ color: kind === LURE.GOLD ? (i % 2 ? 0xfff3a8 : 0xffd23f) : kind === LURE.MAGNET ? (i % 2 ? 0xe8c8ff : 0xffffff) : i % 3 ? 0xffffff : 0xfff3a8 });
+      const g = new Graphics().star(0, 0, 4, 2.6, 0.9).fill({ color: kind === LURE.GOLD || kind === LURE.GOLD_MAGNET ? (i % 2 ? 0xfff3a8 : 0xffd23f) : kind === LURE.MAGNET ? (i % 2 ? 0xe8c8ff : 0xffffff) : i % 3 ? 0xffffff : 0xfff3a8 });
       top.addChild(g);
       return { g, phase: Math.random() * Math.PI * 2, tile: tiles[Math.floor(Math.random() * tiles.length)] ?? at };
     });
     top.addChild(timer);
     this.scene.world.addChild(top);
     this.scene.layer3d(top, false, true);
-    const glow = this.nightGlow(centre.x, centre.y, kind === LURE.MAGNET ? 0xb060ff : 0x5ff0ff);
+    const glow = this.nightGlow(centre.x, centre.y, kind === LURE.GOLD_MAGNET ? 0xff5fb0 : kind === LURE.MAGNET ? 0xb060ff : 0x5ff0ff);
     this.lures.set(key, { water, top, timer, shown: "", glimmer, tiles, area: this.reach(at), centre, ends, nextLeap: 0, leaps: [], rings: [], glow, kind, appearAt });
   }
 
@@ -363,7 +366,7 @@ export class LureShows {
         const a = l.tiles[Math.floor(Math.random() * l.tiles.length)];
         const across = l.tiles.filter((t) => t.y === a.y && Math.abs(t.x - a.x) >= 1 && Math.abs(t.x - a.x) <= 2);
         const b = across[Math.floor(Math.random() * across.length)] ?? a;
-        const metal = l.kind === LURE.MAGNET;
+        const metal = l.kind === LURE.MAGNET || l.kind === LURE.GOLD_MAGNET;
         const pool = metal ? METALS : LEAPERS;
         const fish = new Sprite(itemTexture(pool[Math.floor(Math.random() * pool.length)], metal ? "scrap" : "fish"));
         fish.anchor.set(0.5);
@@ -431,11 +434,11 @@ export class LureShows {
     for (const b of blocks.values()) {
       const g = b.l.water;
       const kind = b.l.kind;
-      g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: kind === LURE.GOLD ? GOLD : kind === LURE.MAGNET ? PURPLE : AQUA, alpha: (kind === LURE.GLIMMER ? 0.42 : 0.55) * b.fade + 0.1 * breathe * b.fade });
+      g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: kind === LURE.GOLD ? GOLD : kind === LURE.GOLD_MAGNET ? ROSE : kind === LURE.MAGNET ? PURPLE : AQUA, alpha: (kind === LURE.GLIMMER ? 0.42 : 0.55) * b.fade + 0.1 * breathe * b.fade });
       const phase = (b.dx + b.dy) * 0.09 + Math.atan2(b.dy, b.dx) * 2 - spin * 4;
       const band = Math.sin(phase);
       if (band < 0.55) continue;
-      const sheen = kind === LURE.GOLD ? GOLD_SHEEN : kind === LURE.MAGNET ? PURPLE_SHEEN : SHEEN;
+      const sheen = kind === LURE.GOLD ? GOLD_SHEEN : kind === LURE.GOLD_MAGNET ? ROSE_SHEEN : kind === LURE.MAGNET ? PURPLE_SHEEN : SHEEN;
       const hue = sheen[Math.floor(((phase / (Math.PI * 2)) % 1 + 1) % 1 * sheen.length)];
       g.rect(b.x, b.y, SHEEN_PX, SHEEN_PX).fill({ color: hue, alpha: (band - 0.55) * 1.1 * b.fade });
     }

@@ -70,7 +70,7 @@ import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
-import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, MAGNET_LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
+import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, GOLD_MAGNET_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, MAGNET_LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
@@ -125,7 +125,7 @@ const DANCE_BOT_LOOK = encodeLook({ hue: 200, skin: 0, hair: 4, hat: 0, hatHue: 
 /** Protocol `drink::*`. */
 const BEER = 1;
 const WATER = 2;
-const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5, LURE: 6, SALVAGE: 7 };
+const FISH = { CAST: 0, BITE: 1, CAUGHT: 2, ESCAPED: 3, FLOP: 4, HIT: 5, LURE: 6, SALVAGE: 7, HAUL: 8 };
 /** protocol `fish_event::FLOP_MS`; and the treasure chest (opened for coins). */
 const FLOP_MS = 4500;
 const TREASURE_ITEM = 113;
@@ -3762,24 +3762,28 @@ export class Game {
       const lures = ui.eco.qty(LURE_ITEM);
       const golds = ui.eco.qty(GOLD_LURE_ITEM);
       const metals = ui.eco.qty(MAGNET_LURE_ITEM);
+      const legends = ui.eco.qty(GOLD_MAGNET_LURE_ITEM);
       const magnet = ui.eco.qty(MAGNET_ITEM) > 0;
       // Tapped twice with only the magnet: just the magnet on offer.
-      if (twice && magnet && lures + golds + metals === 0) {
+      if (twice && magnet && lures + golds + metals + legends === 0) {
         this.near(ui.menu, t, 6).showWith("🧲 Salvage Magnet", "Scrap off the bottom: it takes a while to find something.", [["🧲 Drop the magnet", () => this.fish(t, true)]]);
         return true;
       }
-      if (twice && lures + golds + metals > 0) {
+      if (twice && lures + golds + metals + legends > 0) {
         this.lures.previewAt(t);
         this.lureMenuFrom = this.self ? { ...this.self.destination } : null;
         const opts: [string, () => void][] = [];
         if (magnet) opts.push(["🧲 Drop the magnet", () => this.fish(t, true)]);
+        if (legends > 0) opts.push([`👑 Throw a Legendary Magnet Lure (${legends} left)`, () => this.throwLure(t, LURE.GOLD_MAGNET)]);
         if (metals > 0) opts.push([`🧲 Throw a Glimmering Magnet Lure (${metals} left)`, () => this.throwLure(t, LURE.MAGNET)]);
         if (golds > 0) opts.push([`🌟 Throw a Legendary Lure (${golds} left)`, () => this.throwLure(t, LURE.GOLD)]);
         if (lures > 0) opts.push([`✨ Throw a Glimmer Lure (${lures} left)`, () => this.throwLure(t, LURE.GLIMMER)]);
         this.near(ui.menu, t, 6).showWith(
-          golds > 0 ? "🌟 Lures" : metals > 0 && !lures ? "🧲 Magnet Lure" : metals > 0 ? "✨ Lures" : "✨ Glimmer Lure",
+          golds + legends > 0 ? "🌟 Lures" : metals > 0 && !lures ? "🧲 Magnet Lure" : metals > 0 ? "✨ Lures" : "✨ Glimmer Lure",
           this.lures.covers(t, this.socket?.clock.now() ?? 0)
             ? "This water's already lured."
+            : legends > 0
+              ? "Legendary magnet: the water turns rose-gold for 3 minutes, epic metals and up only, found sooner."
             : metals > 0 && !golds && !lures
               ? "Attracts rare metals to the area of your magnet, for 5 minutes."
             : metals > 0
@@ -3878,9 +3882,9 @@ export class Game {
             a.castLine({ x: m.x, y: m.y }, performance.now());
             window.setTimeout(() => a.state !== FISHING && a.reelIn(performance.now()), 700);
           }
-          this.lures.toss({ x: a.pos.x * TILE + TILE / 2 + (m.x > a.pos.x ? 10 : -10), y: a.pos.y * TILE - 6 }, { x: m.x, y: m.y }, m.item === GOLD_LURE_ITEM ? LURE.GOLD : m.item === MAGNET_LURE_ITEM ? LURE.MAGNET : LURE.GLIMMER);
+          this.lures.toss({ x: a.pos.x * TILE + TILE / 2 + (m.x > a.pos.x ? 10 : -10), y: a.pos.y * TILE - 6 }, { x: m.x, y: m.y }, m.item === GOLD_LURE_ITEM ? LURE.GOLD : m.item === GOLD_MAGNET_LURE_ITEM ? LURE.GOLD_MAGNET : m.item === MAGNET_LURE_ITEM ? LURE.MAGNET : LURE.GLIMMER);
         }
-        if (m.item === MAGNET_LURE_ITEM) salvagefx.magnetLure(vol, 650);
+        if (m.item === MAGNET_LURE_ITEM || m.item === GOLD_MAGNET_LURE_ITEM) salvagefx.magnetLure(vol, 650);
         else sfx.splash(vol, 650);
         break;
       }
@@ -3960,6 +3964,8 @@ export class Game {
           caught?.name ?? "A fish",
           rarity,
           caught?.kind ?? "fish",
+          undefined,
+          angler,
         );
         if (isSelf && rarity >= 4) {
           // A legendary or mythical catch lights up the whole screen.
@@ -3980,6 +3986,25 @@ export class Game {
           this.hud.toast(text, m.item === TREASURE_ITEM || (caught?.rarity ?? 0) >= 3 ? 5000 : 3000);
           this.richToast = { item: m.item === TREASURE_ITEM ? COIN : m.item, text, until: performance.now() + 4000 };
         }
+        break;
+      }
+      case FISH.HAUL: {
+        // More of the magnet's haul: held up beside what it came up with.
+        const it = this.ui.eco.items.get(m.item);
+        const angler = m.id;
+        this.catches.start(
+          { x: m.x, y: m.y },
+          () => {
+            const a = this.avatars.get(angler);
+            return a ? { x: a.pos.x * TILE + TILE / 2, y: a.pos.y * TILE + TILE - 4 - 34 } : null;
+          },
+          it?.key ?? "rusty_can",
+          it?.name ?? "Something",
+          it?.rarity ?? 0,
+          it?.kind ?? "scrap",
+          undefined,
+          angler,
+        );
         break;
       }
       case FISH.ESCAPED:

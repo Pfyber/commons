@@ -135,6 +135,8 @@ pub const GIANT_STING_X: f64 = 3.2;
 /// The lava burns the Goliath this much quicker than anyone else.
 pub const GIANT_LAVA_X: f64 = 1.5;
 pub const GIANT_LAVA_REACH: f64 = 0.1;
+/// The smart lead the scorpion onto someone else this often, rather than fight it.
+pub const SCORPION_BAIT: f64 = 0.9;
 /// The lion that comes out for the Goliath: a great brown brute of a thing,
 /// tougher and harder hitting, and a bigger target, but a lion in all else.
 pub const BIG_LION_HP: f64 = 56.0;
@@ -362,14 +364,14 @@ pub mod kit {
 /// whirlwind's reach and damage, and how far blows knock it.
 pub const KIT_HP: [f64; 5] = [162.0, 157.0, 143.0, 166.0, 226.0];
 pub const KIT_SPEED: [f64; 5] = [1.0, 1.176, 1.0, 1.0, 0.84];
-pub const KIT_LIGHT_REACH: [f64; 5] = [1.35, 1.3, 1.3, 1.95, 2.05];
-pub const KIT_LIGHT_ARC: [f64; 5] = [1.0, 0.6, 0.6, 0.8, 1.35];
-pub const KIT_LIGHT_DMG: [f64; 5] = [1.0, 0.6, 0.65, 1.08, 1.5];
+pub const KIT_LIGHT_REACH: [f64; 5] = [1.35, 1.75, 1.75, 1.95, 2.05];
+pub const KIT_LIGHT_ARC: [f64; 5] = [1.0, 0.8, 0.8, 0.8, 1.35];
+pub const KIT_LIGHT_DMG: [f64; 5] = [1.0, 0.6, 0.65, 1.08, 1.3];
 pub const KIT_LIGHT_TIME: [f64; 5] = [1.0, 0.45, 0.45, 1.08, 1.3];
 /// The wind-up on top of that: the tank hauls its hammer back before it comes round.
 pub const KIT_LIGHT_WINDUP: [f64; 5] = [1.0, 1.0, 1.0, 1.0, 1.5];
 pub const KIT_HEAVY_REACH: [f64; 5] = [1.55, 1.15, 1.15, 2.2, 1.6];
-pub const KIT_HEAVY_DMG: [f64; 5] = [1.0, 0.6, 0.65, 0.57, 1.1];
+pub const KIT_HEAVY_DMG: [f64; 5] = [1.0, 0.6, 0.65, 0.57, 0.95];
 pub const KIT_LUNGE: [f64; 5] = [1.3, 1.3, 1.3, 1.7, 1.0];
 pub const KIT_LUNGE_MAX: [f64; 5] = [4.0, 4.0, 4.0, 5.2, 3.0];
 pub const KIT_SPIN_REACH: [f64; 5] = [1.75, 1.75, 1.75, 2.5, 1.75];
@@ -395,8 +397,8 @@ pub const QUICK_ARROW_DMG: f64 = 6.0;
 /// tiny shove, no reel (it's far too quick to be allowed to lock anyone down),
 /// and a guard shrugs it off (`STAB_BLOCK_COST`).
 pub const STAB: (u32, u32, u32) = (40, 50, 90);
-pub const STAB_DMG: f64 = 6.0;
-pub const STAB_KB: f64 = 1.3;
+pub const STAB_DMG: f64 = 8.0;
+pub const STAB_KB: f64 = 2.0;
 pub const STAB_COST: f64 = 4.5;
 pub const STAB_BLOCK_COST: f64 = 3.0;
 /// (`Event.m`:) a stab.
@@ -437,7 +439,7 @@ pub const KIT_HEAVY_COST: [f64; 5] = [1.0, 1.0, 1.0, 2.0, 1.0];
 pub const TANK_LEAP_MIN: f64 = 1.0;
 pub const TANK_LEAP: f64 = 4.2;
 pub const TANK_STOMP_R: f64 = 1.6;
-pub const TANK_STOMP_DMG: f64 = 20.0;
+pub const TANK_STOMP_DMG: f64 = 17.0;
 pub const TANK_STOMP_KB: f64 = 11.0;
 pub const TANK_STOMP_DAZE_MS: u32 = 600;
 /// How tall a body stands (tiles above its feet): a blow or a missile
@@ -461,7 +463,7 @@ pub const BLAST_R: f64 = 3.3;
 pub const BLAST_DMG: f64 = 44.0;
 /// The tank's: an earthquake, a stomp throwing everyone near away, dazed.
 pub const QUAKE_R: f64 = 3.7;
-pub const QUAKE_DMG: f64 = 24.0;
+pub const QUAKE_DMG: f64 = 20.0;
 pub const QUAKE_KB: f64 = 14.0;
 pub const QUAKE_DAZE_MS: u32 = 800;
 /// What's flying besides the crowd's gifts (`Missile::kind`).
@@ -831,8 +833,7 @@ pub struct Lion {
     /// It's a thief (`next_dart`: when it can sting again), and what it's dragging.
     pub thief: bool,
     pub item: u8,
-    /// (A lion:) the Goliath's own, the big brown one. (The scorpion:) still
-    /// after whoever it first went for, till it's stung.
+    /// (A lion:) the Goliath's own, the big brown one.
     pub big: bool,
 }
 
@@ -1379,6 +1380,9 @@ pub struct Ai {
     /// Since when the one it's watching has faced it (0: it hasn't), and how long it takes to see that.
     faced_at: u32,
     faced_react: u32,
+    /// Leading the scorpion onto someone else, and when it thinks again about that.
+    baiting: bool,
+    bait_at: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1923,6 +1927,13 @@ fn heavy_blow(f: &Fighter, now: u32) -> (f64, f64) {
 }
 
 /// Whether (x, y) is under a cloud at (cx, cy).
+/// Where the lava burns the Goliath: ahead of it, it's a lot of giant to keep
+/// out of it, but only as it comes in over the sand: nothing burns before
+/// there's lava to see.
+fn giant_lava(lava: f64) -> f64 {
+    lava - GIANT_LAVA_REACH * ((1.0 - lava) / GIANT_LAVA_REACH).clamp(0.0, 1.0)
+}
+
 fn in_cloud(cx: f64, cy: f64, x: f64, y: f64) -> bool {
     ((x - cx) / ACID_RX).powi(2) + ((y - cy) / ACID_RY).powi(2) < 1.0
 }
@@ -3055,11 +3066,7 @@ impl Match {
             // (Up in the Goliath's grip, they're clear of the fire.)
             let out = self.ring.reach(f.x, f.y);
             // (The lava reaches the Goliath first: it's a lot of giant to keep out of it.)
-            let lava = if f.giant && lava < 1.15 {
-                lava - GIANT_LAVA_REACH
-            } else {
-                lava
-            };
+            let lava = if f.giant { giant_lava(lava) } else { lava };
             if !f.down && !f.immune() && f.act != act::HELD && out > fire.min(lava) {
                 // (It burns everyone alike, the Goliath as much of its health as anyone.)
                 let k = if self.fighters[i].giant || self.fighters[i].max_hp != HP {
@@ -3282,15 +3289,7 @@ impl Match {
             }
             disaster::SCORPION => {
                 let (x, y) = (self.ring.w / 2.0, self.ring.h / 2.0);
-                // The Goliath first, if there is one (it's the one with the most to lose).
-                let giant = self
-                    .fighters
-                    .iter()
-                    .find(|f| f.giant && !f.down)
-                    .map(|f| f.id);
-                let target = giant
-                    .or(self.nearest_fighter(x, y).map(|f| f.id))
-                    .unwrap_or(0);
+                let target = self.nearest_fighter(x, y).map(|f| f.id).unwrap_or(0);
                 self.lions.push(Lion {
                     id: 1,
                     x,
@@ -3311,7 +3310,7 @@ impl Match {
                     next_rush: now + SCORPION_EMERGE_MS + 800,
                     thief: false,
                     item: 0,
-                    big: giant.is_some(),
+                    big: false,
                 });
             }
             disaster::ACID => {
@@ -3691,9 +3690,7 @@ impl Match {
                     .filter(|t| !t.down && t.act != act::HELD);
                 let near = self.nearest_fighter(l.x, l.y);
                 let d = |f: &Fighter| (f.x - l.x).hypot(f.y - l.y);
-                // (Its first sting's for the one it came for, whoever's in the way.)
                 let t = match (mine, near) {
-                    (Some(m), _) if l.big => m,
                     (Some(m), Some(n)) => {
                         if d(n) + 0.5 < d(m) {
                             n
@@ -3770,7 +3767,6 @@ impl Match {
                     // (`pounced`: the first of the two.)
                     let first = !l.pounced;
                     self.lions[k].pounced = first;
-                    self.lions[k].big = false;
                     let rest = if first { STING_CHAIN_MS } else { STING_REST_MS };
                     self.lion_set(k, lion::RECOVER, now, now + rest);
                     for j in 0..self.fighters.len() {
@@ -5180,12 +5176,42 @@ impl Match {
         let Some(t) = chosen else {
             return evs;
         };
-        // A lion at it: swatted aside first.
+        // The canny mind what's coming down on it: its seizing someone (it
+        // can't be touched, whirling them round) is the way through, and it
+        // keeps that for it when it can see it'll be needed.
+        let canny = sk.cunning >= 0.8;
+        let (cx, cy) = (self.ring.w / 2.0, self.ring.h / 2.0);
+        let burn_at = self.fire(now).min(giant_lava(self.lava(now)));
+        let out = self.ring.reach(me.x, me.y);
+        let burning = canny && burn_at < 1.05 && out > burn_at - 0.03;
+        let danger = if burning {
+            Some((me.x * 2.0 - cx, me.y * 2.0 - cy))
+        } else if canny {
+            self.danger_at(me.x, me.y, GIANT_R + 0.3, 900, now)
+        } else {
+            None
+        };
+        let in_grab = foes.iter().any(|f| dist(f) < GRAB_LUNGE + GIANT_R);
+        if danger.is_some() && me.rage >= RAGE && in_grab && me.can_cancel(now) {
+            let a = foes
+                .iter()
+                .min_by(|a, b| dist(a).total_cmp(&dist(b)))
+                .map_or(0.0, |f| (f.y - me.y).atan2(f.x - me.x));
+            evs.extend(self.input(me.id, input::SPECIAL, a, now));
+            return evs;
+        }
+        let storm = canny
+            && (self.meteors_end > now
+                || !self.clouds.is_empty()
+                || (matches!(self.disaster_stage, disaster::SPIN | disaster::DECIDED)
+                    && matches!(self.disaster_kind, disaster::METEORS | disaster::ACID)));
+        // A lion at it: swatted aside first. (Not the scorpion, by the canny, with someone to hit instead.)
         if me.free(now) && now >= me.ai.next_attack {
             let lion_near = self
                 .lions
                 .iter()
                 .filter(|l| l.exposed())
+                .filter(|l| !(canny && l.scorpion && foes.iter().any(|f| dist(f) < SMASH_REACH)))
                 .find(|l| (l.x - me.x).hypot(l.y - me.y) < SMASH_REACH * 0.8 + l.r());
             if let Some(l) = lion_near {
                 let a = (l.y - me.y).atan2(l.x - me.x);
@@ -5222,6 +5248,10 @@ impl Match {
             .iter()
             .filter(|f| (f.x - land.0).hypot(f.y - land.1) < STOMP_R + 0.4)
             .count();
+        // (The canny don't leap into the lava, or under a meteor.)
+        let lands_safe = !canny
+            || ((burn_at >= 1.05 || self.ring.reach(land.0, land.1) < burn_at - 0.08)
+                && self.danger_at(land.0, land.1, GIANT_R, 1400, now).is_none());
         if me.act == act::CHARGE && now >= me.act_at + me.ai.charge_for {
             // (It "aims" its leap at just short of the one it's after; the
             // canny where they're headed, by the time it comes down.)
@@ -5244,6 +5274,19 @@ impl Match {
             self.fighters[i].aim = to;
             // (Far enough to reach them, and through.)
             self.fighters[i].reach = other.map(|o| dist(o) + 1.0).unwrap_or(HURL_DIST);
+            // (The canny hurl them into the fire or the lava, if it's come in.)
+            if canny && burn_at < 0.95 {
+                self.fighters[i].aim = (me.y - cy).atan2(me.x - cx);
+                self.fighters[i].reach = HURL_DIST;
+            }
+        } else if let Some((hx, hy)) = danger.filter(|_| {
+            thinking
+                && me.free(now)
+                && me.stamina >= GIANT_DASH_COST
+                && now >= me.roll_ready
+        }) {
+            // Out from under, at a dash.
+            evs.extend(self.input(me.id, input::ROLL, (me.y - hy).atan2(me.x - hx), now));
         } else if me.free(now)
             && me.hp < GIANT_HP * 0.4
             && foes.iter().filter(|f| dist(f) < 2.2).count() >= 2
@@ -5330,9 +5373,12 @@ impl Match {
             let a = (t.y + t.vy * lead - me.y).atan2(t.x + t.vx * lead - me.x);
             evs.extend(self.input(me.id, input::THROW, a, now));
         } else if me.free(now) && now >= me.ai.next_attack {
-            if me.rage >= RAGE && d < GRAB_REACH + (GRAB_LUNGE - GRAB_REACH) * sk.hunt + GIANT_R {
+            if me.rage >= RAGE
+                && !storm
+                && d < GRAB_REACH + (GRAB_LUNGE - GRAB_REACH) * sk.hunt + GIANT_R
+            {
                 evs.extend(self.input(me.id, input::SPECIAL, toward, now));
-            } else if (crowd >= 2
+            } else if lands_safe && (crowd >= 2
                 || (d < 6.3 + (STOMP_LEAP + 1.0 - 6.3) * sk.hunt
                     && d > 3.0 - 2.0 * sk.hunt
                     // (Hunting, right on top of someone it's as likely to smash.)
@@ -5392,16 +5438,29 @@ impl Match {
                     gift::SPEAR | gift::BOMB => f.holding == 0,
                     _ => true,
                 })
-                .map(|g| (g.x, g.y, (g.x - f.x).hypot(g.y - f.y)))
-                .filter(|g| g.2 < sk.gift_r * 0.8 && !foes.iter().any(|o| dist(o) < 1.8))
+                .map(|g| (g.x, g.y, (g.x - f.x).hypot(g.y - f.y), g.kind))
+                .filter(|g| {
+                    // (Badly hurt, the canny go for the healing, whoever's about.)
+                    let hurt = canny
+                        && f.hp < GIANT_HP * 0.5
+                        && matches!(g.3, gift::HEALTH | gift::REGEN);
+                    g.2 < sk.gift_r * if hurt { 1.2 } else { 0.8 }
+                        && (hurt || !foes.iter().any(|o| dist(o) < 1.8))
+                })
                 .min_by(|a, b| a.2.total_cmp(&b.2));
             let safe = self.safe_to(now);
             let (hx, hy) = (self.ring.w / 2.0 - f.x, self.ring.h / 2.0 - f.y);
-            let (mx, my) = if self.ring.reach(f.x, f.y) > safe - 0.14 {
+            // (The canny don't wait to feel it: the lava's a lot worse for a giant.)
+            let margin = if canny && burn_at < 1.05 { 0.22 } else { 0.14 };
+            let (mx, my) = if self.ring.reach(f.x, f.y) > safe - margin {
                 // The fire or the lava at its heels: inwards, whatever else.
                 let hd = hx.hypot(hy).max(0.01);
                 (hx / hd, hy / hd)
-            } else if let (Some((gx, gy, gd)), act::NONE | act::BLOCK) = (gift, f.act) {
+            } else if let Some((hx, hy)) = danger {
+                let (vx, vy) = (f.x - hx, f.y - hy);
+                let vd = vx.hypot(vy).max(0.01);
+                (vx / vd, vy / vd)
+            } else if let (Some((gx, gy, gd, _)), act::NONE | act::BLOCK) = (gift, f.act) {
                 ((gx - f.x) / gd.max(0.01), (gy - f.y) / gd.max(0.01))
             } else {
                 let radial = ((d - 1.6) / 0.8).clamp(-1.0, 1.0);
@@ -6430,6 +6489,143 @@ impl Match {
     /// can (the more it reads, the likelier), and turns on the beast. Whether
     /// it took the turn.
     #[allow(clippy::too_many_arguments)]
+    /// What's about to come down on (x, y), `r` round it, within `ms`, and
+    /// where from: a meteor, a bomb, a cloud, the spikes.
+    fn danger_at(&self, x: f64, y: f64, r: f64, ms: u32, now: u32) -> Option<(f64, f64)> {
+        let meteor = self
+            .meteors
+            .iter()
+            .filter(|m| m.at <= now + ms)
+            .find(|m| (m.x - x).hypot(m.y - y) < METEOR_R + r)
+            .map(|m| (m.x, m.y));
+        let bomb = || {
+            self.missiles
+                .iter()
+                .filter(|m| m.kind == gift::BOMB || m.kind == missile::BIG_BOMB)
+                .map(|m| {
+                    let sp = m.vx.hypot(m.vy).max(0.01);
+                    (m.x + m.vx / sp * m.left, m.y + m.vy / sp * m.left, m.r)
+                })
+                .find(|b| (b.0 - x).hypot(b.1 - y) < b.2 + r)
+                .map(|b| (b.0, b.1))
+        };
+        let cloud = || {
+            self.clouds
+                .iter()
+                .filter(|c| c.delay <= now + ms)
+                .find(|c| {
+                    let cx = c.x(now);
+                    in_cloud(cx, c.y, x, y)
+                        || in_cloud(cx + c.dir * ACID_SPEED * ms as f64 / 1000.0, c.y, x, y)
+                })
+                .map(|c| (x, c.y))
+        };
+        let spike = || {
+            self.ring
+                .spikes
+                .iter()
+                .enumerate()
+                .find(|(k, s)| self.spike_phase(*k, now + ms).0 >= 1 && s.contains(x, y, r))
+                .map(|(_, s)| (s.x + s.w / 2.0, s.y + s.h / 2.0))
+        };
+        meteor.or_else(bomb).or_else(cloud).or_else(spike)
+    }
+
+    /// Fighter `i` leads the scorpion `l` onto the nearest of their foes:
+    /// past them, so it's them it finds first. False: nobody to lead it to.
+    #[allow(clippy::too_many_arguments)]
+    fn bait_scorpion(
+        &mut self,
+        i: usize,
+        l: &Lion,
+        sk: &Skill,
+        now: u32,
+        dt: f64,
+        rng: &mut impl FnMut() -> f64,
+        evs: &mut Vec<Event>,
+    ) -> bool {
+        let me = self.fighters[i].clone();
+        let sides = self.mode != mode::CLASSIC;
+        let Some(foe) = self
+            .fighters
+            .iter()
+            .filter(|f| !f.down && f.id != me.id && f.act != act::HELD)
+            .filter(|f| !sides || f.team != me.team)
+            .min_by(|a, b| {
+                let d = |f: &Fighter| (f.x - me.x).hypot(f.y - me.y);
+                d(a).total_cmp(&d(b))
+            })
+            .cloned()
+        else {
+            return false;
+        };
+        let (fx, fy) = (foe.x - l.x, foe.y - l.y);
+        let fd = fx.hypot(fy).max(0.01);
+        let (px, py) = (foe.x + fx / fd * 2.0, foe.y + fy / fd * 2.0);
+        let (mut vx, mut vy) = (px - me.x, py - me.y);
+        let vd = vx.hypot(vy).max(0.01);
+        vx /= vd;
+        vy /= vd;
+        // (Not back past its claws to get there: round it.)
+        let (ax, ay) = (me.x - l.x, me.y - l.y);
+        let ad = ax.hypot(ay).max(0.01);
+        let (ax, ay) = (ax / ad, ay / ad);
+        if ad < 3.5 && vx * ax + vy * ay < 0.2 {
+            let side = if vx * -ay + vy * ax >= 0.0 { 1.0 } else { -1.0 };
+            vx = ax * 0.6 - ay * side;
+            vy = ay * 0.6 + ax * side;
+        }
+        // (Kept off the wall: it's no place to be caught.)
+        let out = self.ring.reach(me.x, me.y);
+        if out > 0.7 {
+            let (hx, hy) = (self.ring.w / 2.0 - me.x, self.ring.h / 2.0 - me.y);
+            let hd = hx.hypot(hy).max(0.01);
+            vx += hx / hd * (out - 0.7) * 3.0;
+            vy += hy / hd * (out - 0.7) * 3.0;
+        }
+        let len = vx.hypot(vy).max(0.01);
+        let (vx, vy) = (vx / len, vy / len);
+        let run = vy.atan2(vx);
+        if me.can_cancel(now)
+            && now >= me.roll_ready
+            && me.stamina > ROLL_COST + 10.0
+            && ad < 3.2
+            && matches!(l.act, lion::CROUCH | lion::RUSH)
+            && rng() < sk.read
+        {
+            evs.extend(self.input(me.id, input::ROLL, run, now));
+            return true;
+        }
+        // (A blow at them on the way past, if they're in reach.)
+        let to_foe = (foe.y - me.y).atan2(foe.x - me.x);
+        if me.free(now)
+            && now >= me.ai.next_attack
+            && me.stamina > me.light_cost()
+            && (foe.x - me.x).hypot(foe.y - me.y) < KIT_LIGHT_REACH[me.k()] + foe.body() - BODY_R
+        {
+            evs.extend(self.input(me.id, input::LIGHT, to_foe, now));
+            self.fighters[i].ai.next_attack = now + (sk.gap.0 + rng() * sk.gap.1) as u32;
+        }
+        if !self.fighters[i].free(now) {
+            return true;
+        }
+        let slow = sk.speed * KIT_SPEED[me.k()] * me.speed_x(now);
+        let (nx, ny, _) = self.ring.slide(
+            me.x,
+            me.y,
+            vx * SPEED * slow * dt,
+            vy * SPEED * slow * dt,
+            BODY_R,
+        );
+        let f = &mut self.fighters[i];
+        f.vx = (nx - f.x) / dt;
+        f.vy = (ny - f.y) / dt;
+        f.x = nx;
+        f.y = ny;
+        f.aim = run;
+        true
+    }
+
     fn bot_lion(
         &mut self,
         i: usize,
@@ -6459,6 +6655,20 @@ impl Match {
         };
         let (dx, dy) = (l.x - me.x, l.y - me.y);
         let d = dx.hypot(dy).max(0.01);
+        // The smart don't stand and fight it: they lead it onto someone else.
+        if l.scorpion && sk.cunning >= 0.8 {
+            if now >= me.ai.bait_at {
+                let ai = &mut self.fighters[i].ai;
+                ai.bait_at = now + 3000;
+                ai.baiting = rng() < SCORPION_BAIT;
+            }
+            if self.fighters[i].ai.baiting
+                && (d < 4.5 || (l.target == me.id && d < 8.0))
+                && self.bait_scorpion(i, &l, sk, now, dt, rng, evs)
+            {
+                return true;
+            }
+        }
         // (Only one that's on it, or close.)
         if d > if l.target == me.id { 7.0 } else { 2.6 } {
             return false;
@@ -6586,6 +6796,13 @@ impl Match {
                 }
                 // (Hunting: finish off the hurt.)
                 w += (1.0 - f.hp / f.max_hp) * 3.0 * sk.hunt;
+                // (And mind whoever's swinging at it, not just whom it's after.)
+                if !matches!(f.act, act::NONE | act::BLOCK | act::STUN)
+                    && gap_to(f) < 3.0
+                    && turn(f.aim, (me.y - f.y).atan2(me.x - f.x)).abs() < 1.0
+                {
+                    w += 1.8 * sk.hunt;
+                }
                 w
             };
             target = foes
@@ -7094,6 +7311,67 @@ impl Match {
                 in_cloud(x, c.y, f.x, f.y) || in_cloud(x + c.dir * ACID_SPEED * 0.8, c.y, f.x, f.y)
             })
             .map(|c| (f.x, c.y, 0.0));
+        // An arrow or a dart on its way (hunting: it steps out of its line).
+        if sk.hunt > 0.0 && now >= f.ai.sidestep_until {
+            let shot = self
+                .missiles
+                .iter()
+                .filter(|m| m.kind != gift::BOMB && m.kind != missile::BIG_BOMB)
+                .filter(|m| {
+                    m.kind == missile::DART || self.fighters.iter().any(|o| o.id == m.by && foe_of(&f, o))
+                })
+                .find_map(|m| {
+                    let sp = m.vx.hypot(m.vy).max(0.01);
+                    let (ux, uy) = (m.vx / sp, m.vy / sp);
+                    let (rx, ry) = (f.x - m.x, f.y - m.y);
+                    let cross = rx * uy - ry * ux;
+                    ((0.0..5.0).contains(&(rx * ux + ry * uy)) && cross.abs() < BODY_R + 0.35)
+                        .then_some((uy.atan2(ux), cross))
+                });
+            if let Some((a, cross)) = shot
+                && rng() < sk.read * 0.5
+            {
+                let ai = &mut self.fighters[i].ai;
+                ai.sidestep = a + if cross > 0.0 { -FRAC_PI_2 } else { FRAC_PI_2 };
+                ai.sidestep_until = now + 350;
+            }
+        }
+        // Hunting, a rage ready: through what's coming down, untouchable.
+        if sk.hunt > 0.0
+            && f.rage >= RAGE
+            && f.can_cancel(now)
+            && self.danger_at(f.x, f.y, 0.2, 500, now).is_some()
+        {
+            evs.extend(self.input(me.id, input::SPECIAL, aim, now));
+            return evs;
+        }
+        // In the fire or the lava: a roll inwards, not a walk.
+        let burning = self.ring.reach(f.x, f.y) > fire - 0.02;
+        if burning
+            && sk.cunning >= 0.8
+            && f.can_cancel(now)
+            && now >= f.roll_ready
+            && f.stamina > ROLL_COST
+        {
+            evs.extend(self.input(me.id, input::ROLL, (cy - f.y).atan2(cx - f.x), now));
+            return evs;
+        }
+        // Someone shooting from a distance: closed down with a roll.
+        if thinking
+            && sk.hunt > 0.0
+            && intent == intent::PRESS
+            && !f.shoots()
+            && t.shoots()
+            && (2.5..6.5).contains(&dist)
+            && f.free(now)
+            && now >= f.roll_ready
+            && f.stamina > ROLL_COST + 25.0
+            && self.ring.clear_line(f.x, f.y, t.x, t.y)
+            && rng() < 0.35
+        {
+            evs.extend(self.input(me.id, input::ROLL, toward, now));
+            return evs;
+        }
         let (mut mx, mut my) = if self.ring.reach(f.x, f.y) > fire - 0.14 {
             (cx - f.x, cy - f.y)
         } else if let Some(s) = danger_spike {
@@ -8609,12 +8887,10 @@ mod tests {
     }
 
     #[test]
-    fn the_scorpion_goes_for_the_goliath_first_then_for_whoever_is_nearest() {
+    fn the_scorpion_goes_for_whoever_is_nearest_the_goliath_or_not() {
         let (mut m, t) = goliath_disaster(disaster::SCORPION);
         let gid = m.fighters.iter().find(|f| f.giant).unwrap().id;
-        assert_eq!(m.lions[0].target, gid);
-        assert!(m.lions[0].big, "after it");
-        // Someone right beside it: it pays them no mind.
+        assert!(!m.lions[0].big);
         let l = &mut m.lions[0];
         l.act = lion::PROWL;
         l.act_until = u32::MAX;
@@ -8625,28 +8901,95 @@ mod tests {
             m.fighters.iter().position(|f| !f.giant).unwrap(),
         );
         let oid = m.fighters[other].id;
+        for k in 0..m.fighters.len() {
+            m.fighters[k].down = k != giant && k != other;
+        }
         let mut r = rng(96);
         let mut tt = t;
-        let hold = |m: &mut Match| {
+        for _ in 0..3 {
+            tt += 100;
             (m.fighters[other].x, m.fighters[other].y) = (m.lions[0].x + 2.0, m.lions[0].y);
             (m.fighters[giant].x, m.fighters[giant].y) = (m.lions[0].x + 8.0, m.lions[0].y);
             m.fighters.iter_mut().for_each(|f| f.hp = f.max_hp);
-        };
-        for _ in 0..10 {
-            tt += 100;
-            hold(&mut m);
-            m.step(tt, 100, &mut r);
-        }
-        assert_eq!(m.lions[0].target, gid, "not distracted");
-        assert_eq!(m.lions[0].act, lion::PROWL);
-        // Stung: from now on, whoever's nearest.
-        m.lions[0].big = false;
-        for _ in 0..3 {
-            tt += 100;
-            hold(&mut m);
             m.step(tt, 100, &mut r);
         }
         assert_eq!(m.lions[0].target, oid);
+        for _ in 0..3 {
+            tt += 100;
+            // (It's committed to a sting once wound up: back on the prowl.)
+            m.lions[0].act = lion::PROWL;
+            m.lions[0].act_until = u32::MAX;
+            (m.fighters[other].x, m.fighters[other].y) = (m.lions[0].x + 8.0, m.lions[0].y);
+            (m.fighters[giant].x, m.fighters[giant].y) = (m.lions[0].x + 2.0, m.lions[0].y);
+            m.fighters.iter_mut().for_each(|f| f.hp = f.max_hp);
+            m.step(tt, 100, &mut r);
+        }
+        assert_eq!(m.lions[0].target, gid);
+    }
+
+    #[test]
+    fn the_lava_only_burns_the_goliath_once_it_is_on_the_sand() {
+        // Not yet in from the walls: nothing, however near the wall it stands.
+        assert_eq!(giant_lava(1.1), 1.1);
+        assert_eq!(giant_lava(1.0), 1.0);
+        // Well in: the reach it always had.
+        assert!((giant_lava(0.8) - (0.8 - GIANT_LAVA_REACH)).abs() < 1e-9);
+        assert!(giant_lava(0.97) > 0.9);
+    }
+
+    #[test]
+    fn the_smart_lead_the_scorpion_onto_someone_else() {
+        let mut led = 0;
+        for seed in 0..20 {
+            let (mut m, t) = fixed_disaster(disaster::SCORPION);
+            m.level = crate::level::EXTREME;
+            let mut r = rng(400 + seed);
+            let l = &mut m.lions[0];
+            l.act = lion::PROWL;
+            l.act_until = u32::MAX;
+            l.next_rush = u32::MAX;
+            l.next_dart = u32::MAX;
+            (l.x, l.y) = (10.0, 10.0);
+            let (me, foe) = (0, 1);
+            for k in 2..m.fighters.len() {
+                m.fighters[k].down = true;
+            }
+            m.fighters[me].bot = true;
+            (m.fighters[me].x, m.fighters[me].y) = (12.0, 10.0);
+            m.fighters[me].ai = Ai::default();
+            (m.fighters[foe].x, m.fighters[foe].y) = (18.0, 10.0);
+            m.lions[0].target = m.fighters[me].id;
+            let mut evs = Vec::new();
+            let sk = skill(m.level);
+            let was = m.fighters[me].x;
+            let mut tt = t;
+            for _ in 0..10 {
+                tt += 100;
+                m.bot_lion(me, &sk, tt, 0.1, &mut r, 2.0, &mut evs);
+            }
+            if m.fighters[me].x > was + 1.0 {
+                led += 1;
+            }
+        }
+        assert!(led >= 14, "most run for it: {led}/20");
+    }
+
+    #[test]
+    fn a_canny_goliath_seizes_someone_to_ride_out_a_meteor() {
+        let (mut m, t) = goliath_disaster(disaster::METEORS);
+        m.level = crate::level::EXTREME;
+        let g = m.fighters.iter().position(|f| f.giant).unwrap();
+        let o = m.fighters.iter().position(|f| !f.giant).unwrap();
+        m.fighters[g].rage = RAGE;
+        m.fighters[g].bot = true;
+        (m.fighters[g].x, m.fighters[g].y) = (14.0, 10.0);
+        (m.fighters[o].x, m.fighters[o].y) = (15.5, 10.0);
+        m.meteors.clear();
+        m.meteors.push(Meteor { x: 14.0, y: 10.0, at: t + 500 });
+        let mut r = rng(97);
+        m.giant_bot(g, t + 100, 0.1, &mut r);
+        assert_eq!(m.fighters[g].act, act::GRAB);
+        assert!(m.fighters[g].immune());
     }
 
     #[test]
@@ -10765,7 +11108,7 @@ mod kit_tests {
         for k in 1..4 {
             m.step(t + k * 100, 100, &mut r);
         }
-        assert!(hp - m.fighters[1].hp < 1.0);
+        assert!(hp - m.fighters[1].hp < STAB_DMG * 0.2);
         assert!(wind - m.fighters[1].stamina <= STAB_BLOCK_COST + 0.01);
         // The bow and the bomb are held for, as ever.
         let (mut m, t) = duel(kit::BOMBER, kit::KNIGHT, 4.0);
