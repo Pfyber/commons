@@ -1,6 +1,6 @@
 // The ⚙️ settings panel (from the HUD): sound (mute, and how loud each kind
-// of sound is), graphics (sharp or fast, the weather, night falling, name
-// tags, a frame counter), the keys, and logging out.
+// of sound is), graphics (sharp or fast, 2D or 3D, the weather, night
+// falling, name tags, a frame counter), the keys, and logging out.
 
 import { type Settings, resetSettings, setSettings, settings } from "../settings";
 import { Panel, button, el } from "./panels";
@@ -67,10 +67,16 @@ export class SettingsPanel extends Panel {
       button("⚡ Fast", () => (setSettings({ quality: "low" }), this.render()), s.quality === "low" ? "small on" : "small"),
     );
     this.body.append(el("p", "hint", "Sharp: full screen resolution and the colour grade. Fast: lighter on older computers and phones."), quality);
-    const toggle = (label: string, key: "weather" | "daynight" | "names" | "fps") => {
+    const toggle = (label: string, key: "weather" | "daynight" | "names" | "fps" | "view3d") => {
       const on = s[key];
       this.body.append(button(`${on ? "✅" : "⬜"} ${label}`, () => (setSettings({ [key]: !on } as Partial<Settings>), this.render()), "small set-toggle"));
     };
+    const view = el("div", "tier-row");
+    view.append(
+      button("🗺️ 2D", () => (setSettings({ view3d: false }), this.render()), s.view3d ? "small" : "small on"),
+      button("🧊 3D", () => (setSettings({ view3d: true }), this.render()), s.view3d ? "small on" : "small"),
+    );
+    this.body.append(el("p", "hint", "3D: the camera tilts and the world stands up in perspective. 2D: straight down, as drawn."), view);
     toggle("Weather (rain, mist, cloud shadows)", "weather");
     toggle("Night falls (day and night)", "daynight");
     toggle("Name tags and speech bubbles", "names");

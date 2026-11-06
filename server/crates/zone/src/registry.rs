@@ -8,7 +8,7 @@ use crate::stats::InstanceSnapshot;
 use anyhow::Context;
 use commons_protocol::CELL_TILES;
 use commons_sim::furniture::Furniture;
-use commons_sim::{Grid, MapFile};
+use commons_sim::{Grid, MapFile, labyrinth};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -61,6 +61,8 @@ pub struct Registry {
     pub economy: Option<Arc<EconomyClient>>,
     pub social: Option<Arc<SocialClient>>,
     zones: HashMap<String, Arc<ZoneDef>>,
+    /// The Glowroot Labyrinth, by day: made when first visited (a new one daily).
+    labyrinths: Mutex<HashMap<u32, Arc<ZoneDef>>>,
     instances: Mutex<HashMap<InstanceKey, InstanceHandle>>,
     /// Who is playing, from which device, on how many connections (see `claim`).
     online: Mutex<HashMap<String, (u32, u32)>>,
@@ -132,6 +134,7 @@ impl Registry {
             economy,
             social,
             zones,
+            labyrinths: Mutex::new(HashMap::new()),
             instances: Mutex::new(HashMap::new()),
             online: Mutex::new(HashMap::new()),
         })
@@ -146,13 +149,17 @@ impl Registry {
         if number == 0 || number > MAX_INSTANCES_PER_ZONE {
             return None;
         }
-        let def = self.zones.get(zone)?;
+        let def = if zone == labyrinth::ZONE {
+            self.labyrinth(owner.as_deref()?)?
+        } else {
+            self.zones.get(zone)?.clone()
+        };
         let mut instances = self.instances.lock().unwrap();
         let handle = instances
             .entry((zone.to_string(), number, owner.clone()))
             .or_insert_with(|| {
                 Instance::spawn(
-                    def.clone(),
+                    def,
                     number,
                     owner,
                     self.economy.clone(),
@@ -160,6 +167,22 @@ impl Registry {
                 )
             });
         Some(handle.clone())
+    }
+
+    /// The labyrinth for a day (`owner`, see `labyrinth::day_key`), if it's open now.
+    fn labyrinth(&self, day: &str) -> Option<Arc<ZoneDef>> {
+        let day = labyrinth::parse_day(day).filter(|&d| labyrinth::open(d))?;
+        let mut all = self.labyrinths.lock().unwrap();
+        // Days gone by are let go (their instances keep their own copy while anyone's in them).
+        all.retain(|&d, _| labyrinth::open(d));
+        let def = all.entry(day).or_insert_with(|| {
+            Arc::new(ZoneDef::new(
+                labyrinth::ZONE.into(),
+                labyrinth::generate(day),
+                None,
+            ))
+        });
+        Some(def.clone())
     }
 
     pub fn stats(&self) -> Vec<InstanceSnapshot> {

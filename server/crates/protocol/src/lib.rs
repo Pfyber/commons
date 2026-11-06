@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 48;
+pub const PROTOCOL_VERSION: u16 = 50;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -415,12 +415,33 @@ message_enum! {
         51 TankFish { x: u16, y: u16, fish: Vec<u32> }
         /// What stands on the table at (x, y) (0: nothing).
         52 ObjectTop { x: u16, y: u16, item: u32 }
+        /// The Glowroot Labyrinth, for a newcomer: which lanterns are lit and
+        /// which gates are open (their numbers), which glimmers you've found
+        /// and which heartstones you're attuned to (a bit each), how many found
+        /// the way up today, and whether you have.
+        53 LabState { lit: Vec<u8>, gates: Vec<u8>, found: u8, attuned: u8, finishers: u16, out: bool }
+        /// Something happened in the labyrinth (`lab::*`): `id` lit lantern `n`,
+        /// found glimmer `n` or was attuned to heartstone `n` (those two to them
+        /// alone), found the way up (`n`th today), or was caught by a wisp; gate
+        /// `n` opened or shut.
+        54 LabEvent { kind: u8, id: u32, n: u16 }
         /// Your bet's down (`pick`, paying `pays` if it's good).
-        53 ArenaBetPlaced { pick: u8, pays: u16 }
+        55 ArenaBetPlaced { pick: u8, pays: u16 }
         /// How your bet came out: `coins` back (0: lost), the stake only if
         /// `refund` (the round came to nothing).
-        54 ArenaBetSettled { coins: u16, refund: bool }
+        56 ArenaBetSettled { coins: u16, refund: bool }
     }
+}
+
+/// `LabEvent` kinds.
+pub mod lab {
+    pub const LIT: u8 = 1;
+    pub const GLIMMER: u8 = 2;
+    pub const OUT: u8 = 3;
+    pub const ATTUNED: u8 = 4;
+    pub const GATE_OPEN: u8 = 5;
+    pub const GATE_SHUT: u8 = 6;
+    pub const CAUGHT: u8 = 7;
 }
 
 /// Emote ids for `Emote` / `EmoteShown` (spec §7).

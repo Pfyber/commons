@@ -25,7 +25,7 @@ export class Furniture {
     const table = map.decor_legend.indexOf("chess_table");
     // Picnic blankets (lie back and watch the stars), logs round the campfire,
     // the library's chairs and story cushions.
-    const seatKinds = new Set(["bench", "bench_v", "swing", "blanket", "log_seat", "stool", "chair", "chair_n", "cushion", "amph_seat", "amph_seat_hi", "amph_seat_pub", "amph_seat_pub_hi"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
+    const seatKinds = new Set(["bench", "bench_v", "swing", "blanket", "log_seat", "stool", "chair", "chair_n", "cushion", "armchair", "amph_seat", "amph_seat_hi", "amph_seat_pub", "amph_seat_pub_hi"].map((k) => map.decor_legend.indexOf(k)).filter((i) => i >= 0));
     const w = map.width;
     map.decor.forEach((d, i) => {
       if (seatKinds.has(d)) this.seats.set(i, { id: i, tile: { x: i % w, y: Math.floor(i / w) }, table: null });

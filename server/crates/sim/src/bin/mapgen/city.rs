@@ -1420,7 +1420,10 @@ fn about(key: &str, name: &str) -> String {
             "Arcade: pong, light cycles, racers, a dance-off and more inside; word games out here"
                 .to_string()
         }
-        "cafe" => "The Mossy Mug: drinks, the pool table and pinball inside".to_string(),
+        "cafe" => {
+            "The Mossy Mug café: coffee, cake, the pool table and pinball inside. Open voice in there: everyone hears everyone"
+                .to_string()
+        }
         "library" => {
             "Library: every book in Project Gutenberg, in every language. Browse the wings, or ask at the desk"
                 .to_string()

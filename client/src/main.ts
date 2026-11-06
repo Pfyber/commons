@@ -53,6 +53,7 @@ import { IncomingCall, PhonePanel } from "./ui/phone";
 import { Clubs } from "./clubs";
 import { ClubsPanel } from "./ui/clubs";
 import { Concert } from "./concert";
+import { Lounge } from "./lounge";
 import { ConcertPanel } from "./ui/concert";
 import { MetroPanel, playRide, stationsOf } from "./ui/metro";
 import { BlackjackPanel, CagePanel, Casino, RoulettePanel, SlotsPanel, Tables } from "./ui/casino";
@@ -148,11 +149,16 @@ function hideOverlay() {
 }
 
 const maps = new Map<string, ZoneMap>();
-async function loadMap(zone: string): Promise<ZoneMap> {
-  let m = maps.get(zone);
+async function loadMap(zone: string, owner?: string | null): Promise<ZoneMap> {
+  // The Glowroot Labyrinth is new every day: its map comes from the server, by day (the ticket's owner).
+  const key = zone === "labyrinth" ? `labyrinth:${owner}` : zone;
+  let m = maps.get(key);
   if (!m) {
-    m = (await fetch(MAP_URLS[zone]).then((r) => r.json())) as ZoneMap;
-    maps.set(zone, m);
+    const url = zone === "labyrinth" ? `/api/labyrinth/${encodeURIComponent(owner ?? "")}` : MAP_URLS[zone];
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`map ${key}: ${res.status}`);
+    m = (await res.json()) as ZoneMap;
+    maps.set(key, m);
   }
   // Each visit gets its own copy: placed furniture edits the collision layer.
   return structuredClone(m);
@@ -408,6 +414,9 @@ async function main() {
   tables.onCoins = () => void eco.load().catch(() => {});
   const concert = new Concert(auth, auth.player!.id, social);
   concert.onToast = (t) => hud.toast(t, 5000);
+  // The café's open voice (ADR 0021).
+  const lounge = new Lounge(auth);
+  lounge.onToast = (t) => hud.toast(t, 5000);
   const concertPanel = new ConcertPanel(concert, {
     walkOnStage: () => void (game as Game | null)?.walkToSpot("stage_spot"),
     toast: (t) => hud.toast(t, 4500),
@@ -511,6 +520,7 @@ async function main() {
     clubsPanel,
     concert,
     concertPanel,
+    lounge,
     yard: new YardPanel(rent, eco, rentHost),
     casino,
     leaders: new LeaderboardPanel(auth),
@@ -568,7 +578,7 @@ async function main() {
   const enter = async (refusalThrows = false) => {
     try {
       const ticket = await auth.join(dest);
-      const map = await loadMap(ticket.zone_id);
+      const map = await loadMap(ticket.zone_id, ticket.owner);
       // In the mall, put what's on show onto the displays before drawing.
       if (ticket.zone_id === "mall") {
         await shop.load().catch(() => {});
@@ -626,6 +636,8 @@ async function main() {
             if (z === "club_hall" && lot) return void travel({ zone: "city", arrive: `place:${lot}` });
             // The Museum & Gallery has a door on each block: in and out by the one you chose.
             if (given && (z === "museum" || (z === "city" && from?.zoneId === "museum"))) return void travel({ zone: z, arrive: given });
+            // Up from the labyrinth: out at the heart of the hedge maze.
+            if (z === "city" && from?.zoneId === "labyrinth") return void travel({ zone: z, arrive: "place:maze" });
             const place = from && ["mall", "bar", "arcade", HALL, "club_hall", "bowling", "concert_hall", "casino", "museum", "paintball"].includes(from.zoneId) ? `place:${from.zoneId}` : undefined;
             const arrive =
               (z === HALL && from && wingOfZone(from.zoneId)) || (z === "club_hall" && from?.zoneId === "clubroom")

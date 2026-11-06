@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 48;
+export const PROTOCOL_VERSION = 50;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -1062,6 +1062,8 @@ export type ServerMsg =
   | { t: "ObjectOn"; x: number; y: number; on: boolean }
   | { t: "TankFish"; x: number; y: number; fish: number[] }
   | { t: "ObjectTop"; x: number; y: number; item: number }
+  | { t: "LabState"; lit: number[]; gates: number[]; found: number; attuned: number; finishers: number; out: boolean }
+  | { t: "LabEvent"; kind: number; id: number; n: number }
   | { t: "ArenaBetPlaced"; pick: number; pays: number }
   | { t: "ArenaBetSettled"; coins: number; refund: boolean }
   ;
@@ -1460,13 +1462,28 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.y);
       w.u32(m.item);
       break;
-    case "ArenaBetPlaced":
+    case "LabState":
       w.u8(53);
+      w.vec(m.lit, (x) => w.u8(x));
+      w.vec(m.gates, (x) => w.u8(x));
+      w.u8(m.found);
+      w.u8(m.attuned);
+      w.u16(m.finishers);
+      w.bool(m.out);
+      break;
+    case "LabEvent":
+      w.u8(54);
+      w.u8(m.kind);
+      w.u32(m.id);
+      w.u16(m.n);
+      break;
+    case "ArenaBetPlaced":
+      w.u8(55);
       w.u8(m.pick);
       w.u16(m.pays);
       break;
     case "ArenaBetSettled":
-      w.u8(54);
+      w.u8(56);
       w.u16(m.coins);
       w.bool(m.refund);
       break;
@@ -1636,9 +1653,15 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "ObjectTop", x: r.u16(), y: r.u16(), item: r.u32() };
       break;
     case 53:
-      m = { t: "ArenaBetPlaced", pick: r.u8(), pays: r.u16() };
+      m = { t: "LabState", lit: r.vec(() => r.u8()), gates: r.vec(() => r.u8()), found: r.u8(), attuned: r.u8(), finishers: r.u16(), out: r.bool() };
       break;
     case 54:
+      m = { t: "LabEvent", kind: r.u8(), id: r.u32(), n: r.u16() };
+      break;
+    case 55:
+      m = { t: "ArenaBetPlaced", pick: r.u8(), pays: r.u16() };
+      break;
+    case 56:
       m = { t: "ArenaBetSettled", coins: r.u16(), refund: r.bool() };
       break;
     default:

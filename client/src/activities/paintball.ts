@@ -613,9 +613,8 @@ export class PaintballShow {
   /** The field point under the mouse (or the aiming finger). */
   private aimPoint(): { x: number; y: number } | null {
     if (!this.mouse) return null;
-    const s = this.scene.scale;
-    const w = this.scene.world.position;
-    return { x: (this.mouse.sx - w.x) / s / TILE - this.ox, y: (this.mouse.sy - w.y) / s / TILE - this.oy };
+    const w = this.scene.screenToWorld(this.mouse.sx, this.mouse.sy);
+    return { x: w.x / TILE - this.ox, y: w.y / TILE - this.oy };
   }
 
   /** Where the camera looks: a little ahead of us toward the aim, shaking when we're hit. */

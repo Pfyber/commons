@@ -3,6 +3,11 @@
 	email {$ACME_EMAIL}
 }
 
+# www.<domain> just sends people to <domain>.
+www.{$COMMONS_DOMAIN} {
+	redir https://{$COMMONS_DOMAIN}{uri} permanent
+}
+
 {$COMMONS_DOMAIN} {
 	encode zstd gzip
 
@@ -18,6 +23,13 @@
 	}
 	handle /ws {
 		reverse_proxy zone:8082
+	}
+	# Voice signalling (browsers) and LiveKit's room service (the social hub).
+	handle /rtc* {
+		reverse_proxy livekit:7880
+	}
+	handle /twirp/* {
+		reverse_proxy livekit:7880
 	}
 
 	handle {
@@ -35,6 +47,6 @@
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
-		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Permissions-Policy "camera=(), microphone=(self), geolocation=()"
 	}
 }

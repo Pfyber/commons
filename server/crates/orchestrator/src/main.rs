@@ -81,11 +81,13 @@ const PUBLIC_DOORS: &[&str] = &[
     "museum",
     "gallery",
     "paintball",
+    // Up from the Glowroot Labyrinth: out at the heart of the hedge maze.
+    "maze",
 ];
 
 /// Zones served unless `COMMONS_ZONES` says otherwise: the city, homes, the
 /// public buildings, and the Library's hall and wings (ADR 0012).
-const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling,concert_hall,casino,museum,paintball";
+const ZONES: &str = "city,home,mall,bar,arcade,library,library_children,library_lit,library_world,library_history,library_society,library_science,library_arts,library_reference,club_hall,clubroom,bowling,concert_hall,casino,museum,paintball,labyrinth";
 
 /// A metro station, `metro_<key>` (ADR 0016): you come up its stairs.
 fn is_station(place: &str) -> bool {
@@ -224,6 +226,18 @@ async fn join(
             )
             .await?;
             (zone, 1, Some(club), room.name)
+        } else if zone == "labyrinth" {
+            // A new labyrinth every day (UTC): today's, whoever you are.
+            let day = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() / 86_400)
+                .unwrap_or(0);
+            (
+                zone,
+                1,
+                Some(day.to_string()),
+                "The Glowroot Labyrinth".to_string(),
+            )
         } else {
             (zone, 1, None, String::new())
         }

@@ -21,6 +21,13 @@ x-app: &app
     SMTP_URL: ${SMTP_URL:-}
     MAIL_FROM: ${MAIL_FROM:-}
     COMMONS_FOUNDING_SEASON_END: ${COMMONS_FOUNDING_SEASON_END:-}
+    # true: sign-in links on screen and dev login, for testing without SMTP.
+    # Anyone can then sign in as anyone, so keep it false once SMTP works.
+    COMMONS_DEV: ${COMMONS_DEV:-false}
+    # Voice: browsers and the social hub both reach LiveKit through Caddy.
+    LIVEKIT_URL: wss://${COMMONS_DOMAIN}
+    LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+    LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
     RUST_LOG: ${RUST_LOG:-info}
   logging:
     driver: json-file
@@ -81,7 +88,19 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
     ports: ["80:80", "443:443", "443:443/udp"]
     volumes: [caddy_data:/data, caddy_config:/config]
-    depends_on: [api, social, orchestrator, zone]
+    depends_on: [api, social, orchestrator, zone, livekit]
+
+  # Voice for phone calls and the concert hall (ADR 0013, 0015). Signalling
+  # goes through Caddy (/rtc, /twirp); audio uses 7881/tcp and 7882/udp
+  # directly, so open those two ports in the firewall.
+  livekit:
+    image: livekit/livekit-server:v1.13.10
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}"
+    volumes: [./livekit.yaml:/etc/livekit.yaml:ro]
+    ports: ["7881:7881", "7882:7882/udp"]
 
   # A compressed dump every night, the last 14 kept (plus the newest
   # copied to ./backups on the host for off-site syncing).

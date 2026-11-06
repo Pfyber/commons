@@ -124,6 +124,8 @@ const DECOR: &[&str] = &[
     "amphora",
     // A bench stood north to south (seen side on), a seat on each tile.
     "bench_v",
+    // The café's fireside armchairs (seats).
+    "armchair",
 ];
 
 fn g(name: &str) -> u8 {

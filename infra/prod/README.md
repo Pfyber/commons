@@ -35,12 +35,31 @@ The first build takes about 10 minutes. Look for `mailer ready` in the API
 log. Then open `https://your-domain`, sign in with your Caretaker email, and
 check that the Town Hall shows the **Caretaker** tab.
 
+Or do sections 2 and 3 in one go on a fresh Ubuntu server (it also installs
+Docker, adds swap for the build and generates the secrets):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Pfyber/commons/main/infra/prod/install.sh \
+  | bash -s -- your-domain you@example.org
+```
+
 ## 4. Updating
 
 ```sh
-git pull
-docker compose -f infra/prod/docker-compose.yml --env-file infra/prod/.env up -d --build
+~/commons/infra/prod/update.sh
 ```
+
+It fetches the branch from GitHub (fast-forward only, so a hand edit on the
+server stops it rather than being lost), rebuilds what changed and restarts
+it. Run it after editing `.env` too. From your own computer:
+`ssh ubuntu@your-server commons/infra/prod/update.sh`.
+
+## Voice
+
+LiveKit runs in the same compose file. Browsers reach it through Caddy at
+`wss://your-domain` (`/rtc`, `/twirp`); audio uses ports **7881/tcp** and
+**7882/udp**, which must be open. Set `LIVEKIT_API_KEY` and
+`LIVEKIT_API_SECRET` in `.env` (`install.sh` generates them).
 
 Migrations run automatically when the API starts. Players see "Commons was
 updated, reload" when the protocol changes.

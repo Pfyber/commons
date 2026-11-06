@@ -18,6 +18,7 @@ mod fishing;
 mod garden;
 mod hangout;
 mod home;
+mod labyrinth;
 mod lucky;
 mod paintball;
 mod pool;
@@ -291,6 +292,8 @@ pub struct Instance {
     lures: Vec<fishing::Lure>,
     /// The lucky crate (outdoors only).
     lucky: lucky::Lucky,
+    /// The Glowroot Labyrinth's lanterns, glimmers and way up (its zone only).
+    lab: Option<labyrinth::Lab>,
     /// The lake rowboats go on, where the map has one, and the boats out on it.
     lake: Option<boats::Lake>,
     boats: Vec<boats::Boat>,
@@ -359,6 +362,7 @@ impl Instance {
             .iter()
             .find(|o| o.kind == "pool_table")
             .map(|o| pool::Table::new((o.x, o.y)));
+        let lab = labyrinth::Lab::for_zone(&zone);
         let arena_obj = arena::Arena::new(&zone.map.objects);
         let yard = paintball::Yard::new(&zone.map.objects);
         let lanes = zone
@@ -414,6 +418,7 @@ impl Instance {
             pool,
             lures: Vec::new(),
             lucky: lucky::Lucky::new(),
+            lab,
             lake,
             boats: Vec::new(),
             lanes,
@@ -564,6 +569,7 @@ impl Instance {
             self.arcade_tick(now);
             self.garden_tick(now);
             self.lucky_tick(now);
+            self.lab_tick(now);
             self.boat_tick(now);
             let bytes = self.flush();
             let elapsed = start.elapsed();
@@ -707,11 +713,16 @@ impl Instance {
         // Leaving your home, you step out of your own front door.
         let door = claims.arrive.as_ref().and_then(|lot| {
             let key = format!("door:{lot}");
-            self.zone
-                .map
-                .objects
+            let objects = &self.zone.map.objects;
+            objects
                 .iter()
                 .find(|o| o.kind == "spot" && o.label.as_deref() == Some(key.as_str()))
+                // Up from the labyrinth: out by the sundial at the heart of the hedge maze.
+                .or_else(|| {
+                    objects
+                        .iter()
+                        .find(|o| lot == "maze" && o.kind == "maze_heart")
+                })
                 .and_then(|o| self.grid.nearest_walkable((o.x, o.y), 2))
         });
         let tile = door
@@ -789,6 +800,7 @@ impl Instance {
         self.pool_hello(id);
         self.lure_hello(id);
         self.lucky_hello(id);
+        self.lab_hello(id);
         self.bowl_hello(id);
         self.arena_hello(id);
         self.pb_hello(id);
@@ -1244,6 +1256,7 @@ impl Instance {
         }
         self.update_subs(id, now);
         self.lucky_near(id, now);
+        self.lab_near(id, now);
     }
 
     fn change_cell(&mut self, id: u32, old: u16, new: u16, now: u32) {
