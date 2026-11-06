@@ -3,6 +3,11 @@
 	email {$ACME_EMAIL}
 }
 
+# www.<domain> just sends people to <domain>.
+www.{$COMMONS_DOMAIN} {
+	redir https://{$COMMONS_DOMAIN}{uri} permanent
+}
+
 {$COMMONS_DOMAIN} {
 	encode zstd gzip
 
