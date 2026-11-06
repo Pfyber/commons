@@ -188,6 +188,9 @@ pub fn paintball() -> MapFile {
         ("pb_hay", 17, 13, 2, 1),
         ("pb_hedge", 16, 2, 2, 2),
         ("pb_hedge", 16, 20, 2, 2),
+        // Two more to lie up in, midfield, either side of the tyres.
+        ("pb_hedge", 12, 7, 2, 2),
+        ("pb_hedge", 12, 15, 2, 2),
     ];
     for &(k, x, y, ow, oh) in half {
         b.object(k, fx + x, fy + y, ow, oh, None, false);

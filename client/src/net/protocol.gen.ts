@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 42;
+export const PROTOCOL_VERSION = 48;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -120,6 +120,7 @@ export interface ArenaFighter {
   holding: number;
   fix: number;
   kit: number;
+  buffs: number;
 }
 
 export function encArenaFighter(w: Writer, v: ArenaFighter) {
@@ -137,6 +138,7 @@ export function encArenaFighter(w: Writer, v: ArenaFighter) {
   w.u8(v.holding);
   w.u8(v.fix);
   w.u8(v.kit);
+  w.u8(v.buffs);
 }
 
 export function decArenaFighter(r: Reader): ArenaFighter {
@@ -155,6 +157,71 @@ export function decArenaFighter(r: Reader): ArenaFighter {
     holding: r.u8(),
     fix: r.u8(),
     kit: r.u8(),
+    buffs: r.u8(),
+  };
+}
+
+export interface ArenaLion {
+  id: number;
+  kind: number;
+  x: number;
+  y: number;
+  aim: number;
+  hp: number;
+  act: number;
+  actMs: number;
+  toX: number;
+  toY: number;
+  item: number;
+}
+
+export function encArenaLion(w: Writer, v: ArenaLion) {
+  w.u8(v.id);
+  w.u8(v.kind);
+  w.u16(v.x);
+  w.u16(v.y);
+  w.u16(v.aim);
+  w.u8(v.hp);
+  w.u8(v.act);
+  w.u16(v.actMs);
+  w.u16(v.toX);
+  w.u16(v.toY);
+  w.u8(v.item);
+}
+
+export function decArenaLion(r: Reader): ArenaLion {
+  return {
+    id: r.u8(),
+    kind: r.u8(),
+    x: r.u16(),
+    y: r.u16(),
+    aim: r.u16(),
+    hp: r.u8(),
+    act: r.u8(),
+    actMs: r.u16(),
+    toX: r.u16(),
+    toY: r.u16(),
+    item: r.u8(),
+  };
+}
+
+export interface ArenaCloud {
+  id: number;
+  x: number;
+  y: number;
+}
+
+export function encArenaCloud(w: Writer, v: ArenaCloud) {
+  w.u8(v.id);
+  w.u16(v.x);
+  w.u16(v.y);
+}
+
+export function decArenaCloud(r: Reader): ArenaCloud {
+  return {
+    id: r.u8(),
+    x: r.u16(),
+    y: r.u16(),
   };
 }
 
@@ -390,6 +457,10 @@ export type ClientMsg =
   | { t: "ArenaKit"; kit: number }
   | { t: "ArenaLobby" }
   | { t: "ArenaWheel"; on: boolean }
+  | { t: "ArenaVote"; kind: number }
+  | { t: "ArenaDisasters"; on: boolean }
+  | { t: "ArenaBet"; pick: number }
+  | { t: "ArenaSwitch"; slot: number }
   | { t: "SalvageReel"; target: boolean; extras: number }
   | { t: "UseObject"; x: number; y: number }
   | { t: "TankPut"; x: number; y: number; fish: number }
@@ -677,6 +748,22 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(62);
       w.bool(m.on);
       break;
+    case "ArenaVote":
+      w.u8(67);
+      w.u8(m.kind);
+      break;
+    case "ArenaDisasters":
+      w.u8(68);
+      w.bool(m.on);
+      break;
+    case "ArenaBet":
+      w.u8(69);
+      w.u8(m.pick);
+      break;
+    case "ArenaSwitch":
+      w.u8(70);
+      w.u8(m.slot);
+      break;
     case "SalvageReel":
       w.u8(63);
       w.bool(m.target);
@@ -891,6 +978,18 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 62:
       m = { t: "ArenaWheel", on: r.bool() };
       break;
+    case 67:
+      m = { t: "ArenaVote", kind: r.u8() };
+      break;
+    case 68:
+      m = { t: "ArenaDisasters", on: r.bool() };
+      break;
+    case 69:
+      m = { t: "ArenaBet", pick: r.u8() };
+      break;
+    case 70:
+      m = { t: "ArenaSwitch", slot: r.u8() };
+      break;
     case 63:
       m = { t: "SalvageReel", target: r.bool(), extras: r.u8() };
       break;
@@ -950,7 +1049,7 @@ export type ServerMsg =
   | { t: "LureShown"; x: number; y: number; ends: number; kind: number }
   | { t: "BowlState"; lane: number; a: number; b: number; status: number; turn: number; frame: number; ball: number; standing: number; shot: number; rollsA: number[]; rollsB: number[] }
   | { t: "BowlRolled"; lane: number; by: number; aim: number; power: number; knocked: number; shot: number }
-  | { t: "ArenaState"; status: number; now: number; phaseMs: number; round: number; fire: number; spikes: number[]; slots: number[]; crowns: number[]; fighters: ArenaFighter[]; gifts: ArenaGift[]; winner: number; level: number; mode: number; goliath: number; kits: boolean; chooseMs: number; exhibition: boolean; wheel: boolean }
+  | { t: "ArenaState"; status: number; now: number; phaseMs: number; round: number; fire: number; spikes: number[]; slots: number[]; crowns: number[]; fighters: ArenaFighter[]; gifts: ArenaGift[]; winner: number; level: number; mode: number; goliath: number; kits: boolean; chooseMs: number; exhibition: boolean; wheel: boolean; disaster: number; disasterStage: number; disasterMs: number; disasterVotes: number[]; disasterPool: number; lava: number; lions: ArenaLion[]; disasters: boolean; clouds: ArenaCloud[]; betMs: number; bets: number[]; betPay: number }
   | { t: "ArenaEvent"; kind: number; a: number; b: number; x: number; y: number; n: number; m: number; vx: number; vy: number }
   | { t: "LuckyShown"; x: number; y: number; moves: number }
   | { t: "LuckyFound"; id: number; x: number; y: number }
@@ -963,6 +1062,8 @@ export type ServerMsg =
   | { t: "ObjectOn"; x: number; y: number; on: boolean }
   | { t: "TankFish"; x: number; y: number; fish: number[] }
   | { t: "ObjectTop"; x: number; y: number; item: number }
+  | { t: "ArenaBetPlaced"; pick: number; pays: number }
+  | { t: "ArenaBetSettled"; coins: number; refund: boolean }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -1259,6 +1360,18 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.chooseMs);
       w.bool(m.exhibition);
       w.bool(m.wheel);
+      w.u8(m.disaster);
+      w.u8(m.disasterStage);
+      w.u16(m.disasterMs);
+      w.vec(m.disasterVotes, (x) => w.u8(x));
+      w.u8(m.disasterPool);
+      w.u16(m.lava);
+      w.vec(m.lions, (x) => encArenaLion(w, x));
+      w.bool(m.disasters);
+      w.vec(m.clouds, (x) => encArenaCloud(w, x));
+      w.u16(m.betMs);
+      w.vec(m.bets, (x) => w.u8(x));
+      w.u16(m.betPay);
       break;
     case "ArenaEvent":
       w.u8(41);
@@ -1346,6 +1459,16 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.x);
       w.u16(m.y);
       w.u32(m.item);
+      break;
+    case "ArenaBetPlaced":
+      w.u8(53);
+      w.u8(m.pick);
+      w.u16(m.pays);
+      break;
+    case "ArenaBetSettled":
+      w.u8(54);
+      w.u16(m.coins);
+      w.bool(m.refund);
       break;
   }
   return w.finish();
@@ -1474,7 +1597,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "BowlRolled", lane: r.u8(), by: r.u32(), aim: r.u16(), power: r.u16(), knocked: r.u16(), shot: r.u32() };
       break;
     case 40:
-      m = { t: "ArenaState", status: r.u8(), now: r.u32(), phaseMs: r.u32(), round: r.u8(), fire: r.u16(), spikes: r.vec(() => r.u8()), slots: r.vec(() => r.u32()), crowns: r.vec(() => r.u8()), fighters: r.vec(() => decArenaFighter(r)), gifts: r.vec(() => decArenaGift(r)), winner: r.u32(), level: r.u8(), mode: r.u8(), goliath: r.u8(), kits: r.bool(), chooseMs: r.u16(), exhibition: r.bool(), wheel: r.bool() };
+      m = { t: "ArenaState", status: r.u8(), now: r.u32(), phaseMs: r.u32(), round: r.u8(), fire: r.u16(), spikes: r.vec(() => r.u8()), slots: r.vec(() => r.u32()), crowns: r.vec(() => r.u8()), fighters: r.vec(() => decArenaFighter(r)), gifts: r.vec(() => decArenaGift(r)), winner: r.u32(), level: r.u8(), mode: r.u8(), goliath: r.u8(), kits: r.bool(), chooseMs: r.u16(), exhibition: r.bool(), wheel: r.bool(), disaster: r.u8(), disasterStage: r.u8(), disasterMs: r.u16(), disasterVotes: r.vec(() => r.u8()), disasterPool: r.u8(), lava: r.u16(), lions: r.vec(() => decArenaLion(r)), disasters: r.bool(), clouds: r.vec(() => decArenaCloud(r)), betMs: r.u16(), bets: r.vec(() => r.u8()), betPay: r.u16() };
       break;
     case 41:
       m = { t: "ArenaEvent", kind: r.u8(), a: r.u32(), b: r.u32(), x: r.u16(), y: r.u16(), n: r.u16(), m: r.u16(), vx: r.u16(), vy: r.u16() };
@@ -1511,6 +1634,12 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 52:
       m = { t: "ObjectTop", x: r.u16(), y: r.u16(), item: r.u32() };
+      break;
+    case 53:
+      m = { t: "ArenaBetPlaced", pick: r.u8(), pays: r.u16() };
+      break;
+    case 54:
+      m = { t: "ArenaBetSettled", coins: r.u16(), refund: r.bool() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

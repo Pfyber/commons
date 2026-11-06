@@ -113,6 +113,7 @@ export class Scene {
    */
   private zoom = loadZoom();
   private zoomTo = this.zoom;
+  private locked: { w: number; h: number } | null = null;
   private zoomAt = performance.now();
   private cam: TileXY = { x: 0, y: 0 };
   /**
@@ -315,7 +316,7 @@ export class Scene {
   resize() {
     const res = this.app.renderer.resolution;
     const [lo, hi] = this.zoomRange();
-    const step = this.stepAt(Math.max(lo, Math.min(hi, this.zoom)));
+    const step = this.locked ? this.lockedStep(this.locked) : this.stepAt(Math.max(lo, Math.min(hi, this.zoom)));
     // Settled on a whole step, the art is pixel-perfect; between steps (gliding, pinching) it's smooth.
     this.scale = step / res;
     this.world.scale.set(this.scale);
@@ -351,6 +352,7 @@ export class Scene {
 
   /** Glides a step in (+1) or out (−1). Returns whether it will change. */
   zoomBy(dir: number): boolean {
+    if (this.locked) return false;
     const [lo, hi] = this.zoomRange();
     const next = Math.max(lo, Math.min(hi, Math.round(this.zoomTo) + Math.sign(dir)));
     if (next === this.zoomTo) return false;
@@ -365,12 +367,38 @@ export class Scene {
    * closer still; `save`: kept for next time.)
    */
   zoomFine(dir: number, closer = true, save = false): boolean {
+    if (this.locked) return false;
     const [lo, hi] = this.zoomRange();
     const next = Math.max(lo, Math.min(hi + (closer ? 2 : 0), this.zoomTo + Math.sign(dir) * 0.25));
     if (next === this.zoomTo) return false;
     this.zoomTo = next;
     if (save) this.saveZoom();
     return true;
+  }
+
+  /**
+   * Fixes the view at `w` × `h` tiles, whatever the screen, as big as fits
+   * (a quarter step at a time, and no zooming till it's let go): paintball,
+   * where seeing further is winning. Null lets it go.
+   */
+  lockView(box: { w: number; h: number } | null) {
+    const same = box?.w === this.locked?.w && box?.h === this.locked?.h;
+    // (Asked every frame: the screen may have changed under it.)
+    if (same && (!box || Math.abs(this.lockedStep(box) - this.scale * this.app.renderer.resolution) < 1e-3)) return;
+    this.locked = box;
+    this.resize();
+  }
+
+  /** The locked view's size on screen (CSS px). */
+  get lockedPx(): { w: number; h: number } | null {
+    return this.locked ? { w: this.locked.w * TILE * this.scale, h: this.locked.h * TILE * this.scale } : null;
+  }
+
+  private lockedStep(box: { w: number; h: number }): number {
+    const { width, height } = this.app.screen;
+    const fit = Math.min(width / (box.w * TILE), height / (box.h * TILE)) * this.app.renderer.resolution;
+    // (Below one device pixel to the art pixel, as fine as it needs: small phones.)
+    return fit >= 1 ? Math.floor(fit * 4) / 4 : Math.max(0.125, Math.floor(fit * 16) / 16);
   }
 
   /** Back within the usual range (after watching the arena close up). */

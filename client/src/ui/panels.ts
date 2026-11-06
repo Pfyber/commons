@@ -351,7 +351,7 @@ export class BagPanel extends Panel {
       }
       this.body.append(grid);
     }
-    if (!any) this.body.append(el("p", "empty", "Your bag is empty. Try fishing at the pond or the market cart by the fountain."));
+    if (!any) this.body.append(el("p", "empty", "Your bag is empty. Try fishing at the pond or a look round the Commons Mall."));
   }
 }
 
@@ -768,7 +768,7 @@ export class PlotMenu extends Panel {
     const p = this.info;
     if (!p) {
       const seeds = this.eco.ofKind("seed").filter((s) => this.eco.qty(s.id) > 0);
-      this.body.append(el("p", "", seeds.length ? "Plant something:" : "You have no seeds. The market cart sells them."));
+      this.body.append(el("p", "", seeds.length ? "Plant something:" : "You have no seeds. The Commons Mall sells them."));
       for (const s of seeds) {
         const row = el("div", "row");
         row.append(icon(s), el("span", "name", `${s.name} ×${this.eco.qty(s.id)}`), button("Plant", () => (this.act(x, y, 1, s.id), this.hide()), "small"));

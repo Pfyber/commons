@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import arenaRs from "../../../server/crates/sim/src/arena.rs?raw";
-import { ARROW, ARROW_RANGE, ARROW_SPEED, BIG_BOMB, BIG_BOMB_COST, BIG_BOMB_FULL_MS, BIG_BOMB_R, BLAST_R, BODY_H, BURST_COST, BURST_GAP_MS, CAST, CHOOSE_MS, GIANT_H, KIT_HEAVY_REACH, KIT_HP, KIT_LIGHT_ARC, KIT_LIGHT_REACH, KIT_LIGHT_TIME, KIT_LUNGE, KIT_LUNGE_MAX, KIT_SPEED, KIT_SPIN_REACH, LOB_MIN, LOB_RANGE, QUAKE_R, QUICK_ARROW_COST, QUICK_LOB, QUICK_LOB_COST, QUICK_LOB_R, QUICK_SHOT, SHOOT, TANK_LEAP, TANK_LEAP_MIN, TANK_STOMP_R } from "./arenakits";
-import { GIANT_CHARGE_MS, HEAVY_LUNGE, HEAVY_LUNGE_MAX, HP, HURL_DIST, HURL_MIN, STOMP_LEAP, STOMP_LEAP_MIN, STOMP_R, GIANT_DASH_COST, GIANT_DASH_DIST, GIANT_DASH_MS, GIANT_HP, GIANT_R, GIANT_SPEED, GRAB_SPIN_MS, OVER_MS, PARADE_END, PARADE_FIRST_GAP, PARADE_GAP, LIGHT_COST, SMASH, SMASH_ARC, SMASH_COST, SMASH_REACH, STOMP } from "./arena";
+import { BET_STAKE } from "./arenabets";
+import { THIEF_BURROW_MS, THIEF_PEEK_MS, THIEF_SNATCH_MS } from "./arenathief";
+import { ARROW, ARROW_RANGE, ARROW_SPEED, BIG_BOMB, BIG_BOMB_COST, BIG_BOMB_FULL_MS, BIG_BOMB_R, BLAST_R, BODY_H, BURST_COST, BURST_MIN_COST, BURST_GAP_MS, CAST, CHOOSE_MS, GIANT_H, KIT_HEAVY_REACH, KIT_HP, KIT_LIGHT_ARC, KIT_LIGHT_REACH, KIT_COST, KIT_HEAVY_COST, KIT_LIGHT_TIME, KIT_LIGHT_WINDUP, KIT_LUNGE, KIT_LUNGE_MAX, KIT_SPEED, KIT_SPIN_REACH, LOB_MIN, LOB_RANGE, QUAKE_R, STAB, STAB_COST, SHOOT, SPEAR_FULL_MS, TANK_LEAP, TANK_LEAP_MIN, TANK_STOMP_R } from "./arenakits";
+import { ACID_OFF, ACID_RX, ACID_RY, DART_WIND_MS, STING_QUICK_WIND_MS, THIEF_ID, LION_CROUCH_MS, LION_EMERGE_MS, LION_HP, LION_LEAP_MS, METEOR_RAIN_MS, METEOR_WARN_MS, SCORPION_HP, SCORPION_RISE_MS, SCORPION_ROAR_MS, SCORPION_SINK_MS, SCORPION_WAIT_MS, STING_WIND_MS } from "./arenadisaster";
+import { GIANT_CHARGE_MS, HEAVY_LUNGE, HEAVY_LUNGE_MAX, HP, HURL_DIST, HURL_MIN, STOMP_LEAP, STOMP_LEAP_MIN, STOMP_R, GIANT_DASH_COST, GIANT_DASH_DIST, GIANT_DASH_MS, GIANT_HP, GIANT_R, GIANT_SPEED, GRAB_SPIN_MS, OVER_MS, PARADE_END, PARADE_FIRST_GAP, PARADE_GAP, LIGHT_COST, SMASH, SMASH_ARC, SMASH_COST, SMASH_REACH, SPEED_GIFT_X, STOMP } from "./arena";
 
 /** A constant's value in the server's arena sim (sim/src/arena.rs). */
 function serverConst(name: string): number {
@@ -11,6 +14,10 @@ function serverConst(name: string): number {
 }
 
 describe("the arena (mirrors sim::arena)", () => {
+  it("runs as fast in Hermes' boots as the server lets it", () => {
+    expect(SPEED_GIFT_X).toBe(serverConst("SPEED_GIFT_X"));
+  });
+
   it("ends the champion's parade where the server stands them after", () => {
     expect(PARADE_END).toBe(serverConst("PARADE_END"));
     expect(PARADE_GAP).toBe(serverConst("PARADE_GAP"));
@@ -62,6 +69,9 @@ describe("the arena's classes (mirror sim::arena::kit)", () => {
     expect(KIT_LIGHT_REACH).toEqual(table("KIT_LIGHT_REACH"));
     expect(KIT_LIGHT_ARC).toEqual(table("KIT_LIGHT_ARC"));
     expect(KIT_LIGHT_TIME).toEqual(table("KIT_LIGHT_TIME"));
+    expect(KIT_LIGHT_WINDUP).toEqual(table("KIT_LIGHT_WINDUP"));
+    expect(KIT_HEAVY_COST).toEqual(table("KIT_HEAVY_COST"));
+    expect(KIT_COST).toEqual(table("KIT_COST"));
     expect(KIT_HEAVY_REACH).toEqual(table("KIT_HEAVY_REACH"));
     expect(KIT_LUNGE).toEqual(table("KIT_LUNGE"));
     expect(KIT_LUNGE_MAX).toEqual(table("KIT_LUNGE_MAX"));
@@ -72,13 +82,12 @@ describe("the arena's classes (mirror sim::arena::kit)", () => {
       [CHOOSE_MS, "CHOOSE_MS"],
       [ARROW_SPEED, "ARROW_SPEED"],
       [ARROW_RANGE, "ARROW_RANGE"],
-      [QUICK_ARROW_COST, "QUICK_ARROW_COST"],
+      [STAB_COST, "STAB_COST"],
       [BURST_GAP_MS, "BURST_GAP_MS"],
       [BURST_COST, "BURST_COST"],
+      [BURST_MIN_COST, "BURST_MIN_COST"],
       [LOB_MIN, "LOB_MIN"],
       [LOB_RANGE, "LOB_RANGE"],
-      [QUICK_LOB_R, "QUICK_LOB_R"],
-      [QUICK_LOB_COST, "QUICK_LOB_COST"],
       [TANK_LEAP_MIN, "TANK_LEAP_MIN"],
       [TANK_LEAP, "TANK_LEAP"],
       [TANK_STOMP_R, "TANK_STOMP_R"],
@@ -86,6 +95,28 @@ describe("the arena's classes (mirror sim::arena::kit)", () => {
       [GIANT_H, "GIANT_H"],
       [BLAST_R, "BLAST_R"],
       [QUAKE_R, "QUAKE_R"],
+      [LION_HP, "LION_HP"],
+      [LION_CROUCH_MS, "LION_CROUCH_MS"],
+      [LION_LEAP_MS, "LION_LEAP_MS"],
+      [LION_EMERGE_MS, "LION_EMERGE_MS"],
+      [METEOR_WARN_MS, "METEOR_WARN_MS"],
+      [METEOR_RAIN_MS, "METEOR_RAIN_MS"],
+      [SCORPION_HP, "SCORPION_HP"],
+      [SCORPION_SINK_MS, "SCORPION_SINK_MS"],
+      [SCORPION_WAIT_MS, "SCORPION_WAIT_MS"],
+      [SCORPION_RISE_MS, "SCORPION_RISE_MS"],
+      [SCORPION_ROAR_MS, "SCORPION_ROAR_MS"],
+      [STING_WIND_MS, "STING_WIND_MS"],
+      [STING_QUICK_WIND_MS, "STING_QUICK_WIND_MS"],
+      [THIEF_ID, "THIEF_ID"],
+      [BET_STAKE, "BET_STAKE"],
+      [THIEF_PEEK_MS, "THIEF_PEEK_MS"],
+      [THIEF_SNATCH_MS, "THIEF_SNATCH_MS"],
+      [THIEF_BURROW_MS, "THIEF_BURROW_MS"],
+      [DART_WIND_MS, "DART_WIND_MS"],
+      [ACID_RX, "ACID_RX"],
+      [ACID_RY, "ACID_RY"],
+      [ACID_OFF, "ACID_OFF"],
     ] as [number, string][]) {
       expect(v, name).toBe(serverConst(name));
     }
@@ -96,11 +127,11 @@ describe("the arena's classes (mirror sim::arena::kit)", () => {
     };
     expect(SHOOT).toEqual(pair("SHOOT"));
     expect(CAST).toEqual(pair("CAST"));
-    expect(QUICK_SHOT).toEqual(pair("QUICK_SHOT"));
-    expect(QUICK_LOB).toEqual(pair("QUICK_LOB"));
+    expect(STAB).toEqual(arenaRs.match(/pub const STAB: \(u32, u32, u32\) = \(([0-9, ]+)\)/)![1].split(",").map((v) => Number(v.trim())));
     expect(BIG_BOMB_R).toEqual(pair("BIG_BOMB_R", "f64"));
     expect(BIG_BOMB_COST).toEqual(pair("BIG_BOMB_COST", "f64"));
     expect(ARROW).toBe(Number(arenaRs.match(/pub const ARROW: u8 = (\d+);/)![1]));
+    expect(SPEAR_FULL_MS).toBe(2 * serverConst("HEAVY_FULL_MS"));
     expect(BIG_BOMB_FULL_MS).toBe(serverConst("HEAVY_MIN_MS") + 4 * (serverConst("HEAVY_FULL_MS") - serverConst("HEAVY_MIN_MS")));
     expect(BIG_BOMB).toBe(Number(arenaRs.match(/pub const BIG_BOMB: u8 = (\d+);/)![1]));
   });

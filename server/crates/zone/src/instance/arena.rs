@@ -8,11 +8,26 @@
 //! ring gets an `ArenaState` every tick and an `ArenaEvent` for each blow.
 
 use super::Instance;
-use commons_protocol::{ArenaFighter, ArenaGift, ServerMsg, state};
+use crate::econ::CallError;
+use commons_protocol::{
+    ArenaCloud, ArenaFighter, ArenaGift, ArenaLion, ServerMsg, error_code, state,
+};
 use commons_sim::TilePos;
 use commons_sim::arena as sim;
 use commons_sim::map::MapObject;
 use rand::Rng;
+
+/// A spectator's bet: who, on what, and whether the stake's been taken yet.
+/// (The coin's item id.)
+const COIN: u32 = 1;
+
+#[derive(Debug, Clone)]
+struct Bet {
+    id: u32,
+    player: String,
+    pick: u8,
+    paid: bool,
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct Arena {
@@ -24,6 +39,8 @@ pub(super) struct Arena {
     /// fighters come back out after.
     gate: TilePos,
     dirty: bool,
+    /// The spectators' bets on this round.
+    bets: Vec<Bet>,
     /// Nobody's played since then (or someone's just looked at the sign):
     /// the bots put on a match of their own once it's been a while.
     quiet_until: u32,
@@ -49,6 +66,7 @@ impl Arena {
             ring: (a.x, a.y, a.w, a.h),
             gate,
             dirty: true,
+            bets: Vec::new(),
             quiet_until: EXHIBIT_AFTER_MS,
         })
     }
@@ -104,6 +122,7 @@ impl Arena {
                     act_ms: now.saturating_sub(f.act_at).min(65_535) as u16,
                     charge: (f.charge * 100.0).round() as u8,
                     flags: f.flags(now),
+                    buffs: f.buffs(now),
                     holding: f.holding,
                     fix: f.fix,
                     kit: (m.picks.get(f.slot).copied().unwrap_or(0) & sim::kit::PICKED) | f.kit,
@@ -131,6 +150,51 @@ impl Arena {
             },
             exhibition: m.exhibition,
             wheel: m.wheel,
+            disaster: m.disaster_shown(),
+            disaster_stage: m.disaster_stage,
+            disaster_ms: m.disaster_end.saturating_sub(now).min(65_535) as u16,
+            disaster_votes: m.disaster_tally().to_vec(),
+            disaster_pool: m.disaster_pool,
+            lava: (m.lava(now) * 1000.0).round() as u16,
+            disasters: m.disasters,
+            bet_ms: m.bet_ms(now).min(65_535) as u16,
+            bets: {
+                let mut n = vec![0u8; 4];
+                for b in &self.bets {
+                    if let Some(c) = n.get_mut(b.pick as usize) {
+                        *c = c.saturating_add(1);
+                    }
+                }
+                n
+            },
+            bet_pay: m.bet_pay() as u16,
+            clouds: m
+                .clouds
+                .iter()
+                .filter(|c| c.delay <= now)
+                .map(|c| ArenaCloud {
+                    id: c.id,
+                    x: x100(c.x(now) + sim::ACID_OFF),
+                    y: x100(c.y),
+                })
+                .collect(),
+            lions: m
+                .lions
+                .iter()
+                .map(|l| ArenaLion {
+                    id: l.id,
+                    kind: if l.thief { 2 } else { l.scorpion as u8 },
+                    x: x100(l.x),
+                    y: x100(l.y),
+                    aim: sim::aim_to_u16(l.aim),
+                    hp: l.hp.max(0.0).ceil().min(255.0) as u8,
+                    act: l.act,
+                    act_ms: now.saturating_sub(l.act_at).min(65_535) as u16,
+                    to_x: x100(l.to.0),
+                    to_y: x100(l.to.1),
+                    item: l.item,
+                })
+                .collect(),
         }
     }
 }
@@ -408,6 +472,183 @@ impl Instance {
         }
     }
 
+    pub(super) fn arena_disasters(&mut self, id: u32, on: bool, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.set_disasters(id, on) {
+            ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
+    /// A spectator's vote for the round's disaster.
+    /// Over to another place, in the lobby.
+    pub(super) fn arena_switch(&mut self, id: u32, slot: u8, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.switch_place(id, slot as usize) {
+            ar.dirty = true;
+            self.arena_send(now);
+        }
+    }
+
+    /// A spectator's bet on the round: the stake taken, or told why not.
+    pub(super) fn arena_bet(&mut self, id: u32, pick: u8, now: u32) {
+        let Some(a) = self.avatars.get_mut(&id) else {
+            return;
+        };
+        if !a.emote_rl.try_take(now as u64) {
+            return;
+        }
+        let (player, minor) = (a.player_id.clone(), a.minor);
+        let Some(ar) = self.arena.as_ref() else {
+            return;
+        };
+        // (Betting's kept from under-18s, as the casino is.)
+        if minor && !commons_common::config::env_or("COMMONS_CASINO_MINORS", false) {
+            return self.error(id, error_code::NOT_ALLOWED, "betting's for grown-ups");
+        }
+        if ar.m.bet_ms(now) == 0 {
+            return self.error(
+                id,
+                error_code::NOT_ALLOWED,
+                "bets are closed for this round",
+            );
+        }
+        if ar.m.playing(id) {
+            return self.error(id, error_code::NOT_ALLOWED, "no betting from the sand");
+        }
+        if !ar.m.bet_ok(pick) || ar.bets.iter().any(|b| b.id == id) {
+            return;
+        }
+        let pays = ar.m.bet_pay() as u16;
+        let Some(econ) = self.economy.clone() else {
+            return self.error(id, error_code::UNAVAILABLE, "the bookie's away just now");
+        };
+        if let Some(ar) = self.arena.as_mut() {
+            ar.bets.push(Bet {
+                id,
+                player: player.clone(),
+                pick,
+                paid: false,
+            });
+        }
+        let key = self.next_key("arena_bet");
+        let who = player.clone();
+        self.spawn_call(
+            async move {
+                econ.grant(&who, COIN, -sim::BET_STAKE, "arena_bet", &key)
+                    .await
+            },
+            move |inst, result| {
+                let bet = inst
+                    .arena
+                    .as_mut()
+                    .and_then(|ar| ar.bets.iter_mut().find(|b| b.id == id));
+                match (result, bet) {
+                    (Ok(applied), Some(b)) => {
+                        b.paid = true;
+                        if inst.avatars.contains_key(&id) {
+                            inst.send_granted(id, &applied);
+                            inst.send_to(id, &ServerMsg::ArenaBetPlaced { pick, pays });
+                        }
+                    }
+                    // (The round was over before the till rang: it's handed straight back.)
+                    (Ok(applied), None) => {
+                        if inst.avatars.contains_key(&id) {
+                            inst.send_granted(id, &applied);
+                        }
+                        inst.arena_pay(id, player, sim::BET_STAKE, true);
+                    }
+                    (Err(e), _) => {
+                        if let Some(ar) = inst.arena.as_mut() {
+                            ar.bets.retain(|b| b.id != id);
+                        }
+                        let (code, msg) = match e {
+                            CallError::Rejected(_) => {
+                                (error_code::NOT_ALLOWED, "not enough coins for a bet")
+                            }
+                            CallError::Unavailable => {
+                                (error_code::UNAVAILABLE, "the bookie's busy; try again")
+                            }
+                        };
+                        inst.error(id, code, msg);
+                    }
+                }
+            },
+        );
+    }
+
+    /// The round's decided (`side`: who took it; none: nobody did): good
+    /// bets paid, the rest told. Anyone who's since jumped in gets their stake back.
+    fn arena_settle(&mut self, side: Option<u8>) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        let bets = std::mem::take(&mut ar.bets);
+        let pay = ar.m.bet_pay();
+        let fighting: Vec<bool> = bets.iter().map(|b| ar.m.playing(b.id)).collect();
+        for (b, fought) in bets.into_iter().zip(fighting) {
+            if !b.paid {
+                continue;
+            }
+            if side.is_none() || fought {
+                self.arena_pay(b.id, b.player, sim::BET_STAKE, true);
+            } else if side == Some(b.pick) {
+                self.arena_pay(b.id, b.player, pay, false);
+            } else {
+                self.send_to(
+                    b.id,
+                    &ServerMsg::ArenaBetSettled {
+                        coins: 0,
+                        refund: false,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Coins back to a spectator (wherever they've got to: it's theirs).
+    fn arena_pay(&mut self, id: u32, player: String, coins: i32, refund: bool) {
+        let Some(econ) = self.economy.clone() else {
+            return;
+        };
+        let reason = if refund {
+            "arena_bet_back"
+        } else {
+            "arena_bet_won"
+        };
+        let key = self.next_key("arena_bet_pay");
+        self.spawn_call(
+            async move { econ.grant(&player, COIN, coins, reason, &key).await },
+            move |inst, result| match result {
+                Ok(applied) if inst.avatars.contains_key(&id) => {
+                    inst.send_granted(id, &applied);
+                    inst.send_to(
+                        id,
+                        &ServerMsg::ArenaBetSettled {
+                            coins: coins as u16,
+                            refund,
+                        },
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(?e, coins, "arena bet: couldn't pay out"),
+            },
+        );
+    }
+
+    pub(super) fn arena_vote(&mut self, id: u32, kind: u8, now: u32) {
+        let Some(ar) = self.arena.as_mut() else {
+            return;
+        };
+        if ar.m.vote(id, kind) {
+            self.arena_send(now);
+        }
+    }
+
     /// A class picked for the round (shown at once to all).
     pub(super) fn arena_kit(&mut self, id: u32, kit: u8, now: u32) {
         let Some(ar) = self.arena.as_mut() else {
@@ -489,6 +730,11 @@ impl Instance {
         };
         let before = ar.m.status;
         if before == sim::LOBBY {
+            // (Called off, with bets down: they're handed back.)
+            if !ar.bets.is_empty() {
+                self.arena_settle(None);
+                return;
+            }
             if ar.dirty {
                 ar.dirty = false;
                 self.arena_send(now);
@@ -529,6 +775,10 @@ impl Instance {
         }
         for e in &evs {
             self.arena_broadcast(&event_msg(e));
+        }
+        if let Some(e) = evs.iter().find(|e| e.kind == sim::ev::ROUND_WON) {
+            let side = self.arena.as_ref().and_then(|ar| ar.m.won_by(e.a));
+            self.arena_settle(side);
         }
         // The match won: a gladiator's win, on the leaderboard (not a bot's).
         if after == sim::OVER && before != sim::OVER {

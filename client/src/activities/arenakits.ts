@@ -14,11 +14,14 @@ export const ACT = { NONE: 0, LIGHT1: 1, LIGHT2: 2, LIGHT3: 3, CHARGE: 4, HEAVY:
 
 export const KIT = { KNIGHT: 0, ARCHER: 1, BOMBER: 2, SPEARMAN: 3, TANK: 4, COUNT: 5, PICKED: 0x80 };
 /** Each class (by `KIT`): as `arena::KIT_*`. */
-export const KIT_HP = [108, 105, 95, 110, 150];
+export const KIT_HP = [162, 157, 143, 166, 226];
 export const KIT_SPEED = [1, 1.176, 1, 1, 0.84];
-export const KIT_LIGHT_REACH = [1.35, 1.15, 1.15, 1.95, 1.4];
-export const KIT_LIGHT_ARC = [1, 0.85, 0.85, 0.8, 1.05];
-export const KIT_LIGHT_TIME = [1, 0.8, 0.8, 1.08, 1.15];
+export const KIT_LIGHT_REACH = [1.35, 1.3, 1.3, 1.95, 2.05];
+export const KIT_LIGHT_ARC = [1, 0.6, 0.6, 0.8, 1.35];
+export const KIT_LIGHT_TIME = [1, 0.45, 0.45, 1.08, 1.3];
+export const KIT_LIGHT_WINDUP = [1, 1, 1, 1, 1.5];
+export const KIT_HEAVY_COST = [1, 1, 1, 2, 1];
+export const KIT_COST = [1, 1, 1, 1, 1.35];
 export const KIT_HEAVY_REACH = [1.55, 1.15, 1.15, 2.2, 1.6];
 export const KIT_LUNGE = [1.3, 1.3, 1.3, 1.7, 1];
 export const KIT_LUNGE_MAX = [4, 4, 4, 5.2, 3];
@@ -29,27 +32,28 @@ export const SHOOT: [number, number] = [90, 260];
 export const CAST: [number, number] = [320, 260];
 export const ARROW_SPEED = 22;
 export const ARROW_RANGE = 14;
-export const QUICK_SHOT: [number, number] = [60, 690];
-export const QUICK_ARROW_COST = 9;
+/** The archer's and the bomber's stab (as `arena::STAB`, `STAB_COST`). */
+export const STAB: [number, number, number] = [40, 50, 90];
+export const STAB_COST = 3.5;
 export const BURST_GAP_MS = 110;
 export const BURST_COST = 26;
+export const BURST_MIN_COST = 10;
 export const LOB_MIN = 2.2;
 export const LOB_RANGE = 7;
-export const QUICK_LOB: [number, number] = [120, 480];
-export const QUICK_LOB_R = 1.5;
-export const QUICK_LOB_COST = 20;
 export const BIG_BOMB_R: [number, number] = [1.7, 2.7];
 /** The big bomb takes four times a heavy blow's charge to fill (as `arena::BIG_BOMB_FULL_MS`). */
 export const BIG_BOMB_FULL_MS = 220 + 4 * (1000 - 220);
+/** The spearman's lunge takes twice as long to fill (as `arena::SPEAR_FULL_MS`). */
+export const SPEAR_FULL_MS = 2000;
 export const BIG_BOMB_COST: [number, number] = [28, 56];
 export const TANK_LEAP_MIN = 1;
-export const TANK_LEAP = 3.4;
+export const TANK_LEAP = 4.2;
 export const TANK_STOMP_R = 1.6;
 /** How tall a body stands, the Goliath's (as `arena::BODY_H`, `GIANT_H`): hits land anywhere on it. */
 export const BODY_H = 0.9;
-export const GIANT_H = 2.2;
+export const GIANT_H = 2.5;
 export const BLAST_R = 3.3;
-export const QUAKE_R = 2.9;
+export const QUAKE_R = 3.7;
 /** An arrow in flight, the bomber's big bomb (`arena::missile::*`). */
 export const ARROW = 5;
 export const BIG_BOMB = 6;
@@ -91,9 +95,9 @@ export const KITS: KitInfo[] = [
     name: "Archer",
     icon: "🏹",
     role: "Long range",
-    blurb: "Light on their feet, deadly from afar. Keep your distance: up close, every arrow counts.",
-    quick: "Quick shot: an arrow at your aim, one every 0.75 s, as far as a thrown spear",
-    charged: "Triple shot: three fast arrows in a row, flying till they hit something",
+    blurb: "Light on their feet, deadly from afar. Keep your distance: up close, it's a quick blade and quicker feet.",
+    quick: "Sword stab: lightning fast, a scratch and a shove, next to no stamina",
+    charged: "Draw the bow: one arrow, two half drawn, three fast ones fully drawn, flying till they hit something",
     ultimate: "Arrow storm: untouchable, three rings of arrows all round you, half a second apart",
     stats: [2, 4, 2, 5],
     tint: "#4f8a3c",
@@ -103,8 +107,8 @@ export const KITS: KitInfo[] = [
     icon: "💣",
     role: "Area damage",
     blurb: "Bombs for everyone. Lob them where they'll stand, but mind your own blast.",
-    quick: "Lob a bomb: it lands where you aim",
-    charged: "Big bomb: hold (up to ~3 s) for a bigger blast and more damage (and more stamina)",
+    quick: "Sword stab: lightning fast, a scratch and a shove, next to no stamina",
+    charged: "Bomb: lands where you aim. Hold (up to ~3 s) for a bigger blast and more damage (and more stamina)",
     ultimate: "Big bang: a huge blast all round you (you're unharmed). Picked-up bombs: thrown three at a time",
     stats: [2, 3, 4, 4],
     tint: "#c8553d",
@@ -115,7 +119,7 @@ export const KITS: KitInfo[] = [
     role: "Reach",
     blurb: "A knight with a long spear: strikes from further off, lunges further, hits a little lighter.",
     quick: "Spear thrust: reaches well past a sword",
-    charged: "A long lunging thrust (costs twice the stamina, hits lighter)",
+    charged: "A long lunging thrust: hold about 2 s to fill it (costs twice the stamina, hits lighter)",
     ultimate: "Whirlwind: the spear swung wide, all round you",
     stats: [3, 3, 2, 4],
     tint: "#3f6fb0",
@@ -124,8 +128,8 @@ export const KITS: KitInfo[] = [
     name: "Tank",
     icon: "🪨",
     role: "Bruiser",
-    blurb: "The most health of anyone, a heavy hammer that hits hard. Slower, tires sooner, hard to knock about, and its armour turns some of every arrow and bomb.",
-    quick: "Hammer blow: hits hard, a touch slower",
+    blurb: "The most health of anyone, a heavy hammer that hits hard. Slower, tires sooner, hard to knock about, and its armour turns some of every arrow and bomb. Its shield knocks a bomb back at whoever threw it.",
+    quick: "Hammer swing: hauled back, then a wide, crushing blow",
     charged: "Stomp: leap toward your aim, a shockwave where you land",
     ultimate: "Earthquake: stamp the ground, throwing everyone near away, dazed",
     stats: [5, 1, 4, 2],

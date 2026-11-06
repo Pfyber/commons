@@ -5246,6 +5246,45 @@ canvas.woozy {
     0 6px 16px 12px rgba(0, 0, 0, 0.25);
 }
 
+/* The city map's filters: a chip each, lit in its colour while it's on. */
+.panel.citymap .city-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+.panel.citymap .city-chip {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+/* (Room for the chips over the map, with no scrolling.) */
+.panel.citymap:not(.big) .panel-body {
+  max-height: calc(100vh - 90px);
+}
+.panel.citymap .city-chip.on {
+  background: var(--chip);
+  color: #1e140a;
+}
+.panel.citymap .city-note {
+  margin: 0;
+  text-align: center;
+}
+
+/* The city map's bigger view: the whole screen, the map as large as it'll go. */
+.panel.citymap.big {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+}
+.panel.citymap.big .panel-body {
+  align-items: center;
+}
+
 /* ---- money in: a coin spinning up over your head (Game.coinPop) ---- */
 .coin-pop {
   position: fixed;
@@ -5285,6 +5324,23 @@ canvas.woozy {
 
 /* ---- Paintball at the Splat Yard ----------------------------------------- */
 
+/* Paintball's window on the field: the same stretch of it for everyone. */
+.pb-sight {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  /* Over the name tags (nobody's given away out in the dark), under the town's bars. */
+  z-index: 1;
+  pointer-events: none;
+  box-shadow: 0 0 0 200vmax #120e16, inset 0 0 24px 6px rgba(18, 14, 22, 0.6);
+}
+.pb-sight[hidden] {
+  display: none;
+}
+body.pb-playing #labels {
+  z-index: 1;
+}
 .pb-hud {
   position: fixed;
   inset: 0;
@@ -6277,6 +6333,27 @@ body.pb-touch-mode .pb-feed {
   background: rgba(30, 18, 10, 0.88);
   box-shadow: var(--frame), var(--drop);
 }
+/* Wanted something there's no stamina for. */
+.ar-self.nowind .ar-bar.st {
+  animation: ar-nowind 0.36s steps(6);
+}
+@keyframes ar-nowind {
+  0%,
+  100% {
+    transform: none;
+    filter: none;
+  }
+  20%,
+  60% {
+    transform: translateX(-3px);
+    filter: brightness(2) saturate(0.4);
+  }
+  40%,
+  80% {
+    transform: translateX(3px);
+    filter: brightness(1.4);
+  }
+}
 .ar-bar {
   position: relative;
   grid-column: 1;
@@ -7266,4 +7343,256 @@ body.phone .emotes button img.px-icon {
 body.phone .bottom .log {
   max-width: 80vw;
   font-size: 12px;
+}
+
+/* ---- the no-connection sign (ui/netsign.ts): under the top-right buttons, above everything ---- */
+.net-sign {
+  position: fixed;
+  top: calc(66px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+  box-shadow: var(--frame), var(--drop), var(--bevel);
+  pointer-events: none;
+  animation: net-sign-pulse 1.4s steps(2) infinite;
+}
+
+.net-sign[hidden] {
+  display: none;
+}
+
+@keyframes net-sign-pulse {
+  50% {
+    opacity: 0.72;
+  }
+}
+
+body.phone .net-sign {
+  top: calc(52px + env(safe-area-inset-top, 0px));
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  padding: 3px;
+}
+
+body.phone .net-sign span {
+  display: none;
+}
+
+/* ---- Caesar's disasters (activities/arenadisaster.ts): what's coming, the vote, the wheel ---- */
+.ar-dis {
+  pointer-events: none;
+  position: fixed;
+  top: calc(84px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 44;
+  padding: 5px 14px;
+  background: rgba(26, 16, 32, 0.86);
+  box-shadow: var(--frame), var(--drop);
+  color: #fff1c8;
+  font-size: 15px;
+  text-align: center;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.ar-dis[hidden] {
+  display: none;
+}
+
+.ar-dis.urgent {
+  animation: ar-dis-beat 0.5s steps(2) infinite;
+}
+
+@keyframes ar-dis-beat {
+  50% {
+    background: rgba(120, 24, 12, 0.9);
+  }
+}
+
+.ar-dis-tally {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.ar-dis-tally:empty {
+  display: none;
+}
+
+.ar-vote {
+  position: fixed;
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 46;
+  padding: 8px 12px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--frame), var(--drop), var(--bevel);
+  text-align: center;
+}
+
+.ar-vote[hidden] {
+  display: none;
+}
+
+.ar-vote-head {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.ar-vote-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ar-vote-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 72px;
+  padding: 6px 8px;
+  border: 0;
+  background: var(--paper-2);
+  color: var(--ink);
+  box-shadow: var(--frame), var(--bevel);
+  cursor: pointer;
+  font: inherit;
+}
+
+.ar-vote-btn:hover {
+  background: #fff1c8;
+}
+
+.ar-vote-btn.on {
+  background: #ffd23f;
+}
+
+.ar-vote-icon {
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.ar-vote-name {
+  font-size: 12px;
+}
+
+.ar-vote-n {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+body.phone .ar-vote-row {
+  gap: 4px;
+}
+
+body.phone .ar-vote-btn {
+  min-width: 54px;
+  padding: 5px 2px;
+}
+
+body.phone .ar-vote-name {
+  font-size: 9px;
+}
+
+/* The spectators' bets. */
+.ar-bet {
+  position: fixed;
+  left: 12px;
+  top: calc(120px + env(safe-area-inset-top, 0px));
+  z-index: 46;
+  width: 196px;
+  padding: 8px 10px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--frame), var(--drop), var(--bevel);
+  animation: ar-bet-in 0.22s ease-out;
+}
+.ar-bet[hidden] {
+  display: none;
+}
+@keyframes ar-bet-in {
+  from {
+    transform: translateX(-16px);
+    opacity: 0;
+  }
+}
+.ar-bet-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.ar-bet-time.soon {
+  color: #c8321c;
+}
+.ar-bet-btn {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  column-gap: 6px;
+  align-items: center;
+  width: 100%;
+  margin-top: 4px;
+  padding: 5px 7px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ar-bet-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.ar-bet-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.ar-bet-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--c);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.ar-bet-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ar-bet-sub {
+  grid-column: 2;
+  grid-row: 2;
+  font-size: 10px;
+  opacity: 0.7;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ar-bet-odds {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  font-size: 11px;
+  font-weight: 700;
+  color: #8a6410;
+}
+.ar-bet.placed {
+  width: auto;
+  max-width: 196px;
+  text-align: left;
+}
+.ar-bet.placed .ar-bet-head {
+  margin-bottom: 2px;
+}
+.ar-bet-pick {
+  font-weight: 700;
+  font-size: 15px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.ar-bet-pays {
+  font-size: 11px;
+  opacity: 0.75;
 }

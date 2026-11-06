@@ -115,7 +115,37 @@ function glowTexture(): Texture {
 }
 
 /** A soft white glow, tinted per light (the arcade's neon). */
+let soft: Texture | null = null;
+let softer: Texture | null = null;
+
+/**
+ * A light with no edge to it: a long, bell-shaped fall to nothing, large
+ * enough not to step when scaled up, and speckled by a fraction of a shade so
+ * that its faintest reaches don't show as rings on a dark floor.
+ */
+function softGlow(): Texture {
+  if (softer) return softer;
+  const n = 256;
+  const c = document.createElement("canvas");
+  c.width = c.height = n;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const r = Math.hypot(x - n / 2 + 0.5, y - n / 2 + 0.5) / (n / 2);
+      const i = (y * n + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+      if (r < 1) img.data[i + 3] = Math.floor(0.8 * 255 * Math.exp(-r * r * 4.2) * (1 - r * r) ** 2 + Math.random());
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  softer = Texture.from(c);
+  softer.source.scaleMode = "linear";
+  return softer;
+}
+
 function whiteGlow(): Texture {
+  if (soft) return soft;
   const c = document.createElement("canvas");
   c.width = c.height = 64;
   const ctx = c.getContext("2d")!;
@@ -125,7 +155,8 @@ function whiteGlow(): Texture {
   g.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
-  return Texture.from(c);
+  soft = Texture.from(c);
+  return soft;
 }
 
 /** Each cabinet's screen colour (art: arcade_cabinet). */
@@ -267,10 +298,11 @@ export class DayNight {
    * sprite to put it out.
    */
   addGlow(x: number, y: number, sx: number, sy: number, tint: number, alpha: number): Sprite {
-    const s = new Sprite(whiteGlow());
+    const s = new Sprite(softGlow());
     s.anchor.set(0.5);
     s.tint = tint;
-    s.scale.set(sx, sy);
+    // (Its size in the old 64 px glow's terms.)
+    s.scale.set(sx / 4, sy / 4);
     s.alpha = alpha;
     s.position.set(x, y);
     this.lights.addChild(s);

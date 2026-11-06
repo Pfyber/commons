@@ -1,3 +1,5 @@
+import { setBetting } from "./activities/arenabets";
+import { netIdle } from "./ui/netsign";
 import { Application } from "pixi.js";
 import cityUrl from "../../assets/maps/city.json?url";
 import homeUrl from "../../assets/maps/home.json?url";
@@ -179,6 +181,7 @@ async function main() {
   let game: Game | null = null;
   // Admins zoom out three times as far.
   setWideZoom(!!auth.player?.admin);
+  setBetting(!auth.player?.minor);
   const eco = new Economy(auth);
   const social = new Social(auth, auth.player!.id);
   const town = new Town(auth);
@@ -278,6 +281,35 @@ async function main() {
     },
     walk: (t) => (game as Game | null)?.walkTo(t),
     toCity: () => void travel({ zone: "city" }),
+    events: async (map) => {
+      // What's on, wherever anyone's told us: each asked apart, so one that's
+      // down only loses its own line.
+      const at = (kind: string, name: string) => {
+        const o = map.objects.find((q) => q.kind === kind);
+        return o ? [{ x: o.x, y: o.y, w: o.w, h: o.h, name }] : [];
+      };
+      const [planned, requests, fish, salvage] = await Promise.allSettled([clubs.events(), town.requests(), eco.fishQuest(), eco.fishQuest(true)]);
+      const out = [];
+      // Today's: club events on now, or later today.
+      if (planned.status === "fulfilled") {
+        const midnight = new Date();
+        midnight.setHours(24, 0, 0, 0);
+        for (const e of planned.value) {
+          if (!e.live && e.starts_at * 1000 >= midnight.getTime()) continue;
+          const o = spot(map, e.place) ?? map.objects.find((q) => q.label === e.place);
+          const clock = new Date(e.starts_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          if (o) out.push({ x: o.x - 1, y: o.y - 1, w: 3, h: 3, name: `${e.title} · ${e.live ? "NOW" : clock}` });
+        }
+      }
+      // The day's jobs.
+      if (requests.status === "fulfilled") {
+        const left = requests.value.filter((r) => !r.done).length;
+        if (left) out.push(...at("notice_board", `Daily requests · ${left}`));
+      }
+      const open = [fish, salvage].filter((q) => q.status === "fulfilled" && !q.value.done).length;
+      if (open) out.push(...at("fisherman", open > 1 ? "Daily orders · 2" : "Daily order"));
+      return out;
+    },
   });
   const minimap = new Minimap(document.getElementById("hud")!, () => cityMap.toggle());
   homes.onChange(() => minimap.setHome(homes.mine));
@@ -648,6 +680,8 @@ async function main() {
     window.setTimeout(() => void enter(), delay);
   };
   const onDisconnect = (reason: CloseReason) => {
+    // (Turned away, not cut off: the sign's for trouble.)
+    if (reason?.code === ERR_REPLACED || reason?.code === ERR_NAME_TAKEN || reason?.code === ERR_VERSION) netIdle();
     if (reason?.code === ERR_REPLACED) {
       showOverlay("You joined from somewhere else", "Commons is open in another tab or device.", {
         label: "Play here instead",

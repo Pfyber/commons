@@ -61,11 +61,23 @@ export function drawArms(g: Graphics, ox: number, oy: number, p: Gear) {
     }
     if (blocking) g.rect(ox + sh.x - w / 2 - 2, oy + sh.y - 3, w + 4, h + 6).stroke({ color: 0x9fe8ff, width: 1, alpha: 0.6 + 0.3 * Math.sin(now / 90) });
   };
-  // A dagger: short and quick.
+  // A short sword: a bright blade, a little brass guard, a leather grip.
   const dagger = (hx: number, hy: number, tx: number, ty: number) => {
     line(ox + hx, oy + hy, ox + tx, oy + ty, 0x1a1020, 3);
     line(ox + hx + 1, oy + hy + 1, ox + tx, oy + ty, 0xe8ecf4, 1);
+    const a = Math.atan2(ty - hy, tx - hx) + Math.PI / 2;
+    const [gx, gy] = [ox + hx + (tx - hx) * 0.2, oy + hy + (ty - hy) * 0.2];
+    line(gx - Math.cos(a) * 3, gy - Math.sin(a) * 3, gx + Math.cos(a) * 3, gy + Math.sin(a) * 3, 0xd9a83a, 1);
     g.rect(ox + hx - 1, oy + hy - 1, 3, 3).fill({ color: 0x6b4a2b });
+  };
+  // Stabbing: drawn back a hair, then straight out along the aim (one way, then the other).
+  const stab = () => {
+    const aim = pos.aim;
+    const [ca, sa] = [Math.cos(aim), Math.sin(aim) * 0.75];
+    const low = f.act === ACT.LIGHT2 ? 3 : 0;
+    const out = since < windup ? -3 : Math.min(1, (since - windup) / 40) * 15;
+    const [hx, hy] = [ca * (6 + out), -19 + low + sa * (6 + out)];
+    dagger(hx, hy, hx + ca * 13, hy + sa * 13);
   };
   // A long spear: the shaft, a steel head at its tip.
   const spear = (hx: number, hy: number, tx: number, ty: number, glow = false) => {
@@ -79,21 +91,21 @@ export function drawArms(g: Graphics, ox: number, oy: number, p: Gear) {
       g.rect(Math.round(ox + tx + Math.cos(a) * k), Math.round(oy + ty + Math.sin(a) * k), w, w).fill({ color: 0xd8dce8 });
     }
   };
-  // A war hammer: a short haft, a heavy steel head across its end.
+  // A war hammer: a long haft (on past `t`), a heavy steel head across its end.
   const hammer = (hx: number, hy: number, tx: number, ty: number, glow = false) => {
-    line(ox + hx, oy + hy, ox + tx, oy + ty, 0x1a1020, 4);
-    line(ox + hx, oy + hy, ox + tx, oy + ty, 0x8a5a32, 2);
+    const [ex, ey] = [ox + hx + (tx - hx) * 1.35, oy + hy + (ty - hy) * 1.35];
+    line(ox + hx, oy + hy, ex, ey, 0x1a1020, 4);
+    line(ox + hx, oy + hy, ex, ey, 0x8a5a32, 2);
     const a = Math.atan2(ty - hy, tx - hx) + Math.PI / 2;
-    const [cx, cy] = [ox + tx, oy + ty];
-    for (let k = -5; k <= 5; k++) {
-      const x = Math.round(cx + Math.cos(a) * k);
-      const y = Math.round(cy + Math.sin(a) * k);
-      g.rect(x - 3, y - 3, 7, 7).fill({ color: 0x1a1020 });
+    for (let k = -6; k <= 6; k++) {
+      const x = Math.round(ex + Math.cos(a) * k);
+      const y = Math.round(ey + Math.sin(a) * k);
+      g.rect(x - 3, y - 3, 8, 8).fill({ color: 0x1a1020 });
     }
-    for (let k = -4; k <= 4; k++) {
-      const x = Math.round(cx + Math.cos(a) * k);
-      const y = Math.round(cy + Math.sin(a) * k);
-      g.rect(x - 2, y - 2, 5, 5).fill({ color: glow ? 0xffe14f : k < -1 ? 0xc4c8d0 : 0x9aa0aa });
+    for (let k = -5; k <= 5; k++) {
+      const x = Math.round(ex + Math.cos(a) * k);
+      const y = Math.round(ey + Math.sin(a) * k);
+      g.rect(x - 2, y - 2, 6, 6).fill({ color: glow ? 0xffe14f : k < -1 ? 0xc4c8d0 : 0x9aa0aa });
     }
   };
   // A bow: an arc across the aim (`at` its middle), the string drawn back by `pull`, an arrow on it if drawn.
@@ -137,9 +149,11 @@ export function drawArms(g: Graphics, ox: number, oy: number, p: Gear) {
     case KIT.SPEARMAN: {
       shield(11, 11, true);
       if (f.act === ACT.CHARGE || charging) {
-        // Drawn back, level, to lunge.
+        // Drawn back, further and further, for all to see how full it is:
+        // from its point out ahead to all of it behind them, tipping up.
         const k = chargeK;
-        spear(-face * (24 + 6 * k), -22, face * (14 - 4 * k), -22, k >= 1);
+        const shake = k >= 1 ? Math.round(Math.sin(now / 30)) : 0;
+        spear(-face * (12 + 30 * k) + shake, -22 + 6 * k, face * (26 - 30 * k) + shake, -22 - 5 * k, k >= 1);
       } else if (f.act === ACT.SPIN) {
         const a = (now / 60) % (Math.PI * 2);
         spear(-Math.cos(a) * 26, -18 - Math.sin(a) * 9, Math.cos(a) * 26, -18 + Math.sin(a) * 9, true);
@@ -163,8 +177,12 @@ export function drawArms(g: Graphics, ox: number, oy: number, p: Gear) {
         if (since < CAST[0]) hammer(face * 2, -34, face * 2, -54, true);
         else hammer(face * 4, -26, face * 16, -2);
       } else if (swinging) {
-        if (since < windup) hammer(face * 4, -28, -face * 8, -46, f.act === ACT.HEAVY);
-        else hammer(face * 6, -24, face * (f.act === ACT.HEAVY ? 28 : 22), -6);
+        // Hauled back over the shoulder, then round and down in front.
+        // (`turn`: radians from straight up, toward where it faces.)
+        const [back, down] = [-1, 2.2];
+        const up = since / Math.max(1, windup);
+        const turn = since < windup ? 0.35 + (back - 0.35) * (1 - (1 - up) * (1 - up)) : back + (down - back) * Math.sqrt(Math.min(1, (since - windup) / 100));
+        hammer(face * 4, -26, face * (4 + Math.sin(turn) * 26), -26 - Math.cos(turn) * 26, f.act === ACT.HEAVY && since < windup);
       } else if (blocking) hammer(face * 10, -12, face * 12, -30);
       else if (f.act !== ACT.ROLL) hammer(face * 6, -14, -face * 2, -34);
       break;
@@ -191,10 +209,8 @@ export function drawArms(g: Graphics, ox: number, oy: number, p: Gear) {
       } else {
         // Slung on their back, and the dagger in hand.
         bow(ox - face * 7, oy - 18, -Math.PI / 2 + face * 0.6, 0, false, 18);
-        if (swinging) {
-          if (since < windup) dagger(face * 5, -24, -face * 3, -30);
-          else dagger(face * 7, -18, face * 18, -18 + (f.act === ACT.LIGHT2 ? 4 : 0));
-        } else if (f.act !== ACT.ROLL) dagger(face * 7, -13, face * 12, -20);
+        if (swinging) stab();
+        else if (f.act !== ACT.ROLL) dagger(face * 7, -13, face * 12, -20);
       }
       break;
     }
@@ -220,10 +236,8 @@ export function drawArms(g: Graphics, ox: number, oy: number, p: Gear) {
           const a = now / 90 + i * 1.6;
           g.rect(Math.round(ox + Math.cos(a) * (12 + 6 * k)), Math.round(oy - 18 + Math.sin(a) * (8 + 4 * k)), 2, 2).fill({ color: 0xfff1a8 });
         }
-      } else if (swinging) {
-        if (since < windup) dagger(face * 5, -24, -face * 3, -30);
-        else dagger(face * 7, -18, face * 18, -18 + (f.act === ACT.LIGHT2 ? 4 : 0));
-      } else if (f.act !== ACT.ROLL) dagger(face * 7, -13, face * 12, -20);
+      } else if (swinging) stab();
+      else if (f.act !== ACT.ROLL) dagger(face * 7, -13, face * 12, -20);
       break;
     }
     default: {

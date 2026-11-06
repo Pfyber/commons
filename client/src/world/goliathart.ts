@@ -46,8 +46,11 @@ const IRON = 0x4a4a56;
 const STEEL = 0xd8dce8;
 const WOOD = 0x6b4426;
 
+/** How much bigger than it's drawn below it stands, all of it, out from its feet. */
+const SCALE = 1.15;
+
 /** How tall it stands (px, feet to the top of its horns): its bars and name go above. */
-export const GOLIATH_HEIGHT = 96;
+export const GOLIATH_HEIGHT = 110;
 
 /**
  * Draws the Goliath into `g`, its feet at (fx, fy) (already lifted, if it's
@@ -57,8 +60,11 @@ export function drawGoliath(g: Graphics, fx: number, fy: number, p: GoliathPose)
   const f = p.face;
   // Mirrored by facing: x forward is +x for f = 1.
   const rect = (x: number, y: number, w: number, h: number, c: number, a = 1) => {
-    const X = f > 0 ? fx + x : fx - x - w;
-    g.rect(Math.round(X), Math.round(fy + y), w, h).fill({ color: c, alpha: a });
+    const X = f > 0 ? x : -x - w;
+    // (Edges rounded, not sizes: neighbouring blocks still meet.)
+    const [l, t] = [Math.round(fx + X * SCALE), Math.round(fy + y * SCALE)];
+    const [r, b] = [Math.round(fx + (X + w) * SCALE), Math.round(fy + (y + h) * SCALE)];
+    g.rect(l, t, Math.max(1, r - l), Math.max(1, b - t)).fill({ color: c, alpha: a });
   };
   const dot = (x: number, y: number, s: number, c: number) => rect(x - s / 2, y - s / 2, s, s, c);
   /** A thick segment from (x0, y0) at angle `a` (0 forward, π/2 down), `len` long, `w` thick; returns its end. */

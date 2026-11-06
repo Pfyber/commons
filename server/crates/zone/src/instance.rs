@@ -177,6 +177,8 @@ struct Avatar {
     pending: Option<Pending>,
     /// Unix time a moderation mute ends (0: not muted).
     muted_until: u64,
+    /// Under 18 (kept out of anything like gambling).
+    minor: bool,
     /// Activity not yet reported: instance time counted up to, interactions.
     counted_until: u32,
     interactions: u32,
@@ -749,6 +751,7 @@ impl Instance {
             pending: None,
             fish: None,
             muted_until: claims.muted_until,
+            minor: claims.minor,
             counted_until: now,
             interactions: 0,
             sat_together: false,
@@ -942,6 +945,10 @@ impl Instance {
             ClientMsg::ArenaKit { kit } => self.arena_kit(id, kit, now),
             ClientMsg::ArenaLobby {} => self.arena_lobby(id, now),
             ClientMsg::ArenaWheel { on } => self.arena_wheel(id, on, now),
+            ClientMsg::ArenaVote { kind } => self.arena_vote(id, kind, now),
+            ClientMsg::ArenaDisasters { on } => self.arena_disasters(id, on, now),
+            ClientMsg::ArenaBet { pick } => self.arena_bet(id, pick, now),
+            ClientMsg::ArenaSwitch { slot } => self.arena_switch(id, slot, now),
             ClientMsg::PbBot { slot, on } => self.pb_bot(id, slot, on, now),
             ClientMsg::PbLevel { level } => self.pb_level(id, level, now),
             ClientMsg::ArenaMove { x, y, aim, reach } => self.arena_move(id, x, y, aim, reach, now),

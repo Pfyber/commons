@@ -15,7 +15,7 @@ import { PrizePanel } from "./ui/prizes";
 import { PoolPanel } from "./activities/pool";
 import { BOT as BOWL_BOT, BowlingPanel, scoreSoFar } from "./activities/bowling";
 import { ArenaShow } from "./activities/arena";
-import { PaintballShow } from "./activities/paintball";
+import { PaintballShow, PB_VIEW } from "./activities/paintball";
 import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
 import { Sky } from "./ambient/sky";
 import { Campfire } from "./activities/campfire";
@@ -32,6 +32,7 @@ import { Ambient } from "./ambient/ambient";
 import { DayNight } from "./ambient/daynight";
 import { COIN, type Economy, type Item } from "./economy";
 import type { ServerMsg } from "./net/protocol.gen";
+import { isBotName, type Other } from "./ui/citymap";
 import type { Social } from "./social";
 import type { Gov } from "./gov";
 import type { Town } from "./town";
@@ -797,7 +798,7 @@ export class Game {
         (id) => this.avatars.get(id)?.info.name ?? "someone",
         () => this.socket?.clock.now() ?? 0,
         (m) => this.socket?.send(m),
-        (x, y) => this.daynight.addGlow(x, y, 2.6, 2.2, 0xff7a3a, 0.7),
+        (x, y) => this.daynight.addGlow(x, y, 3.4, 2.9, 0xff6a20, 0.55),
         () => this.avatars.values(),
       );
     }
@@ -936,8 +937,9 @@ export class Game {
   }
 
   /** Where everyone else in view is (tiles), for the maps. */
-  get others(): TileXY[] {
-    return [...this.avatars.values()].filter((a) => a.info.id !== this.selfId && a.info.id > 0).map((a) => a.pos);
+  get others(): Other[] {
+    const { social } = this.ui;
+    return [...this.avatars.values()].filter((a) => a.info.id !== this.selfId && a.info.id > 0).map((a) => ({ ...a.pos, bot: isBotName(a.info.name), friend: !!social.friendByName(a.info.name) }));
   }
 
   /** The rest of the player's walk (where they are, then each turn ahead), or null standing still. */
@@ -2569,6 +2571,12 @@ export class Game {
       case "ArenaEvent":
         this.arena?.onEvent(m);
         break;
+      case "ArenaBetPlaced":
+        this.arena?.onBetPlaced(m.pick, m.pays);
+        break;
+      case "ArenaBetSettled":
+        this.arena?.onBetSettled(m.coins, m.refund);
+        break;
       case "BowlRolled": {
         this.bowling?.onRolled(m);
         // The bowler picks up a ball, swings and lets go; it rolls up the lane.
@@ -4126,6 +4134,11 @@ export class Game {
     // The arena first: it places the fighters, so they're drawn (and the camera follows) where their gear is.
     this.arena?.update(serverNow, wallNow);
     this.paintball?.update(serverNow, wallNow);
+    if (this.paintball) {
+      // Out on the field, everyone sees the same stretch of it, whatever their screen.
+      this.scene.lockView(this.paintball.capturing ? PB_VIEW : null);
+      this.paintball.frameView(this.scene.lockedPx);
+    }
 
     // Move the camera first so every label is placed against this frame's view.
     const self = this.self;

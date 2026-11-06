@@ -1,3 +1,5 @@
+import { netRequestFailed, netRequestOk } from "../ui/netsign";
+
 // HTTP calls to the auth API and orchestrator. The access token lives in
 // memory only; the refresh token is kept in localStorage to stay signed in.
 
@@ -69,8 +71,12 @@ async function request<T>(method: string, path: string, body: unknown, bearer?: 
   try {
     res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
+    netRequestFailed();
     throw new ApiError(0, "network", "Can't reach Commons right now. Check your connection.");
   }
+  // (The gateway's word for "the server's not there".)
+  if (res.status >= 502 && res.status <= 504) netRequestFailed();
+  else netRequestOk();
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error ?? "error", data.message ?? `Request failed (${res.status})`);
   return data as T;

@@ -10,6 +10,7 @@ import {
   encodeFrame,
   splitFrame,
 } from "./protocol.gen";
+import { netConnecting, netHeard, netLost } from "../ui/netsign";
 
 const PING_EVERY_MS = 5000;
 const CLOCK_SAMPLES = 8;
@@ -60,9 +61,11 @@ export class ZoneSocket {
   ) {
     // A path ("/ws") means the game server sits behind this page's own host.
     if (url.startsWith("/")) url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${url}`;
+    netConnecting();
     this.ws = new WebSocket(url);
     this.ws.binaryType = "arraybuffer";
     this.ws.onopen = () => {
+      netHeard();
       this.send({
         t: "Hello",
         joinToken,
@@ -77,11 +80,13 @@ export class ZoneSocket {
     this.ws.onmessage = (ev) => this.receive(new Uint8Array(ev.data as ArrayBuffer));
     this.ws.onclose = () => {
       window.clearInterval(this.pingTimer);
+      netLost();
       this.onClose(this.lastError);
     };
   }
 
   private receive(frame: Uint8Array) {
+    netHeard();
     for (const raw of splitFrame(frame)) {
       let msg: ServerMsg;
       try {
@@ -108,7 +113,7 @@ export class ZoneSocket {
   }
 
   close() {
-    this.onClose = () => {};
+    this.ws.onclose = null;
     window.clearInterval(this.pingTimer);
     this.ws.close();
   }

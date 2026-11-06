@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 42;
+pub const PROTOCOL_VERSION: u16 = 48;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -32,7 +32,16 @@ records! {
     /// (`arena::flag`), what they're holding (`arena::gift`), and `fix`:
     /// bumped when the server puts them somewhere (the client takes its word);
     /// their class (`arena::kit`, with `kit::PICKED` once picked this round).
-    ArenaFighter { id: u32, x: u16, y: u16, aim: u16, hp: u16, stamina: u8, rage: u8, act: u8, act_ms: u16, charge: u8, flags: u8, holding: u8, fix: u8, kit: u8 }
+    ArenaFighter { id: u32, x: u16, y: u16, aim: u16, hp: u16, stamina: u8, rage: u8, act: u8, act_ms: u16, charge: u8, flags: u8, holding: u8, fix: u8, kit: u8, buffs: u8 }
+
+    /// A lion on the sand (`commons_sim::arena::lion`): where (arena tiles ×100),
+    /// which way it faces, its health, what it's doing and for how long (ms),
+    /// and where its pounce comes down.
+    /// (`kind`: 0 a lion, 1 the scorpion.)
+    ArenaLion { id: u8, kind: u8, x: u16, y: u16, aim: u16, hp: u8, act: u8, act_ms: u16, to_x: u16, to_y: u16, item: u8 }
+
+    /// An acid cloud over the sand: where (arena tiles ×100, x from `arena::ACID_OFF` off the west edge).
+    ArenaCloud { id: u8, x: u16, y: u16 }
 
     /// A gift the crowd threw in (`commons_sim::arena::gift`): where (arena tiles ×100), and how long till it lands (ms).
     ArenaGift { kind: u8, x: u16, y: u16, lands_ms: u16 }
@@ -227,6 +236,14 @@ message_enum! {
         61 ArenaLobby {}
         /// In the arena's lobby: the wheel of classes on or off (it picks everyone's at the match's start).
         62 ArenaWheel { on: bool }
+        /// Watching a round: which disaster you'd have Caesar send (`arena::disaster`).
+        67 ArenaVote { kind: u8 }
+        /// In the arena's lobby: the round's disasters (and the stone wheel) on or off.
+        68 ArenaDisasters { on: bool }
+        /// A spectator's bet on the round (`arena::Match::side_of`).
+        69 ArenaBet { pick: u8 }
+        /// In the lobby: to place `slot`, if it's empty or a bot's.
+        70 ArenaSwitch { slot: u8 }
         /// The salvage game done: whether the glinting thing came up, and
         /// which of the other junk (bit `i`: `SalvageJunk.items[i]`) came with it.
         63 SalvageReel { target: bool, extras: u8 }
@@ -364,7 +381,7 @@ message_enum! {
         /// 2 up), who has each place (0 free) and their crowns, the fighters,
         /// the gifts, and the round's (or match's) winner; the bots' level, the kind of
         /// match, classes on, and how long left to pick one. Every tick of a match.
-        40 ArenaState { status: u8, now: u32, phase_ms: u32, round: u8, fire: u16, spikes: Vec<u8>, slots: Vec<u32>, crowns: Vec<u8>, fighters: Vec<ArenaFighter>, gifts: Vec<ArenaGift>, winner: u32, level: u8, mode: u8, goliath: u8, kits: bool, choose_ms: u16, exhibition: bool, wheel: bool }
+        40 ArenaState { status: u8, now: u32, phase_ms: u32, round: u8, fire: u16, spikes: Vec<u8>, slots: Vec<u32>, crowns: Vec<u8>, fighters: Vec<ArenaFighter>, gifts: Vec<ArenaGift>, winner: u32, level: u8, mode: u8, goliath: u8, kits: bool, choose_ms: u16, exhibition: bool, wheel: bool, disaster: u8, disaster_stage: u8, disaster_ms: u16, disaster_votes: Vec<u8>, disaster_pool: u8, lava: u16, lions: Vec<ArenaLion>, disasters: bool, clouds: Vec<ArenaCloud>, bet_ms: u16, bets: Vec<u8>, bet_pay: u16 }
         /// Something happened (`commons_sim::arena::ev`): `a`, `b`, `n`, `m` as
         /// each says, at (x, y) (arena tiles ×100), and a knock (`vx`, `vy`:
         /// tiles a second ×100, + 32768).
@@ -398,6 +415,11 @@ message_enum! {
         51 TankFish { x: u16, y: u16, fish: Vec<u32> }
         /// What stands on the table at (x, y) (0: nothing).
         52 ObjectTop { x: u16, y: u16, item: u32 }
+        /// Your bet's down (`pick`, paying `pays` if it's good).
+        53 ArenaBetPlaced { pick: u8, pays: u16 }
+        /// How your bet came out: `coins` back (0: lost), the stake only if
+        /// `refund` (the round came to nothing).
+        54 ArenaBetSettled { coins: u16, refund: bool }
     }
 }
 

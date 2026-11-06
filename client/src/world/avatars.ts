@@ -164,7 +164,7 @@ export class Avatar {
    * walking), which way they face, their pose (null: standing or walking),
    * whether they're stepping, and whether they've just been hit (a red flash).
    */
-  private arena: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number } | null = null;
+  private arena: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number; tint?: number } | null = null;
   /** Bowling: when they began to throw (pick up, swing back, let go), 0 if not. */
   private bowlAt = 0;
   private snore: HTMLDivElement | null = null;
@@ -359,7 +359,7 @@ export class Avatar {
   }
 
   /** In the arena's fight (or out of it, with null). */
-  setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number } | null) {
+  setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number; tint?: number } | null) {
     this.arena = a;
     if (a) {
       this.motion = null;
@@ -558,7 +558,7 @@ export class Avatar {
       y = fighting.y;
       this.pos = { x, y };
       this.facing = fighting.facing;
-      this.sprite.tint = fighting.hurt ? 0xff8080 : 0xffffff;
+      this.sprite.tint = fighting.hurt ? 0xff8080 : (fighting.tint ?? 0xffffff);
     }
     this.shown = { x, y };
 

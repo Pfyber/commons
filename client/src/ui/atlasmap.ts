@@ -1,8 +1,10 @@
 // The city drawn as an old atlas, for the minimap and the city map: muted
 // antique colours on paper, roads edged in ink, water with coastline rings
 // and little waves, trees as inked crowns, and every building as a proper
-// map symbol (a drop shadow, a hatched roof with its ridge, an ink outline;
-// houses in an assortment of roof colours), finished with a meridian grid,
+// map symbol, its real shape from above (a floor plan of wings, each under a
+// hipped roof with its ridge and its four slopes lit from the north-west; a
+// drop shadow, an ink outline; houses L- and T-shaped in an assortment of
+// roof colours, a horseshoe of a concert hall, a round striped tent), finished with a meridian grid,
 // fold creases, a darkened rim and a compass rose. Drawn at the size it's
 // shown, so the detail stays crisp (cached per map and size).
 
@@ -143,6 +145,272 @@ const ROOFS: Record<string, string> = {
   tailor: "#b5443a",
 };
 
+/** One part of a building's plan, as fractions of its plot; `round`: a dome or a drum, not a hipped roof. */
+interface Wing {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  round?: boolean;
+}
+
+const wing = (x: number, y: number, w: number, h: number, round = false): Wing => ({ x, y, w, h, round });
+
+/** The big buildings' plans (their fronts face south, as they stand in the world). */
+const PLANS: Record<string, Wing[]> = {
+  // A long hall, its grand gable reaching out to the street.
+  mall_entrance: [wing(0, 0.1, 1, 0.62), wing(0.38, 0, 0.24, 1)],
+  apartments: [wing(0, 0.06, 1, 0.56), wing(0.06, 0.4, 0.36, 0.6), wing(0.58, 0.4, 0.36, 0.6)],
+  // Two end pavilions, the clock tower in the middle.
+  town_hall: [wing(0.1, 0.16, 0.8, 0.56), wing(0, 0, 0.28, 1), wing(0.72, 0, 0.28, 1), wing(0.39, 0.3, 0.22, 0.32, true)],
+  // Reading rooms behind a pillared porch.
+  library: [wing(0, 0, 1, 0.72), wing(0.26, 0.62, 0.48, 0.38)],
+  // Round a courtyard, a dome over the great hall.
+  museum: [wing(0, 0, 0.2, 1), wing(0.8, 0, 0.2, 1), wing(0, 0, 1, 0.42), wing(0.4, 0.05, 0.2, 0.34, true)],
+  gallery: [wing(0, 0.12, 1, 0.64), wing(0.3, 0.5, 0.4, 0.5)],
+  // A fan of seats, rounded at the back, the stage house square on the front.
+  concert_hall: [wing(0.1, 0, 0.8, 0.84, true), wing(0.24, 0.62, 0.52, 0.38)],
+  club_hall: [wing(0, 0.1, 1, 0.6), wing(0, 0, 0.3, 1), wing(0.7, 0, 0.3, 1)],
+  club_house: [wing(0, 0.14, 1, 0.62), wing(0.34, 0, 0.32, 1)],
+  bar: [wing(0, 0, 1, 0.66), wing(0.08, 0.5, 0.5, 0.5)],
+  arcade_hall: [wing(0, 0.08, 1, 0.68), wing(0.3, 0.5, 0.4, 0.5)],
+  bowling_alley: [wing(0, 0, 1, 0.74), wing(0, 0.5, 0.36, 0.5)],
+  paintball_hall: [wing(0, 0.1, 1, 0.62), wing(0.62, 0.4, 0.38, 0.6)],
+  // Its great drum domed over, turrets at the front corners.
+  casino: [wing(0, 0.1, 1, 0.66), wing(0.34, 0.02, 0.32, 0.7, true), wing(0, 0.5, 0.2, 0.5, true), wing(0.8, 0.5, 0.2, 0.5, true)],
+  post_office: [wing(0, 0, 1, 0.66), wing(0.34, 0.5, 0.32, 0.5)],
+  building: [wing(0, 0.1, 1, 0.66), wing(0.1, 0.4, 0.34, 0.6)],
+  boat_hire: [wing(0, 0, 1, 0.7), wing(0.3, 0.5, 0.4, 0.5)],
+  well: [wing(0, 0, 1, 1, true)],
+  bandstand: [wing(0.14, 0, 0.72, 1, true)],
+};
+
+/** A house's plan: an L one way or the other, or a T (they vary from house to house). */
+function housePlan(x: number, y: number, w: number, h: number): Wing[] {
+  const v = Math.floor(rnd(x, y, 21) * 3);
+  const flip = rnd(x, y, 23) < 0.5;
+  const mirror = (p: Wing) => (flip ? wing(1 - p.x - p.w, p.y, p.w, p.h) : p);
+  const tall = h > w;
+  const plan = tall
+    ? [wing(0, 0, 0.66, 1), v === 2 ? wing(0.4, 0.3, 0.6, 0.4) : wing(0.4, v ? 0.56 : 0.06, 0.6, 0.38)]
+    : [wing(0, 0.04, 1, 0.6), v === 2 ? wing(0.34, 0.3, 0.32, 0.7) : wing(v ? 0.06 : 0.6, 0.3, 0.34, 0.7)];
+  return plan.map(mirror);
+}
+
+/** A hipped roof over a wing: four slopes up to its ridge, lit from the top left. */
+function hipRoof(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, roof: string, k: number) {
+  ctx.fillStyle = roof;
+  ctx.fillRect(x, y, w, h);
+  const along = w >= h;
+  const inset = Math.min(w, h) / 2;
+  const [ax, ay, bx, by] = along ? [x + inset, y + h / 2, x + w - inset, y + h / 2] : [x + w / 2, y + inset, x + w / 2, y + h - inset];
+  const slope = (pts: [number, number][], col: string) => {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    ctx.closePath();
+    ctx.fill();
+  };
+  const [x1, y1] = [x + w, y + h];
+  slope([[x, y], [x1, y], [bx, by], [ax, ay]], "rgba(255,240,205,0.3)");
+  slope([[x, y1], [x1, y1], [bx, by], [ax, ay]], "rgba(30,15,5,0.26)");
+  slope([[x, y], [x, y1], [ax, ay]], "rgba(255,240,205,0.12)");
+  slope([[x1, y], [x1, y1], [bx, by]], "rgba(30,15,5,0.14)");
+  // Courses of tiles, once there's room to see them.
+  if (Math.min(w, h) > 9) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(40,25,10,0.16)";
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    const step = Math.max(1.6, k * 0.7);
+    for (let d = step; d < h; d += step) {
+      ctx.moveTo(x, y + d);
+      ctx.lineTo(x1, y + d);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  // The hips and the ridge.
+  if (Math.min(w, h) > 3) {
+    ctx.strokeStyle = "rgba(40,25,10,0.5)";
+    ctx.lineWidth = Math.max(0.5, k * 0.16);
+    ctx.beginPath();
+    for (const [cx, cy, rx, ry] of [[x, y, ax, ay], [x, y1, ax, ay], [x1, y, bx, by], [x1, y1, bx, by]]) {
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(rx, ry);
+    }
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(40,25,10,0.75)";
+  ctx.lineWidth = Math.max(0.6, k * 0.26);
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+}
+
+/** A dome or a drum seen from above: round, shining up towards the top left. */
+function dome(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, roof: string) {
+  ctx.fillStyle = roof;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const g = ctx.createRadialGradient(cx - rx * 0.35, cy - ry * 0.35, 0, cx, cy, Math.max(rx, ry));
+  g.addColorStop(0, "rgba(255,245,220,0.6)");
+  g.addColorStop(0.55, "rgba(255,245,220,0)");
+  g.addColorStop(1, "rgba(30,15,5,0.34)");
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
+/** A building, as its plan: the shadow of it all, the one ink outline, then each wing's roof. */
+function building(ctx: CanvasRenderingContext2D, kind: string, tx: number, ty: number, x: number, y: number, w: number, h: number, k: number, roof: string) {
+  const lw = Math.max(0.6, k * 0.3);
+  // The tailor's: a round tent, striped red and white, a flag at its peak.
+  if (kind === "tailor") {
+    const [cx, cy, rx, ry] = [x + w / 2, y + h / 2, w / 2, h * 0.62];
+    ctx.fillStyle = "rgba(50,35,20,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(cx + 1, cy + 1, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      ctx.fillStyle = i % 2 ? "#f4ecd8" : "#c8423a";
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.ellipse(cx, cy, rx, ry, 0, a, a + Math.PI / 4);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    return;
+  }
+  const plan = kind === "house" ? housePlan(tx, ty, w, h) : PLANS[kind] ?? [wing(0, 0, 1, 1)];
+  const rect = (p: Wing) => [x + p.x * w, y + p.y * h, p.w * w, p.h * h] as const;
+  const outline = (p: Wing, grow: number) => {
+    const [rx, ry, rw, rh] = rect(p);
+    ctx.beginPath();
+    if (p.round) ctx.ellipse(rx + rw / 2, ry + rh / 2, rw / 2 + grow, rh / 2 + grow, 0, 0, Math.PI * 2);
+    else ctx.rect(rx - grow, ry - grow, rw + grow * 2, rh + grow * 2);
+  };
+  // The shadow, falling down and to the right, of the whole plan at once.
+  const sh = Math.max(1, k * 0.7);
+  ctx.save();
+  ctx.translate(sh, sh);
+  ctx.fillStyle = "rgba(50,35,20,0.35)";
+  ctx.beginPath();
+  for (const p of plan) {
+    const [rx, ry, rw, rh] = rect(p);
+    if (p.round) {
+      ctx.moveTo(rx + rw, ry + rh / 2);
+      ctx.ellipse(rx + rw / 2, ry + rh / 2, rw / 2, rh / 2, 0, 0, Math.PI * 2);
+    } else ctx.rect(rx, ry, rw, rh);
+  }
+  ctx.fill("nonzero");
+  ctx.restore();
+  // The ink round the outside of the plan: each wing's, the roofs then cover what's inside.
+  ctx.fillStyle = INK;
+  for (const p of plan) {
+    outline(p, lw);
+    ctx.fill();
+  }
+  for (const p of plan) {
+    const [rx, ry, rw, rh] = rect(p);
+    if (p.round) dome(ctx, rx + rw / 2, ry + rh / 2, rw / 2, rh / 2, roof);
+    else hipRoof(ctx, rx, ry, rw, rh, roof, k);
+  }
+  // A line where the wings meet, and each building's touches.
+  if (plan.length > 1 && Math.min(w, h) > 6) {
+    ctx.strokeStyle = "rgba(30,18,8,0.55)";
+    ctx.lineWidth = Math.max(0.5, k * 0.2);
+    for (const p of plan.slice(1)) {
+      if (p.round) continue;
+      const [rx, ry, rw, rh] = rect(p);
+      ctx.strokeRect(rx, ry, rw, rh);
+    }
+  }
+  touches(ctx, kind, x, y, w, h, k);
+}
+
+/** What makes each one itself, where there's room to show it. */
+function touches(ctx: CanvasRenderingContext2D, kind: string, x: number, y: number, w: number, h: number, k: number) {
+  if (Math.min(w, h) < 6) {
+    // Too small for more than a stripe (a stall's awning).
+    if (kind === "stall") {
+      ctx.fillStyle = "rgba(255,245,225,0.8)";
+      for (let i = 0; i < 3; i++) ctx.fillRect(x + (w * (i * 2 + 0.5)) / 6, y, w / 6, h);
+    }
+    return;
+  }
+  if (kind === "stall") {
+    ctx.fillStyle = "rgba(255,245,225,0.75)";
+    for (let i = 0; i < 3; i++) ctx.fillRect(x + (w * (i * 2 + 0.5)) / 6, y, w / 6, h);
+  } else if (kind === "library" || kind === "museum") {
+    // The pillars along the front.
+    const py = y + h * (kind === "library" ? 0.97 : 0.46);
+    const [x0, x1] = kind === "library" ? [0.28, 0.72] : [0.24, 0.76];
+    const n = 6;
+    ctx.fillStyle = "#f0e6cc";
+    for (let i = 0; i < n; i++) {
+      const px = x + w * (x0 + ((x1 - x0) * i) / (n - 1));
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(0.6, k * 0.32), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (kind === "gallery") {
+    // Long skylights down the roof.
+    ctx.fillStyle = "rgba(190,225,240,0.8)";
+    for (let i = 0; i < 4; i++) ctx.fillRect(x + w * (0.08 + i * 0.23), y + h * 0.2, w * 0.15, Math.max(1, h * 0.08));
+  } else if (kind === "arcade_hall") {
+    // Neon along its eaves.
+    ctx.strokeStyle = "#ff5fc0";
+    ctx.lineWidth = Math.max(0.6, k * 0.2);
+    ctx.strokeRect(x + k * 0.6, y + h * 0.08 + k * 0.6, w - k * 1.2, h * 0.68 - k * 1.2);
+  } else if (kind === "bowling_alley") {
+    // Its lanes, side by side.
+    ctx.strokeStyle = "rgba(235,250,245,0.55)";
+    ctx.lineWidth = Math.max(0.5, k * 0.16);
+    ctx.beginPath();
+    for (let i = 1; i < 5; i++) {
+      ctx.moveTo(x + w * 0.42, y + h * (0.1 + i * 0.11));
+      ctx.lineTo(x + w * 0.94, y + h * (0.1 + i * 0.11));
+    }
+    ctx.stroke();
+  } else if (kind === "town_hall") {
+    // The clock on its tower.
+    ctx.fillStyle = "#f6dc8a";
+    ctx.beginPath();
+    ctx.arc(x + w / 2, y + h * 0.46, Math.max(1, Math.min(w, h) * 0.07), 0, Math.PI * 2);
+    ctx.fill();
+  } else if (kind === "bandstand") {
+    // Its spokes.
+    ctx.strokeStyle = "rgba(40,25,10,0.5)";
+    ctx.lineWidth = Math.max(0.5, k * 0.16);
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      ctx.moveTo(x + w / 2, y + h / 2);
+      ctx.lineTo(x + w / 2 + Math.cos(a) * w * 0.36, y + h / 2 + Math.sin(a) * h * 0.5);
+    }
+    ctx.stroke();
+  }
+  // A chimney or two on the bigger roofs that'd have them.
+  if (["house", "apartments", "mall_entrance", "bar", "post_office", "club_hall", "club_house", "paintball_hall", "building"].includes(kind) && w > 8) {
+    const c = Math.max(1, k * 0.9);
+    ctx.fillStyle = INK;
+    ctx.fillRect(x + w * 0.76 - 0.4, y + h * 0.2 - 0.4, c + 0.8, c + 0.8);
+    ctx.fillStyle = "#6a4432";
+    ctx.fillRect(x + w * 0.76, y + h * 0.2, c, c);
+  }
+}
+
 const cache = new Map<string, HTMLCanvasElement>();
 let cacheMap: ZoneMap | null = null;
 
@@ -252,56 +520,7 @@ export function atlasMap(map: ZoneMap, size: number): HTMLCanvasElement {
     if (w < 1.2 || h < 1.2) continue;
     const house = o.kind === "house";
     const roof = house ? HOUSE_ROOFS[Math.floor(rnd(o.x, o.y, 13) * HOUSE_ROOFS.length)] : ROOFS[o.kind] ?? "#8a5a3a";
-    const sh = Math.max(1, k * 0.7);
-    // Shadow, falling down and to the right.
-    ctx.fillStyle = "rgba(50,35,20,0.35)";
-    ctx.fillRect(x + sh, y + sh, w, h);
-    // Roof.
-    ctx.fillStyle = roof;
-    ctx.fillRect(x, y, w, h);
-    // The lit slope: the half nearer the top (or left, on a tall building).
-    const along = w >= h;
-    ctx.fillStyle = "rgba(255,240,210,0.22)";
-    if (along) ctx.fillRect(x, y, w, h / 2);
-    else ctx.fillRect(x, y, w / 2, h);
-    // Hatching across the roof, where there's room.
-    if (Math.min(w, h) > 5) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x, y, w, h);
-      ctx.clip();
-      ctx.strokeStyle = "rgba(40,25,10,0.28)";
-      ctx.lineWidth = 0.6;
-      const step = Math.max(2, k * 0.9);
-      ctx.beginPath();
-      for (let d = -h; d < w; d += step) {
-        ctx.moveTo(x + d, y + h);
-        ctx.lineTo(x + d + h, y);
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
-    // Ridge.
-    ctx.strokeStyle = "rgba(40,25,10,0.65)";
-    ctx.lineWidth = Math.max(0.6, k * 0.3);
-    ctx.beginPath();
-    if (along) {
-      ctx.moveTo(x + Math.min(h / 2, w / 4), y + h / 2);
-      ctx.lineTo(x + w - Math.min(h / 2, w / 4), y + h / 2);
-    } else {
-      ctx.moveTo(x + w / 2, y + Math.min(w / 2, h / 4));
-      ctx.lineTo(x + w / 2, y + h - Math.min(w / 2, h / 4));
-    }
-    ctx.stroke();
-    // Chimney on the bigger ones.
-    if (!house && w > 8 && h > 5) {
-      ctx.fillStyle = "#5a3a2a";
-      ctx.fillRect(x + w * 0.75, y + h * 0.18, Math.max(1, k * 0.8), Math.max(1, k * 0.8));
-    }
-    // Ink outline.
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = Math.max(0.6, k * 0.35);
-    ctx.strokeRect(x + 0.25, y + 0.25, w - 0.5, h - 0.5);
+    building(ctx, o.kind, o.x, o.y, x, y, w, h, k, roof);
   }
 
   // Paper: grain, meridians, folds, a darkened rim and the compass.
@@ -346,7 +565,7 @@ export function atlasMap(map: ZoneMap, size: number): HTMLCanvasElement {
 
 /** A compass rose in the bottom-left corner. */
 function compass(ctx: CanvasRenderingContext2D, size: number) {
-  const r = Math.max(8, Math.round(size * 0.065));
+  const r = Math.max(8, Math.min(30, Math.round(size * 0.065)));
   const cx = r + 6;
   const cy = size - r - 6;
   ctx.fillStyle = "rgba(240,228,196,0.75)";

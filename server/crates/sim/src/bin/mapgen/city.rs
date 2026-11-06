@@ -237,6 +237,21 @@ pub fn city() -> MapFile {
                 market_extras(&mut k, &|dx, dy| {
                     names.get(&(bx + dx, by + dy)).cloned().unwrap_or_default()
                 });
+                // Only the kerbs along the roads are stone here: of the paved yards,
+                // what touches a road is kerb, and the rest is grass.
+                let (plaza, road) = (g("plaza"), g("road"));
+                for y in 0..N {
+                    for x in 0..N {
+                        if k.ground_at(x, y) != plaza {
+                            continue;
+                        }
+                        let by_road = (x.saturating_sub(1)..=(x + 1).min(N - 1)).any(|a| {
+                            (y.saturating_sub(1)..=(y + 1).min(N - 1))
+                                .any(|b| k.ground_at(a, b) == road)
+                        });
+                        k.ground(x, y, if by_road { "curb" } else { "grass" });
+                    }
+                }
             }
             "park" => park(&mut k),
             "pond" => pond(&mut k),
@@ -1829,6 +1844,12 @@ fn sidewalk(k: &mut Blk) {
 fn market(k: &mut Blk) {
     const C: f32 = 23.5;
     let dist = |x: u16, y: u16| ((x as f32 - C).powi(2) + (y as f32 - C).powi(2)).sqrt();
+    // How far out on the roundabout: an octagon, its corners straight 45° runs
+    // that step evenly, tile by tile (a circle snapped to tiles steps unevenly).
+    let ring = |x: u16, y: u16| {
+        let (a, b) = ((x as f32 - C).abs(), (y as f32 - C).abs());
+        a.max(b).max((a + b) / 1.45)
+    };
     k.lawn();
     // The garden footpath, a wide circle round everything.
     for y in 2..N - 2 {
@@ -1858,7 +1879,7 @@ fn market(k: &mut Blk) {
     // The roundabout: kerb, road, kerb; the plaza inside.
     for y in 2..N - 2 {
         for x in 2..N - 2 {
-            let d = dist(x, y);
+            let d = ring(x, y);
             // Where a spur road meets the ring, the road runs straight on (no
             // kerb across it).
             let spur = ((22..26).contains(&y) && !(12..=35).contains(&x))
@@ -1874,9 +1895,11 @@ fn market(k: &mut Blk) {
             } else {
                 "grass"
             };
-            let g = if d < 9.5 {
+            // (The lawn in the middle is a true circle, inside the octagon.)
+            let c = dist(x, y);
+            let g = if c < 9.5 {
                 grass
-            } else if d < 10.5 || (13.5..14.5).contains(&d) {
+            } else if c < 10.5 || (13.5..14.5).contains(&d) {
                 "curb"
             } else if d < 13.5 {
                 "road"
@@ -1924,7 +1947,7 @@ fn market(k: &mut Blk) {
     // out of the apartments' door; `door:mall` for leaving the mall.
     for y in 9..12u16 {
         for x in 11..37u16 {
-            if dist(x, y) >= 14.5 {
+            if ring(x, y) >= 14.5 {
                 k.ground(x, y, "plaza");
             }
         }
@@ -1944,18 +1967,6 @@ fn market(k: &mut Blk) {
     k.spot("post_office", 6, 35);
     k.rect(38, 12, 6, 5, "plaza");
     k.object("tailor", 39, 13, 3, 2, "Tailor");
-    // Carts on round paved spots between the ring and the footpath.
-    for (x, y) in [(12, 13), (34, 13), (12, 34), (34, 34)] {
-        for yy in y - 2..y + 3 {
-            for xx in x - 2..x + 4 {
-                let (dx, dy) = (xx as f32 - (x as f32 + 0.5), yy as f32 - y as f32);
-                if dx * dx + dy * dy <= 6.5 {
-                    k.ground(xx, yy, "plaza");
-                }
-            }
-        }
-        k.object("market_cart", x, y, 2, 1, "Market");
-    }
     // Stalls along the south side, either side of the south road, on a
     // paved walk to rent and sell from.
     k.rect(6, 38, 13, 4, "plaza");

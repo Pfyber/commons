@@ -17,9 +17,11 @@
 // its ticks. When you're knocked flying the server carries you (here, the
 // same knock plays out at once). Every blow: sparks, a number, a hit-stop and
 // a shake; parries flash, walls thud, bombs boom, spikes shake then rise,
-// the crowd throws gifts in, and late in a round the ring of fire closes.
+// the crowd throws gifts in, a disaster strikes (lava, meteors or lions: the
+// spectators' choice), and late in a round the ring of fire closes.
 
 import { Container, Graphics, Sprite, type Texture } from "pixi.js";
+import * as arenafx from "../ambient/arenafx";
 import * as sfx from "../ambient/sfx";
 import type { EntityInfo, ServerMsg } from "../net/protocol.gen";
 import { button, confirmButton, el, isTyping } from "../ui/panels";
@@ -31,8 +33,14 @@ import { COURT_CAESAR, COURT_CANDLES, COURT_TORCH_DOWN, COURT_TORCH_OUT, COURT_O
 import { drawPixelText, pixelWidth } from "../world/pixelfont";
 import { levelLabel, levelPicker } from "./botlevel";
 import { drawArms } from "./arenagear";
-import { ACT, ARROW, ARROW_RANGE, ARROW_SPEED, BIG_BOMB, BIG_BOMB_FULL_MS, BIG_BOMB_R, BLAST_R, BODY_H, CAST, GIANT_H, KIT, KIT_HEAVY_REACH, KIT_HP, KIT_LIGHT_ARC, KIT_LIGHT_REACH, KIT_LIGHT_TIME, KIT_LUNGE, KIT_LUNGE_MAX, KIT_SPEED, KIT_SPIN_REACH, KITS, KitPicker, LOB_MIN, LOB_RANGE, QUAKE_R, SHOOT, TANK_LEAP, TANK_LEAP_MIN, TANK_STOMP_R, kitGallery, kitOf, picked, shoots } from "./arenakits";
+import { BetPanel } from "./arenabets";
+import { NightGlows } from "./arenaglow";
+import { Juice } from "./arenajuice";
+import { ACT, ARROW, ARROW_RANGE, ARROW_SPEED, BIG_BOMB, BIG_BOMB_COST, BIG_BOMB_FULL_MS, BIG_BOMB_R, BLAST_R, BODY_H, BURST_MIN_COST, STAB, STAB_COST, CAST, GIANT_H, KIT, KIT_COST, KIT_HEAVY_COST, KIT_HEAVY_REACH, KIT_HP, KIT_LIGHT_ARC, KIT_LIGHT_REACH, KIT_LIGHT_TIME, KIT_LIGHT_WINDUP, KIT_LUNGE, KIT_LUNGE_MAX, KIT_SPEED, KIT_SPIN_REACH, KITS, KitPicker, LOB_MIN, LOB_RANGE, QUAKE_R, SHOOT, SPEAR_FULL_MS, TANK_LEAP, TANK_LEAP_MIN, TANK_STOMP_R, kitGallery, kitOf, picked, shoots } from "./arenakits";
 import { ClassWheel } from "./arenawheel";
+import { DisasterShow, KINDS, THIEF_ID } from "./arenadisaster";
+import * as dfx from "../ambient/disasterfx";
+import * as wheelfx from "../ambient/wheelsfx";
 import { BOWL_OVERHANG, bowlMasts, bowlSeats } from "../world/amphitheatre";
 import { spectatorTexture } from "../world/crowdart";
 import { drawGoliath, GOLIATH_HEIGHT, type GoliathAct, type GoliathPose } from "../world/goliathart";
@@ -79,12 +87,16 @@ const LIGHT: [number, number, number][] = [
 ];
 const HEAVY_MIN_MS = 220;
 const HEAVY_FULL_MS = 1000;
+/** How long class `k`'s lunge (or stomp) takes to fill. */
+const fillMs = (k: number) => (k === KIT.SPEARMAN ? SPEAR_FULL_MS : HEAVY_FULL_MS);
 const HEAVY: [number, number, number] = [70, 190, 360];
 const HEAVY_ARC = 1.25;
 /** The heavy blow's lunge: further the longer it's charged (as `arena::HEAVY_LUNGE*`). */
 export const HEAVY_LUNGE = 1.3;
 export const HEAVY_LUNGE_MAX = 4.0;
 const HEAVY_COST = 28;
+/** The Goliath's stomp's (as `arena::STOMP_COST`). */
+const STOMP_COST = 30;
 const ROLL_MS = 260;
 const ROLL_DIST = 2.3;
 const ROLL_COST = 24;
@@ -98,11 +110,22 @@ const BOMB_R = 1.9;
 const KB_FRICTION = 5;
 /** How long before a press counts as charging a heavy blow (ms). */
 const HOLD_MS = 170;
+/** How long a roll that can't go yet is kept for (as `arena::INPUT_BUFFER_MS`). */
+const ROLL_BUFFER_MS = 400;
+/** Wall time (ms), as the frame's own. */
+const wallNow = () => performance.now();
 const INPUT = { LIGHT: 1, HEAVY_START: 2, HEAVY_RELEASE: 3, BLOCK_ON: 4, BLOCK_OFF: 5, ROLL: 6, THROW: 7, SPECIAL: 8 };
-const GIFT = { HEALTH: 1, SPEAR: 2, BOMB: 3, FURY: 4 };
-const EV = { HIT: 1, PARRY: 2, GUARD_BREAK: 3, WALL_SLAM: 4, DOWN: 5, SWING: 6, ROLL: 7, GIFT_INCOMING: 8, PICKUP: 10, THROW: 11, BOOM: 12, SPIKED: 14, ROUND_START: 15, FIGHT: 16, ROUND_WON: 17, CHAMPION: 18, SPECIAL: 19, FIRE: 20, STUCK: 21, RAGE_FULL: 22, STOMP: 23, GRAB: 24, HURL: 25 };
+const GIFT = { HEALTH: 1, SPEAR: 2, BOMB: 3, FURY: 4, SPEED: 5, REGEN: 6, SHIELD: 7 };
+/** What gifts are doing for a fighter (as `arena::buff`). */
+const BUFF = { SPEED: 1, REGEN: 2, SHIELD: 4, SHIELD2: 8, HEAL: 16, POISON: 32 };
+/** The scorpion's dart (as `arena::missile::DART`), and the slowness of its poison (`POISON_SLOW`). */
+const DART = 7;
+export const POISON_SLOW = 0.9;
+/** How much faster Hermes' boots make you (as `arena::SPEED_GIFT_X`). */
+export const SPEED_GIFT_X = 1.5;
+const EV = { THIEF_OUT: 43, THIEF_GRAB: 44, THIEF_STING: 45, HIT: 1, PARRY: 2, GUARD_BREAK: 3, WALL_SLAM: 4, DOWN: 5, SWING: 6, ROLL: 7, GIFT_INCOMING: 8, PICKUP: 10, THROW: 11, BOOM: 12, SPIKED: 14, ROUND_START: 15, FIGHT: 16, ROUND_WON: 17, CHAMPION: 18, SPECIAL: 19, FIRE: 20, STUCK: 21, RAGE_FULL: 22, STOMP: 23, GRAB: 24, HURL: 25, SHIELD: 26, BOUNCE: 27, DISASTER_PICKED: 28, DISASTER: 29, METEOR_WARN: 30, METEOR: 31, LION_OUT: 32, LION_CROUCH: 33, LION_LEAP: 34, LION_LAND: 35, LION_HIT: 36, LION_DOWN: 37, POISONED: 38, SCORPION_WIND: 39, SCORPION_STING: 40, DART_HIT: 41, ACID_BURN: 42 };
 /** How much each thing stirs the crowd (they cheer more, the more stirred, and it fades). */
-const HYPE: Record<number, number> = { 1: 0.12, 2: 0.3, 3: 0.3, 4: 0.35, 5: 0.65, 12: 0.3, 14: 0.3, 16: 0.5, 17: 1, 18: 1, 19: 0.4 };
+const HYPE: Record<number, number> = { 1: 0.12, 2: 0.3, 3: 0.3, 4: 0.35, 5: 0.65, 12: 0.3, 14: 0.3, 16: 0.5, 17: 1, 18: 1, 19: 0.4, 27: 0.5, 29: 1, 31: 0.2, 32: 0.3, 35: 0.2, 37: 0.6 };
 /** The pennants on the amphitheatre's masts. */
 const PENNANTS = [0xb8322c, 0xd9a83a, 0x6a2a8a, 0xf2ead8];
 const FLAG = { DOWN: 1, FURY: 2, KNOCKED: 4, IFRAMES: 8, QUEUED: 16, WINDED: 32, GIANT: 64, DAZED: 128 };
@@ -110,17 +133,17 @@ const FLAG = { DOWN: 1, FURY: 2, KNOCKED: 4, IFRAMES: 8, QUEUED: 16, WINDED: 32,
  * Goliath mode (as `arena::mode`, GIANT_*, SMASH, STOMP, GRAB_*: arena.test.ts
  * checks they agree): one giant against the rest, drawn as its own brute (goliathart).
  */
-export const MODE = { CLASSIC: 0, GOLIATH: 1 };
-export const GIANT_HP = 400;
+export const MODE = { CLASSIC: 0, GOLIATH: 1, TEAMS: 2 };
+export const GIANT_HP = 600;
 export const GIANT_SPEED = 0.95;
-export const GIANT_R = 0.55;
+export const GIANT_R = 0.63;
 export const SMASH: [number, number, number] = [210, 110, 280];
 /** Out of stamina, its smash is slower: the wind-up and recovery this many times as long (as `arena::TIRED_SMASH`). */
 export const TIRED_SMASH = 1.8;
 /** Its smash's reach (tiles) and how far either side of its aim it sweeps (as `arena::SMASH_*`): any way it aims, up and down too. */
 export const SMASH_REACH = 4.3;
 /** What a slash and the Goliath's smash cost in stamina (as `arena::LIGHT_COST`, `SMASH_COST`). */
-export const LIGHT_COST = 9;
+export const LIGHT_COST = 11;
 export const SMASH_COST = 14;
 export const SMASH_ARC = 0.9;
 export const STOMP: [number, number, number] = [200, 520, 460];
@@ -129,7 +152,7 @@ export const GRAB_SPIN_MS = 3000;
 export const GIANT_CHARGE_MS = 1800;
 /** Its stomp's leap (by the charge; never past the mouse), and the shockwave's reach (as `arena::STOMP_*`). */
 export const STOMP_LEAP_MIN = 1.0;
-export const STOMP_LEAP = 5.7;
+export const STOMP_LEAP = 8.5;
 export const STOMP_R = 2.3;
 /** The hurl: as far as the mouse, no nearer than this, no further than a dash (as `arena::HURL_*`). */
 export const HURL_MIN = 3.0;
@@ -142,17 +165,25 @@ export const GIANT_DASH_MS = 380;
 export const GIANT_DASH_DIST = 5.0;
 export const GIANT_DASH_COST = 60;
 /** A gladiator's health (as `arena::HP`). */
-export const HP = 100;
+export const HP = 150;
 const isGiant = (f: { flags: number }) => (f.flags & FLAG.GIANT) !== 0;
+/** The fury: red, blinking hotter and cooler. */
+const furyTint = (now: number) => (Math.floor(now / 130) % 2 ? 0xff4a4a : 0xffa0a0);
 const GIFTS: Record<number, { icon: string; name: string }> = {
-  [GIFT.HEALTH]: { icon: "🍗", name: "ROAST LEG +35" },
+  [GIFT.HEALTH]: { icon: "🍗", name: "ROAST LEG +53" },
   [GIFT.SPEAR]: { icon: "🔱", name: "SPEAR" },
   [GIFT.BOMB]: { icon: "💣", name: "BOMB" },
   [GIFT.FURY]: { icon: "⛑️", name: "FURY!" },
+  [GIFT.SPEED]: { icon: "🪽", name: "HERMES BOOTS!" },
+  [GIFT.REGEN]: { icon: "🧪", name: "REGENERATION" },
+  [GIFT.SHIELD]: { icon: "🛡️", name: "SHIELD!" },
 };
 /** Each place's colours: their ring, shield, bars and name. */
 const COLORS = [0xffc83d, 0x3fa9ff, 0xff4f6a, 0x5fd07a];
 const CSS = ["#ffc83d", "#3fa9ff", "#ff4f6a", "#5fd07a"];
+/** Two against two: blue, and red. */
+const TEAM_COLORS = [0x3fa9ff, 0xff4f6a];
+const TEAM_CSS = ["#3fa9ff", "#ff4f6a"];
 const BOT_NAMES = ["Maximus", "Brutalia", "Crixus", "Spartaka"];
 /** The bots' looks: gladiators in red and gold, blue, crimson, green. */
 const BOT_LOOKS = [0, 1, 2, 3].map((k) => encodeLook({ hue: [40, 210, 355, 120][k], skin: (k * 3 + 1) % 4, hair: (k * 5 + 3) % 8, hat: k % 2, hatHue: [40, 210, 0, 120][k], style: 0, accessory: 0, outfit: (k % 2) * 2 }));
@@ -171,10 +202,14 @@ export type ArenaSend =
   | { t: "ArenaBot"; slot: number; on: boolean }
   | { t: "ArenaLevel"; level: number }
   | { t: "ArenaMode"; mode: number; goliath: number }
+  | { t: "ArenaBet"; pick: number }
+  | { t: "ArenaSwitch"; slot: number }
   | { t: "ArenaKits"; on: boolean }
   | { t: "ArenaKit"; kit: number }
   | { t: "ArenaLobby" }
   | { t: "ArenaWheel"; on: boolean }
+  | { t: "ArenaVote"; kind: number }
+  | { t: "ArenaDisasters"; on: boolean }
   | { t: "ArenaMove"; x: number; y: number; aim: number; reach: number }
   | { t: "ArenaAct"; act: number; aim: number; reach: number };
 
@@ -239,7 +274,12 @@ interface Missile {
 }
 
 /** Slash `n` of a combo (wind-up, blow, recovery) at class `k`'s pace (as `Fighter::light`). */
-const lightOf = (k: number, n: number): [number, number, number] => LIGHT[n].map((v) => Math.round(v * KIT_LIGHT_TIME[k] + 1e-9)) as [number, number, number];
+const lightOf = (k: number, n: number): [number, number, number] => {
+  if (shoots(k)) return STAB;
+  const pace = (v: number) => Math.round(v * KIT_LIGHT_TIME[k] + 1e-9);
+  const [w, a, r] = LIGHT[n];
+  return [pace(Math.round(w * KIT_LIGHT_WINDUP[k] + 1e-9)), pace(a), pace(r)];
+};
 
 const turn = (a: number, b: number) => {
   let d = b - a;
@@ -272,8 +312,19 @@ const snd = {
     sfx.burst(t + 0.02, 0.25, 0.2 * vol, "highpass", 2500);
   },
   spikes(vol: number) {
+    // A hard steel snap up out of the floor, and a ring off it.
     const t = sfx.at(0);
-    sfx.burst(t, 0.06, 0.18 * vol, "highpass", 3000);
+    sfx.burst(t, 0.05, 0.24 * vol, "highpass", 3000);
+    sfx.tone(t, 0.12, 0.07 * vol, "square", 1500, 520);
+    sfx.burst(t + 0.2, 0.05, 0.1 * vol, "bandpass", 1800, 900);
+  },
+  /** A short blade, thrust: a thin, quick whip of air. */
+  stab(vol: number) {
+    sfx.burst(sfx.at(0), 0.07, 0.11 * vol, "bandpass", 2600, 5200, 1.6);
+  },
+  /** Out of breath: a soft, empty puff. */
+  noWind() {
+    sfx.burst(sfx.at(0), 0.14, 0.09, "lowpass", 700, 260);
   },
   pickup() {
     const t = sfx.at(0);
@@ -344,9 +395,9 @@ function word(text: string, color: string): Texture {
   return t;
 }
 
-/** The gifts as little pictures: a roast leg, a spear, a bomb, a helmet. */
+/** The gifts as little pictures: a roast leg, a spear, a bomb, a helmet, winged boots, a purple potion, a round shield. */
 const giftTex = new Map<number, Texture>();
-function giftTexture(kind: number): Texture {
+export function giftTexture(kind: number): Texture {
   let t = giftTex.get(kind);
   if (!t) {
     const c = document.createElement("canvas");
@@ -376,6 +427,50 @@ function giftTexture(kind: number): Texture {
       px("#8f6236", 9, 2, 2, 4);
       px("#ffd23f", 10, 1, 2, 2);
       px("#ff6a3f", 11, 0, 1, 1);
+    } else if (kind === GIFT.SPEED) {
+      // A golden boot with a white wing at its heel.
+      px(O, 7, 3, 6, 9);
+      px(O, 7, 10, 9, 4);
+      px("#e8b84a", 8, 4, 4, 7);
+      px("#e8b84a", 8, 11, 7, 2);
+      px("#fff1b0", 8, 4, 2, 3);
+      px("#a8761e", 8, 12, 7, 1);
+      px(O, 1, 3, 6, 2);
+      px(O, 0, 5, 7, 2);
+      px(O, 1, 7, 6, 2);
+      px(O, 3, 9, 4, 1);
+      px("#ffffff", 2, 4, 5, 1);
+      px("#ffffff", 1, 5, 6, 1);
+      px("#d8e8ff", 2, 6, 5, 1);
+      px("#ffffff", 2, 7, 5, 1);
+      px("#d8e8ff", 4, 8, 3, 1);
+    } else if (kind === GIFT.REGEN) {
+      // A round purple potion: a cork, a glass neck, a glowing brew.
+      px(O, 6, 0, 4, 3);
+      px("#b98a5a", 7, 1, 2, 1);
+      px(O, 6, 3, 4, 3);
+      px("#d8e8f0", 7, 3, 2, 3);
+      px(O, 3, 6, 10, 9);
+      px(O, 2, 7, 12, 7);
+      px("#9a3fe0", 3, 7, 10, 7);
+      px("#9a3fe0", 4, 6, 8, 9);
+      px("#c77dff", 4, 8, 8, 2);
+      px("#6a24c0", 4, 12, 8, 2);
+      px("#ffffff", 4, 7, 2, 2);
+      px("#e8c8ff", 9, 11, 2, 1);
+    } else if (kind === GIFT.SHIELD) {
+      // A round blue shield: a steel rim, a gold boss, a shine.
+      px(O, 4, 1, 8, 14);
+      px(O, 1, 4, 14, 8);
+      px(O, 2, 2, 12, 12);
+      px("#c9d2dc", 3, 2, 10, 12);
+      px("#c9d2dc", 2, 3, 12, 10);
+      px("#3f7fd0", 3, 3, 10, 10);
+      px("#6fb4ff", 4, 3, 4, 3);
+      px("#2a5aa0", 9, 10, 4, 3);
+      px(O, 6, 6, 4, 4);
+      px("#ffd23f", 7, 7, 2, 2);
+      px("#ffffff", 4, 4, 2, 1);
     } else {
       px(O, 2, 3, 12, 10);
       px("#d9a915", 3, 4, 10, 7);
@@ -456,6 +551,8 @@ interface Floater {
   y: number;
   at: number;
   life: number;
+  /** Its size, settled (those without pop in at the size they are). */
+  size?: number;
 }
 
 /** A rose petal: fluttering down (z in tiles), or lying where it fell (landed, wall ms). */
@@ -521,6 +618,8 @@ export class ArenaShow {
     sentAt: 0,
     sent: { x: -1, y: -1, aim: -1, reach: -1 },
     rollUntil: 0,
+    /** A roll asked for that couldn't go yet (server time). */
+    rollWanted: 0,
     rollDir: 0,
     rollReady: 0,
     lungeFrom: 0,
@@ -545,8 +644,6 @@ export class ArenaShow {
   private ghosts = new Map<number, Graphics[]>();
   private giantPath = new Map<number, { x: number; y: number; t: number }[]>();
   private dashSeen = new Map<number, number>();
-  /** The Goliath's health last frame, and till when it shows healing (resting). */
-  private giantHp = new Map<number, { hp: number; until: number }>();
   private posed = new Set<number>();
   private missiles: Missile[] = [];
   private stuck: { x: number; y: number; aim: number; until: number; arrow?: boolean }[] = [];
@@ -558,6 +655,7 @@ export class ArenaShow {
   private stopIds = new Set<number>();
   private spikeUpAt: number[] = [];
   private lastSpikes: number[] = [];
+  private spikeDownAt: number[] = [];
   private fx = new Graphics();
   private fires: Fire[] = [];
   /** Caesar's head (world px) and the tile in front of his dais. */
@@ -615,6 +713,7 @@ export class ArenaShow {
   private center = el("div", "pb-center ar-center");
   private feed = el("div", "pb-feed ar-feed");
   private selfEl = el("div", "ar-self");
+  private windToldAt = 0;
   private hint = el("div", "ar-hint");
   private touchPad = el("div", "ar-touch");
   private btns: Record<string, HTMLButtonElement> = {};
@@ -623,6 +722,11 @@ export class ArenaShow {
   /** With classes on: the pick at each round's start. */
   private kitPicker = new KitPicker((k) => this.send({ t: "ArenaKit", kit: k }));
   private classWheel = new ClassWheel();
+  /** The round's disaster (its vote, its wheel, its meteors and lions). */
+  private disaster: DisasterShow;
+  /** The lava, and when it was last drawn. */
+  private lavaG = new Graphics();
+  private lavaAt = 0;
   private results = el("div", "pb-results");
   private lobbyOpen = false;
   private yieldBtn!: HTMLButtonElement;
@@ -635,6 +739,13 @@ export class ArenaShow {
   /** Those lying out on the carpet (over it: it is a flat object of its own). */
   private petalsOutG = new Graphics();
   private carpetY = Infinity;
+  /** What's shining after dark, this frame. */
+  private glows: NightGlows;
+  /** All the sand and sparks. */
+  private juice: Juice;
+  private bets: BetPanel;
+  /** How far each fighter's gone since their last footfall, and where they were. */
+  private strides = new Map<number, { x: number; y: number; d: number; at: number; full: boolean }>();
 
   constructor(
     private scene: Scene,
@@ -665,8 +776,51 @@ export class ArenaShow {
       map.objects.filter((o) => o.kind === "arena_spikes").map(rect),
       map.objects.some((o) => o.kind === "arena_bowl"),
     );
+    this.glows = new NightGlows(nightGlow);
+    this.juice = new Juice((x) => this.wx(x), (y) => this.wy(y), TILE, this.scene.sorted);
+    this.bets = new BetPanel({
+      bet: (pick) => this.send({ t: "ArenaBet", pick }),
+      name: (slot) => {
+        const id = this.state?.slots[slot] ?? 0;
+        return id ? this.who(id) : "";
+      },
+      css: (slot) => this.cssOf(slot),
+    });
+    this.disaster = new DisasterShow({
+      wx: (x) => this.wx(x),
+      wy: (y) => this.wy(y),
+      tile: TILE,
+      sorted: this.scene.sorted,
+      canVote: () => {
+        const p = this.mine();
+        return (!p || (p.flags & FLAG.DOWN) !== 0) && (this.watching || this.capturing || this.hearing() > 0.5);
+      },
+      inSight: () => this.watching || this.capturing || this.hearing() > 0,
+      lavaClose: (lava) => {
+        const p = this.mine();
+        if (!p || p.flags & FLAG.DOWN) return false;
+        const e = this.ring.oval ? ROUNDNESS : 2;
+        const [cx, cy] = [this.ring.w / 2, this.ring.h / 2];
+        const out = (Math.abs(this.me.x / cx - 1) ** e + Math.abs(this.me.y / cy - 1) ** e) ** (1 / e);
+        return out > lava - 0.09;
+      },
+      mid: { x: this.ring.w / 2, y: this.ring.h / 2 },
+      floorZ: this.oy * TILE + 2,
+      vote: (kind) => this.send({ t: "ArenaVote", kind }),
+      near: (x, y) => this.near(x, y),
+      dust: (x, y, n) => this.dust(x, y, n),
+      shake: (k) => {
+        if (this.capturing || this.watching) this.shake = Math.max(this.shake, k);
+      },
+      ring: (x, y, color, r) => this.ringFx(x, y, color, r),
+      glow: (x, y) => nightGlow(x, y),
+      giftTex: (kind) => giftTexture(kind),
+      light: (x, y, tint, sx, sy, alpha) => this.glows.add(x, y, tint, sx, sy, alpha),
+    });
     // On the sand: the fire's glow and the spikes over the floor, under the fighters; effects over all.
     this.floor.zIndex = this.oy * TILE + 2;
+    this.lavaG.zIndex = this.floor.zIndex - 0.5;
+    this.scene.sorted.addChild(this.lavaG);
     this.scene.sorted.addChild(this.floor);
     this.top.zIndex = 1e9;
     this.top.addChild(this.fx);
@@ -808,6 +962,15 @@ export class ArenaShow {
     return this.state?.fighters.find((f) => f.id === this.selfId());
   }
 
+  /** Their colour: their own, or in two against two, their team's. */
+  private colorOf(slot: number): number {
+    return this.state?.mode === MODE.TEAMS ? TEAM_COLORS[slot < 2 ? 0 : 1] : COLORS[slot];
+  }
+
+  private cssOf(slot: number): string {
+    return this.state?.mode === MODE.TEAMS ? TEAM_CSS[slot < 2 ? 0 : 1] : CSS[slot];
+  }
+
   private slotOf(id: number): number {
     return Math.max(0, this.state?.slots.indexOf(id) ?? 0);
   }
@@ -844,13 +1007,16 @@ export class ArenaShow {
       const f = this.watchFocus();
       this.watchCam.x += (f.x - this.watchCam.x) * 0.08;
       this.watchCam.y += (f.y - this.watchCam.y) * 0.08;
-      return this.watchCam;
+      if (this.shake <= 0) return this.watchCam;
+      const w = performance.now();
+      return { x: this.watchCam.x + (Math.sin(w / 29) + Math.sin(w / 17.3)) * 0.2 * this.shake, y: this.watchCam.y + (Math.sin(w / 23) + Math.sin(w / 13.7)) * 0.2 * this.shake };
     }
     if (!this.capturing) return pos;
     // In the parade: just ahead of us, the way we're walking.
     if (this.state?.status === OVER) return { x: pos.x, y: pos.y + 1 };
-    const sx = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
-    const sy = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
+    const t = performance.now();
+    const sx = this.shake > 0 ? (Math.sin(t / 29) + Math.sin(t / 17.3)) * 0.27 * this.shake : 0;
+    const sy = this.shake > 0 ? (Math.sin(t / 23) + Math.sin(t / 13.7)) * 0.27 * this.shake : 0;
     return { x: pos.x + this.camLead.x + sx, y: pos.y + this.camLead.y + sy };
   }
 
@@ -874,6 +1040,9 @@ export class ArenaShow {
     e.stopImmediatePropagation();
     this.cycleWatch(dir);
   };
+
+  /** The mouse's buttons held down (`PointerEvent.buttons`). */
+  private buttons = 0;
 
   private onKey = (e: KeyboardEvent) => {
     if (!this.capturing || isTyping(e)) return;
@@ -903,6 +1072,7 @@ export class ArenaShow {
   private onBlur = () => {
     this.keys.clear();
     this.stick = null;
+    this.buttons = 0;
     if (this.me.blocking) this.block(false);
     if (this.me.pressAt) this.release();
   };
@@ -921,9 +1091,24 @@ export class ArenaShow {
     }
     this.setTouchMode(false);
     this.mouse = { sx: e.clientX, sy: e.clientY };
-    if (e.button === 0) this.press();
-    if (e.button === 2) this.block(true);
+    this.mouseButtons(e);
   };
+
+  /**
+   * The mouse's buttons, as they are now. (A browser only says `pointerdown`
+   * for the first button of a chord and `pointerup` for the last: attacking
+   * with block held, or letting go of one of two, comes as a mere move. So
+   * it's `buttons` that's followed, not the events.)
+   */
+  private mouseButtons(e: PointerEvent) {
+    const now = e.buttons & 3;
+    const was = this.buttons;
+    this.buttons = now;
+    if (now & 1 && !(was & 1)) this.press();
+    if (was & 1 && !(now & 1)) this.release();
+    if (now & 2 && !(was & 2)) this.block(true);
+    if (was & 2 && !(now & 2)) this.block(false);
+  }
 
   private onMove = (e: PointerEvent) => {
     if (this.stick && this.stick.id === e.pointerId) {
@@ -939,7 +1124,10 @@ export class ArenaShow {
       }
       return;
     }
-    if (e.pointerType !== "touch") this.mouse = { sx: e.clientX, sy: e.clientY };
+    if (e.pointerType !== "touch") {
+      this.mouse = { sx: e.clientX, sy: e.clientY };
+      if (this.buttons && this.capturing) this.mouseButtons(e);
+    }
   };
 
   private onUp = (e: PointerEvent) => {
@@ -947,9 +1135,9 @@ export class ArenaShow {
       this.stick = null;
       return;
     }
-    if (e.pointerType === "touch" || !this.capturing) return;
-    if (e.button === 0) this.release();
-    if (e.button === 2) this.block(false);
+    if (e.pointerType === "touch") return;
+    if (this.capturing) this.mouseButtons(e);
+    else this.buttons = 0;
   };
 
   private setTouchMode(on: boolean) {
@@ -994,21 +1182,29 @@ export class ArenaShow {
       this.me.releaseAt = now;
       this.me.releaseCharge = -1;
       if (p && !isGiant(p) && !shoots(kitOf(p)) && kitOf(p) !== KIT.TANK && held >= HEAVY_MIN_MS && p.stamina >= HEAVY_COST * 0.5 && !(p.flags & FLAG.WINDED)) {
-        const charge = Math.min(1, (held - HEAVY_MIN_MS) / (HEAVY_FULL_MS - HEAVY_MIN_MS));
+        const charge = Math.min(1, (held - HEAVY_MIN_MS) / (fillMs(kitOf(p)) - HEAVY_MIN_MS));
         if (sure) this.lunge(now, charge);
         else this.me.releaseCharge = charge;
       }
-    } else {
+    } else if (now - this.me.pressAt < HOLD_MS) {
+      // (Held, with no wind for the charge: nothing at all, not a slash.)
       this.act(INPUT.LIGHT);
       // Shown at once only when the server's sure to take it (free, with the
       // wind for it); else it's kept for when we're free, and shows then (a
       // swing drawn and then dropped looked like it had been cut off).
       const giant = !!p && isGiant(p);
       const free = !!p && (p.act === ACT.NONE || p.act === ACT.BLOCK) && !(p.flags & (FLAG.KNOCKED | FLAG.DOWN));
-      if (free && !shoots(kitOf(p!)) && p!.stamina >= (giant ? SMASH_COST : LIGHT_COST) * 0.5) this.me.swingAt = now;
+      if (free && p!.stamina >= (giant ? SMASH_COST : shoots(kitOf(p!)) ? STAB_COST : LIGHT_COST) * 0.5) this.me.swingAt = now;
     }
     this.me.pressAt = 0;
     this.me.charging = false;
+  }
+
+  /** Whether we've the wind for our charged attack (as `Fighter::can_charge`, and a hair over: stamina reaches us rounded). */
+  private canCharge(p: F): boolean {
+    const k = kitOf(p);
+    const cost = isGiant(p) ? STOMP_COST : KIT_COST[k] * (k === KIT.ARCHER ? BURST_MIN_COST : k === KIT.BOMBER ? BIG_BOMB_COST[0] : HEAVY_COST * KIT_HEAVY_COST[k]);
+    return !(p.flags & FLAG.WINDED) && p.stamina >= cost * 0.5 + 1;
   }
 
   /** Our heavy blow's lunge, from `now` (server time), the further the more it was charged. */
@@ -1041,12 +1237,46 @@ export class ArenaShow {
 
   private roll() {
     const p = this.mine();
+    if (!p || p.flags & FLAG.DOWN || this.state?.status !== FIGHTING) return;
+    this.me.rollWanted = this.serverNow();
+    this.tryRoll();
+  }
+
+  /** Whether a roll (the Goliath: a dash) would go right now: as `Fighter::can_roll`, and the wind for it. */
+  private rollBlocked(p: F, now: number): "busy" | "wind" | null {
+    const giant = isGiant(p);
+    if (p.flags & FLAG.WINDED || p.stamina < (giant ? GIANT_DASH_COST : ROLL_COST * 0.5 * KIT_COST[kitOf(p)])) return "wind";
+    if (now < this.me.rollReady || p.flags & (FLAG.KNOCKED | FLAG.DOWN)) return "busy";
+    if (p.act === ACT.NONE || p.act === ACT.BLOCK || p.act === ACT.CHARGE) return giant && p.act === ACT.CHARGE ? "busy" : null;
+    const s = this.state!;
+    const since = p.actMs + Math.max(0, now - s.now);
+    if (p.act >= ACT.LIGHT1 && p.act <= ACT.LIGHT3) {
+      const [w, a] = lightOf(giant ? KIT.KNIGHT : kitOf(p), p.act - ACT.LIGHT1);
+      return !giant && since >= w + a ? null : "busy";
+    }
+    return "busy";
+  }
+
+  /** A roll that's been asked for: now, if it can; else it's kept a moment (as the server keeps it). */
+  private tryRoll() {
+    const want = this.me.rollWanted;
+    if (!want) return;
+    const p = this.mine();
     const now = this.serverNow();
-    // (The Goliath's too heavy to roll: it dashes, if it's the wind for it.)
-    const giant = isGiant(p ?? { flags: 0 });
-    if (!p || p.flags & FLAG.DOWN || now < this.me.rollReady || p.stamina < (giant ? GIANT_DASH_COST : ROLL_COST * 0.5) || this.state?.status !== FIGHTING) return;
-    if (giant && [ACT.SMASH, ACT.STOMP, ACT.GRAB, ACT.CHARGE].includes(p.act)) return;
-    if (p.act === ACT.STUN || p.act === ACT.SPIN || p.act === ACT.HEAVY || p.act === ACT.THROW || p.flags & (FLAG.KNOCKED | FLAG.WINDED)) return;
+    if (!p || p.flags & FLAG.DOWN || this.state?.status !== FIGHTING) {
+      this.me.rollWanted = 0;
+      return;
+    }
+    const blocked = this.rollBlocked(p, now);
+    if (blocked) {
+      if (now > want + ROLL_BUFFER_MS) {
+        this.me.rollWanted = 0;
+        if (blocked === "wind") this.outOfWind();
+      }
+      return;
+    }
+    this.me.rollWanted = 0;
+    const giant = isGiant(p);
     // (A charge, cut short.)
     this.me.pressAt = 0;
     this.me.charging = false;
@@ -1060,6 +1290,17 @@ export class ArenaShow {
     snd.whoosh(giant ? 1 : 0.8);
     this.dust(this.me.x, this.me.y, giant ? 14 : 6);
     if (giant) this.shake = Math.max(this.shake, 0.12);
+  }
+
+  /** Wanted something there's no stamina for: says so, rather than nothing happening. */
+  private outOfWind() {
+    const now = wallNow();
+    if (now < this.windToldAt + 500) return;
+    this.windToldAt = now;
+    snd.noWind();
+    this.selfEl.classList.remove("nowind");
+    void this.selfEl.offsetWidth;
+    this.selfEl.classList.add("nowind");
   }
 
   private throwIt() {
@@ -1136,7 +1377,7 @@ export class ArenaShow {
     this.lobby.hidden = !show;
     if (!show) return;
     const mine = s ? s.slots.indexOf(me) : -1;
-    const key = s ? `${s.status}|${s.slots.join(",")}|${s.crowns.join(",")}|${mine}|${s.level}|${s.mode}|${s.goliath}|${s.kits}|${s.wheel}|${s.exhibition}` : "none";
+    const key = s ? `${s.status}|${s.slots.join(",")}|${s.crowns.join(",")}|${mine}|${s.level}|${s.mode}|${s.goliath}|${s.kits}|${s.wheel}|${s.disasters}|${s.exhibition}` : "none";
     if (key === this.lobbyKey) return;
     this.lobbyKey = key;
     this.lobby.replaceChildren();
@@ -1163,9 +1404,14 @@ export class ArenaShow {
       const bot = id >= BOT_BASE && id < BOT_BASE + SLOTS;
       const name = id === 0 ? "· empty ·" : bot ? `🤖 ${BOT_NAMES[k]} (bot)` : id === me ? `${this.nameOf(id)} (you)` : this.nameOf(id);
       const row = el("div", `ar-place${id === 0 ? " open" : ""}${id === me ? " me" : ""}${bot ? " bot" : ""}`);
-      row.style.setProperty("--c", CSS[k]);
+      row.style.setProperty("--c", this.cssOf(k));
       row.append(el("span", "ar-dot"), el("span", "ar-place-name", name), el("span", "ar-place-crowns", running ? "♛".repeat(s!.crowns[k]) : ""));
       // Goliath mode: whose place is the Goliath's (and, in the lobby, a button to make it so).
+      // Two against two: whose side, and a way to cross over.
+      if (s && s.mode === MODE.TEAMS) {
+        row.append(el("span", "ar-goliath-tag", k < 2 ? "🔵 BLUE" : "🔴 RED"));
+        if (!running && mine >= 0 && k !== mine && (id === 0 || id >= BOT_BASE)) row.append(button("⇄", () => this.send({ t: "ArenaSwitch", slot: k }), "ar-bot-btn"));
+      }
       if (s && s.mode === MODE.GOLIATH) {
         if (s.goliath === k) row.append(el("span", "ar-goliath-tag", "👹 GOLIATH"));
         else if (canEdit && id !== 0) row.append(button("👹", () => this.send({ t: "ArenaMode", mode: MODE.GOLIATH, goliath: k }), "subtle ar-bot-btn"));
@@ -1200,7 +1446,7 @@ export class ArenaShow {
     const actions = el("div", "ar-lobby-actions");
     if (!running && mine >= 0) {
       const go = button("⚔️ FIGHT!", () => this.send({ t: "ArenaStart", bots: false }), "primary");
-      go.disabled = fighters < 2 || (goliathMode && !giantHere);
+      go.disabled = fighters < 2 || (goliathMode && !giantHere) || (!!s && s.mode === MODE.TEAMS && (!(s.slots[0] || s.slots[1]) || !(s.slots[2] || s.slots[3])));
       actions.append(go);
       actions.append(button("Step out", () => this.send({ t: "ArenaLeave" }), "subtle"));
     } else if (!running) {
@@ -1213,7 +1459,7 @@ export class ArenaShow {
       "hint ar-how",
       this.touchMode || matchMedia("(pointer: coarse)").matches
         ? "Stick to move · ⚔ tap to slash, hold to charge (holding a spear or bomb: throws it) · 🛡 hold to block (just in time: parry!) · 💨 roll · 🌪 whirlwind"
-        : "WASD move · mouse aim · click slash (keep clicking: combo) · hold click: heavy lunge · holding a spear or bomb, click throws it · right click/Shift block (just in time: PARRY) · Space roll · Q whirlwind",
+        : "WASD move · mouse aim · click slash (keep clicking: combo) · hold click: heavy lunge · holding a spear or bomb, click throws it · right click/Shift block (just in time: PARRY; takes the worst of arrows and bombs, for stamina) · Space roll · Q whirlwind",
     );
     // The kind of match: everyone for themselves, or the Goliath against the rest.
     const kinds = el("div", "ar-kinds");
@@ -1221,6 +1467,7 @@ export class ArenaShow {
       for (const [m, label, tip] of [
         [MODE.CLASSIC, "⚔️ Free-for-all", "everyone for themselves"],
         [MODE.GOLIATH, "👹 Goliath", "one giant against the rest"],
+        [MODE.TEAMS, "🤝 2v2", "two against two: friends can't hurt each other"],
       ] as [number, string, string][]) {
         const b = button(label, () => this.send({ t: "ArenaMode", mode: m, goliath: m === MODE.GOLIATH && s.slots[s.goliath] === 0 ? Math.max(0, s.slots.findIndex((x) => x !== 0)) : s.goliath }), `ar-kind${s.mode === m ? " on" : ""}`);
         b.title = tip;
@@ -1239,14 +1486,21 @@ export class ArenaShow {
       on.disabled = !canEdit;
       kitsRow.append(on);
       if (s.kits) {
-        const wheel = button(s.wheel ? "🎡 Wheel: ON" : "🎡 Wheel: OFF", () => this.send({ t: "ArenaWheel", on: !s.wheel }), `ar-kind${s.wheel ? " on" : ""}`);
+        const wheel = button(s.wheel ? "🎡 Class Wheel: ON" : "🎡 Class Wheel: OFF", () => this.send({ t: "ArenaWheel", on: !s.wheel }), `ar-kind${s.wheel ? " on" : ""}`);
         wheel.title = s.wheel ? "A wheel spins before every round and picks everyone a new class" : "Everyone picks their own class";
         wheel.disabled = !canEdit;
         kitsRow.append(wheel);
       }
       kitsRow.append(button("👁 Preview classes", () => kitGallery(), "subtle"));
     }
-    this.lobby.append(head, sub, kinds, places, modeEl, ...(level ? [level] : []), kitsRow, actions, how, ...(goliathHow ? [goliathHow] : []));
+    const disasterRow = el("div", "ar-kits-row");
+    if (s) {
+      const on = button(s.disasters ? "🌋 Disaster Wheel: ON" : "🌋 Disaster Wheel: OFF", () => this.send({ t: "ArenaDisasters", on: !s.disasters }), `ar-kind${s.disasters ? " on" : ""}`);
+      on.title = s.disasters ? "A stone wheel turns mid-round and sets lava, meteors or lions on everyone" : "No disasters: only the fire closes in";
+      on.disabled = !canEdit;
+      disasterRow.append(on);
+    }
+    this.lobby.append(head, sub, kinds, places, modeEl, ...(level ? [level] : []), kitsRow, disasterRow, actions, how, ...(goliathHow ? [goliathHow] : []));
   }
 
   // ---- from the server -------------------------------------------------------------
@@ -1330,12 +1584,179 @@ export class ArenaShow {
     const now = performance.now();
     this.hype = Math.min(1, this.hype + (HYPE[e.kind] ?? 0) * (e.kind === EV.HIT && (e.m & 2) !== 0 ? 2 : 1));
     switch (e.kind) {
+      case EV.DISASTER_PICKED: {
+        const k = KINDS[e.n];
+        if (!k) break;
+        // (Off the wheel, or by the crowd's vote.)
+        wheelfx.landed(e.n - 1);
+        this.disaster.wheelLanded(e.n, performance.now());
+        this.announce(`${k.icon} ${k.name}!`, k.color, 1.1, "the wheel has spoken");
+        break;
+      }
+      case EV.DISASTER: {
+        const k = KINDS[e.n];
+        if (!k) break;
+        dfx.horn();
+        this.announce(`${k.icon} ${k.name}!`, k.color, 1.6, k.hint);
+        this.caesarSays(k.caesar, 2800);
+        this.shake = Math.max(this.shake, 0.3);
+        this.disaster.struck(e.n, performance.now());
+        break;
+      }
+      case EV.METEOR_WARN:
+        this.disaster.meteorMarked(x, y, e.m / 100, e.n, wallNow());
+        break;
+      case EV.METEOR:
+        this.disaster.meteorLanded(x, y, 1.5, wallNow());
+        this.explode(x, y, 1.5);
+        this.sparks(x, y - 0.3, 0xffb03a, 26);
+        this.dust(x, y, 8);
+        // (Dozens come down: only the near ones rock the camera.)
+        if (this.capturing) {
+          const d = Math.hypot(this.me.x - x, this.me.y - y);
+          if (d < 5) this.shake = Math.max(this.shake, 0.12 + 0.28 * (1 - d / 5));
+        }
+        break;
+      case EV.LION_OUT:
+        this.ringFx(x, y, 0xffd23f, 1.4);
+        this.dust(x, y, 10);
+        dfx.roar(Math.max(0.55, nearMe), e.b * 240);
+        break;
+      case EV.LION_CROUCH:
+        dfx.growl(nearMe);
+        if (e.a === me) this.float("!", "#ff4f1a", this.me.x, this.me.y - 1.9, 2.2);
+        break;
+      case EV.LION_LEAP:
+        dfx.pounce(nearMe);
+        this.dust(x, y, 5);
+        break;
+      case EV.LION_LAND:
+        dfx.claws(nearMe);
+        this.dust(x, y, 7);
+        this.ringFx(x, y, 0xe8d3a3, 0.9);
+        break;
+      case EV.LION_HIT:
+        this.disaster.hurt(e.b, wallNow());
+        // (The little ones don't feel it: they're done for.)
+        if (e.b >= THIEF_ID) break;
+        this.sparks(x, y - 0.5, this.disaster.beastUp ? 0xffd88a : 0xff5a3a, 10);
+        this.float(`-${e.n}`, "#ffb03a", x, y - 1.4, 1);
+        sfx.swordHit(nearMe * 0.7);
+        if (this.disaster.beastUp) dfx.scorpionHit(nearMe);
+        else dfx.yelp(nearMe);
+        break;
+      case EV.LION_DOWN:
+        if (e.b >= THIEF_ID) {
+          dfx.thiefSquish(nearMe);
+          this.sparks(x, y - 0.3, 0xc2622c, 10);
+          this.dust(x, y, 4);
+          this.float(e.a === me ? "GOTCHA!" : "SQUISH", "#ffd88a", x, y - 1.2, 0.9);
+          break;
+        }
+        if (this.disaster.beastUp) {
+          dfx.scorpionDown(nearMe);
+          this.sparks(x, y - 0.5, 0x8cff4e, 44);
+          this.dust(x, y, 18);
+          this.ringFx(x, y, 0xc86eff, 2.6);
+          this.float(e.a === me ? "SCORPION SLAIN!" : "SLAIN", "#c86eff", x, y - 3, 1.8);
+          this.shake = Math.max(this.shake, 0.3);
+          break;
+        }
+        dfx.lionDown(nearMe);
+        this.sparks(x, y - 0.5, 0xffd23f, 26);
+        this.dust(x, y, 8);
+        this.float(e.a === me ? "LION SLAIN!" : "SLAIN", "#ffd23f", x, y - 1.8, e.a === me ? 1.6 : 1.1);
+        break;
+      case EV.THIEF_OUT:
+        dfx.thiefPeek(nearMe);
+        break;
+      case EV.THIEF_GRAB:
+        dfx.thiefHook(nearMe);
+        this.sparks(x, y - 0.3, 0xffd88a, 5);
+        this.dust(x, y, 3);
+        this.float("STOLEN!", "#ffb03a", x, y - 1.2, 0.85);
+        break;
+      case EV.THIEF_STING:
+        dfx.thiefSting(nearMe);
+        this.disaster.thiefStung(e.a, wallNow());
+        this.ringFx(x, y, 0x8cff4e, 0.7);
+        this.float("STUNG!", "#8cff4e", x, y - 1.5, 1);
+        if (e.b === me) this.buzz(50);
+        break;
+      case EV.POISONED:
+        this.sparks(x, y - 0.8, 0x8cff4e, 12);
+        this.float("POISONED", "#8cff4e", x, y - 1.9, 1);
+        if (e.b === me) dfx.poisoned();
+        break;
+      case EV.SCORPION_WIND:
+        dfx.scorpionHiss(nearMe);
+        if (e.n === 1) dfx.dartSpit(nearMe * 0.6);
+        if (e.n === 2) {
+          // It's coming: a lurch, a spray of sand.
+          this.dust(x, y, 10);
+          this.ringFx(x, y, 0xc86eff, 1.3);
+          this.shake = Math.max(this.shake, 0.14);
+        }
+        if (e.b === me && this.capturing) this.float(e.n === 2 ? "!!" : "!", "#c86eff", this.me.x, this.me.y - 1.9, 2.2);
+        break;
+      case EV.SCORPION_STING:
+        dfx.scorpionSting(nearMe);
+        this.dust(x, y, 7);
+        this.ringFx(x, y, 0xc86eff, 1);
+        if (this.capturing && Math.hypot(this.me.x - x, this.me.y - y) < 4) this.shake = Math.max(this.shake, 0.22);
+        break;
+      case EV.DART_HIT:
+        this.dropMissile(e.a, DART);
+        if (e.n) {
+          this.sparks(x, y - 0.8, 0x9fd3ee, 10);
+          this.float("BLOCKED", "#9fd3ee", x, y - 1.8, 1.1);
+          sfx.swordClang(nearMe * 0.7);
+        } else this.sparks(x, y - 0.8, 0x8cff4e, 12);
+        break;
+      case EV.ACID_BURN:
+        this.sparks(x, y - 0.6, 0xb6ff5a, 6);
+        this.float(`-${e.n}`, "#b6ff5a", x, y - 1.4, 0.9);
+        dfx.sizzle(nearMe);
+        if (e.b === me) {
+          this.vignette.classList.remove("hit");
+          void this.vignette.offsetWidth;
+          this.vignette.classList.add("hit");
+        }
+        break;
+      case EV.BOUNCE: {
+        // A tank's shield sends a bomb back: a ringing clang, and off it goes.
+        this.dropMissile(e.a, e.n);
+        this.ringFx(x, y, 0x9fd3ee, 1.2);
+        this.sparks(x, y - 0.4, 0xffe14f, 22);
+        this.float("BOUNCED!", "#ffe14f", x, y - 1.6, 1.5);
+        sfx.swordClang(nearMe);
+        if (e.b === me || e.a === me) this.shake = Math.max(this.shake, 0.2);
+        if (e.a === me) this.announce("💣 IT'S COMING BACK!", "#ff8a4a", 0.9, "roll out of its way");
+        break;
+      }
+      case EV.SHIELD: {
+        // It bursts: a blast of shards, rings racing out, and no harm done.
+        const big = !!this.state?.fighters.find((q) => q.id === e.b && isGiant(q));
+        const at = y - (big ? 2.4 : 1.2);
+        this.sparks(x, at, 0x9fe8ff, big ? 46 : 30);
+        this.sparks(x, at, 0xffffff, 12);
+        this.ringFx(x, y, 0xffffff, big ? 2.6 : 1.5);
+        this.ringFx(x, y, 0x7fd8ff, big ? 3.6 : 2.2);
+        this.float(e.n ? "SHIELD HOLDS!" : "SHIELD!", "#9fe8ff", x, at - 1.2, 1.5);
+        arenafx.shieldBurst(nearMe);
+        if (e.b === me) this.buzz([20, 30, 40]);
+        break;
+      }
       case EV.SWING:
         if (e.n === ACT.SMASH) {
           if (e.m & 1) this.tiredSmash.add(e.a);
           else this.tiredSmash.delete(e.a);
         }
-        sfx.swordSwing(e.n === ACT.HEAVY ? 0 : 1, nearMe * (e.n === ACT.HEAVY ? 1 : 0.5));
+        // (The tank's hammer whooshes as it comes round, after the wind-up.)
+        const who = this.state?.fighters.find((q) => q.id === e.a);
+        if (who && !isGiant(who) && kitOf(who) === KIT.TANK && e.n >= ACT.LIGHT1 && e.n <= ACT.LIGHT3) window.setTimeout(() => sfx.swordSwing(0, nearMe * 0.8), lightOf(KIT.TANK, e.n - ACT.LIGHT1)[0]);
+        else if (who && !isGiant(who) && shoots(kitOf(who)) && e.n >= ACT.LIGHT1 && e.n <= ACT.LIGHT3) snd.stab(nearMe);
+        else sfx.swordSwing(e.n === ACT.HEAVY ? 0 : 1, nearMe * (e.n === ACT.HEAVY ? 1 : 0.5));
         // Our heavy blow, taken: lunge now if we were waiting on its word
         // (the windup's already gone by on the server, so straight in).
         if (e.a === me && e.n === ACT.HEAVY && this.me.releaseCharge >= 0) {
@@ -1346,6 +1767,18 @@ export class ArenaShow {
         }
         break;
       case EV.HIT: {
+        // Bundled off the wheel as it moves: no harm, only the shove.
+        if (e.m & 4096) {
+          this.dust(x, y, 4);
+          if (e.b === me) {
+            const [vx, vy] = [(e.vx - 32768) / 100, (e.vy - 32768) / 100];
+            this.me.kvx = vx;
+            this.me.kvy = vy;
+            this.me.knockUntil = this.serverNow() + Math.hypot(vx, vy) * 45;
+            this.me.rollUntil = this.me.lungeUntil = 0;
+          }
+          break;
+        }
         // The Goliath whirling someone round: nothing touches it.
         if (e.m & 256) {
           this.sparks(x, y - 1.6, 0xffd23f, 10);
@@ -1371,11 +1804,25 @@ export class ArenaShow {
         const blocked = (e.m & 1) !== 0;
         const heavy = (e.m & 2) !== 0;
         const big = heavy || (e.m & 4) !== 0 || (e.m & 32) !== 0;
-        const color = blocked ? 0x9fd3ee : big ? 0xffa03f : 0xfff1a8;
-        this.sparks(x, y - 0.4, color, blocked ? 8 : big ? 18 : 10);
-        this.float(blocked ? `${e.n}` : `-${e.n}`, blocked ? "#9fd3ee" : big ? "#ff8a4a" : "#ffffff", x, y - 1.3, big ? 1.5 : 1);
-        if (blocked) sfx.swordClang(nearMe * 0.7);
-        else sfx.swordHit(nearMe * (big ? 1 : 0.65));
+        // A lion or a meteor: knocked out of it, the button held or not.
+        if (!e.a && e.b === me && !blocked) {
+          this.me.pressAt = 0;
+          this.me.charging = false;
+          this.me.swingAt = 0;
+        }
+        const stab = (e.m & 8192) !== 0;
+        const by = this.state?.fighters.find((f) => f.id === e.a);
+        // Which way the blow came, and went.
+        const from = by ? Math.atan2(by.y / 100 - y, by.x / 100 - x) : Math.atan2(e.vy - 32768, e.vx - 32768) + Math.PI;
+        if (blocked) this.juice.guard(x, y, from, heavy || big);
+        else this.juice.hit(x, y, from + Math.PI, big, big ? 0xffc06a : 0xfff1c8);
+        this.float(blocked ? `${e.n}` : `-${e.n}`, blocked ? "#9fd3ee" : big ? "#ff8a4a" : "#ffffff", x, y - 1.3, big ? 1.5 : stab ? 0.8 : 1);
+        if (blocked) arenafx.guard(nearMe * (stab ? 0.5 : 1));
+        else if (stab) sfx.swordHit(nearMe * 0.35);
+        else {
+          sfx.swordHit(nearMe * (big ? 1 : 0.65));
+          arenafx.bodyHit(nearMe * (big ? 1 : 0.6));
+        }
         if (big) {
           this.hitStop([e.a, e.b], heavy ? 110 : 80);
           if (e.a === me || e.b === me) this.shake = Math.max(this.shake, heavy ? 0.28 : 0.18);
@@ -1414,10 +1861,10 @@ export class ArenaShow {
       }
       case EV.PARRY: {
         const heavy = e.n === 1;
-        this.ringFx(x, y, 0xffffff, heavy ? 2.2 : 1.6);
-        this.sparks(x, y - 0.5, heavy ? 0xffe14f : 0xffffff, heavy ? 34 : 22);
+        this.juice.parry(x, y, heavy);
         this.float(heavy ? "HEAVY PARRIED!" : "PARRY!", "#ffe14f", x, y - 1.6, heavy ? 1.8 : 2);
-        sfx.swordParry(nearMe);
+        sfx.swordParry(nearMe * 0.6);
+        arenafx.parry(nearMe);
         if (heavy) sfx.crowdRoar(0.6);
         this.hitStop([e.a, e.b], heavy ? 220 : 160);
         if (e.a === me || e.b === me) this.shake = Math.max(this.shake, heavy ? 0.32 : 0.22);
@@ -1432,20 +1879,25 @@ export class ArenaShow {
       }
       case EV.GUARD_BREAK:
         this.float("GUARD BREAK!", "#ff9a3f", x, y - 1.8, 1.4);
-        sfx.swordClang(nearMe);
-        this.sparks(x, y - 0.5, 0xff9a3f, 14);
+        arenafx.guardBreak(nearMe);
+        this.juice.guardBreak(x, y);
+        this.hitStop([e.a, e.b], 90);
+        if (e.b === me) this.shake = Math.max(this.shake, 0.26);
         break;
       case EV.WALL_SLAM:
         this.float("WALL SLAM!", "#ff6a6a", x, y - 1.6, 1.6);
-        this.dust(x, y, 16);
-        snd.thud(nearMe);
-        this.hitStop([e.b], 120);
-        if (e.a === me || e.b === me) this.shake = Math.max(this.shake, 0.3);
+        this.juice.wallSlam(x, y, Math.atan2(y - this.ring.h / 2, x - this.ring.w / 2));
+        arenafx.wallSlam(nearMe);
+        this.hitStop([e.a, e.b], 150);
+        if (e.a === me || e.b === me) this.shake = Math.max(this.shake, 0.42);
+        else this.shake = Math.max(this.shake, 0.16 * nearMe);
         sfx.crowdRoar(0.35);
         break;
       case EV.DOWN:
-        this.sparks(x, y - 0.4, COLORS[this.slotOf(e.b)], 26);
-        this.dust(x, y, 18);
+        this.juice.ko(x, y, this.colorOf(this.slotOf(e.b)));
+        arenafx.ko(nearMe);
+        this.hitStop([e.b], 130);
+        this.shake = Math.max(this.shake, 0.2 * nearMe);
         this.float("DOWN!", "#ff4f6a", x, y - 1.8, 1.8);
         this.addFeed(e.a, e.b);
         sfx.crowdRoar(0.7);
@@ -1472,12 +1924,30 @@ export class ArenaShow {
         break;
       case EV.PICKUP: {
         const g = GIFTS[e.n];
-        this.ringFx(x, y, 0xffe14f, 1);
-        this.float(g?.name ?? "GIFT", "#ffe14f", x, y - 1.4, 1.2);
-        snd.pickup();
+        // Each with a colour and a sound of its own.
+        const hue = e.n === GIFT.SPEED ? 0xfff1b0 : e.n === GIFT.REGEN ? 0xc77dff : e.n === GIFT.SHIELD ? 0x7fd8ff : e.n === GIFT.FURY ? 0xff4f4f : 0xffe14f;
+        this.ringFx(x, y, hue, 1);
+        this.float(g?.name ?? "GIFT", `#${hue.toString(16).padStart(6, "0")}`, x, y - 1.4, 1.2);
+        const giant = !!this.state?.fighters.find((q) => q.id === e.a && isGiant(q));
+        if (e.n === GIFT.SPEED) {
+          this.sparks(x, y, hue, 14);
+          arenafx.boots(nearMe);
+        } else if (e.n === GIFT.REGEN) {
+          this.sparks(x, y, hue, 14);
+          arenafx.potion(nearMe);
+        } else if (e.n === GIFT.SHIELD) {
+          this.ringFx(x, y, 0xffffff, 1.4);
+          arenafx.shieldUp(nearMe);
+        } else if (e.n === GIFT.FURY) {
+          this.sparks(x, y, hue, 18);
+          arenafx.fury(nearMe);
+        } else snd.pickup();
         if (e.a === me) {
-          if (e.n === GIFT.SPEAR || e.n === GIFT.BOMB) this.announce(`${g.icon} ${g.name}`, "#ffe14f", 1, this.touchMode ? "tap ⚔️ to throw it" : "attack (click) to throw it where you aim");
-          else if (e.n === GIFT.FURY) this.announce("⛑️ FURY!", "#ff9a3f", 1.2, "hits half again as hard, for a while");
+          if (e.n === GIFT.SPEAR || e.n === GIFT.BOMB) this.announce(`${g.icon} ${g.name}`, "#ffe14f", 1, this.touchMode ? "tap ⚔️ to throw it" : e.n === GIFT.BOMB && giant ? "one great big bomb: attack (click) to throw it" : "attack (click) to throw it where you aim");
+          else if (e.n === GIFT.FURY) this.announce("⛑️ FURY!", "#ff4f4f", 1.2, giant ? "hits half again as hard, for a long while" : "hits half again as hard, for a while");
+          else if (e.n === GIFT.SPEED) this.announce("🪽 HERMES BOOTS!", "#fff1b0", 1.2, giant ? "half as fast again, for a long while" : "half as fast again, for a while");
+          else if (e.n === GIFT.REGEN) this.announce("🧪 REGENERATION", "#c77dff", 1.2, giant ? "a great deal of health, coming back slowly" : "health coming back slowly, for 15 seconds");
+          else if (e.n === GIFT.SHIELD) this.announce("🛡️ SHIELD!", "#7fd8ff", 1.2, giant ? "it'll take the next two blows" : "it'll take the next blow");
         }
         break;
       }
@@ -1508,12 +1978,13 @@ export class ArenaShow {
           if (best >= 0) this.missiles.splice(best, 1);
         }
         this.explode(x, y, e.n ? e.n / 100 : BOMB_R);
+        this.juice.blast(x, y, e.n ? e.n / 100 : BOMB_R);
         snd.boom(Math.max(0.5, nearMe));
         if (this.capturing && Math.hypot(this.me.x - x, this.me.y - y) < 5) this.shake = Math.max(this.shake, 0.4);
         break;
       case EV.STUCK:
         this.dropMissile(e.a, e.n || GIFT.SPEAR);
-        this.stuck.push({ x, y, aim: fromU16(e.m), until: now + (e.n === ARROW ? 1500 : 2500), arrow: e.n === ARROW });
+        this.stuck.push({ x, y, aim: fromU16(e.m), until: now + (e.n === ARROW ? 1500 : 2500), arrow: e.n === ARROW || e.n === DART });
         snd.thud(nearMe * 0.5);
         break;
       case EV.SPIKED:
@@ -1543,8 +2014,15 @@ export class ArenaShow {
           else this.announce(ours ? "THE GIANT FALLS! ♛" : "⚔️ THE GLADIATORS TAKE THE ROUND", "#ffd23f", 1.4, `${this.who(e.a)} led the charge`);
           break;
         }
+        if (st && st.mode === MODE.TEAMS && e.a !== 0) {
+          const k = this.slotOf(e.a) < 2 ? 0 : 1;
+          const mySlot = st.slots.indexOf(me);
+          const ours = mySlot >= 0 && (mySlot < 2 ? 0 : 1) === k;
+          this.announce(ours ? "YOUR TEAM TAKES THE ROUND! ♛" : `${k ? "RED" : "BLUE"} TEAM TAKES THE ROUND ♛`, TEAM_CSS[k], 1.4, `${this.who(e.a)} led the way`);
+          break;
+        }
         if (e.a === 0) this.announce("NOBODY LEFT STANDING", "#c9c2b0", 1.2);
-        else this.announce(e.a === me ? "YOU TAKE THE ROUND! ♛" : `${this.who(e.a).toUpperCase()} TAKES THE ROUND ♛`, CSS[this.slotOf(e.a)], 1.4);
+        else this.announce(e.a === me ? "YOU TAKE THE ROUND! ♛" : `${this.who(e.a).toUpperCase()} TAKES THE ROUND ♛`, this.cssOf(this.slotOf(e.a)), 1.4);
         break;
       }
       case EV.CHAMPION:
@@ -1586,17 +2064,13 @@ export class ArenaShow {
       // The Goliath's: the stomp's shockwave, the grab, the hurl.
       case EV.STOMP: {
         const r = e.n / 100;
-        this.ringFx(x, y, 0xffd23f, r * 0.6);
-        this.ringFx(x, y, 0xff9a3f, r);
-        window.setTimeout(() => this.ringFx(x, y, 0xe8d3a3, r * 1.25), 90);
-        this.dust(x, y, 46);
-        this.sparks(x, y - 0.2, 0xe8d3a3, 18);
-        snd.boom(Math.max(0.6, nearMe));
-        snd.thud(nearMe);
-        sfx.crowdRoar(0.7);
-        this.shake = Math.max(this.shake, 0.25 + 0.45 * nearMe);
         // (The Goliath's stomp, or a tank's earthquake.)
         const tank = this.state?.fighters.some((f) => f.id === e.a && !isGiant(f));
+        this.juice.stomp(x, y, r, !tank);
+        arenafx.quake(Math.max(0.6, nearMe) * (tank ? 0.7 : 1));
+        snd.boom(Math.max(0.4, nearMe) * 0.5);
+        sfx.crowdRoar(0.7);
+        this.shake = Math.max(this.shake, (tank ? 0.2 : 0.3) + 0.5 * nearMe);
         this.float(tank ? "QUAKE!" : "STOMP!", "#ffd23f", x, y - (tank ? 2.2 : 3.4), tank ? 1.5 : 1.8);
         break;
       }
@@ -1645,6 +2119,25 @@ export class ArenaShow {
     if (this.touchMode) navigator.vibrate?.(pattern);
   }
 
+  /** Our bet's down. */
+  onBetPlaced(pick: number, pays: number) {
+    this.bets.placed(this.state, pick, pays);
+    sfx.cash(0.5, 1);
+  }
+
+  /** How our bet went. */
+  onBetSettled(coins: number, refund: boolean) {
+    this.bets.settled();
+    if (refund) this.announce("🪙 BET RETURNED", "#c9c2b0", 1, "the round came to nothing");
+    else if (coins > 0) {
+      this.announce(`🪙 +${coins} COINS!`, "#ffd23f", 1.6, "your bet came in");
+      sfx.cash(1, coins);
+      const f = this.watching ? this.watchFocus() : null;
+      const [x, y] = f ? [f.x - this.ox, f.y - this.oy] : [this.ring.w / 2, this.ring.h / 2];
+      this.juice.coins(x, y, 40);
+    } else this.announce("🪙 YOUR BET'S LOST", "#c9c2b0", 1);
+  }
+
   private hitStop(ids: number[], ms: number) {
     this.stopUntil = performance.now() + ms;
     this.stopIds = new Set(ids);
@@ -1676,6 +2169,10 @@ export class ArenaShow {
     const live = !!s && s.status !== LOBBY;
     const me = this.selfId();
     const p = this.mine();
+    this.disaster.update(s, s?.round ?? -1, serverNow, wallNow, dt);
+    // Spectators' bets: anyone by the ring who isn't in the fight.
+    const fighting = !!s && s.slots.includes(this.selfId());
+    this.bets.update(s, !fighting && (this.watching || this.hearing() > 0.5));
     // The lobby card closes when we walk away from the ring.
     if (this.lobbyOpen && !this.capturing) {
       const self = this.avatarOf(me);
@@ -1716,7 +2213,7 @@ export class ArenaShow {
         const m = this.marching(s, f, serverNow);
         if (m) {
           const t = this.toTile(m.x, m.y);
-          avatar.setArena({ x: t.x, y: t.y, facing: m.face, frame: m.frame, walking: m.walking, hurt: false, lean: m.lean, lift: m.lift, hide: isGiant(f), height: isGiant(f) ? GOLIATH_HEIGHT + 24 : undefined });
+          avatar.setArena({ x: t.x, y: t.y, facing: m.face, frame: m.frame, walking: m.walking, hurt: false, lean: m.lean, lift: m.lift, hide: isGiant(f), height: isGiant(f) ? GOLIATH_HEIGHT + 24 : undefined, tint: f.flags & FLAG.FURY ? furyTint(performance.now()) : undefined });
           avatar.setFade(1);
           this.posed.add(f.id);
           this.held.set(f.id, { x: m.x, y: m.y, aim: m.face > 0 ? 0 : Math.PI });
@@ -1765,7 +2262,7 @@ export class ArenaShow {
             : Math.cos(pos.aim) >= 0
               ? 1
               : -1;
-        avatar.setArena({ x: t.x, y: t.y, facing: face, frame: pose.frame, walking: moving && pose.frame === null && !(f.flags & FLAG.DOWN), hurt: pose.hurt, lean: pose.lean, lift: pose.lift, hide: isGiant(f), height: isGiant(f) ? GOLIATH_HEIGHT + 24 : undefined });
+        avatar.setArena({ x: t.x, y: t.y, facing: face, frame: pose.frame, walking: moving && pose.frame === null && !(f.flags & FLAG.DOWN), hurt: pose.hurt, lean: pose.lean, lift: pose.lift, hide: isGiant(f), height: isGiant(f) ? GOLIATH_HEIGHT + 24 : undefined, tint: f.flags & FLAG.FURY ? furyTint(performance.now()) : undefined });
         avatar.setFade(f.flags & FLAG.DOWN ? 0.7 : 1);
         this.posed.add(f.id);
         this.drawGear(f, pos, since, serverNow, avatar, pose, moving);
@@ -1831,11 +2328,16 @@ export class ArenaShow {
       const aimAt = this.aimPoint();
       if (aimAt) this.me.aim = Math.atan2(aimAt.y - this.me.y, aimAt.x - this.me.x);
     }
-    // A press held long enough: charging a heavy blow.
+    this.tryRoll();
+    // A press held long enough: charging a heavy blow (once there's the wind for it).
     if (this.me.pressAt && !this.me.charging && serverNow - this.me.pressAt >= HOLD_MS && s.status === FIGHTING) {
-      this.me.charging = true;
-      this.act(INPUT.HEAVY_START);
+      if (this.canCharge(p)) {
+        this.me.charging = true;
+        this.act(INPUT.HEAVY_START);
+      } else if (p.flags & FLAG.WINDED || (p.act === ACT.NONE && serverNow - this.me.pressAt >= HOLD_MS + 120)) this.outOfWind();
     }
+    // Waiting on a blow to finish, and it left us too tired: no charge after all.
+    if (this.me.charging && (p.act === ACT.NONE || p.act === ACT.BLOCK) && !this.canCharge(p)) this.me.charging = false;
     const down = (p.flags & FLAG.DOWN) !== 0;
     if (s.status === FIGHTING && !down) {
       let moved = false;
@@ -1901,7 +2403,7 @@ export class ArenaShow {
     if (p.act === ACT.STOMP || p.act === ACT.HELD) return 0;
     if (p.act === ACT.SMASH) return 0.25 * GIANT_SPEED;
     if (p.act === ACT.GRAB) return 0.35 * GIANT_SPEED;
-    return (isGiant(p) ? GIANT_SPEED : KIT_SPEED[kitOf(p)]) * this.baseSpeed(p, now);
+    return (isGiant(p) ? GIANT_SPEED : KIT_SPEED[kitOf(p)]) * this.baseSpeed(p, now) * (p.buffs & BUFF.SPEED ? SPEED_GIFT_X : 1) * (p.buffs & BUFF.POISON ? POISON_SLOW : 1);
   }
 
   private baseSpeed(p: F, now: number): number {
@@ -2000,7 +2502,7 @@ export class ArenaShow {
         return since < w ? { frame: SWORD_RAISE, lean: -face * 0.06, lift: 0, hurt: false } : { frame: BOWL_RELEASE, lean: face * (f.act === ACT.LIGHT3 ? 0.18 : 0.1), lift: 0, hurt: false };
       }
       case ACT.CHARGE: {
-        const k = Math.min(1, since / HEAVY_FULL_MS);
+        const k = Math.min(1, since / fillMs(kit));
         const shiver = k >= 1 ? Math.sin(now / 30) * 0.03 : 0;
         return { frame: SWORD_RAISE, lean: -face * 0.2 * k + shiver, lift: 0, hurt: false };
       }
@@ -2052,6 +2554,48 @@ export class ArenaShow {
     return { frame: null, lean: 0, lift: 0, hurt: false };
   }
 
+  /** The small things that make them feel there: feet in the sand, a dash's afterimage, a skid, a charge. */
+  private liveliness(f: F, pos: { x: number; y: number }, avatar: Avatar, color: number, since: number, now: number) {
+    const giant = isGiant(f);
+    let st = this.strides.get(f.id);
+    if (!st) this.strides.set(f.id, (st = { x: pos.x, y: pos.y, d: 0, at: 0, full: false }));
+    const [dx, dy] = [pos.x - st.x, pos.y - st.y];
+    const moved = Math.hypot(dx, dy);
+    [st.x, st.y] = [pos.x, pos.y];
+    if (moved > 1) return;
+    // (A stride's length, a Goliath's a good deal longer.)
+    st.d += moved;
+    if (st.d > (giant ? 1.7 : 1.15) && f.act !== ACT.ROLL) {
+      st.d = 0;
+      this.juice.step(pos.x, pos.y, giant);
+      if (giant) {
+        const near = this.near(pos.x, pos.y);
+        arenafx.giantStep(near);
+        this.shake = Math.max(this.shake, 0.07 * near);
+      }
+    }
+    if (f.act === ACT.ROLL && now - st.at > 38) {
+      st.at = now;
+      const sp = avatar.sprite;
+      this.juice.ghost(sp.texture, sp.x, sp.y, sp.scale.x, sp.scale.y, sp.anchor.x, sp.anchor.y, color, sp.zIndex - 0.1);
+      this.juice.step(pos.x, pos.y, false);
+    }
+    if (f.flags & FLAG.KNOCKED && moved > 0.012 && now - st.at > 45) {
+      st.at = now;
+      this.juice.skid(pos.x, pos.y, Math.atan2(dy, dx));
+    }
+    // A charge gathering, with a ring and a glint for us when it's full.
+    if (f.act === ACT.CHARGE) {
+      const k = Math.min(1, since / fillMs(giant ? KIT.KNIGHT : kitOf(f)));
+      if (Math.random() < 0.3 + 0.5 * k) this.juice.charge(pos.x, pos.y, k, color);
+      if (k >= 1 && !st.full) {
+        st.full = true;
+        this.ringFx(pos.x, pos.y, 0xffe14f, 1);
+        if (f.id === this.selfId()) arenafx.chargeFull();
+      }
+    } else st.full = false;
+  }
+
   /** Sword and shield (in their colour), the ring under them, the slash's arc, and their bars. */
   private drawGear(f: F, pos: { x: number; y: number; aim: number }, since: number, now: number, avatar: Avatar, pose: Pose, moving = false) {
     let g = this.gear.get(f.id);
@@ -2062,12 +2606,19 @@ export class ArenaShow {
     }
     g.clear();
     const slot = this.slotOf(f.id);
-    const color = COLORS[slot];
+    const color = this.colorOf(slot);
     const fx = this.wx(pos.x);
     const feet = this.wy(pos.y) - 4;
     const down = (f.flags & FLAG.DOWN) !== 0;
     g.position.set(0, 0);
     g.zIndex = avatar.sprite.zIndex + 0.4;
+    if (!down) this.liveliness(f, pos, avatar, color, since, now);
+    // After dark, each stands in a pool of light of their own colour, on the
+    // sand around their feet (over them, it'd wash them out); the Goliath in a great red one.
+    if (!down) {
+      if (isGiant(f)) this.glows.add(fx, feet - 8, 0xff4a2a, 3.6, 2.2, 0.55);
+      else this.glows.add(fx, feet, color, 2, 1.3, 0.6);
+    }
     if (isGiant(f)) {
       this.giantGear(g, f, fx, feet, since, now, pose, color, moving);
       // (Its smash swept out on the sand, the way it aims: up and down too.)
@@ -2080,7 +2631,7 @@ export class ArenaShow {
     if (down) return;
     // Charging: a glow building under them.
     if (f.act === ACT.CHARGE || (f.id === this.selfId() && this.me.charging)) {
-      const k = Math.min(1, since / HEAVY_FULL_MS);
+      const k = Math.min(1, since / fillMs(kitOf(f)));
       g.ellipse(fx, feet + 2, 10 + k * 8, 4 + k * 3).fill({ color: 0xff9a3f, alpha: 0.18 + 0.3 * k });
       if (k >= 1 && Math.floor(now / 120) % 2) g.ellipse(fx, feet + 2, 20, 8).stroke({ width: 1, color: 0xffe14f, alpha: 0.9 });
       if (f.id === this.selfId() && this.me.charging) this.lungeMarker(now);
@@ -2095,7 +2646,7 @@ export class ArenaShow {
     const swinging = [ACT.LIGHT1, ACT.LIGHT2, ACT.LIGHT3, ACT.HEAVY, ACT.THROW].includes(f.act);
     const kit = kitOf(f);
     const charging = f.act === ACT.CHARGE || (f.id === this.selfId() && this.me.charging);
-    const chargeK = Math.min(1, (f.act === ACT.CHARGE ? since : now - this.me.pressAt - HOLD_MS) / HEAVY_FULL_MS);
+    const chargeK = Math.min(1, (f.act === ACT.CHARGE ? since : now - this.me.pressAt - HOLD_MS) / fillMs(kit));
     // When the swing's blow lands (its wind-up done).
     const windup = f.act === ACT.HEAVY ? HEAVY[0] : f.act === ACT.THROW ? THROW[0] : swinging ? lightOf(kit, f.act - ACT.LIGHT1)[0] : 0;
     drawArms(g, ox, oy, { kit, act: f.act, since, now, face, aim: pos.aim, color, blocking, swinging, charging, chargeK, windup });
@@ -2120,6 +2671,7 @@ export class ArenaShow {
         if (near) g.rect(sx - 1, sy - 1, 2, 2).fill({ color: 0xfffbe0 });
       }
     }
+    if (!down) this.buffFx(g, f, fx, feet, 38, 17, now, moving);
     // Bars over the head: health in their colour, rage under it.
     const bx = Math.round(fx) - 15;
     const by = Math.round(oy) - 52;
@@ -2150,8 +2702,8 @@ export class ArenaShow {
     const face: 1 | -1 = hold !== undefined ? (Math.cos(hold) >= 0 ? 1 : -1) : Math.cos(fromU16(f.aim)) >= 0 ? 1 : -1;
     // A great dark ring under it, and its shadow (a shrinking one, mid-leap).
     const shadow = pose.lift > 4 ? 1 - Math.min(0.5, pose.lift / 92) : 1;
-    g.ellipse(fx, feet + 2, 28 * shadow, 10 * shadow).fill({ color: 0x000000, alpha: 0.3 });
-    g.ellipse(fx, feet + 2, 28, 10).stroke({ width: 3, color, alpha: down ? 0.3 : 0.9 });
+    g.ellipse(fx, feet + 2, 32 * shadow, 12 * shadow).fill({ color: 0x000000, alpha: 0.3 });
+    g.ellipse(fx, feet + 2, 32, 12).stroke({ width: 3, color, alpha: down ? 0.3 : 0.9 });
     let act: GoliathAct = moving ? "walk" : "idle";
     let k = 0;
     const self = f.id === this.selfId();
@@ -2219,8 +2771,8 @@ export class ArenaShow {
     const aura = f.act === ACT.GRAB ? (front: boolean) => {
       const p = 0.5 + 0.5 * Math.sin(now / 110);
       if (!front) {
-        g.ellipse(fx, oy - 46, 38, 58).fill({ color: 0xffd23f, alpha: 0.1 + 0.06 * p });
-        g.ellipse(fx, oy - 46, 38 + p * 3, 58 + p * 3).stroke({ width: 2, color: 0xffd23f, alpha: 0.35 + 0.3 * p });
+        g.ellipse(fx, oy - 53, 44, 67).fill({ color: 0xffd23f, alpha: 0.1 + 0.06 * p });
+        g.ellipse(fx, oy - 53, 44 + p * 3, 67 + p * 3).stroke({ width: 2, color: 0xffd23f, alpha: 0.35 + 0.3 * p });
       }
       for (let i = 0; i < 8; i++) {
         const a = now / 260 + (i / 8) * Math.PI * 2;
@@ -2234,20 +2786,10 @@ export class ArenaShow {
     drawGoliath(g, fx, oy, look);
     whirl?.(g, false);
     aura?.(true);
-    // Resting, its wounds closing: little green crosses drifting up off it.
-    const seen = this.giantHp.get(f.id);
-    if (seen && f.hp > seen.hp + 0.01 && f.hp - seen.hp < 5) seen.until = now + 700;
-    this.giantHp.set(f.id, { hp: f.hp, until: seen?.until ?? 0 });
-    if (!down && now < (seen?.until ?? 0))
-      for (let i = 0; i < 5; i++) {
-        const rise = ((now / 22 + i * 37) % 70) / 70;
-        const x = Math.round(fx - 26 + ((i * 13) % 52) + Math.sin(now / 300 + i) * 3);
-        const y = Math.round(oy - 20 - rise * 70);
-        const a = 0.85 * (1 - rise);
-        g.rect(x - 1, y - 3, 2, 6).fill({ color: 0x7cf08a, alpha: a });
-        g.rect(x - 3, y - 1, 6, 2).fill({ color: 0x7cf08a, alpha: a });
-      }
+    // (The fury: the whole giant blinking red.)
+    g.tint = f.flags & FLAG.FURY && !down ? furyTint(now) : 0xffffff;
     if (down) return;
+    this.buffFx(g, f, fx, feet, GOLIATH_HEIGHT + 8, 53, now, moving);
     // Dust kicked up where the club comes down.
     // (Where it lands: the way it aimed.)
     if (act === "smash" && since < SMASH[0] + 180) {
@@ -2274,8 +2816,8 @@ export class ArenaShow {
   private lungeMarker(now: number) {
     if (!this.me.pressAt) return;
     const held = now - this.me.pressAt - HOLD_MS;
-    const c = Math.max(0, Math.min(1, (held - HEAVY_MIN_MS) / (HEAVY_FULL_MS - HEAVY_MIN_MS)));
     const kit = this.myKit();
+    const c = Math.max(0, Math.min(1, (held - HEAVY_MIN_MS) / (fillMs(kit) - HEAVY_MIN_MS)));
     if (kit === KIT.ARCHER) return this.bowMarker(c, now);
     if (kit === KIT.BOMBER) return this.lobMarker(Math.max(0, Math.min(1, (held - HEAVY_MIN_MS) / (BIG_BOMB_FULL_MS - HEAVY_MIN_MS))), now);
     if (kit === KIT.TANK) return this.stompMarker(now, { chargeMs: HEAVY_FULL_MS, min: TANK_LEAP_MIN, max: TANK_LEAP, r: TANK_STOMP_R });
@@ -2543,7 +3085,16 @@ export class ArenaShow {
       case ACT.LIGHT3: {
         const k = isGiant(f) ? KIT.KNIGHT : kitOf(f);
         const [w, a] = lightOf(k, f.act - ACT.LIGHT1);
-        if (since >= w && since < w + a + 80) sweep(KIT_LIGHT_REACH[k], KIT_LIGHT_ARC[k], Math.min(1, (since - w) / a), f.act === ACT.LIGHT3 ? 0xffe14f : 0xffffff, f.act === ACT.LIGHT3 ? 4 : 3, 0.85);
+        if (shoots(k)) {
+          const u = (since - w) / (a + 40);
+          if (u >= 0 && u < 1) {
+            const [ca, sa] = [Math.cos(pos.aim), Math.sin(pos.aim) * 0.7];
+            const [r0, r1] = [12, KIT_LIGHT_REACH[k] * TILE * (0.7 + 0.3 * Math.min(1, u * 2.5))];
+            const off = f.act === ACT.LIGHT2 ? 3 : -3;
+            g.moveTo(cx + ca * r0 - sa * off, cy + sa * r0 + ca * off).lineTo(cx + ca * r1, cy + sa * r1).stroke({ width: 2, color: 0xffffff, alpha: 0.85 * (1 - u) });
+            g.rect(Math.round(cx + ca * r1) - 1, Math.round(cy + sa * r1) - 1, 3, 3).fill({ color: 0xfff6d8, alpha: 1 - u });
+          }
+        } else if (since >= w && since < w + a + 80) sweep(KIT_LIGHT_REACH[k], KIT_LIGHT_ARC[k], Math.min(1, (since - w) / a), f.act === ACT.LIGHT3 ? 0xffe14f : 0xffffff, k === KIT.TANK ? 6 : f.act === ACT.LIGHT3 ? 4 : 3, 0.85);
         break;
       }
       case ACT.HEAVY:
@@ -2656,31 +3207,55 @@ export class ArenaShow {
         g.rect(Math.round(this.wx(x)) - 1, Math.round(this.wy(y) - h - 3), 2, 3).fill({ color: 0xfff4c4, alpha: flick });
       }
     }
-    // The spikes: rattling (red, shaking), then up.
+    // (The lava's a lot of little blocks: redrawn a dozen times a second, no more.)
+    if (s.lava < 1140 && wallNow - this.lavaAt > 80) {
+      this.lavaAt = wallNow;
+      this.drawLava(this.lavaG.clear(), s.lava / 1000, wallNow);
+    } else if (s.lava >= 1140 && this.lavaAt) {
+      this.lavaAt = 0;
+      this.lavaG.clear();
+    }
+    this.disaster.drawFloor(g, wallNow);
+    this.juice.drawFloor(g, performance.now());
+    // The spikes: a rattle (red, the tips showing), then up with a snap, and straight back down.
     this.ring.spikes.forEach((sp, k) => {
       const phase = s.spikes[k] ?? 0;
+      const [x0, y0, w, h] = [this.wx(sp.x), this.wy(sp.y), sp.w * TILE, sp.h * TILE];
       if (phase === 2 && this.lastSpikes[k] !== 2) {
         this.spikeUpAt[k] = wallNow;
         // (Heard only right by them: they come up all match long.)
-        const near = this.capturing ? 1 - Math.hypot(sp.x + 1 - this.me.x, sp.y + 1 - this.me.y) / 4 : 0;
+        const near = this.capturing ? 1 - Math.hypot(sp.x + 1 - this.me.x, sp.y + 1 - this.me.y) / 5 : 0;
         if (near > 0) snd.spikes(near);
+        this.dust(sp.x + sp.w / 2, sp.y + sp.h / 2, 5);
       }
+      if (phase !== 2 && this.lastSpikes[k] === 2) this.spikeDownAt[k] = wallNow;
       this.lastSpikes[k] = phase;
-      const x0 = this.wx(sp.x);
-      const y0 = this.wy(sp.y);
       if (phase === 1) {
-        const pulse = 0.25 + 0.25 * Math.sin(wallNow / 60);
-        const jx = Math.round(Math.sin(wallNow / 23) * 1);
-        g.rect(x0 + 3 + jx, y0 + 3, sp.w * TILE - 6, sp.h * TILE - 6).fill({ color: 0xff2a2a, alpha: pulse });
-      } else if (phase === 2) {
-        const k2 = Math.min(1, (wallNow - (this.spikeUpAt[k] ?? 0)) / 90);
-        for (let yy = 9; yy < sp.h * TILE - 6; yy += 9) {
-          for (let xx = 9 + ((yy / 9) % 2) * 4; xx < sp.w * TILE - 6; xx += 9) {
-            const h = 10 * k2;
-            g.poly([x0 + xx - 3, y0 + yy + 1, x0 + xx + 3, y0 + yy + 1, x0 + xx, y0 + yy + 1 - h]).fill({ color: 0xd8dce8 });
-            g.rect(x0 + xx - 1, y0 + yy + 1 - h, 1, h * 0.7).fill({ color: 0xffffff, alpha: 0.8 });
-          }
+        const pulse = 0.25 + 0.25 * Math.sin(wallNow / 45);
+        const jx = Math.round(Math.sin(wallNow / 19));
+        g.rect(x0 + 3 + jx, y0 + 3, w - 6, h - 6).fill({ color: 0xff2a2a, alpha: pulse });
+      }
+      // How far up: a snap past full height and a settle; then down, quicker still.
+      let up = 0;
+      if (phase === 2) {
+        const t = (wallNow - (this.spikeUpAt[k] ?? 0)) / 70;
+        up = t < 1 ? t * 1.25 : 1 + 0.25 * Math.max(0, 1 - (t - 1) / 1.5);
+      } else {
+        const t = (wallNow - (this.spikeDownAt[k] ?? 0)) / 90;
+        if (t < 1) up = 1 - t * t;
+      }
+      const tips = phase === 1 ? 2.5 * (0.6 + 0.4 * Math.sin(wallNow / 30)) : up * 11;
+      if (tips > 0.5) {
+        for (let yy = 9; yy < h - 6; yy += 9) {
+          for (let xx = 9 + ((yy / 9) % 2) * 4; xx < w - 6; xx += 9) g.poly([x0 + xx - 3, y0 + yy + 1, x0 + xx + 3, y0 + yy + 1, x0 + xx, y0 + yy + 1 - tips]);
         }
+        g.fill({ color: 0xc8ccd8 });
+        for (let yy = 9; yy < h - 6; yy += 9) {
+          for (let xx = 9 + ((yy / 9) % 2) * 4; xx < w - 6; xx += 9) g.rect(x0 + xx - 1, y0 + yy + 1 - tips, 1, tips * 0.75);
+        }
+        g.fill({ color: 0xffffff, alpha: 0.85 });
+        // The dark slits they came out of, and a flash on their way up.
+        if (phase === 2 && wallNow - (this.spikeUpAt[k] ?? 0) < 120) g.rect(x0 + 2, y0 + 2, w - 4, h - 4).stroke({ width: 2, color: 0xffffff, alpha: 0.7 });
       }
     });
     // Gifts: falling (a shadow growing under them), then lying there bobbing.
@@ -2704,7 +3279,7 @@ export class ArenaShow {
       sp.visible = true;
       sp.scale.set(1.5);
       sp.rotation = left > 0 ? (wallNow / 90) % (Math.PI * 2) : 0;
-      sp.position.set(Math.round(this.wx(x)), Math.round(this.wy(y) - fall * 160 - (left <= 0 ? 3 + Math.sin(wallNow / 250) * 2 : 0)));
+      sp.position.set(Math.round(this.wx(x)) + this.disaster.giftTrembles(x, y, wallNow), Math.round(this.wy(y) - fall * 160 - (left <= 0 ? 3 + Math.sin(wallNow / 250) * 2 : 0)));
       sp.zIndex = this.wy(y);
     }
     for (const [key, sp] of this.giftSprites) {
@@ -2810,7 +3385,7 @@ export class ArenaShow {
     }
     g.clear();
     g.zIndex = avatar.sprite.zIndex + 0.4;
-    const color = COLORS[this.slotOf(f.id)];
+    const color = this.colorOf(this.slotOf(f.id));
     const fx = this.wx(m.x);
     const feet = this.wy(m.y) - 4;
     const ox = fx;
@@ -2818,7 +3393,7 @@ export class ArenaShow {
     const face = m.face;
     if (isGiant(f)) {
       // The Goliath walks it too: its club raised high if it's won, dragged if not.
-      g.ellipse(fx, feet + 2, 28, 10).stroke({ width: 2, color: m.champ ? 0xffd23f : color, alpha: m.champ ? 0.55 + 0.3 * Math.sin(now / 160) : 0.35 });
+      g.ellipse(fx, feet + 2, 32, 12).stroke({ width: 2, color: m.champ ? 0xffd23f : color, alpha: m.champ ? 0.55 + 0.3 * Math.sin(now / 160) : 0.35 });
       const act: GoliathAct = m.champ && m.raise ? "air" : m.walking ? "walk" : "idle";
       drawGoliath(g, fx, oy, { face, act, k: 1, step: (now / 1000) * 8, now, rage: m.champ, hurt: false });
       return;
@@ -2866,7 +3441,7 @@ export class ArenaShow {
       const me = this.selfId();
       const champ = s.winner;
       const name = this.who(champ).toUpperCase();
-      const color = CSS[this.slotOf(champ)];
+      const color = this.cssOf(this.slotOf(champ));
       const inIt = s.fighters.some((f) => f.id === me);
       const near = inIt ? 1 : this.near(this.ring.w / 2, this.ring.h);
       const cue = (key: string, at: number, fn: () => void) => {
@@ -3107,7 +3682,7 @@ export class ArenaShow {
     if (key !== this.watchKey) {
       this.watchKey = key;
       this.watchName.textContent = who ? this.who(who) : "The middle";
-      this.watchName.style.color = who ? CSS[this.slotOf(who)] : "";
+      this.watchName.style.color = who ? this.cssOf(this.slotOf(who)) : "";
     }
   }
 
@@ -3206,7 +3781,8 @@ export class ArenaShow {
   private drawGates(dt: number) {
     if (!this.gates.length) return;
     const s = this.state;
-    const want = s && s.status === COUNTDOWN ? 1 : 0;
+    // (Open for the gladiators' march, and for anything let out at them.)
+    const want = (s && s.status === COUNTDOWN) || this.disaster.gatesOpen ? 1 : 0;
     const before = this.gatesOpen;
     this.gatesOpen = want > before ? Math.min(1, before + dt * 2.2) : Math.max(0, before - dt * 1.6);
     const o = this.gatesOpen;
@@ -3368,6 +3944,85 @@ export class ArenaShow {
 
   // ---- effects ---------------------------------------------------------------------
 
+  /**
+   * What the gifts are doing for fighter `f` (feet at `x`, `feet`, `tall` px
+   * high and `wide` round): the fury's red heat, the boots' wings and
+   * streaks, the potion's ring, healing's green crosses, the shield's bubble.
+   */
+  private buffFx(g: Graphics, f: F, x: number, feet: number, tall: number, wide: number, now: number, moving: boolean) {
+    const mid = feet - tall * 0.5;
+    if (f.flags & FLAG.FURY) {
+      const p = 0.5 + 0.5 * Math.sin(now / 90);
+      g.ellipse(x, mid, wide * 0.95, tall * 0.62).fill({ color: 0xff2020, alpha: 0.1 + 0.12 * p });
+      for (let i = 0; i < 6; i++) {
+        const rise = ((now / 10 + i * 31) % 60) / 60;
+        const sx = Math.round(x + Math.sin(i * 2.4 + now / 240) * wide * 0.8);
+        g.rect(sx, Math.round(feet - rise * tall * 1.05), 2, 3).fill({ color: i % 2 ? 0xff4f2a : 0xffb03a, alpha: 0.9 * (1 - rise) });
+      }
+    }
+    if (f.buffs & BUFF.SPEED) {
+      // Little white wings beating at the heels; streaks of light behind.
+      const flap = Math.floor(now / 70) % 2;
+      for (const side of [-1, 1]) {
+        const wx = Math.round(x + side * (wide * 0.42));
+        const wy = Math.round(feet - 5);
+        g.rect(wx + (side > 0 ? 0 : -5), wy - flap * 2, 5, 2).fill({ color: 0xffffff });
+        g.rect(wx + (side > 0 ? 1 : -4), wy + 2 - flap * 2, 4, 1).fill({ color: 0xd8e8ff });
+        g.rect(wx + (side > 0 ? 0 : -2), wy + 2, 2, 2).fill({ color: 0xffd23f });
+      }
+      if (moving) {
+        const dir = Math.cos(fromU16(f.aim)) >= 0 ? -1 : 1;
+        for (let i = 0; i < 4; i++) {
+          const len = 10 + ((now / 16 + i * 17) % 18);
+          const ly = Math.round(feet - 6 - i * (tall / 5));
+          g.rect(Math.round(x + dir * (wide * 0.5 + 2)) + (dir < 0 ? -len : 0), ly, len, 1).fill({ color: 0xfff1b0, alpha: 0.55 - i * 0.08 });
+        }
+      }
+    }
+    if (f.buffs & BUFF.REGEN) {
+      // The potion at work: a violet ring at the feet.
+      const p = 0.5 + 0.5 * Math.sin(now / 240);
+      g.ellipse(x, feet, wide * 0.85, wide * 0.3).stroke({ width: 1, color: 0xc77dff, alpha: 0.5 + 0.3 * p });
+    }
+    if (f.buffs & BUFF.POISON) {
+      // The poison at work: sick green bubbles rising off them.
+      for (let i = 0; i < 6; i++) {
+        const rise = ((now / 30 + i * 41) % 60) / 60;
+        const sx = Math.round(x + (((i * 17) % 34) / 17 - 1) * wide * 0.8 + Math.sin(now / 170 + i) * 2);
+        const sy = Math.round(feet - tall * (0.1 + rise * 0.9));
+        const col = i % 2 ? 0x8cff4e : 0x4ed02a;
+        g.circle(sx, sy, 1.4 + (i % 3)).fill({ color: col, alpha: 0.85 * (1 - rise) });
+      }
+      g.ellipse(x, feet, wide * 0.8, wide * 0.28).stroke({ width: 1, color: 0x8cff4e, alpha: 0.5 + 0.3 * Math.sin(now / 150) });
+    }
+    if (f.buffs & (BUFF.REGEN | BUFF.HEAL)) {
+      // Wounds closing (resting, the potion, a good meal): little green crosses drifting up.
+      for (let i = 0; i < 5; i++) {
+        const rise = ((now / 22 + i * 37) % 70) / 70;
+        const sx = Math.round(x + (((i * 13) % 52) / 26 - 1) * wide * 0.75 + Math.sin(now / 300 + i) * 3);
+        const sy = Math.round(feet - tall * (0.2 + rise * 0.75));
+        const a = 0.85 * (1 - rise);
+        g.rect(sx - 1, sy - 3, 2, 6).fill({ color: 0x7cf08a, alpha: a });
+        g.rect(sx - 3, sy - 1, 6, 2).fill({ color: 0x7cf08a, alpha: a });
+      }
+    }
+    if (f.buffs & BUFF.SHIELD) {
+      // The bubble: faint glass, a bright edge, a shine sliding round it.
+      const p = 0.5 + 0.5 * Math.sin(now / 200);
+      const rx = wide * 1.05 + p;
+      const ry = tall * 0.62 + p;
+      g.ellipse(x, mid, rx, ry).fill({ color: 0x7fd8ff, alpha: 0.13 + 0.05 * p });
+      g.ellipse(x, mid, rx, ry).stroke({ width: 2, color: 0xbff0ff, alpha: 0.75 });
+      if (f.buffs & BUFF.SHIELD2) g.ellipse(x, mid, rx + 5, ry + 5).stroke({ width: 1, color: 0xffffff, alpha: 0.5 + 0.3 * p });
+      g.ellipse(x - rx * 0.36, mid - ry * 0.5, rx * 0.22, ry * 0.12).fill({ color: 0xffffff, alpha: 0.55 });
+      const a = now / 500;
+      for (let i = 0; i < 3; i++) {
+        const b = a + (i / 3) * Math.PI * 2;
+        g.rect(Math.round(x + Math.cos(b) * rx) - 1, Math.round(mid + Math.sin(b) * ry) - 1, 3, 3).fill({ color: 0xffffff, alpha: 0.85 });
+      }
+    }
+  }
+
   private sparks(x: number, y: number, color: number, n: number) {
     const now = performance.now();
     for (let i = 0; i < n; i++) {
@@ -3406,23 +4061,93 @@ export class ArenaShow {
     sprite.anchor.set(0.5, 1);
     sprite.scale.set(scale);
     this.top.addChild(sprite);
-    this.floaters.push({ sprite, x: this.wx(x), y: this.wy(y), at: performance.now(), life: 1100 });
+    this.floaters.push({ sprite, x: this.wx(x), y: this.wy(y), at: performance.now(), life: 1100, size: scale });
+  }
+
+  /**
+   * The lava: where the fire would burn, molten rock (a dark crust breaking
+   * up over rivers of orange and gold, all of it creeping), its edge alive,
+   * glowing and heaving as it comes.
+   */
+  private drawLava(g: Graphics, lava: number, wallNow: number) {
+    const cx = this.ring.w / 2;
+    const cy = this.ring.h / 2;
+    const p = this.ring.oval ? ROUNDNESS : 2;
+    const STEP = 1 / 3;
+    const t = wallNow / 1000;
+    for (let y = 0; y < this.ring.h; y += STEP) {
+      const dy = (y + STEP / 2 - cy) / cy;
+      const edge = this.ring.oval ? Math.max(0, 1 - Math.abs(dy) ** ROUNDNESS) ** (1 / ROUNDNESS) * cx : cx;
+      // (The front of it heaves, row to row.)
+      const swell = lava + Math.sin(y * 1.3 + t * 1.7) * 0.012 + Math.sin(y * 3.1 - t * 2.3) * 0.006;
+      const inside = swell ** p - Math.abs(dy) ** p;
+      const half = inside > 0 ? inside ** (1 / p) * cx : 0;
+      for (const [from, to] of [[cx - edge, cx - half], [cx + half, cx + edge]]) {
+        if (to <= from) continue;
+        g.rect(this.wx(from), this.wy(y), (to - from) * TILE, STEP * TILE + 1).fill({ color: 0xa82208 });
+        for (let x = Math.ceil(from / STEP) * STEP; x < to; x += STEP) {
+          // The flow: slow waves crossing, breaking the crust into plates
+          // with bright rivers between them, all of it creeping.
+          const n = Math.sin(x * 0.8 + y * 0.6 - t * 0.5) + Math.sin(x * 0.45 - y * 0.9 + t * 0.35) + Math.sin(x * 1.7 + Math.sin(y * 1.3 + t * 0.3) * 1.4) * 0.5;
+          const river = Math.abs(n);
+          const col = river < 0.08 ? 0xfff0a8 : river < 0.2 ? 0xffc23a : river < 0.42 ? 0xff7a14 : n > 1.25 ? 0x34120a : n < -1 ? 0x651606 : 0;
+          if (!col) continue;
+          const [x0, y0] = [Math.round(this.wx(x)), Math.round(this.wy(y))];
+          const [x1, y1] = [Math.round(this.wx(Math.min(to, x + STEP))), Math.round(this.wy(y + STEP))];
+          g.rect(x0, y0, x1 - x0, y1 - y0).fill({ color: col });
+        }
+        // The glowing lip of it, against the sand.
+        const lip = to === cx - half ? to : from;
+        const dir = to === cx - half ? -1 : 1;
+        if (half > 0) {
+          g.rect(this.wx(lip) + (dir < 0 ? -4 : 0), this.wy(y), 4, STEP * TILE + 1).fill({ color: 0xfff0a8 });
+          g.rect(this.wx(lip) + (dir < 0 ? 0 : -6), this.wy(y), 6, STEP * TILE + 1).fill({ color: 0xff5a1a, alpha: 0.5 });
+        }
+      }
+    }
+    // Bubbles swelling and bursting all over it.
+    for (let i = 0; i < 26; i++) {
+      const life = ((t * 0.7 + i * 0.37) % 1);
+      const seed = Math.floor(t * 0.7 + i * 0.37) * 7 + i * 13;
+      const x = ((seed * 7.13) % 1000) / 1000 * this.ring.w;
+      const y = ((seed * 3.77) % 1000) / 1000 * this.ring.h;
+      // (Only out on the lava itself.)
+      const out = (Math.abs(x / cx - 1) ** p + Math.abs(y / cy - 1) ** p) ** (1 / p);
+      if (out <= lava + 0.03 || out >= 1) continue;
+      const r = life * 5;
+      g.circle(this.wx(x), this.wy(y), r).fill({ color: 0xffd23f, alpha: 1 - life * 0.5 });
+      if (life > 0.8) g.circle(this.wx(x), this.wy(y), r + 3).stroke({ width: 1, color: 0xfff4c4, alpha: (1 - life) * 5 });
+    }
   }
 
   private drawFx(wallNow: number, dt: number, s: State | null, serverNow: number) {
     void serverNow;
     const g = this.fx;
+    this.disaster.drawSky(g, wallNow);
     // Missiles: a spear flying level, a bomb arcing with its fuse fizzing.
     for (const m of this.missiles) {
       const x = this.wx(m.x);
       const y = this.wy(m.y);
       g.ellipse(x, y, 4, 1.5).fill({ color: 0x000000, alpha: 0.25 });
-      if (m.kind === GIFT.BOMB || m.kind === BIG_BOMB) {
+      if (m.kind === DART) {
+        // The scorpion's dart: a dark barb, dripping green.
+        const a = Math.atan2(m.vy, m.vx);
+        for (let k = 0; k < 13; k += 1) {
+          const col = k < 3 ? 0x8cff4e : k < 9 ? 0x2a1812 : 0x5ec032;
+          g.rect(Math.round(x - Math.cos(a) * k), Math.round(y - 16 - Math.sin(a) * k * 0.7), k < 5 ? 3 : 2, k < 5 ? 3 : 2).fill({ color: col });
+        }
+        this.glows.add(x, y - 16, 0x8cff4e, 0.75, 0.6, 0.7);
+        for (let k = 1; k < 5; k++) g.rect(Math.round(x - Math.cos(a) * (10 + k * 7)), Math.round(y - 15 - Math.sin(a) * (10 + k * 7) * 0.7 + k), 2, 2).fill({ color: 0x8cff4e, alpha: 0.7 - k * 0.12 });
+      } else if (m.kind === GIFT.BOMB || m.kind === BIG_BOMB) {
         // (The big bomb: bigger, banded red, a longer fuse.)
         const big = m.kind === BIG_BOMB;
         const k = 1 - m.left / m.range;
         const h = 14 + Math.sin(k * Math.PI) * (big ? 32 : 26);
         const r = big ? 8 : 5;
+        // Its fuse lighting it up, and a pool of that on the sand under it.
+        const fizz = 0.8 + 0.2 * Math.sin(wallNow / 35);
+        this.glows.add(x, y - h, 0xff8a2a, big ? 1.3 : 0.9, big ? 1.3 : 0.9, 0.8 * fizz);
+        this.glows.add(x, y, 0xff6a1a, big ? 0.9 : 0.6, big ? 0.45 : 0.3, 0.3 * fizz);
         g.circle(x, y - h, r).fill({ color: 0x2f2c38 }).stroke({ width: 1, color: 0x1a1020 });
         if (big) g.rect(x - r + 1, y - h - 1, r * 2 - 2, 2).fill({ color: 0xc8402a });
         g.rect(x + r - 3, y - h - r - 2, 2, big ? 4 : 3).fill({ color: Math.floor(wallNow / 60) % 2 ? 0xffd23f : 0xff6a3f });
@@ -3434,14 +4159,17 @@ export class ArenaShow {
           const col = k < 2 ? 0xd8dce8 : k > 8 ? (k % 2 ? 0xffffff : 0xd94a4a) : 0xb08a52;
           g.rect(Math.round(x - Math.cos(a) * k), Math.round(y - 14 - Math.sin(a) * k * 0.7), k < 2 || k > 8 ? 2 : 1, k < 2 || k > 8 ? 2 : 1).fill({ color: col });
         }
+        this.glows.add(x - Math.cos(a) * 6, y - 14, 0xffe2a0, 0.7, 0.5, 0.7);
         // (A faint streak behind.)
         g.rect(Math.round(x - Math.cos(a) * 18), Math.round(y - 14 - Math.sin(a) * 18 * 0.7), 1, 1).fill({ color: 0xffffff, alpha: 0.5 });
       } else {
         const a = Math.atan2(m.vy, m.vx);
         const L = 20;
+        this.glows.add(x - Math.cos(a) * 10, y - 14, 0xffe2a0, 0.8, 0.55, 0.6);
         for (let k = 0; k < L; k += 1) g.rect(Math.round(x - Math.cos(a) * k), Math.round(y - 14 - Math.sin(a) * k * 0.7), 2, 2).fill({ color: k < 4 ? 0xd8dce8 : 0x8f6236 });
       }
     }
+    this.glows.flush();
     // Spears stuck in the walls a while.
     this.stuck = this.stuck.filter((st) => wallNow < st.until);
     for (const st of this.stuck) {
@@ -3468,11 +4196,13 @@ export class ArenaShow {
       g.rect(Math.round(this.wx(p.x)), Math.round(this.wy(p.y) - p.z * TILE), p.size, p.size).fill({ color: p.color, alpha: Math.max(0, 1 - (now - p.born) / p.life) });
     }
     // Rings.
-    this.rings = this.rings.filter((r) => now - r.at < 450);
+    this.rings = this.rings.filter((r) => now - r.at < 480);
     for (const r of this.rings) {
-      const t = (now - r.at) / 450;
-      g.ellipse(this.wx(r.x), this.wy(r.y) - 10, r.r * TILE * (0.3 + t * 0.8), r.r * TILE * 0.6 * (0.3 + t * 0.8)).stroke({ width: 3, color: r.color, alpha: 1 - t });
+      const t = (now - r.at) / 480;
+      const e = 0.3 + 0.8 * (1 - (1 - t) ** 3);
+      g.ellipse(this.wx(r.x), this.wy(r.y) - 10, r.r * TILE * e, r.r * TILE * 0.6 * e).stroke({ width: Math.max(1, 3.5 * (1 - t)), color: r.color, alpha: (1 - t) ** 1.3 });
     }
+    this.juice.drawAir(g, now, dt);
     // Words floating up.
     this.floaters = this.floaters.filter((f) => {
       const t = (wallNow - f.at) / f.life;
@@ -3480,7 +4210,9 @@ export class ArenaShow {
         f.sprite.destroy();
         return false;
       }
-      f.sprite.position.set(Math.round(f.x), Math.round(f.y - t * 30));
+      // A pop as it lands, then up and away, slowing.
+      f.sprite.position.set(Math.round(f.x), Math.round(f.y - (1 - (1 - t) ** 2.4) * 34));
+      if (f.size) f.sprite.scale.set(f.size * (t < 0.1 ? 1.45 - (t / 0.1) * 0.45 : 1));
       f.sprite.alpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
       return true;
     });
@@ -3556,7 +4288,7 @@ export class ArenaShow {
     const row = el("div", "pb-feed-row");
     const name = (id: number) => {
       const s = el("span", "", id ? this.who(id) : "The arena");
-      s.style.color = id ? CSS[this.slotOf(id)] : "#ff9a3f";
+      s.style.color = id ? this.cssOf(this.slotOf(id)) : "#ff9a3f";
       if (id === this.selfId()) s.classList.add("me");
       return s;
     };
@@ -3599,13 +4331,13 @@ export class ArenaShow {
     // The wheel picks: it spins for us (the Goliath has no class to spin for).
     if (s!.wheel) {
       this.kitPicker.update(0, null, false, []);
-      const rest = s!.fighters.filter((f) => !isGiant(f) && f.id !== p!.id).map((f) => ({ name: this.who(f.id), color: CSS[this.slotOf(f.id)], kit: kitOf(f) }));
+      const rest = s!.fighters.filter((f) => !isGiant(f) && f.id !== p!.id).map((f) => ({ name: this.who(f.id), color: this.cssOf(this.slotOf(f.id)), kit: kitOf(f) }));
       this.classWheel.update(left, isGiant(p!) ? -1 : kitOf(p!), rest);
       return;
     }
     const others = s!.fighters
       .filter((f) => !isGiant(f))
-      .map((f) => ({ name: this.who(f.id), color: CSS[this.slotOf(f.id)], picked: picked(f), kit: kitOf(f) }));
+      .map((f) => ({ name: this.who(f.id), color: this.cssOf(this.slotOf(f.id)), picked: picked(f), kit: kitOf(f) }));
     this.kitPicker.update(left, picked(p!) ? kitOf(p!) : -1, isGiant(p!), others);
   }
 
@@ -3639,7 +4371,7 @@ export class ArenaShow {
         const f = s.fighters.find((q) => q.id === id);
         const crowns = Array.from({ length: TO_WIN }, (_, i) => `<i class="${i < s.crowns[k] ? "on" : ""}">♛</i>`).join("");
         const hp = f ? (Math.max(0, f.hp) / this.maxHp(f)) * 100 : 0;
-        return `<div class="ar-chip${f && f.flags & FLAG.DOWN ? " down" : ""}${id === this.selfId() ? " me" : ""}" style="--c:${CSS[k]}"><b>${f && isGiant(f) ? "👹 " : ""}${escape(this.who(id))}</b><span class="ar-cr">${crowns}</span><span class="ar-hp"><i style="width:${hp}%"></i></span></div>`;
+        return `<div class="ar-chip${f && f.flags & FLAG.DOWN ? " down" : ""}${id === this.selfId() ? " me" : ""}" style="--c:${this.cssOf(k)}"><b>${f && isGiant(f) ? "👹 " : ""}${escape(this.who(id))}</b><span class="ar-cr">${crowns}</span><span class="ar-hp"><i style="width:${hp}%"></i></span></div>`;
       })
       .join("");
     const fire = s.fire / 1000;
@@ -3682,13 +4414,13 @@ export class ArenaShow {
         this.selfEl.innerHTML = html2;
       }
       this.hint.textContent = giant
-        ? "👹 click: SMASH · hold & let go: STOMP · right-click/Shift: block · Space: DASH (60% stamina) · Q (rage): GRAB, whirl and hurl"
+        ? "👹 click: SMASH · hold & let go: STOMP · right-click/Shift: block (knocks bombs back) · Space: DASH (60% stamina) · Q (rage): GRAB, whirl and hurl"
         : p.holding
           ? `click: THROW it · right-click/Shift: block · Space roll · Q ${ult.toLowerCase()}`
           : kit === KIT.ARCHER
-            ? `🏹 click: QUICK SHOT · hold & let go: TRIPLE SHOT (flies till it hits) · Shift: block · Space roll · Q ${ult.toLowerCase()}`
+            ? `🏹 click: STAB · hold & let go: THE BOW (longer: up to three arrows) · Shift: block · Space roll · Q ${ult.toLowerCase()}`
             : kit === KIT.BOMBER
-              ? `💣 click: LOB A BOMB (to your aim) · hold & let go: BIG BOMB (longer: bigger) · Shift: block · Space roll · Q ${ult.toLowerCase()}`
+              ? `💣 click: STAB · hold & let go: BOMB (to your aim; longer: bigger) · Shift: block · Space roll · Q ${ult.toLowerCase()}`
               : `${this.state?.kits ? `${KITS[kit].icon} ` : ""}click ${kit === KIT.SPEARMAN ? "thrust" : kit === KIT.TANK ? "hammer" : "slash"} · hold: ${kit === KIT.TANK ? "STOMP (leap to your aim)" : "heavy"} · right-click/Shift: block (time it: PARRY) · Space roll · Q ${ult.toLowerCase()}`;
       this.btns.special.textContent = giant ? "🤚" : ultIcon;
       this.btns.roll.hidden = false;
@@ -3712,14 +4444,14 @@ export class ArenaShow {
     if (!champ) snd.fanfare(false);
     const card = el("div", "pb-results-card ar-results");
     const h = el("h2", "", champ === me ? "👑 CHAMPION!" : champ ? `👑 ${this.who(champ).toUpperCase()}` : "NO CHAMPION");
-    if (champ) h.style.color = CSS[this.slotOf(champ)];
+    if (champ) h.style.color = this.cssOf(this.slotOf(champ));
     card.append(h, el("div", "pb-results-score", champ && champ !== me ? "is the champion of the arena" : "Crown of the Colosseum"));
     const table = el("div", "pb-results-table");
     const rows = s.slots.map((id, k) => ({ id, k })).filter((r) => r.id).sort((a, b) => s.crowns[b.k] - s.crowns[a.k]);
     for (const r of rows) {
       const row = el("div", `pb-results-row${r.id === me ? " me" : ""}`);
       const n = el("span", "", this.who(r.id));
-      n.style.color = CSS[r.k];
+      n.style.color = this.cssOf(r.k);
       row.append(n, el("span", "", "♛".repeat(s.crowns[r.k]) || "—"), el("span", "", ""));
       table.append(row);
     }
@@ -3734,6 +4466,10 @@ export class ArenaShow {
   destroy() {
     this.kitPicker.destroy();
     this.classWheel.destroy();
+    this.disaster.destroy();
+    this.glows.destroy();
+    this.juice.destroy();
+    this.bets.destroy();
     window.removeEventListener("keydown", this.onKey, true);
     window.removeEventListener("keyup", this.onKeyUp, true);
     window.removeEventListener("blur", this.onBlur);
@@ -3753,6 +4489,7 @@ export class ArenaShow {
     this.ghosts.clear();
     for (const sp of this.giftSprites.values()) sp.destroy();
     this.floor.destroy();
+    this.lavaG.destroy();
     this.spikesG.destroy();
     this.flamesG.destroy();
     for (const t of this.torchStands) t.destroy({ texture: true, textureSource: true });

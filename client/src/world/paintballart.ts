@@ -15,6 +15,8 @@ const OUTLINE = "#2b2233";
 export const BLUE_PAINT = "#3fa9ff";
 export const RED_PAINT = "#ff4f6a";
 const PAINTS = ["#3fa9ff", "#ff4f6a", "#ffd23f", "#7ee05a", "#c77dff", "#ff9a3f"];
+const CALM_SATURATION = 0.58;
+const CALM_LIGHT = 0.95;
 
 function px(ctx: Ctx, color: string, x: number, y: number, w = 1, h = 1) {
   ctx.fillStyle = color;
@@ -68,8 +70,26 @@ function oldPaint(ctx: Ctx, x: number, y: number, w: number, h: number, n: numbe
   for (let i = 0; i < n; i++) splat(ctx, PAINTS[Math.floor(rnd() * PAINTS.length)], x + rnd() * w, y + rnd() * h, r * (0.6 + rnd() * 0.7), rnd);
 }
 
+/** The Yard's art, its colours calmed: so much of a muddy old barn's, so little of the paint box's. */
+function calm(c: HTMLCanvasElement) {
+  const ctx = c.getContext("2d")!;
+  const img = ctx.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const grey = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+    for (let k = 0; k < 3; k++) d[i + k] = (grey + (d[i + k] - grey) * CALM_SATURATION) * CALM_LIGHT;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 /** The art for one of the Yard's objects, or null if it isn't one. */
 export function paintballObject(o: { kind: string; x: number; y: number; w: number; h: number; label?: string | null }): { c: HTMLCanvasElement; overhang: number } | null {
+  const art = drawObject(o);
+  if (art) calm(art.c);
+  return art;
+}
+
+function drawObject(o: { kind: string; x: number; y: number; w: number; h: number; label?: string | null }): { c: HTMLCanvasElement; overhang: number } | null {
   const w = o.w * T;
   const h = o.h * T;
   const rnd = rand(o.x * 7919 + o.y * 104729 + o.kind.length * 31);
@@ -136,7 +156,8 @@ export function paintballObject(o: { kind: string; x: number; y: number; w: numb
 /** The field: turf in mown stripes, chalk lines, each side's base, netting posts round it. */
 function field(w: number, h: number): HTMLCanvasElement {
   const [c, ctx] = canvas(w, h);
-  // Mown stripes (over the pitch ground, see-through).
+  // Worn turf, muted, and mown in stripes.
+  px(ctx, "#7c9769", 0, 0, w, h);
   for (let x = 0; x < w; x += 64) px(ctx, "rgba(255,255,255,0.05)", x, 0, 32, h);
   // The bases: three tiles deep at each end, in the team's colour, hatched.
   const base = 3 * T;

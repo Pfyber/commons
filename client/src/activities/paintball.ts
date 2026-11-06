@@ -38,6 +38,12 @@ const COUNTDOWN = 1;
 const PLAYING = 2;
 const OVER = 3;
 const BOT_BASE = 0xffffff10;
+/**
+ * How much of the field anyone sees, in tiles, on any screen: the view's fitted
+ * inside the screen and the rest blacked out, so a wide or a tall window, or
+ * zooming out, is no way of seeing further.
+ */
+export const PB_VIEW = { w: 28, h: 16 };
 const SLOTS = 6;
 const HP = 3;
 const HOPPER = 12;
@@ -492,6 +498,12 @@ export class PaintballShow {
   // Feel.
   private shake = 0;
   private camLead = { x: 0, y: 0 };
+  private sight = (() => {
+    const e = el("div", "pb-sight");
+    e.hidden = true;
+    document.body.append(e);
+    return e;
+  })();
   private lastCount = -1;
   private nextHeart = 0;
   private recentKills: number[] = [];
@@ -556,6 +568,15 @@ export class PaintballShow {
   // ---- who's who -----------------------------------------------------------------
 
   /** Whether we're out on the field (our input goes to the match, not the world). */
+  /** The window onto the field (`null`: not playing). */
+  frameView(px: { w: number; h: number } | null) {
+    this.sight.hidden = !px;
+    if (!px) return;
+    const [w, h] = [`${Math.round(px.w)}px`, `${Math.round(px.h)}px`];
+    if (this.sight.style.width !== w) this.sight.style.width = w;
+    if (this.sight.style.height !== h) this.sight.style.height = h;
+  }
+
   get capturing(): boolean {
     const s = this.state;
     return !!s && (s.status === COUNTDOWN || s.status === PLAYING) && s.players.some((p) => p.id === this.selfId());
@@ -1720,6 +1741,7 @@ export class PaintballShow {
   }
 
   destroy() {
+    this.sight.remove();
     window.removeEventListener("keydown", this.onKey, true);
     window.removeEventListener("keyup", this.onKeyUp, true);
     window.removeEventListener("blur", this.onBlur);
