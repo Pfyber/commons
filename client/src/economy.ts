@@ -21,6 +21,8 @@ export interface Item {
     account_bound?: boolean;
     /** Tools: which hand (`rod`, `can`). Home exterior: which part of the house. */
     tool?: string;
+    /** Set up anywhere outdoors (a lawn chair). */
+    portable?: boolean;
     slot?: string;
     /** The fisherman's prices, and how often a fish bites. */
     weight?: number;

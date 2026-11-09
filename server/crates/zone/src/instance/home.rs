@@ -11,6 +11,9 @@ use crate::econ::CallError;
 use commons_protocol::{ServerMsg, error_code};
 use commons_sim::TilePos;
 
+/// How often the city looks over its front yards again.
+const YARD_TICK_MS: u32 = 60_000;
+
 /// The zone whose instances are club rooms, owned by a club.
 pub(crate) const CLUB_ROOM: &str = "clubroom";
 
@@ -21,6 +24,9 @@ impl Instance {
 
     pub(super) fn load_home(&self) {
         // (Only homes and club rooms keep furniture; other zones' owners are something else, a labyrinth's day.)
+        if self.is_city() {
+            return self.load_yards();
+        }
         if self.zone.id != "home" && !self.is_club_room() {
             return;
         }
@@ -47,15 +53,7 @@ impl Instance {
             |inst, result| match result {
                 Ok(objects) => {
                     for o in objects {
-                        let t = (o.x as u16, o.y as u16);
-                        if o.layer == 1 {
-                            inst.set_top(t, o.item as u32);
-                        } else {
-                            inst.set_object(t, o.item as u32);
-                        }
-                        if !o.fish.is_empty() {
-                            inst.set_tank(t, o.fish.iter().map(|&f| f as u32).collect());
-                        }
+                        inst.show_object(&o);
                     }
                 }
                 Err(e) => tracing::error!(?e, "loading home failed"),
@@ -63,13 +61,195 @@ impl Instance {
         );
     }
 
+    fn is_city(&self) -> bool {
+        self.zone.id == "city"
+    }
+
+    /// A saved piece, put where it was left.
+    fn show_object(&mut self, o: &crate::econ::HomeObject) {
+        let (t, item, rot) = ((o.x as u16, o.y as u16), o.item as u32, o.rot as u8);
+        if o.layer == 1 {
+            self.set_top(t, item, rot);
+        } else {
+            self.set_object(t, item, rot);
+        }
+        if o.fed > 0 {
+            self.fed.insert(t, o.fed as u32);
+        }
+        if !o.fish.is_empty() {
+            self.set_tank(t, o.fish.iter().map(|&f| f as u32).collect());
+            // (Anyone here already hears when they last ate.)
+            self.broadcast(
+                self.cell_of(t),
+                &ServerMsg::TankFed {
+                    x: t.0,
+                    y: t.1,
+                    fed: o.fed as u32,
+                },
+                None,
+            );
+        }
+    }
+
+    /// The city's front yards, as saved. Asked again now and then: moving
+    /// out empties a yard without the zone being told.
+    fn load_yards(&self) {
+        let Some(econ) = self.economy.clone() else {
+            return;
+        };
+        self.spawn_call(
+            async move { econ.yard_objects().await },
+            |inst, r| match r {
+                Ok(objects) => {
+                    let keep: std::collections::HashSet<TilePos> =
+                        objects.iter().map(|o| (o.x as u16, o.y as u16)).collect();
+                    let gone: Vec<TilePos> = inst
+                        .objects
+                        .keys()
+                        .filter(|t| !keep.contains(*t) && !inst.portable.contains_key(*t))
+                        .copied()
+                        .collect();
+                    for t in gone {
+                        inst.set_top(t, 0, 0);
+                        inst.set_object(t, 0, 0);
+                    }
+                    for o in &objects {
+                        let t = (o.x as u16, o.y as u16);
+                        let shown = if o.layer == 1 {
+                            inst.tops.get(&t)
+                        } else {
+                            inst.objects.get(&t)
+                        };
+                        if shown != Some(&(o.item as u32)) {
+                            inst.show_object(o);
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(?e, "loading yards failed"),
+            },
+        );
+    }
+
+    pub(super) fn yard_tick(&mut self, now: u32) {
+        if now >= self.next_yard_tick && self.is_city() {
+            self.next_yard_tick = now + YARD_TICK_MS;
+            self.load_yards();
+        }
+    }
+
+    /// The lot whose front yard `t` is in, unless it's the path to the door.
+    fn yard_at(&self, t: TilePos) -> Option<String> {
+        let m = &self.zone.map;
+        let ground = m.ground[t.1 as usize * m.width as usize + t.0 as usize] as usize;
+        if m.ground_legend.get(ground).is_some_and(|g| g == "path") {
+            return None;
+        }
+        m.objects
+            .iter()
+            .find(|o| {
+                o.kind == "yard"
+                    && (o.x..o.x + o.w).contains(&t.0)
+                    && (o.y..o.y + o.h).contains(&t.1)
+            })
+            .and_then(|o| o.label.clone())
+    }
+
+    /// Where seat `seat` is: one the map has, or a chair or sofa placed at
+    /// that tile (seat ids are tile indices).
+    pub(super) fn seat_tile(&self, seat: u32) -> Option<TilePos> {
+        if let Some(s) = self.zone.furniture.seats.get(&seat) {
+            return Some(s.tile);
+        }
+        let w = self.zone.map.width as u32;
+        let t = ((seat % w) as u16, (seat / w) as u16);
+        let item = self.objects.get(&t)?;
+        let catalog = self.economy.as_ref()?.catalog()?;
+        catalog.seats.contains(item).then_some(t)
+    }
+
+    /// A garden pond's tiles, from its top left.
+    fn pond_tiles(t: TilePos) -> [TilePos; 4] {
+        [t, (t.0 + 1, t.1), (t.0, t.1 + 1), (t.0 + 1, t.1 + 1)]
+    }
+
+    /// Whether a pond fits at `t`, all of it in one yard.
+    fn pond_fits(&self, t: TilePos, lot: &str) -> bool {
+        Self::pond_tiles(t).iter().all(|&p| {
+            p.0 < self.zone.map.width
+                && p.1 < self.zone.map.height
+                && self.grid.walkable(p.0, p.1)
+                && !self.objects.contains_key(&p)
+                && !self.avatars.values().any(|a| a.tile == p)
+                && self.yard_at(p).as_deref() == Some(lot)
+        })
+    }
+
+    /// Whether a UV light hangs just above `t`.
+    fn uv_over(&self, t: TilePos) -> bool {
+        let Some(c) = self.economy.as_ref().and_then(|e| e.catalog()) else {
+            return false;
+        };
+        let above = (t.0, t.1.wrapping_sub(1));
+        [self.objects.get(&above), self.tops.get(&above)]
+            .into_iter()
+            .flatten()
+            .any(|i| c.uv.contains(i))
+    }
+
+    /// A UV light came or went at `t`: the plant under it notices.
+    fn refresh_uv(&mut self, t: TilePos) {
+        let below = (t.0, t.1 + 1);
+        let uv = self.uv_over(below);
+        if let Some(p) = self.plots.get_mut(&below)
+            && p.uv != uv
+        {
+            p.uv = uv;
+            self.broadcast_plot(below);
+        }
+    }
+
     /// Adds (item > 0) or removes (item = 0) furniture and tells watchers.
-    fn set_object(&mut self, t: TilePos, item: u32) {
+    fn set_object(&mut self, t: TilePos, item: u32, rot: u8) {
+        let cat = self.economy.as_ref().and_then(|e| e.catalog());
+        let planter = cat.as_ref().is_some_and(|c| c.planters.contains(&item));
+        let walk_on = cat.as_ref().is_some_and(|c| c.walk.contains(&item));
+        let pond = cat.as_ref().is_some_and(|c| c.ponds.contains(&item));
+        let was_pond = cat
+            .as_ref()
+            .zip(self.objects.get(&t))
+            .is_some_and(|(c, old)| c.ponds.contains(old));
+        if was_pond && item == 0 {
+            for p in Self::pond_tiles(t) {
+                self.pond_water.remove(&p);
+                self.grid.set_blocked(
+                    p.0,
+                    p.1,
+                    self.zone.grid.blocked[self.zone.grid.idx(p.0, p.1)],
+                );
+            }
+        }
+        if pond {
+            for p in Self::pond_tiles(t) {
+                self.pond_water.insert(p);
+                self.grid.set_blocked(p.0, p.1, true);
+            }
+        }
         if item == 0 {
+            // Whoever's sitting on it gets up first.
+            let seat = t.1 as u32 * self.zone.map.width as u32 + t.0 as u32;
+            if let Some(&who) = self.seat_occupant.get(&seat) {
+                let now = self.clock.now_ms();
+                self.stand(who, now);
+            }
             self.objects.remove(&t);
+            self.rots.remove(&(t, 0));
             if !self.tops.contains_key(&t) {
                 self.lit.remove(&t);
                 self.tanks.remove(&t);
+                self.fed.remove(&t);
+            }
+            if self.zone.id == "home" {
+                self.soil.remove(&t);
             }
             self.grid.set_blocked(
                 t.0,
@@ -78,7 +258,12 @@ impl Instance {
             );
         } else {
             self.objects.insert(t, item);
-            self.grid.set_blocked(t.0, t.1, true);
+            self.rots.insert((t, 0), rot);
+            // (Rugs are walked over.)
+            self.grid.set_blocked(t.0, t.1, !walk_on);
+            if planter && self.zone.id == "home" {
+                self.soil.insert(t);
+            }
         }
         self.broadcast(
             self.cell_of(t),
@@ -86,9 +271,11 @@ impl Instance {
                 x: t.0,
                 y: t.1,
                 item,
+                rot,
             },
             None,
         );
+        self.refresh_uv(t);
     }
 
     pub(super) fn objects_in_cell(&self, cell: u16) -> Vec<ServerMsg> {
@@ -100,6 +287,7 @@ impl Instance {
                 x: t.0,
                 y: t.1,
                 item: *item,
+                rot: self.rots.get(&(*t, 0)).copied().unwrap_or(0),
             })
             .collect();
         // What's on the tables, what's on, and what swims in the tanks.
@@ -108,6 +296,7 @@ impl Instance {
                 x: t.0,
                 y: t.1,
                 item: *item,
+                rot: self.rots.get(&(*t, 1)).copied().unwrap_or(0),
             });
         }
         for t in self.lit.iter().filter(|t| self.cell_of(**t) == cell) {
@@ -123,6 +312,13 @@ impl Instance {
                 y: t.1,
                 fish: fish.clone(),
             });
+            if let Some(&fed) = self.fed.get(t) {
+                out.push(ServerMsg::TankFed {
+                    x: t.0,
+                    y: t.1,
+                    fed,
+                });
+            }
         }
         out
     }
@@ -144,13 +340,16 @@ impl Instance {
     }
 
     /// What stands on the table at `t` (0: taken off), told to whoever's watching.
-    fn set_top(&mut self, t: TilePos, item: u32) {
+    fn set_top(&mut self, t: TilePos, item: u32, rot: u8) {
         if item == 0 {
             self.tops.remove(&t);
+            self.rots.remove(&(t, 1));
             self.lit.remove(&t);
             self.tanks.remove(&t);
+            self.fed.remove(&t);
         } else {
             self.tops.insert(t, item);
+            self.rots.insert((t, 1), rot);
         }
         self.broadcast(
             self.cell_of(t),
@@ -158,9 +357,11 @@ impl Instance {
                 x: t.0,
                 y: t.1,
                 item,
+                rot,
             },
             None,
         );
+        self.refresh_uv(t);
     }
 
     /// The thing at `t` you'd use (what's on the table, else the table or whatever's there), and its layer.
@@ -171,16 +372,22 @@ impl Instance {
             .or_else(|| self.objects.get(&t).map(|&i| (i, 0)))
     }
 
-    /// Whether `t` is a wall a picture can hang on: a wall (as built) with the home's floor just below it.
-    fn wall_face(&self, t: TilePos) -> bool {
+    /// Whether `t` is a wall a picture can hang on: a wall (as built) with
+    /// the home's floor on the side it faces: just below it, or turned side
+    /// on (`rot` 1 or 3), to its right or left.
+    fn wall_face(&self, t: TilePos, rot: u8) -> bool {
         let m = &self.zone.map;
-        let below = (t.0, t.1 + 1);
-        if below.1 >= m.height || t.0 >= m.width {
+        let front = match rot {
+            1 => (t.0 + 1, t.1),
+            3 => (t.0.wrapping_sub(1), t.1),
+            _ => (t.0, t.1 + 1),
+        };
+        if front.1 >= m.height || front.0 >= m.width {
             return false;
         }
-        let floor = m.ground[below.1 as usize * m.width as usize + below.0 as usize] as usize;
+        let floor = m.ground[front.1 as usize * m.width as usize + front.0 as usize] as usize;
         self.zone.grid.blocked[self.zone.grid.idx(t.0, t.1)]
-            && self.grid.walkable(below.0, below.1)
+            && self.grid.walkable(front.0, front.1)
             && m.ground_legend.get(floor).is_some_and(|n| n == "floor")
     }
 
@@ -197,6 +404,7 @@ impl Instance {
         );
         if fish.is_empty() {
             self.tanks.remove(&t);
+            self.fed.remove(&t);
         } else {
             self.tanks.insert(t, fish);
         }
@@ -233,9 +441,49 @@ impl Instance {
         );
     }
 
+    /// The owner feeds a tank.
+    pub(super) fn tank_feed(&mut self, id: u32, t: TilePos) {
+        if !self.tanks.contains_key(&t) {
+            return;
+        }
+        let Some(owner) = self.check_owner(id) else {
+            return;
+        };
+        let Some(econ) = self.economy.clone() else {
+            return self.error(id, error_code::UNAVAILABLE, "try again in a moment");
+        };
+        if !self.busy.insert(t) {
+            return;
+        }
+        let layer = self.used_at(t).map_or(0, |(_, l)| l);
+        let key = self.next_key("feed");
+        self.spawn_call(
+            async move { econ.tank_feed(&owner, t.0, t.1, layer, &key).await },
+            move |inst, r| {
+                inst.busy.remove(&t);
+                match r {
+                    Ok(done) => {
+                        inst.fed.insert(t, done.fed as u32);
+                        inst.broadcast(
+                            inst.cell_of(t),
+                            &ServerMsg::TankFed {
+                                x: t.0,
+                                y: t.1,
+                                fed: done.fed as u32,
+                            },
+                            None,
+                        );
+                        inst.send_granted(id, &done.applied);
+                    }
+                    Err(e) => inst.economy_error(id, e),
+                }
+            },
+        );
+    }
+
     /// The owner puts a fish from their bag in a tank.
     pub(super) fn tank_put(&mut self, id: u32, t: TilePos, fish: u32) {
-        if self.is_club_room() {
+        if self.zone.id != "home" {
             return self.error(id, error_code::NOT_ALLOWED, "keep fish in a tank at home");
         }
         let Some(owner) = self.check_owner(id) else {
@@ -276,7 +524,7 @@ impl Instance {
 
     /// The owner takes a fish out of a tank, back into their bag.
     pub(super) fn tank_take(&mut self, id: u32, t: TilePos, index: u8) {
-        if !self.tanks.contains_key(&t) {
+        if !self.tanks.contains_key(&t) || self.zone.id != "home" {
             return;
         }
         let Some(owner) = self.check_owner(id) else {
@@ -309,7 +557,8 @@ impl Instance {
     /// the economy service) anyone in a club's room, who got in as a member.
     fn check_owner(&mut self, id: u32) -> Option<String> {
         let player = self.avatars[&id].player_id.clone();
-        if self.is_club_room() {
+        // (In the city, the economy service checks whose yard it is.)
+        if self.is_club_room() || self.is_city() {
             return Some(player);
         }
         if self.owner.as_deref() != Some(player.as_str()) {
@@ -323,7 +572,97 @@ impl Instance {
         Some(player)
     }
 
-    pub(super) fn place(&mut self, id: u32, item: u32, t: TilePos) {
+    /// Folds away the lawn chairs `id`'s player set up (they've left).
+    pub(super) fn fold_chairs(&mut self, id: u32) {
+        let Some(player) = self.avatars.get(&id).map(|a| a.player_id.clone()) else {
+            return;
+        };
+        // (Unless they're here twice over.)
+        if self
+            .avatars
+            .values()
+            .filter(|a| a.player_id == player)
+            .count()
+            > 1
+        {
+            return;
+        }
+        let mine: Vec<TilePos> = self
+            .portable
+            .iter()
+            .filter(|(_, p)| **p == player)
+            .map(|(t, _)| *t)
+            .collect();
+        for t in mine {
+            self.portable.remove(&t);
+            self.set_object(t, 0, 0);
+        }
+    }
+
+    /// A lawn chair set up in the open: anywhere free, one each, while they've one in the bag.
+    fn place_portable(&mut self, id: u32, item: u32, t: TilePos, rot: u8) {
+        let free = self.grid.walkable(t.0, t.1)
+            && !self.soil.contains(&t)
+            && !self.objects.contains_key(&t)
+            && !self.avatars.values().any(|a| a.tile == t);
+        if !free {
+            return self.error(id, error_code::NOT_ALLOWED, "there's no room there");
+        }
+        let Some(econ) = self.economy.clone() else {
+            return self.error(id, error_code::UNAVAILABLE, "try again in a moment");
+        };
+        let player = self.avatars[&id].player_id.clone();
+        if !self.busy.insert(t) {
+            return;
+        }
+        let who = player.clone();
+        self.spawn_call(async move { econ.has(&who, item).await }, move |inst, r| {
+            inst.busy.remove(&t);
+            match r {
+                Ok(n) if n > 0 => {
+                    // (One each: the last one folds up as the new one goes down.)
+                    let old: Vec<TilePos> = inst
+                        .portable
+                        .iter()
+                        .filter(|(_, p)| **p == player)
+                        .map(|(t, _)| *t)
+                        .collect();
+                    for o in old {
+                        inst.portable.remove(&o);
+                        inst.set_object(o, 0, 0);
+                    }
+                    if inst.objects.contains_key(&t) || !inst.grid.walkable(t.0, t.1) {
+                        return inst.error(id, error_code::NOT_ALLOWED, "there's no room there");
+                    }
+                    inst.portable.insert(t, player);
+                    inst.set_object(t, item, rot);
+                }
+                Ok(_) => inst.error(id, error_code::NOT_ALLOWED, "you don't have one of those"),
+                Err(e) => inst.economy_error(id, e),
+            }
+        });
+    }
+
+    pub(super) fn place(&mut self, id: u32, item: u32, t: TilePos, rot: u8) {
+        let rot = rot % 4;
+        let portable = self
+            .economy
+            .as_ref()
+            .and_then(|e| e.catalog())
+            .is_some_and(|c| c.portable.contains(&item));
+        if portable && self.is_city() {
+            return self.place_portable(id, item, t, rot);
+        }
+        let yard = if self.is_city() {
+            match self.yard_at(t) {
+                Some(lot) => Some(lot),
+                None => {
+                    return self.error(id, error_code::NOT_ALLOWED, "that goes in your front yard");
+                }
+            }
+        } else {
+            None
+        };
         let Some(owner) = self.check_owner(id) else {
             return;
         };
@@ -338,9 +677,23 @@ impl Instance {
             cat.as_ref().is_some_and(|c| set(c).contains(&i))
         };
         let home = !self.is_club_room();
+        if is(|c| &c.planters, item) && self.zone.id != "home" {
+            return self.error(id, error_code::NOT_ALLOWED, "planters are for indoors");
+        }
+        if is(|c| &c.ponds, item) {
+            let fits = yard.as_deref().is_some_and(|lot| self.pond_fits(t, lot));
+            if !fits {
+                return self.error(
+                    id,
+                    error_code::NOT_ALLOWED,
+                    "a pond needs two tiles by two, free, in your front yard",
+                );
+            }
+        }
+        let on_wall = self.wall_face(t, rot);
         // Where it goes: on a wall, on a table, or on the floor.
-        let layer: u8 = if home && is(|c| &c.walls, item) {
-            if !self.wall_face(t) || self.objects.contains_key(&t) {
+        let layer: u8 = if home && is(|c| &c.walls, item) && (on_wall || !is(|c| &c.stands, item)) {
+            if !on_wall || self.objects.contains_key(&t) {
                 return self.error(
                     id,
                     error_code::NOT_ALLOWED,
@@ -364,7 +717,9 @@ impl Instance {
             }
             1
         } else {
-            let occupied_by_avatar = self.avatars.values().any(|a| a.tile == t);
+            // (A rug can go down under someone's feet.)
+            let occupied_by_avatar =
+                !is(|c| &c.walk, item) && self.avatars.values().any(|a| a.tile == t);
             if !self.grid.walkable(t.0, t.1)
                 || self.soil.contains(&t)
                 || occupied_by_avatar
@@ -383,7 +738,10 @@ impl Instance {
             async move {
                 match club {
                     Some(club) => econ.club_place(&club, &owner, item, t.0, t.1, &key).await,
-                    None => econ.place(&owner, item, t.0, t.1, layer, &key).await,
+                    None => {
+                        econ.place(&owner, item, t.0, t.1, layer, rot, yard.as_deref(), &key)
+                            .await
+                    }
                 }
             },
             move |inst, r| {
@@ -391,10 +749,11 @@ impl Instance {
                 match r {
                     Ok(applied) => {
                         if layer == 1 {
-                            inst.set_top(t, item);
+                            inst.set_top(t, item, rot);
                         } else {
-                            inst.set_object(t, item);
+                            inst.set_object(t, item, rot);
                         }
+                        inst.fed.insert(t, (super::now_ms() / 1000) as u32);
                         inst.send_granted(id, &applied);
                     }
                     Err(e) => inst.economy_error(id, e),
@@ -404,11 +763,26 @@ impl Instance {
     }
 
     pub(super) fn pickup(&mut self, id: u32, t: TilePos) {
+        // A lawn chair in the open folds up, for whoever set it up.
+        if let Some(owner) = self.portable.get(&t) {
+            if *owner != self.avatars[&id].player_id {
+                return self.error(id, error_code::NOT_ALLOWED, "that's someone else's chair");
+            }
+            self.portable.remove(&t);
+            return self.set_object(t, 0, 0);
+        }
         let Some(owner) = self.check_owner(id) else {
             return;
         };
         if !self.objects.contains_key(&t) {
             return;
+        }
+        if self.plots.contains_key(&t) && self.zone.id == "home" {
+            return self.error(
+                id,
+                error_code::NOT_ALLOWED,
+                "harvest what's growing in it first",
+            );
         }
         let Some(econ) = self.economy.clone() else {
             return self.error(id, error_code::UNAVAILABLE, "try again in a moment");
@@ -416,6 +790,7 @@ impl Instance {
         if !self.busy.insert(t) {
             return;
         }
+        let yard = self.is_city();
         // What's on a table comes off first.
         let layer: u8 = if self.tops.contains_key(&t) { 1 } else { 0 };
         let key = self.next_key("pickup");
@@ -426,7 +801,7 @@ impl Instance {
                 match club {
                     Some(club) => econ.club_pickup(&club, &owner, t.0, t.1, &key).await,
                     None => econ
-                        .pickup(&owner, t.0, t.1, layer, &key)
+                        .pickup(&owner, t.0, t.1, layer, yard, &key)
                         .await
                         .map(|applied| crate::econ::ClubPickup {
                             applied,
@@ -439,9 +814,9 @@ impl Instance {
                 match r {
                     Ok(p) => {
                         if layer == 1 {
-                            inst.set_top(t, 0);
+                            inst.set_top(t, 0, 0);
                         } else {
-                            inst.set_object(t, 0);
+                            inst.set_object(t, 0, 0);
                         }
                         // Back in its placer's bag: tell them, if they're here.
                         let to = if p.to == me {

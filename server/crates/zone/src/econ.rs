@@ -56,6 +56,8 @@ pub struct Plot {
     pub stage: i16,
     pub stage_started_ms: i64,
     pub watered: bool,
+    #[serde(default)]
+    pub uv: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,9 +95,22 @@ pub struct HomeObject {
     /// A fish tank's fish.
     #[serde(default)]
     pub fish: Vec<i32>,
+    /// Quarter turns.
+    #[serde(default)]
+    pub rot: i16,
+    /// When its fish last ate (unix seconds).
+    #[serde(default)]
+    pub fed: i64,
 }
 
 /// A tank changed: what it holds now, and the bag's change.
+/// A tank fed: when, and the bag's change.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TankFed {
+    pub fed: i64,
+    pub applied: Applied,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct TankDone {
     pub fish: Vec<i32>,
@@ -135,6 +150,18 @@ pub struct ZoneCatalog {
     pub surfaces: HashSet<u32>,
     pub tops: HashSet<u32>,
     pub walls: HashSet<u32>,
+    /// Wall pieces that may stand on the floor too.
+    pub stands: HashSet<u32>,
+    /// Pots things grow in, and the lights that speed them up.
+    pub planters: HashSet<u32>,
+    pub uv: HashSet<u32>,
+    /// What can be sat on, and what can be walked over (rugs).
+    pub seats: HashSet<u32>,
+    pub walk: HashSet<u32>,
+    /// Garden ponds (two tiles by two, and fishable).
+    pub ponds: HashSet<u32>,
+    /// Set up anywhere outdoors (a lawn chair), not kept.
+    pub portable: HashSet<u32>,
     pub names: HashMap<u32, String>,
 }
 
@@ -181,6 +208,27 @@ impl ZoneCatalog {
                     }
                     if flag("top") {
                         c.tops.insert(id);
+                    }
+                    if flag("stands") {
+                        c.stands.insert(id);
+                    }
+                    if flag("planter") {
+                        c.planters.insert(id);
+                    }
+                    if flag("uv") {
+                        c.uv.insert(id);
+                    }
+                    if flag("seat") {
+                        c.seats.insert(id);
+                    }
+                    if flag("walk") {
+                        c.walk.insert(id);
+                    }
+                    if flag("pond") {
+                        c.ponds.insert(id);
+                    }
+                    if flag("portable") {
+                        c.portable.insert(id);
                     }
                     if flag("wall") {
                         c.walls.insert(id);
@@ -402,6 +450,31 @@ impl EconomyClient {
         .await
     }
 
+    /// Every front yard's pieces.
+    pub async fn yard_objects(&self) -> Result<Vec<HomeObject>, CallError> {
+        self.call::<(), _>(reqwest::Method::GET, "/internal/home-yards/objects", None)
+            .await
+    }
+
+    /// A pinch of fish food for the tank at (x, y).
+    pub async fn tank_feed(
+        &self,
+        owner: &str,
+        x: u16,
+        y: u16,
+        layer: u8,
+        key: &str,
+    ) -> Result<TankFed, CallError> {
+        let body =
+            serde_json::json!({ "owner": owner, "x": x, "y": y, "layer": layer, "key": key });
+        self.call(
+            reqwest::Method::POST,
+            "/internal/home/tank/feed",
+            Some(&body),
+        )
+        .await
+    }
+
     /// A fish from `owner`'s bag into the tank at (x, y).
     pub async fn tank_put(
         &self,
@@ -447,9 +520,11 @@ impl EconomyClient {
         x: u16,
         y: u16,
         layer: u8,
+        rot: u8,
+        lot: Option<&str>,
         key: &str,
     ) -> Result<Applied, CallError> {
-        let body = serde_json::json!({ "owner": owner, "item": item, "x": x, "y": y, "layer": layer, "key": key });
+        let body = serde_json::json!({ "owner": owner, "item": item, "x": x, "y": y, "layer": layer, "rot": rot, "lot": lot, "key": key });
         self.call(reqwest::Method::POST, "/internal/home/place", Some(&body))
             .await
     }
@@ -501,10 +576,10 @@ impl EconomyClient {
         x: u16,
         y: u16,
         layer: u8,
+        yard: bool,
         key: &str,
     ) -> Result<Applied, CallError> {
-        let body =
-            serde_json::json!({ "owner": owner, "x": x, "y": y, "layer": layer, "key": key });
+        let body = serde_json::json!({ "owner": owner, "x": x, "y": y, "layer": layer, "yard": yard, "key": key });
         self.call(reqwest::Method::POST, "/internal/home/pickup", Some(&body))
             .await
     }
@@ -583,6 +658,13 @@ impl ZoneCatalog {
             surfaces: [454].into(),
             tops: [445, 460].into(),
             walls: [430].into(),
+            stands: Default::default(),
+            planters: Default::default(),
+            uv: Default::default(),
+            seats: Default::default(),
+            walk: Default::default(),
+            ponds: Default::default(),
+            portable: Default::default(),
             names: Default::default(),
         }
     }

@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 52;
+pub const PROTOCOL_VERSION: u16 = 55;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -57,6 +57,9 @@ records! {
 
     /// A paintball power-up waiting on its pad (field tiles ×100).
     PbPickup { kind: u8, x: u16, y: u16 }
+
+    /// A line on the skatepark's board (`SkateBoard`): who, and their score.
+    SkateEntry { name: String, points: u32 }
 
     /// Everything a client needs to render another avatar, including any
     /// walk in progress so it can be simulated locally, and what it signals
@@ -117,8 +120,9 @@ message_enum! {
         10 FishReel { quality: u16 }
         /// Garden plot action (`plot_action::*`); `item` is the seed to plant.
         11 PlotAction { x: u16, y: u16, action: u8, item: u32 }
-        /// Place a furniture item at (x, y) in your home.
-        12 Place { item: u32, x: u16, y: u16 }
+        /// Place a furniture item at (x, y) in your home or front yard, turned
+        /// `rot` quarter turns (0 front, 1 and 3 side on, 2 mirrored).
+        12 Place { item: u32, x: u16, y: u16, rot: u8 }
         /// Pick up the furniture at (x, y) in your home.
         13 Pickup { x: u16, y: u16 }
         /// Play a note at the bandstand (`instrument::*`, `pitch` 0–7 of a
@@ -253,6 +257,20 @@ message_enum! {
         /// `index`th one back out.
         65 TankPut { x: u16, y: u16, fish: u32 }
         66 TankTake { x: u16, y: u16, index: u8 }
+        /// At home: a pinch of fish food for the tank at (x, y).
+        71 TankFeed { x: u16, y: u16 }
+        /// The skatepark (`skate`): on a board (true) or off it.
+        /// `kit`: how your board's built, as others see it (the client's
+        /// own packing: deck, wheels, trail…); sent again on a board to change it.
+        72 SkateOn { on: bool, kit: u32 }
+        /// Where you are on your board, as you skate (map tiles ×100, the
+        /// height off the ground in px, which way you're headed as a fraction
+        /// of a full turn), your pose (`skate::pose`) and the trick you're
+        /// doing (the client's own numbering, shown to others as it is).
+        73 SkateMove { x: u16, y: u16, z: u8, dir: u16, pose: u8, trick: u8, spin: u16 }
+        /// A combo landed (or a bail, or a timed run over: `skate::score`),
+        /// what it was worth, and its name ("Kickflip + 50-50 Grind").
+        74 SkateScore { kind: u8, points: u32, label: String }
     }
 }
 
@@ -305,7 +323,7 @@ message_enum! {
             stage_left_ms: u32,
         }
         /// Furniture at (x, y); `item` 0 means removed.
-        17 ObjectUpdate { x: u16, y: u16, item: u32 }
+        17 ObjectUpdate { x: u16, y: u16, item: u32, rot: u8 }
         /// Your inventory changed: `added` received now, `total` held, and
         /// whether it's a first-ever find for the album.
         18 Granted { item: u32, added: u16, total: u32, first: bool }
@@ -413,8 +431,10 @@ message_enum! {
         50 ObjectOn { x: u16, y: u16, on: bool }
         /// What a fish tank at (x, y) holds (fish item ids).
         51 TankFish { x: u16, y: u16, fish: Vec<u32> }
+        /// When the tank at (x, y) was last fed (unix seconds).
+        59 TankFed { x: u16, y: u16, fed: u32 }
         /// What stands on the table at (x, y) (0: nothing).
-        52 ObjectTop { x: u16, y: u16, item: u32 }
+        52 ObjectTop { x: u16, y: u16, item: u32, rot: u8 }
         /// The Glowroot Labyrinth, for a newcomer: which lanterns are lit and
         /// which gates are open (their numbers), which glimmers you've found
         /// and which heartstones you're attuned to (a bit each), how many found
@@ -432,6 +452,14 @@ message_enum! {
         56 ArenaBetSettled { coins: u16, refund: bool }
         /// Nobody started the match: you've been stood down from your place.
         57 ArenaStoodDown {}
+        /// Someone got on a board at the skatepark (or off it).
+        60 Skating { id: u32, on: bool }
+        /// A skater where they are now (as `SkateMove`).
+        61 Skater { id: u32, x: u16, y: u16, z: u8, dir: u16, pose: u8, trick: u8, spin: u16, kit: u32 }
+        /// A skater's combo landed, bail or run over (as `SkateScore`).
+        62 SkateEvent { id: u32, kind: u8, points: u32, label: String }
+        /// The skatepark's board: today's best timed runs and best combos.
+        63 SkateBoard { runs: Vec<SkateEntry>, combos: Vec<SkateEntry> }
     }
 }
 
@@ -465,6 +493,31 @@ pub mod emote {
     pub const YO_YO: u8 = 11;
     pub const PINWHEEL: u8 = 12;
     pub const TOYS: std::ops::RangeInclusive<u8> = BUBBLES..=PINWHEEL;
+}
+
+/// The skatepark: what `SkateMove.pose` and `SkateScore.kind` mean.
+pub mod skate {
+    /// `pose`: rolling along, crouched to pop, in the air, grinding,
+    /// on a manual, and off the board (a bail).
+    pub mod pose {
+        pub const ROLL: u8 = 0;
+        pub const CROUCH: u8 = 1;
+        pub const AIR: u8 = 2;
+        pub const GRIND: u8 = 3;
+        pub const MANUAL: u8 = 4;
+        pub const BAIL: u8 = 5;
+        pub const MAX: u8 = BAIL;
+    }
+    /// `kind`: a combo landed, a bail, a timed run's final score.
+    pub mod score {
+        pub const COMBO: u8 = 0;
+        pub const BAIL: u8 = 1;
+        pub const RUN: u8 = 2;
+    }
+    /// The most a combo (or run) can be worth: anything more is a lie.
+    pub const MAX_POINTS: u32 = 5_000_000;
+    /// How many lines each of the board's lists holds.
+    pub const BOARD_LINES: usize = 8;
 }
 
 /// Looks reserved for non-player characters (the Caretaker).

@@ -717,7 +717,7 @@ export class PoolPanel extends Panel {
         `${this.who(s.a)} is chalking a cue, waiting for an opponent.`,
         [{ icon: "🎱", label: `Play ${this.who(s.a)}`, sub: "8-ball, head to head", primary: true, pick: join(false) }],
         () => this.hide(),
-        "🍺 The Mossy Mug",
+        "🍺 The Cozy Cup",
       );
       return;
     }
@@ -741,7 +741,7 @@ export class PoolPanel extends Panel {
         { icon: "👥", label: "Wait for a player", sub: "Someone at the bar joins", pick: join(false) },
       ],
       () => this.hide(),
-      ended ? "🎱 Pool" : "🍺 The Mossy Mug",
+      ended ? "🎱 Pool" : "🍺 The Cozy Cup",
     );
   }
 

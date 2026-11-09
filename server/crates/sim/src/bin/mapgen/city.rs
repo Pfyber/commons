@@ -9,7 +9,7 @@
 //! client code.
 
 use super::{Brush, Builder, d, g, hash, maze, noise, nook, spline};
-use commons_sim::city::{APARTMENTS, BlockId, City, STALLS, lot_key};
+use commons_sim::city::{APARTMENTS, BlockId, City, Geometry, STALLS, lot_key};
 use commons_sim::map::{MapFile, StreetGrid};
 use std::collections::VecDeque;
 
@@ -221,6 +221,11 @@ pub fn city() -> MapFile {
             && (1..=last).contains(&id.bx)
             && (1..=last).contains(&id.by);
         if cut {
+            // (The skatepark's laid over it all later: see `skate_district`.)
+            if t.key == "skatepark" {
+                k.lawn();
+                continue;
+            }
             fronts.push(fitted_edge(&mut k, &ring, &inner, id, &t.key, &t.name));
             continue;
         }
@@ -259,6 +264,7 @@ pub fn city() -> MapFile {
             "orchard" => orchard(&mut k),
             "woods" => woods(&mut k),
             "meadow" => meadow(&mut k),
+            "empty" => k.lawn(),
             "club_lot" => club_lot(&mut k, id),
             "home" => homes(&mut k, id),
             "fairground" => fairground(&mut k),
@@ -351,6 +357,7 @@ pub fn city() -> MapFile {
     wildwood(&mut b, &plan, &geo);
     avenue(&mut b, &plan, &ring);
     avenue(&mut b, &plan, &inner);
+    skate_district(&mut b, &ring, &inner, &geo, &city);
 
     // Where bugs and mushrooms turn up in the green blocks (ADR 0019).
     for (id, t) in city.blocks() {
@@ -1421,7 +1428,7 @@ fn about(key: &str, name: &str) -> String {
                 .to_string()
         }
         "cafe" => {
-            "The Mossy Mug café: coffee, cake, the pool table and pinball inside. Open voice in there: everyone hears everyone"
+            "The Cozy Cup café: coffee, cake, the pool table and pinball inside. Open voice in there: everyone hears everyone"
                 .to_string()
         }
         "library" => {
@@ -1483,7 +1490,7 @@ fn fit_building(
         "club_hall" => ("club_hall", 20, 10, "Club Hall".into(), Some("club_hall")),
         "casino" => ("casino", 20, 11, "Casino".into(), Some("casino")),
         "museum" => ("museum", 24, 11, "Museum & Gallery".into(), Some("museum")),
-        "cafe" => ("bar", 16, 9, "The Mossy Mug".into(), Some("bar")),
+        "cafe" => ("bar", 16, 9, "The Cozy Cup".into(), Some("bar")),
         "bowling" => ("bowling_alley", 16, 9, "Bowling".into(), Some("bowling")),
         "town_hall" => ("town_hall", 10, 7, "Town Hall".into(), None),
         "cinema" => ("building", 18, 9, name.to_string(), None),
@@ -1675,6 +1682,11 @@ fn fitted_edge(
 /// onto the ring. The Cinema's big screen plays out on its garden lawn;
 /// the Town Hall's wishing well stands on its forecourt.
 fn fitted_inner(k: &mut Blk, inner: &Ring, id: BlockId, key: &str, name: &str) {
+    if key == "skatepark" {
+        // (Laid over it all later: see `skate_district`.)
+        k.lawn();
+        return;
+    }
     let ((x0, y0, w, h), door, _) = fit_building(
         k,
         &|x, y| inner.inside(x, y, 1.0),
@@ -1744,6 +1756,192 @@ fn fitted_inner(k: &mut Blk, inner: &Ring, id: BlockId, key: &str, name: &str) {
         }
     }
     let _ = door;
+}
+
+/// How far south (tiles from the blocks' top) the skatepark reaches.
+const SKATE_SOUTH: u16 = 39;
+
+/// The skatepark: everything inside the Ring Road across the skatepark
+/// blocks, from the north street down to `SKATE_SOUTH`, paved smooth and
+/// fenced round. The inner ring road runs on through it (walkers still pass
+/// along it; inside the fence it's skated too, so the park's two halves are
+/// one). West of the road: a bowl, a mini ramp, a street plaza with a stair
+/// set, a pyramid and a gap; east: the old park, quarter pipes, the deck and
+/// its handrail, the funbox. Gates on the north street and the east one, and
+/// south to the green. What each piece is (`sk_*`) the client rides on
+/// (walkers go round them); the server only needs `sk_park`, round it all.
+fn skate_district(b: &mut Builder, ring: &Ring, inner: &Ring, geo: &Geometry, city: &City) {
+    let blocks: Vec<_> = city
+        .blocks()
+        .filter(|(_, t)| t.key == "skatepark")
+        .map(|(id, _)| geo.block_origin(id))
+        .collect();
+    if blocks.is_empty() {
+        return;
+    }
+    let x0 = blocks.iter().map(|o| o.x).min().unwrap();
+    let y0 = blocks.iter().map(|o| o.y).min().unwrap();
+    let x1 = blocks.iter().map(|o| o.x + N).max().unwrap();
+    let y1 = (y0 + SKATE_SOUTH).min(blocks.iter().map(|o| o.y + N).max().unwrap());
+    let (road, curb) = (g("road"), g("curb"));
+    // The park: inside the Ring Road, off the streets' pavements, the inner
+    // ring (and its kerbs) included.
+    let w = (x1 - x0) as usize;
+    let h = (y1 - y0) as usize;
+    let mut on = vec![false; w * h];
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let gr = b.ground[b.i(x, y)];
+            // (Bits of old pavement inside count; the streets' own, along the north and east, don't.)
+            let street =
+                (gr == road || gr == curb) && !inner.near(x, y) && (y < y0 + 2 || x + 2 >= x1);
+            let ok = ring.inside(x, y, 0.5) && !street;
+            on[(y - y0) as usize * w + (x - x0) as usize] = ok;
+        }
+    }
+    let at = |x: u16, y: u16| {
+        x >= x0 && y >= y0 && x < x1 && y < y1 && on[(y - y0) as usize * w + (x - x0) as usize]
+    };
+    // Its edge (a fence), and what's within it (paved).
+    let edge = |x: u16, y: u16| {
+        at(x, y)
+            && (x.saturating_sub(1)..=x + 1)
+                .any(|xx| (y.saturating_sub(1)..=y + 1).any(|yy| !at(xx, yy)))
+    };
+    let (mut px0, mut py0, mut px1, mut py1) = (u16::MAX, u16::MAX, 0, 0);
+    let lamp = d("lamp");
+    let mut n = 0u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            if !at(x, y) {
+                continue;
+            }
+            let i = b.i(x, y);
+            let ringside = inner.near(x, y);
+            if edge(x, y) {
+                if ringside && b.ground[i] == road {
+                    // (The road runs on out of the park: no fence across it.)
+                    b.ground[i] = g("skate_road");
+                } else {
+                    b.ground[i] = g("grass");
+                    n += 1;
+                    b.decor[i] = if n % 9 == 0 { lamp } else { d("fence") };
+                    b.solid[i] = true;
+                }
+                continue;
+            }
+            b.ground[i] = if ringside && b.ground[i] == road {
+                g("skate_road")
+            } else {
+                g("skate")
+            };
+            b.decor[i] = 0;
+            b.solid[i] = false;
+            (px0, py0, px1, py1) = (px0.min(x), py0.min(y), px1.max(x), py1.max(y));
+        }
+    }
+    // Whatever stood here (the club lot, its signs) is gone.
+    b.objects
+        .retain(|o| !(o.x >= px0 && o.x <= px1 && o.y >= py0 && o.y <= py1 && at(o.x, o.y)));
+    // Gates: one on the north street, west of the road, one on the east
+    // street, one south to the green. (East of the road, the shop parks by
+    // the north fence.)
+    for (x, y) in (86..90)
+        .map(|x| (x, y0 + 2))
+        .chain((226..230).map(|y| (x1 - 3, y)))
+        .chain((99..103).map(|x| (x, y1 - 1)))
+    {
+        let i = b.i(x, y);
+        if b.decor[i] == d("fence") || b.decor[i] == lamp {
+            b.decor[i] = 0;
+            b.solid[i] = false;
+            b.ground[i] = g("skate");
+        }
+    }
+    let skate = g("skate");
+    let mut put = |kind: &str, x: u16, y: u16, pw: u16, ph: u16, label: &str| {
+        for yy in y..y + ph {
+            for xx in x..x + pw {
+                assert!(
+                    b.ground[b.i(xx, yy)] == skate,
+                    "the skatepark's {kind} at ({x}, {y}) is off the concrete at ({xx}, {yy})"
+                );
+            }
+        }
+        // (Walkers go round the ramps and boxes; skaters ride them. The paint is underfoot.)
+        b.object(kind, x, y, pw, ph, Some(label), kind != "sk_paint");
+    };
+    // ---- West of the road ----
+    // The bowl: quarter pipes all round a sunken floor, open at the corners.
+    put("sk_quarter", 74, 216, 12, 3, "n");
+    put("sk_quarter", 74, 227, 12, 3, "s");
+    put("sk_quarter", 71, 219, 3, 8, "w");
+    put("sk_quarter", 86, 219, 3, 8, "e");
+    // The mini ramp: two quarter pipes face to face.
+    put("sk_quarter", 92, 216, 3, 10, "w");
+    put("sk_quarter", 105, 216, 3, 10, "e");
+    // The plaza: a deck with a stair set down off it and a handrail down that.
+    put("sk_box", 80, 232, 12, 5, "22");
+    put("sk_stairs", 82, 237, 8, 3, "s:22");
+    put("sk_rail", 86, 237, 1, 3, "v:36:12");
+    // The pyramid: a box with a kicker up each side.
+    put("sk_box", 100, 238, 4, 4, "16");
+    put("sk_kicker", 100, 235, 4, 3, "s:16");
+    put("sk_kicker", 100, 242, 4, 3, "n:16");
+    put("sk_kicker", 97, 238, 3, 4, "e:16");
+    put("sk_kicker", 104, 238, 3, 4, "w:16");
+    // The gap: up one kicker, over the flat, down the far one.
+    put("sk_kicker", 111, 237, 3, 3, "e:22");
+    put("sk_kicker", 119, 237, 3, 3, "w:22");
+    // A long flat rail, a ledge and a manual pad.
+    put("sk_rail", 95, 247, 14, 1, "h:13:13");
+    put("sk_box", 110, 244, 10, 1, "10");
+    put("sk_box", 112, 232, 7, 2, "7");
+    put("sk_paint", 94, 228, 11, 2, "SKATE");
+    // ---- East of the road ----
+    // Quarter pipes along the back and the east side (either side of the gate).
+    put("sk_quarter", 123, 215, 11, 3, "n");
+    put("sk_quarter", 150, 220, 3, 6, "e");
+    put("sk_quarter", 150, 230, 3, 14, "e");
+    // The deck in the corner, its stairs, the handrail down them.
+    put("sk_box", 141, 215, 12, 5, "26");
+    put("sk_stairs", 142, 220, 7, 3, "s:26");
+    put("sk_rail", 145, 220, 1, 3, "v:40:16");
+    // The funbox: kickers up both ends, a rail along the top.
+    put("sk_kicker", 130, 226, 3, 3, "e");
+    put("sk_box", 133, 226, 6, 3, "14");
+    put("sk_kicker", 139, 226, 3, 3, "w");
+    put("sk_rail", 133, 227, 6, 1, "h:30:30");
+    // A launch ramp kicking up northward.
+    put("sk_kicker", 127, 221, 4, 3, "n");
+    // A long ledge, a manual pad and a flat rail down the south.
+    put("sk_box", 135, 233, 9, 1, "10");
+    put("sk_box", 140, 237, 6, 2, "7");
+    put("sk_rail", 142, 240, 6, 1, "h:13:13");
+    put("sk_paint", 133, 230, 9, 2, "COMMONS");
+    // The skate shop: a little camper van parked by the north fence, its
+    // hatch open to the park (the shop inside it a row behind, so its
+    // seller stands between).
+    let trucks = [(134, 215, "camper")];
+    for (x, y, v) in trucks {
+        put("sk_shop", x, y, 7, 3, v);
+    }
+    for (x, y, v) in trucks {
+        b.object("sk_shop_back", x, y - 1, 7, 1, Some(v), false);
+    }
+    // The boards: today's best runs and combos.
+    b.object("sk_board", 107, 229, 3, 1, Some("Skatepark"), true);
+    b.object("sk_board", 145, 231, 3, 1, Some("Skatepark"), true);
+    b.object(
+        "sk_park",
+        px0,
+        py0,
+        px1 - px0 + 1,
+        py1 - py0 + 1,
+        Some("Skatepark"),
+        false,
+    );
+    b.object("spot", x1 - 2, 227, 1, 1, Some("skatepark"), false);
 }
 
 /// Pavement around the block with street lamps along the kerb.
@@ -3120,6 +3318,9 @@ fn club_lot(k: &mut Blk, block: BlockId) {
 
 /// Seven homes around a shared courtyard (the C3 layout, without doors yet):
 /// three along the north edge, three along the south, one on the west.
+/// How many rows a front yard runs out from the door.
+const YARD_DEEP: u16 = 6;
+
 fn homes(k: &mut Blk, block: BlockId) {
     k.lawn();
     // Each house is labelled with its lot id; a `door:<lot>` spot in front
@@ -3133,15 +3334,23 @@ fn homes(k: &mut Blk, block: BlockId) {
         // The yard stand by the front door: drawn when its owner puts
         // something on it (it's walked past, not into: a marker).
         k.marker("yard_stand", door.0 - 3, door.1, 2, 1, Some(&lot));
+        // The front yard, furnished like a room (see the zone's `yard_at`):
+        // a path down from the door.
+        k.marker(
+            "yard",
+            x.saturating_sub(1),
+            door.1,
+            w + 2,
+            YARD_DEEP,
+            Some(&lot),
+        );
+        k.rect(door.0, door.1 + 1, 1, YARD_DEEP - 2, "path");
     };
     for i in 0..3u16 {
         let x0 = 3 + i * 15;
-        k.rect(x0 + 1, 9, 10, 3, "flowers");
-        k.rect(x0 + 1, 33, 10, 3, "flowers");
         house(k, i as u8, (x0 + 1, 3, 10, 6));
-        // The south row stands back from the pavement, so a front fence
-        // (a row in front of the door) stays on the lawn.
-        house(k, 3 + i as u8, (x0 + 1, 37, 10, 6));
+        // The south row stands forward of the pavement, for a yard as deep as the north's.
+        house(k, 3 + i as u8, (x0 + 1, 34, 10, 6));
     }
     k.rect(11, 18, 2, 10, "flowers");
     house(k, 6, (3, 18, 8, 10));
@@ -3238,7 +3447,7 @@ fn landmark(k: &mut Blk, key: &str, name: &str) {
             k.spot("gallery", 24, 19);
         }
         "cafe" => {
-            k.object("bar", 16, 9, 16, 9, "The Mossy Mug");
+            k.object("bar", 16, 9, 16, 9, "The Cozy Cup");
             k.spot("door:bar", 24, 18);
             k.spot("bar", 24, 19);
         }

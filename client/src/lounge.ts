@@ -1,5 +1,5 @@
 // The café's open voice (ADR 0021; server: crates/social/src/lounge.rs).
-// Inside The Mossy Mug everyone hears everyone: one LiveKit room per café
+// Inside The Cozy Cup everyone hears everyone: one LiveKit room per café
 // instance, a pass that may talk and listen. Nothing is joined until you've
 // said yes (the warning at the door, or the question inside if you came
 // another way), and your microphone only goes on if you chose that.

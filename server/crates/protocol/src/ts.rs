@@ -279,6 +279,7 @@ pub fn sample_vectors() -> String {
             item: 400,
             x: 5,
             y: 4,
+            rot: 1,
         },
         ClientMsg::Pickup { x: 5, y: 4 },
         ClientMsg::SetMood { mood: 2 },
@@ -364,6 +365,7 @@ pub fn sample_vectors() -> String {
             x: 5,
             y: 4,
             item: 0,
+            rot: 0,
         },
         ServerMsg::Granted {
             item: 1,

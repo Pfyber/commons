@@ -3,6 +3,7 @@
 // wear and gift wrapping. Things kept for good can only be won once.
 
 import { type Economy, TICKET } from "../economy";
+import { ownedTag } from "./homelife";
 import { ApiError } from "../net/api";
 import { Panel, button, el, icon } from "./panels";
 
@@ -42,7 +43,7 @@ export class PrizePanel extends Panel {
       if (!it) continue;
       const owned = p.once && this.eco.qty(it.id) > 0;
       const row = el("div", "row");
-      row.append(icon(it), el("span", "name", it.name), el("span", "price", `${p.tickets} 🎟️`));
+      row.append(icon(it), el("span", "name", it.name), ownedTag(this.eco, it.id), el("span", "price", `${p.tickets} 🎟️`));
       if (owned) {
         row.append(el("span", "hint", "✓ Yours"));
       } else {

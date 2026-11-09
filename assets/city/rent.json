@@ -6,9 +6,9 @@
     "home": {
       "name": "House",
       "tiers": [
-        { "tier": 1, "name": "Cottage", "rent": 15, "furniture": 12, "listings": 2 },
-        { "tier": 2, "name": "House", "rent": 40, "furniture": 24, "listings": 4 },
-        { "tier": 3, "name": "Big house", "rent": 90, "furniture": 48, "listings": 6 }
+        { "tier": 1, "name": "Cottage", "rent": 15, "furniture": 100, "listings": 2 },
+        { "tier": 2, "name": "House", "rent": 40, "furniture": 150, "listings": 4 },
+        { "tier": 3, "name": "Big house", "rent": 90, "furniture": 200, "listings": 6 }
       ]
     },
     "apartment": {

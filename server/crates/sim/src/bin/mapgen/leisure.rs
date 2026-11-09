@@ -1,13 +1,13 @@
 //! The arcade, the bar and the bowling alley (from the merges with the
 //! fork): their own small zones behind doors in the city, the arcade in the
-//! Arcade block, the bar, The Mossy Mug, in the Café block and the alley in
+//! Arcade block, the bar, The Cozy Cup, in the Café block and the alley in
 //! the Bowling block. Leaving, you come out of the same door (`door:arcade`,
 //! `door:bar`, `door:bowling`).
 
 use super::Builder;
 use commons_sim::map::MapFile;
 
-/// Inside The Mossy Mug, the town's café (ADR 0021): log walls, a long
+/// Inside The Cozy Cup, the town's café (ADR 0021): log walls, a long
 /// counter (the bar's taps at one end, the coffee machine and cakes at the
 /// other) with shelves behind and stools in front, the menu on the wall, a
 /// fire with armchairs round it on a rug, café tables with chairs, the pool
@@ -61,7 +61,7 @@ pub fn bar() -> MapFile {
     b.decor(1, 10, "lantern");
     b.decor(17, 6, "lantern");
     b.object("bar_exit", 13, h - 1, 2, 1, Some("To the city"), true);
-    b.finish("The Mossy Mug", (13, 15))
+    b.finish("The Cozy Cup", (13, 15))
 }
 
 /// Inside the arcade: a dim carpeted hall, seven cabinets along the back

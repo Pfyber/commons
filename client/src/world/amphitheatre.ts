@@ -105,7 +105,7 @@ export function bowlU(g: BowlGeom, dx: number, dy: number): number {
 }
 
 /** A point on the bowl's ring u out, at angle th (0 east, π/2 south): ground px from the middle. */
-function ringPoint(g: BowlGeom, th: number, u: number): [number, number] {
+export function ringPoint(g: BowlGeom, th: number, u: number): [number, number] {
   const e = 2 / BOWL_ROUNDNESS;
   const c = Math.cos(th);
   const s = Math.sin(th);
@@ -597,4 +597,23 @@ export function bowlSeats(wTiles: number, hTiles: number): Seat[] {
     for (const c of kept) out.push({ x: c.x, y: c.ground - rowZ(row, c.ground - g.CY), ground: c.ground, th: c.th, open: c.ground - g.CY > g.b * 0.45 });
   });
   return out;
+}
+
+/** The painting's blocks (px): its walls stand up block by block in 3D. */
+export const BOWL_BLOCK = Q;
+
+/**
+ * What the block at (X, Y) (px from the bowl's top-left) is, for the 3D view
+ * (where the painting lies flat and its walls stand up): 1 the outer wall, 2
+ * the podium wall round the sand (0 anything else, which stays on the
+ * ground), and how high it's painted.
+ */
+export function bowlWallBlock(g: BowlGeom, X: number, Y: number): { kind: number; z: number } {
+  const dx = block(X) - g.CX;
+  const dy = block(Y) - g.CY;
+  const s = surface(g, dx, dy);
+  if (s.m === M.WALL) return { kind: 1, z: s.z };
+  // (Not across the gladiators' gates, either side.)
+  if (s.m === M.PODIUM && Math.abs(dy) >= 48) return { kind: 2, z: s.z };
+  return { kind: 0, z: 0 };
 }

@@ -13,6 +13,7 @@ pub mod error;
 pub mod fishquest;
 pub mod goods;
 pub mod gov;
+pub mod homelife;
 pub mod internal;
 pub mod labyrinth;
 pub mod leaderboards;

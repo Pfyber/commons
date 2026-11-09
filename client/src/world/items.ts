@@ -3,6 +3,7 @@
 // the item's stable `key` from the catalogue.
 
 import { Texture } from "pixi.js";
+import { drawHomeLife } from "./roomskin";
 import { PALETTE, avatarCanvas, styleFor, toTexture } from "./art";
 import { drawBug, drawShroom } from "./critterart";
 import { drawFish } from "./fish";
@@ -66,6 +67,14 @@ const OWN_ART = new Set(["pro_rod", "bug_net", "magnet", "gold_lure", "magnet_lu
 
 /** 16×16 icon for any catalogue item. */
 function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
+  // The shovel (drawn at 32×32 with the home pieces).
+  if (key === "shovel") {
+    ctx.save();
+    ctx.scale(0.5, 0.5);
+    drawHomeLife(ctx, key);
+    ctx.restore();
+    return;
+  }
   if (kind === "gadget") {
     // The Mobile Phone: a slim handset, a lit screen with a call bubble.
     px(ctx, O, 4, 1, 8, 14);
@@ -317,11 +326,11 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     }
     return;
   }
-  if (kind === "furniture") {
+  if (kind === "furniture" || kind === "room" || kind === "supply") {
     const ctx16 = ctx;
     ctx16.save();
     ctx16.scale(0.5, 0.5);
-    drawFurniture(ctx16, key);
+    if (!drawHomeLife(ctx16, key, ITEM_META.get(key) as { skin?: string; pattern?: string } | undefined)) drawFurniture(ctx16, key);
     ctx16.restore();
     return;
   }
@@ -331,6 +340,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
 
 /** 32×32 furniture, drawn to sit on its tile. */
 function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
+  if (drawHomeLife(ctx, key)) return;
   const W = PALETTE.wood;
   const D = PALETTE.woodDark;
   switch (key) {
@@ -605,7 +615,7 @@ function cachedTex(key: string, draw: () => HTMLCanvasElement): Texture {
 
 /** Any item drawn at 32×32 (furniture as itself, fish in all their detail, anything else as its icon). */
 export function itemTexture(key: string, kind: string): Texture {
-  if (kind === "furniture") return furnitureTexture(key);
+  if (kind === "furniture" || kind === "room" || kind === "supply") return furnitureTexture(key);
   if (kind === "fish") return cachedTex(`fish:${key}`, () => canvas(32, 32, (ctx) => drawFish(ctx, key)));
   if (kind === "bug") return cachedTex(`bug:${key}`, () => canvas(32, 32, (ctx) => drawBug(ctx, key)));
   if (kind === "shroom") return cachedTex(`shroom:${key}`, () => canvas(32, 32, (ctx) => drawShroom(ctx, key)));

@@ -642,7 +642,7 @@ bought, and nothing is ever lost when a lease ends.
 
 | What | Tiers (coins a week) | Holds |
 |---|---|---|
-| House (168, home blocks) | Cottage 15 · House 40 · Big house 90 | 12 / 24 / 48 pieces of furniture |
+| House (168, home blocks) | Cottage 15 · House 40 · Big house 90 | 100 / 150 / 200 pieces of furniture |
 | Apartment (8, above the Market) | Studio 10 · Flat 30 | 8 / 16 |
 | Market stall (6, south side of the Market) | Small stall 10 · Big stall 30 | 4 / 10 goods on show |
 

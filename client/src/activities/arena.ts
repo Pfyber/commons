@@ -983,6 +983,17 @@ export class ArenaShow {
     return this.state?.mode === MODE.TEAMS ? TEAM_CSS[slot < 2 ? 0 : 1] : CSS[slot];
   }
 
+  /** Whether `a` and `b` are on the same side (two against two, or all against the Goliath). */
+  private allies(a: number, b: number): boolean {
+    const s = this.state;
+    if (!s || s.mode === MODE.CLASSIC) return false;
+    const side = (id: number) => {
+      const slot = s.slots.indexOf(id);
+      return s.mode === MODE.TEAMS ? (slot < 2 ? 0 : 1) : slot === s.goliath ? 1 : 0;
+    };
+    return s.slots.includes(a) && s.slots.includes(b) && side(a) === side(b);
+  }
+
   private slotOf(id: number): number {
     return Math.max(0, this.state?.slots.indexOf(id) ?? 0);
   }
@@ -3324,7 +3335,8 @@ export class ArenaShow {
         m.x = nx;
         m.y = ny;
         // On someone (the server says what it did): gone from here.
-        const hit = s.fighters.some((f) => f.id !== m.by && !(f.flags & (FLAG.DOWN | FLAG.IFRAMES)) && (() => {
+        // (It flies on past the thrower's own side, as on the server.)
+        const hit = s.fighters.some((f) => f.id !== m.by && !this.allies(f.id, m.by) && !(f.flags & (FLAG.DOWN | FLAG.IFRAMES)) && (() => {
           const p = f.id === this.selfId() ? this.me : this.glide(f.id, at);
           // (Anywhere on them, feet to head.)
           const top = p.y - (isGiant(f) ? GIANT_H : BODY_H);

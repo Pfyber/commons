@@ -34,7 +34,7 @@ export const SURFACE_H: Record<string, number> = {
 /** Small things that can stand on a table (or the floor). */
 export const TOPS = new Set(["table_lamp", "candle_trio", "vase_flowers", "tea_set", "book_stack", "succulent", "radio", "laptop", "snow_globe", "photo_frame", "cake_stand", "desk_globe", "fish_bowl", "aquarium", "record_player", "retro_tv", "lava_lamp", "cactus_pot"]);
 /** Things that hang on a wall. */
-export const WALLS = new Set(["wall_mirror", "neon_heart", "xmas_lights", "wreath", "cuckoo_clock", "wall_shelf", "bunting", "window_curtains", "painting_sunset", "painting_sea", "painting_cat", "wall_clock"]);
+export const WALLS = new Set(["uv_light", "wall_mirror", "neon_heart", "xmas_lights", "wreath", "cuckoo_clock", "wall_shelf", "bunting", "window_curtains", "painting_sunset", "painting_sea", "painting_cat", "wall_clock"]);
 /** These switch on and off too. */
 export const COZY_TOGGLES = ["table_lamp", "candle_trio", "radio", "laptop", "snow_globe", "neon_heart", "xmas_lights", "cuckoo_clock", "window_curtains", "christmas_tree", "piano", "popcorn_machine", "floor_candles"];
 

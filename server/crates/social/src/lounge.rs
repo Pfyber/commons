@@ -1,4 +1,4 @@
-//! The café's open voice (ADR 0021): inside The Mossy Mug everyone hears
+//! The café's open voice (ADR 0021): inside The Cozy Cup everyone hears
 //! everyone. Each instance of the `bar` zone has one LiveKit room; anyone
 //! inside who has said yes (the client warns before you go in) gets a pass
 //! that may talk and listen. Leave the café and you're taken out of the

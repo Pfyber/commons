@@ -16,6 +16,9 @@ import { PrizePanel } from "./ui/prizes";
 import { PoolPanel } from "./activities/pool";
 import { BOT as BOWL_BOT, BowlingPanel, scoreSoFar } from "./activities/bowling";
 import { ArenaShow } from "./activities/arena";
+import { SkatePark } from "./activities/skate";
+import { SkateShop } from "./activities/skateshop";
+import { SkateShopPanel } from "./ui/skateshop";
 import { PaintballShow, PB_VIEW } from "./activities/paintball";
 import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
 import { Sky } from "./ambient/sky";
@@ -61,7 +64,7 @@ import type { DecoratePanel } from "./ui/exterior";
 import { HouseFronts } from "./world/housefronts";
 import { CARDS, wrappedTexture } from "./world/goods";
 import { EMOTES } from "./world/avatars";
-import { BOAT_SEATS, BOAT_SPEED_X10, isBoat, rideSpeed } from "./world/vehicles";
+import { BOAT_SEATS, BOAT_SPEED_X10, VESPA, isBoat, rideSpeed } from "./world/vehicles";
 import { itemIconUrl } from "./world/items";
 import { PetLife, petTitle } from "./ambient/petlife";
 import { PET_SOUNDS } from "./world/pets";
@@ -73,8 +76,13 @@ import type { Minimap } from "./ui/minimap";
 import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, GOLD_MAGNET_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, MAGNET_LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
+import type { HomeLife, Look } from "./homelife";
+import type { DronePanel, RoomPanel } from "./ui/homelife";
+import { Drones } from "./world/drone";
+import { WorldFx } from "./world/worldfx";
+import { PLAIN_SKIN, setRoomSkin } from "./world/roomskin";
 import { type MapObject, type ZoneMap, groundAt, nearestWalkable, spot, stepTarget, walkable } from "./world/map";
-import { isRamped, posAt, type TileXY, WALK_SPEED_X10, endT, glideTiles, headingAt, retimed, routeAhead, skateRampAt, speedAt, splice, sprintProfile, sprintingAt, timeToCover, TURN_EARLY } from "./world/motion";
+import { isRamped, posAt, type TileXY, VESPA_SPEED_X10, WALK_SPEED_X10, endT, glideTiles, headingAt, retimed, routeAhead, skateRampAt, rideTopSpeed, speedAt, splice, sprintProfile, sprintingAt, timeToCover, TURN_EARLY } from "./world/motion";
 import { compress, route } from "./world/path";
 import { Props } from "./world/props";
 import { giftBoxTexture } from "./world/items";
@@ -95,7 +103,7 @@ import type { MetroPanel } from "./ui/metro";
 import type { BlackjackPanel, Casino, CagePanel, RoulettePanel, SlotsPanel, Tables } from "./ui/casino";
 import type { MegaSlotsPanel, RacePanel } from "./ui/casinogames";
 import { RouletteFx } from "./world/roulettefx";
-import { PET_SPOTS, TANKS, TOGGLES } from "./world/housewares";
+import { PET_SPOTS, SEATS, TANKS, TOGGLES, WALK_OVER } from "./world/housewares";
 import { WALLS } from "./world/cozyart";
 import type { SalvageGame } from "./ui/salvage";
 import { settings } from "./settings";
@@ -163,6 +171,9 @@ export interface Ui {
   salvage: SalvageGame;
   place: PlaceBanner;
   menu: ActionMenu;
+  life: HomeLife;
+  room: RoomPanel;
+  drone: DronePanel;
   social: Social;
   friends: FriendsPanel;
   town: Town;
@@ -277,14 +288,17 @@ export interface Place {
   owner: string | null;
 }
 
+/** The fish food item (key `fish_food`). */
+const FISH_FOOD = 1203;
+
 /** Tiles in front of the cottage door where gifts are left (home map). */
 const DOORSTEP: TileXY[] = [
-  { x: 8, y: 10 },
-  { x: 11, y: 10 },
-  { x: 7, y: 10 },
-  { x: 12, y: 10 },
-  { x: 6, y: 10 },
-  { x: 13, y: 10 },
+  { x: 8, y: 12 },
+  { x: 11, y: 12 },
+  { x: 7, y: 12 },
+  { x: 12, y: 12 },
+  { x: 6, y: 12 },
+  { x: 13, y: 12 },
 ];
 
 /** Invisible map objects (areas and named places): never what you tapped. */
@@ -464,6 +478,42 @@ export class Game {
   private salvageJunk: number[] = [];
   private disposers: (() => void)[] = [];
   private furniture: Furniture;
+  /** When we last saw our own avatar (or the game began). */
+  private selfSeen = performance.now();
+  /** When each swinger sat down (to build up to a full swing). */
+  private swingers = new Map<number, number>();
+  /** Swings in use, last frame (to bring to rest when they're left). */
+  private swinging = new Set<string>();
+
+  /** Whoever sits on a swing swings: higher and higher, to a steady swing. */
+  private swingAll(wallNow: number) {
+    const now = new Set<string>();
+    for (const [id, a] of this.avatars) {
+      const t = a.destination;
+      if (a.state !== SITTING || a.moving || !this.scene.isSwing(t.x, t.y)) {
+        this.swingers.delete(id);
+        a.seatDy = 0;
+        continue;
+      }
+      const since = wallNow - (this.swingers.get(id) ?? (this.swingers.set(id, wallNow), wallNow));
+      const amp = 0.55 * Math.min(1, since / 2500);
+      a.seatDy = this.scene.setSwing(t.x, t.y, amp * Math.sin(since / 380));
+      now.add(`${t.x},${t.y}`);
+    }
+    for (const k of this.swinging) {
+      if (now.has(k)) continue;
+      const [x, y] = k.split(",").map(Number);
+      this.scene.setSwing(x, y, 0);
+    }
+    this.swinging = now;
+  }
+
+  /** Whether `t` is in your own front yard. */
+  private inMyYard: (t: TileXY) => boolean = () => false;
+  /** The advanced shaders' shadows and reflections (⚙️ settings). */
+  private worldFx: WorldFx | null = null;
+  /** Your deliveries, in the city. */
+  private drones: Drones | null = null;
   private games = new Map<number, GameStateMsg>();
   private chess: ChessPanel;
   private screen: BigScreen | null = null;
@@ -500,6 +550,11 @@ export class Game {
   private arena: ArenaShow | null = null;
   /** Paintball at the Splat Yard. */
   private paintball: PaintballShow | null = null;
+  /** The skatepark, if this map has one, and its shop truck's seller. */
+  private skate: SkatePark | null = null;
+  private skateShop: SkateShop | null = null;
+  /** Dusty's van: building your board. */
+  private skateShopPanel: SkateShopPanel | null = null;
   /** Shoes from the alley's counter (just for fun: the shoe man remembers). */
   private rentedShoes = false;
   /** When we last reminded a bowler they can't walk off mid-game. */
@@ -583,6 +638,7 @@ export class Game {
     },
   ) {
     this.hud = ui.hud;
+    setRoomSkin(zoneId === "home" ? PLAIN_SKIN : null);
     this.scene = new Scene(app, map);
     // Hidden till we're in it: the camera starts at the map's corner (on the
     // city's houses), and showing that for a frame or two flashes a stranger's street.
@@ -595,7 +651,17 @@ export class Game {
     this.fairyRing = spot(map, "fairy_ring");
     this.props = new Props(this.scene, map, ui.eco);
     // Your own home, or your club's room (decorated together, ADR 0014 C2).
-    ui.bag.placeable = (zoneId === "home" && place.owner === ui.social.selfId) || zoneId === "clubroom";
+    // And outdoors, your own front yard.
+    const mine = ui.homes.mine;
+    const yard = zoneId === "city" && mine ? map.objects.find((o) => o.kind === "yard" && o.label === mine) : undefined;
+    ui.bag.placeable = (zoneId === "home" && place.owner === ui.social.selfId) || zoneId === "clubroom" || !!yard;
+    ui.bag.anywhere = zoneId === "city";
+    if (zoneId === "city") {
+      this.inMyYard = (t) => !!yard && t.x >= yard.x && t.x < yard.x + yard.w && t.y >= yard.y && t.y < yard.y + yard.h;
+      this.props.yardRule = (x, y) => this.inMyYard({ x, y }) && groundAt(map, x, y) !== "path" && groundAt(map, x, y) !== "water";
+      const from = spot(map, "mall") ?? { x: 0, y: 0 };
+      this.drones = new Drones(this.scene, ui.life, from, () => (mine ? spot(map, mine.startsWith("apt:") ? "apartments" : `door:${mine}`) : null), (text) => this.hud.toast(text, 4000));
+    }
     this.furniture = new Furniture(map);
     const screenObj = map.objects.find((o) => o.kind === "big_screen");
     if (screenObj) {
@@ -608,9 +674,21 @@ export class Game {
     const indoors = zoneId === "mall" || zoneId === "bar" || zoneId === "arcade" || zoneId.startsWith("library") || zoneId.startsWith("club") || zoneId === "bowling" || zoneId === "concert_hall" || zoneId === "casino" || zoneId === "museum" || zoneId === "paintball";
     // Under the hedge maze, the labyrinth: always dusk, no weather, no birds.
     const underground = zoneId === "labyrinth";
-    this.ambient = new Ambient(this.scene, map, indoors || underground);
+    this.ambient = new Ambient(this.scene, map, indoors || underground || zoneId === "home");
     this.daynight = new DayNight(app, this.scene, map, indoors, zoneId === "arcade" || zoneId === "bowling", underground ? 22.5 : null);
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
+    // Lamps really light things, in a home and in a front yard.
+    this.props.lightUp = {
+      add: (x, y, color, scale) => this.daynight.roomGlow(x, y, color, scale),
+      lit: (n) => (this.daynight.roomLit = n),
+    };
+    if (zoneId === "home") {
+      const windows = map.decor.flatMap((d, i) => (map.decor_legend[d] === "home_window" ? [{ x: ((i % map.width) + 0.5) * TILE, y: (Math.floor(i / map.width) + 3) * TILE }] : []));
+      this.daynight.enterRoom(windows);
+      const hearth = map.objects.find((o) => o.kind === "fireplace");
+      if (hearth) this.daynight.roomGlow((hearth.x + hearth.w / 2) * TILE, (hearth.y + 1.5) * TILE, 0xff9a4a, 3.4);
+      if (place.owner) void ui.life.look(place.owner).then((l) => this.applyLook(l)).catch(() => {});
+    }
     if (zoneId === "city") {
       ui.town
         .loadGoal()
@@ -618,7 +696,7 @@ export class Game {
         .catch(() => {});
     }
     this.setupCorners(map);
-    this.weather = new Weather(app, this.scene, map, indoors || underground);
+    this.weather = new Weather(app, this.scene, map, indoors || underground || zoneId === "home");
     this.catches = new CatchShows(this.scene);
     this.lucky = new LuckyCrate(this.scene);
     if (underground) {
@@ -839,6 +917,24 @@ export class Game {
         (x, y) => this.daynight.addGlow(x, y, 3.4, 2.9, 0xff6a20, 0.55),
         () => this.avatars.values(),
       );
+    }
+    if (map.objects.some((o) => o.kind === "sk_shop")) this.skateShop = new SkateShop(map, this.scene, labels);
+    if (map.objects.some((o) => o.kind === "sk_park")) {
+      this.skate = new SkatePark(
+        this.scene,
+        map,
+        labels,
+        app.canvas,
+        () => this.selfId,
+        (id) => this.avatars.get(id),
+        (id) => this.avatars.get(id)?.info.name ?? "someone",
+        (m) => this.socket?.send(m),
+        (text, ms) => this.hud.toast(text, ms ?? 3000),
+        ui.eco,
+        this.daynight.lightLayer,
+      );
+      const skate = this.skate;
+      this.skateShopPanel = new SkateShopPanel(ui.eco, () => skate.board, (k) => skate.setKit(k));
     }
     if (map.objects.some((o) => o.kind === "pb_field")) {
       this.paintball = new PaintballShow(
@@ -1199,6 +1295,7 @@ export class Game {
         this.enter(front, HALL);
         return true;
       case "library_exit":
+      case "home_exit":
         this.goTo("city");
         return true;
       case "wing_exit":
@@ -1651,7 +1748,7 @@ export class Game {
       this.socket?.send({ t: "Drink", kind });
       this.clerk?.say(line);
     };
-    this.near(this.ui.menu, front, 6).showWith("Barista ☕", "The Mossy Mug", [
+    this.near(this.ui.menu, front, 6).showWith("Barista ☕", "The Cozy Cup", [
       ["☕ A coffee · free", () => order(WATER, "One flat white. Careful, it's hot!", "☕")],
       ["🫖 A pot of tea · free", () => order(WATER, "Mint tea, from the garden.", "🫖")],
       ["🍺 A beer · 5 coins", () => order(BEER, "One cold one, coming up!")],
@@ -1791,7 +1888,7 @@ export class Game {
         this.goTo(zone, arrive);
       };
       const menu = d ? this.near(this.ui.menu, { x: Math.round(d.x), y: Math.round(d.y) }, 4) : this.ui.menu;
-      menu.showWith("☕ The Mossy Mug", CAFE_WARNING, cafeChoices(go, () => this.hud.toast("☕ Another time, then.", 2000)));
+      menu.showWith("☕ The Cozy Cup", CAFE_WARNING, cafeChoices(go, () => this.hud.toast("☕ Another time, then.", 2000)));
       return;
     }
     const until = performance.now() + CARRY_MS;
@@ -2171,6 +2268,10 @@ export class Game {
       b.onclick = run;
       return b;
     };
+    if (it.key === "shovel") {
+      if (!this.ui.bag.placeable || this.zoneId !== "city") return tip("Use it in your front yard");
+      return btn("Dig", () => (this.ui.bag.hide(), this.ui.place.showDig()));
+    }
     switch (it.kind) {
       case "tool": {
         // The Angler's Rod works on its own (fish bite sooner); the others are looks.
@@ -2355,6 +2456,7 @@ export class Game {
 
   private remove(id: number) {
     if (id === this.selfId) return;
+    this.skate?.forget(id);
     if (this.followers.delete(id)) this.showFollowers();
     // Their bobber and any fish of theirs on the bank go with them (or they
     // stay in the pond for good, whatever happens out of sight).
@@ -2541,10 +2643,15 @@ export class Game {
         break;
       }
       case "ObjectUpdate":
-        this.props.setObject(m.x, m.y, m.item);
+        this.props.setObject(m.x, m.y, m.item, m.rot);
+        // A chair or sofa is a seat like any bench.
+        this.furniture.placed({ x: m.x, y: m.y }, SEATS.has(this.ui.eco.items.get(m.item)?.key ?? ""));
         break;
       case "ObjectTop":
-        this.props.setTop(m.x, m.y, m.item);
+        this.props.setTop(m.x, m.y, m.item, m.rot);
+        break;
+      case "TankFed":
+        this.props.setFed(m.x, m.y, m.fed);
         break;
       case "ObjectOn":
         this.props.setOn(m.x, m.y, m.on);
@@ -2657,6 +2764,12 @@ export class Game {
       }
       case "ArenaState":
         this.arena?.onState(m);
+        break;
+      case "Skating":
+      case "Skater":
+      case "SkateEvent":
+      case "SkateBoard":
+        this.skate?.onMsg(m);
         break;
       case "PbState":
         this.paintball?.onState(m);
@@ -2821,8 +2934,8 @@ export class Game {
       }
       return;
     }
-    // Mid-game at a bowling lane (or mid-fight in the arena) you stay put until you leave it.
-    if (this.paintball?.capturing || this.arena?.capturing) return;
+    // Mid-game at a bowling lane (or mid-fight in the arena, or on a skateboard) you stay put until you leave it.
+    if (this.paintball?.capturing || this.arena?.capturing || this.skate?.capturing) return;
     if (this.bowlingNow()) {
       const wall = performance.now();
       if (wall - this.bowlNagAt > 2500) {
@@ -3008,7 +3121,7 @@ export class Game {
     };
     const touchDown = (e: PointerEvent) => {
       // (On the paintball field the thumbs are on the sticks: no pinching.)
-      if (e.pointerType !== "touch" || this.paintball?.capturing || this.arena?.capturing) return;
+      if (e.pointerType !== "touch" || this.paintball?.capturing || this.arena?.capturing || this.skate?.capturing) return;
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (touches.size === 2) pinch = { dist: Math.max(20, spread()), from: this.scene.zoomLevel };
     };
@@ -3068,8 +3181,8 @@ export class Game {
     const tap = (e: FederatedPointerEvent) => {
       // A pinch isn't a tap.
       if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
-      // Out on the paintball field: the mouse aims and shoots, it doesn't walk.
-      if (this.paintball?.capturing || this.arena?.capturing) return;
+      // Out on the paintball field: the mouse aims and shoots, it doesn't walk. (Nor on a skateboard.)
+      if (this.paintball?.capturing || this.arena?.capturing || this.skate?.capturing) return;
       // A menu or shop open: a tap on the world closes it, and that's all.
       if (Panel.dismissOnWorldTap()) return;
       // Tapping anywhere else puts the lure back in the bag: its menu and highlight go.
@@ -3147,6 +3260,7 @@ export class Game {
         this.emote(Number(e.key));
         return;
       }
+      if (e.code === "KeyR" && this.ui.place.item && !isTyping(e)) this.ui.place.turn(1);
       if (KEY_DIRS[e.code]) {
         e.preventDefault();
         // The same way twice in quick succession: sprint.
@@ -3176,6 +3290,12 @@ export class Game {
       e.preventDefault();
       wheel += e.deltaY;
       if (Math.abs(wheel) < 30) return;
+      // Placing something, the wheel turns it.
+      if (this.ui.place.item) {
+        this.ui.place.turn(wheel < 0 ? 1 : -1);
+        wheel = 0;
+        return;
+      }
       const watching = !!this.arena?.watchingNow;
       this.scene.zoomFine(wheel < 0 ? 1 : -1, watching, !watching);
       wheel = 0;
@@ -3201,6 +3321,7 @@ export class Game {
   private furnitureMenu(t: TileXY, item: number) {
     const ui = this.ui;
     const key = ui.eco.items.get(item)?.key ?? "";
+    // (What's out in a yard is dug up with the shovel.)
     const mine = this.isOwnHome || this.zoneId === "clubroom";
     const actions: [string, () => void][] = [];
     let note = "";
@@ -3211,14 +3332,54 @@ export class Game {
         if (spot) this.moveTo(spot, true);
       }
     };
+    const seat = this.furniture.seats.get(this.furniture.idAt(t));
+    if (seat) actions.push(["🪑 Sit down", () => this.sitAt(seat.id)]);
+    // Things you can use: the games, the drone, what's growing.
+    if ((key === "laptop" || key === "arcade_cabinet") && this.arcade) {
+      const arcade = this.arcade;
+      const games = this.scene.map.objects.filter((o) => o.kind === "arcade_cabinet");
+      actions.push(["🕹️ Play a game", () => this.near(ui.menu, t, 6).showWith("🕹️ Games", "The arcade's cabinets, right here.", games.map((g, i) => [g.label ?? "Arcade", () => this.near(arcade, t, 6).openCab(i)]))]);
+    }
+    if (key === "laptop" && this.isOwnHome) actions.push(["🚁 Drone delivery", () => this.near(ui.drone, t, 6).show()]);
+    // (Out in the city a lawn chair is anyone's to sit on; whoever set it up folds it away.)
+    if (key === "lawn_chair" && this.zoneId === "city") actions.push(["🪑 Fold it up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]);
+    if (key === "planter_pot" && this.isOwnHome) {
+      const growing = this.props.plotAt(t.x, t.y);
+      note = growing ? `${ui.eco.name(growing.plant)}${ui.eco.items.get(this.props.objectAt(t.x, t.y - 1) ?? 0)?.key === "uv_light" ? " · ☀️ under a UV light" : ""}` : "Plant any seed here. Put a UV light on the tile above and it grows much faster.";
+      actions.push([growing ? "🌱 Tend it" : "🌱 Plant something", () => this.near(ui.plot, t, 4).showFor(t.x, t.y, growing)]);
+    }
     if (TOGGLES.has(key)) {
       const on = this.props.isOn(t.x, t.y);
       actions.push([on ? "🔌 Turn it off" : "✨ Turn it on", () => (walkUp(), this.socket?.send({ t: "UseObject", x: t.x, y: t.y }))]);
     }
     const holds = TANKS[key];
-    if (holds) {
+    if (key === "display_shelf") {
+      const inside = this.props.tankAt(t.x, t.y);
+      note = inside.length ? `On show: ${inside.map((f) => ui.eco.name(f)).join(", ")}` : `Empty: it shows ${holds} things.`;
+      if (this.isOwnHome && inside.length < holds) {
+        actions.push(["🏺 Display something…", () => {
+          const things = [...ui.eco.items.values()].filter((i) => ui.eco.qty(i.id) > 0 && i.kind !== "currency" && i.kind !== "ticket" && !i.meta.account_bound).sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0)).slice(0, 24);
+          if (!things.length) return this.hud.toast("Your bag is empty.", 3000);
+          this.near(ui.menu, t).showWith("🏺 What goes on show?", "It leaves your bag while it's up here.", things.map((f) => [`${f.name} (${ui.eco.qty(f.id)})`, () => this.socket?.send({ t: "TankPut", x: t.x, y: t.y, fish: f.id })]));
+        }]);
+      }
+      if (this.isOwnHome && inside.length) {
+        actions.push(["🫴 Take something back…", () => {
+          this.near(ui.menu, t).showWith("🫴 Which one?", "Back into your bag.", inside.map((f, i) => [ui.eco.name(f), () => this.socket?.send({ t: "TankTake", x: t.x, y: t.y, index: i })]));
+        }]);
+      }
+    } else if (holds) {
       const inside = this.props.tankAt(t.x, t.y);
       note = inside.length ? `${inside.length} of ${holds} fish: ${inside.map((f) => ui.eco.name(f)).join(", ")}` : `Empty: it holds ${holds} fish.`;
+      if (inside.length && this.props.hungry(t.x, t.y)) note += " They look sluggish: they haven't eaten in days.";
+      if (this.isOwnHome && inside.length) {
+        actions.push([`🍤 Feed them (${ui.eco.qty(FISH_FOOD)} food)`, () => {
+          if (!ui.eco.qty(FISH_FOOD)) return this.hud.toast("🍤 You're out of fish food: the Market cart sells it.", 3000);
+          walkUp();
+          this.socket?.send({ t: "TankFeed", x: t.x, y: t.y });
+          this.hud.toast("🍤 The fish dart up for it!", 2500);
+        }]);
+      }
       if (this.isOwnHome && inside.length < holds) {
         actions.push(["🐟 Put a fish in…", () => {
           // Your fish, rarest first (one of each).
@@ -3244,6 +3405,19 @@ export class Game {
     // stays only near what it's for).
     walkUp();
     this.near(ui.menu, t, 6).showWith(ui.eco.name(item), note, actions);
+  }
+
+  /** A word on screen, from outside the game. */
+  say(text: string) {
+    this.hud.toast(text, 4000);
+  }
+
+  /** Shows a room's wallpaper and flooring. */
+  private applyLook(l: Look) {
+    const pattern = (id: number, fallback: string) => (this.ui.eco.items.get(id)?.meta as { pattern?: string } | undefined)?.pattern ?? fallback;
+    const color = (c: number, fallback: string) => (c < 0 ? fallback : `#${c.toString(16).padStart(6, "0")}`);
+    setRoomSkin({ wall: pattern(l.wall, PLAIN_SKIN.wall), wallColor: color(l.wall_color, PLAIN_SKIN.wallColor), floor: pattern(l.floor, PLAIN_SKIN.floor), floorColor: color(l.floor_color, PLAIN_SKIN.floorColor) });
+    this.scene.repaint();
   }
 
   private get isOwnHome(): boolean {
@@ -3355,19 +3529,37 @@ export class Game {
     const self = this.self;
     if (!self) return false;
     const ui = this.ui;
+    if (ui.place.digging) {
+      const at = this.props.pondAt(t.x, t.y) ?? t;
+      if (!this.props.objectAt(at.x, at.y) || !this.inMyYard(at)) this.hud.toast("🪏 Nothing of yours to dig up there.", 2500);
+      else this.socket?.send({ t: "Pickup", x: at.x, y: at.y });
+      return true;
+    }
     if (ui.place.item) {
       // (Where it can't go, say why instead of trying.)
       const key = ui.place.item.key;
-      if (!this.props.placeCheck(t.x, t.y, key).ok) {
-        this.hud.toast(WALLS.has(key) ? "🖼 Hang it on a wall, just above the floor." : "There's no room there.", 2500);
+      if (!this.props.placeCheck(t.x, t.y, key, ui.place.rot).ok) {
+        this.hud.toast(this.zoneId === "city" || key === "round_pond" ? "🏡 That goes in your own front yard (a pond needs 2×2 free tiles)." : WALLS.has(key) ? "🖼 Hang it on a wall: turn it to face the room." : "There's no room there.", 2500);
         return true;
       }
-      this.socket?.send({ t: "Place", item: ui.place.item.id, x: t.x, y: t.y });
+      this.socket?.send({ t: "Place", item: ui.place.item.id, x: t.x, y: t.y, rot: ui.place.rot });
       ui.place.hide();
       this.props.hideGhost();
       return true;
     }
     // (What's on a table is what you tap.)
+    const parcel = this.drones?.at(t);
+    if (parcel) {
+      if (cheb(self.destination, t) > 2) {
+        this.moveTo(t, true);
+        this.hud.toast("📦 Walk up and tap the parcel to pick it up.", 2500);
+        return true;
+      }
+      this.drones!.claim(parcel)
+        .then(() => (sfx.highFive(0.5), this.hud.toast(`📦 ${parcel.qty} × ${ui.eco.name(parcel.item)}: into your bag!`, 3500)))
+        .catch(() => this.hud.toast("That parcel can't be picked up yet.", 2500));
+      return true;
+    }
     const placed = this.props.topAt(t.x, t.y) ?? this.props.objectAt(t.x, t.y);
     // A house's yard stand, when there's something on it (or it's yours).
     const stand = map.objects.find((o) => o.kind === "yard_stand" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 1 && t.y <= o.y);
@@ -3380,7 +3572,11 @@ export class Game {
       this.near(ui.yard, stand, 4).openFor(stand.label);
       return true;
     }
-    if (placed && (this.zoneId === "home" || this.zoneId === "clubroom")) {
+    // A garden pond's plain water, to fish, whoever's it is.
+    const pond = this.props.pondAt(t.x, t.y);
+    // (A rug's walked on: its menu is for when you're standing on it.)
+    const onRug = !pond && placed !== null && WALK_OVER.has(ui.eco.items.get(placed)?.key ?? "") && cheb(self.destination, t) > 0;
+    if (placed && !pond && !onRug && (this.zoneId === "home" || this.zoneId === "clubroom" || this.zoneId === "city")) {
       this.furnitureMenu(t, placed);
       return true;
     }
@@ -3493,6 +3689,28 @@ export class Game {
         if (spot) this.moveTo(spot, true);
       }
       this.arena.openSign();
+      return true;
+    }
+    // The skatepark's van: Dusty says hello, and you build your board.
+    if ((obj?.kind === "sk_shop" || obj?.kind === "sk_shop_back") && this.skateShop) {
+      const truck = obj.kind === "sk_shop" ? obj : { ...obj, y: obj.y + 1 };
+      const front = { x: truck.x + 3, y: truck.y + truck.h };
+      if (!this.skate?.capturing && cheb(self.destination, front) > 2) {
+        const at = nearestWalkable(map, front.x, front.y, 2);
+        if (at) this.moveTo(at, true);
+      }
+      this.skateShop.greet(truck);
+      if (this.skateShopPanel) this.near(this.skateShopPanel, front, 6).show();
+      return true;
+    }
+    // The skatepark's board by its gate: get on a board (free skate, a run, a line), and today's best.
+    if (obj?.kind === "sk_board" && this.skate) {
+      const front = { x: obj.x + 1, y: obj.y + obj.h };
+      if (!this.skate.capturing && cheb(self.destination, front) > 2) {
+        const at = nearestWalkable(map, front.x, front.y, 2);
+        if (at) this.moveTo(at, true);
+      }
+      this.near(this.skate.boardPanel, front, 8).show();
       return true;
     }
     // The Splat Yard: in to the paintball; out again (not mid-match).
@@ -3751,6 +3969,11 @@ export class Game {
     }
     if (obj?.kind === "city_gate") {
       this.goTo("city");
+      return true;
+    }
+    if (obj?.kind === "room_paint" && this.isOwnHome) {
+      ui.room.onLook = (l) => this.applyLook(l);
+      void ui.life.look(this.place.owner!).then((l) => this.near(ui.room, t, 8).openWith(l));
       return true;
     }
     const ground = groundAt(map, t.x, t.y);
@@ -4289,6 +4512,8 @@ export class Game {
     // The arena first: it places the fighters, so they're drawn (and the camera follows) where their gear is.
     this.arena?.update(serverNow, wallNow);
     this.paintball?.update(serverNow, wallNow);
+    // The skatepark: skaters on their boards (yours, and everyone's).
+    this.skate?.update(wallNow);
     if (this.paintball) {
       // Out on the field, everyone sees the same stretch of it, whatever their screen.
       this.scene.lockView(this.paintball.capturing ? PB_VIEW : null);
@@ -4303,8 +4528,15 @@ export class Game {
       // little when a turn re-plans it, and the drawing blends it out.)
       this.scene.follow(this.paintball ? this.paintball.camera(self.shown) : this.arena ? this.arena.camera(self.shown) : self.shown);
       this.scene.world.visible = true;
+      this.selfSeen = wallNow;
       this.ui.minimap.update(self.pos, self.moving ? this.route : null, wallNow, this.heading, this.others);
     }
+    // (Connected, but our own avatar never came: show the place anyway, and say so.)
+    if (!self && !this.scene.world.visible && wallNow - this.selfSeen > 5000) {
+      console.warn("no avatar of ours from the server after 5 s: showing the world anyway");
+      this.scene.world.visible = true;
+    }
+    this.swingAll(wallNow);
     for (const a of this.avatars.values()) a.update(serverNow, wallNow);
 
     if (self) {
@@ -4324,7 +4556,7 @@ export class Game {
     const placing = this.ui.place.item;
     if (placing && this.hover) {
       const t = this.scene.screenToTile(this.hover.x, this.hover.y);
-      this.props.ghostAt(t.x, t.y, placing.key);
+      this.props.ghostAt(t.x, t.y, placing.key, this.ui.place.rot);
     } else this.props.hideGhost();
     // The leaderboards, fresh every minute while their signs are about.
     if (this.leaderSigns && wallNow - this.leadersAt > 60_000) {
@@ -4332,11 +4564,24 @@ export class Game {
       const signs = this.leaderSigns;
       void this.ui.leaders.load(30_000).then(() => signs.update(this.ui.leaders.data)).catch(() => {});
     }
+    this.drones?.update(wallNow);
     this.props.update(wallNow, (id) => (id === FRANCY_ID ? this.francy?.rodTip : this.avatars.get(id)?.rodTip) ?? null);
     this.ambient.update(this.app.ticker.deltaMS, wallNow);
     // The settings: night falling or not, the weather, the colour grade, name tags.
     this.daynight.alwaysDay = !settings.daynight;
-    this.daynight.setGraded(settings.quality === "high");
+    this.daynight.setGraded(settings.quality === "high" || settings.vibrant || settings.shaders);
+    // Advanced shaders (real shadows) and water reflections: each its own setting.
+    const fx = settings.shaders || settings.reflections;
+    if (fx && !this.worldFx) this.worldFx = new WorldFx(this.scene, this.scene.map);
+    if (this.worldFx) {
+      this.worldFx.shade = settings.shaders;
+      this.worldFx.reflect = settings.reflections;
+    }
+    if (!fx && this.worldFx) {
+      this.worldFx.destroy();
+      this.worldFx = null;
+    }
+    this.worldFx?.update(wallNow, this.daynight.hour(), this.daynight.outdoors ? this.daynight.dark : 0, this.daynight.outdoors);
     this.weather.enabled = settings.weather;
     this.labels.style.visibility = settings.names ? "" : "hidden";
     this.daynight.update();
@@ -4361,6 +4606,7 @@ export class Game {
       this.caretakerChat(wallNow);
     }
     this.clerk?.update(Date.now(), wallNow);
+    this.skateShop?.update(Date.now(), wallNow);
     this.rouletteFx?.update();
     this.francy?.update(Date.now(), wallNow);
     if (this.libraryRoom) {
@@ -4416,7 +4662,12 @@ export class Game {
       this.playingCheckAt = wallNow + 300;
       this.markPlayers();
     }
-    sfx.skate.update(!!self?.riding, wallNow);
+    // (The Vespa has an engine; a board, its wheels' rumble.)
+    const onVespa = self?.info.vehicle === VESPA;
+    sfx.skate.update(!!self?.riding && !onVespa, wallNow);
+    // (Its engine follows how fast it's going, and whether that's rising or falling.)
+    const ride = onVespa ? self?.currentMotion : null;
+    sfx.vespa.update(onVespa, ride ? speedAt(ride, serverNow) / rideTopSpeed(VESPA_SPEED_X10) : 0, wallNow);
     // The jam pads go away when you walk off from the bandstand.
     if (this.jam?.open && self) {
       const b = this.scene.map.objects.find((o) => o.kind === "bandstand");
@@ -4434,6 +4685,8 @@ export class Game {
   }
 
   destroy() {
+    this.drones?.destroy();
+    this.worldFx?.destroy();
     this.socket?.close();
     this.clearAvatars();
     for (const d of this.disposers) d();
@@ -4457,6 +4710,10 @@ export class Game {
     this.bowling?.destroy();
     this.arena?.destroy();
     this.paintball?.destroy();
+    this.skate?.destroy();
+    this.skateShop?.destroy();
+    this.skateShopPanel?.hide();
+    this.skateShopPanel?.el.remove();
     this.arcade?.destroy();
     this.fisherman?.destroy();
     this.francy?.destroy();

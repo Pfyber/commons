@@ -3,7 +3,7 @@
 
 import { Graphics, Sprite } from "pixi.js";
 import type { EntityInfo } from "../net/protocol.gen";
-import { type AvatarFrame, BOWL_BACK, BOWL_HOLD, BOWL_PICKUP, BOWL_RELEASE, PUSH_CROUCH, SPRINT_FRAMES, dozeFrame, SKIN_COLORS, TILE, avatarTexture } from "./art";
+import { type AvatarFrame, BOWL_BACK, BOWL_HOLD, BOWL_PICKUP, BOWL_RELEASE, PUSH_CROUCH, SPRINT_FRAMES, dozeFrame, SKIN_COLORS, TILE, avatarTexture, legColor } from "./art";
 import { decodeLook } from "./look";
 import { type Motion, type TileXY, headingAt, posAt, sprintingAt } from "./motion";
 import type { Scene } from "./scene";
@@ -114,19 +114,37 @@ const NOD_S = 9;
 /** One slow breath, in and out (s). */
 const BREATH_S = 3.4;
 
-const PUSH_POSES: { frame: AvatarFrame; lean: number; ms: number }[] = [
+export const PUSH_POSES: { frame: AvatarFrame; lean: number; ms: number }[] = [
   { frame: 5, lean: 0.3, ms: 80 },
   { frame: 3, lean: 0.5, ms: 110 },
   { frame: 3, lean: 1, ms: 150 },
   { frame: 6, lean: 0.7, ms: 90 },
   { frame: 5, lean: 0.2, ms: 90 },
 ];
-const PUSH_MS = PUSH_POSES.reduce((n, p) => n + p.ms, 0);
+export const PUSH_MS = PUSH_POSES.reduce((n, p) => n + p.ms, 0);
 /** Gliding with both feet on the board between pushes. */
-const GLIDE_MS = 750;
+export const GLIDE_MS = 750;
+
+/**
+ * Mid-push, the back leg (the pushing frames draw only the front one), pixel
+ * for pixel the sprite's own (7 rows: outline, trousers or suit, a shoe
+ * row), each row stepped back by its lean. It starts at the hip, which sinks
+ * with the standing knee's bend; `y` is the ground under the wheels.
+ */
+export function drawPushLeg(g: Graphics, x: number, y: number, facing: number, push: (typeof PUSH_POSES)[number], color: number) {
+  const O = 0x3b3a2e;
+  const c = PUSH_CROUCH[push.frame];
+  const hipY = y - BOARD_RISE - 9 + c;
+  const left = facing > 0 ? x - 4 : x;
+  for (let k = 0; k < 7; k++) {
+    const lx = left - facing * Math.round(k * push.lean);
+    g.rect(lx, hipY + k, 4, 1).fill(O);
+    if (k < 6) g.rect(lx + 1, hipY + k, 2, 1).fill(color);
+  }
+}
 
 /** The push pose after `ms` of rolling, or null while gliding. */
-function pushPose(ms: number): (typeof PUSH_POSES)[number] | null {
+export function pushPose(ms: number): (typeof PUSH_POSES)[number] | null {
   let t = ms % (PUSH_MS + GLIDE_MS);
   for (const p of PUSH_POSES) {
     if (t < p.ms) return p;
@@ -164,7 +182,7 @@ export class Avatar {
    * walking), which way they face, their pose (null: standing or walking),
    * whether they're stepping, and whether they've just been hit (a red flash).
    */
-  private arena: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number; tint?: number } | null = null;
+  private arena: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number; tint?: number; noRide?: boolean } | null = null;
   /** Bowling: when they began to throw (pick up, swing back, let go), 0 if not. */
   private bowlAt = 0;
   private snore: HTMLDivElement | null = null;
@@ -188,6 +206,8 @@ export class Avatar {
   private facing = 1;
   showName = true;
   private nameW = 0;
+  /** Sitting on a swing: how far the seat's carried them (px, on screen). */
+  seatDy = 0;
   /** Posture (protocol `state::*`): 0 idle, 1 sitting. */
   state = 0;
   /** Where we stood before sitting down; standing up returns here. */
@@ -358,8 +378,8 @@ export class Avatar {
     this.label.style.opacity = alpha < 1 ? String(Math.max(0, alpha)) : "";
   }
 
-  /** In the arena's fight (or out of it, with null). */
-  setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number; tint?: number } | null) {
+  /** In the arena's fight, or on a board at the skatepark (`noRide`: what you'd ride's not drawn), or out of it (null). */
+  setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number; tint?: number; noRide?: boolean } | null) {
     this.arena = a;
     if (a) {
       this.motion = null;
@@ -566,7 +586,7 @@ export class Avatar {
     const sitting = this.state === 1 && !walking;
     // On wheels (outdoors): a skateboard is pushed along; skates still
     // stride; on a bike you sit, on a scooter you stand.
-    const vehicle = sitting ? 0 : this.info.vehicle;
+    const vehicle = sitting || fighting?.noRide ? 0 : this.info.vehicle;
     const skating = vehicle === SKATEBOARD;
     const ride = vehicle && !skating ? RIDE_POSE[vehicle] : undefined;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;
@@ -675,7 +695,7 @@ export class Avatar {
     const wave = afloat ? Math.round(Math.sin(wallNow / 450)) : 0;
     const feetX = x * TILE + TILE / 2 + leanX;
     // Seated avatars sit on the bench's slats, drawn just in front of it.
-    const feetY = y * TILE + TILE - (sitting ? 6 : 4) + leanY;
+    const feetY = y * TILE + TILE - (sitting ? 6 - this.seatDy : 4) + leanY;
     // Woozy: a slow sway, a stagger from side to side while walking, a tilt.
     const woozy = wallNow < this.woozyUntil && !sitting;
     const sway = woozy ? Math.sin(wallNow / 420) * 2.5 + (walking ? Math.sin(wallNow / 140) * 3 : 0) : 0;
@@ -761,19 +781,7 @@ export class Avatar {
     g.rect(x - 10, y - 6, 20, 1).fill(0x2a2a2a);
     g.rect(x - 12, y - 7, 2, 2).fill(0x141414);
     g.rect(x + 10, y - 7, 2, 2).fill(0x141414);
-    if (push) {
-      // The back leg, pixel for pixel the sprite's own (7 rows: outline,
-      // trousers, a shoe row), each row stepped back by its lean. It starts
-      // at the hip, which sinks with the standing knee's bend.
-      const c = PUSH_CROUCH[push.frame];
-      const hipY = y - BOARD_RISE - 9 + c;
-      const left = s > 0 ? x - 4 : x;
-      for (let k = 0; k < 7; k++) {
-        const lx = left - s * Math.round(k * push.lean);
-        g.rect(lx, hipY + k, 4, 1).fill(O);
-        if (k < 6) g.rect(lx + 1, hipY + k, 2, 1).fill(0x4a4a5a);
-      }
-    }
+    if (push) drawPushLeg(g, x, y, s, push, legColor(this.info.style));
     this.board.zIndex = this.sprite.zIndex - 0.1;
   }
 

@@ -3,6 +3,7 @@
 // and the shop panel (one display up close, or a shop's counter).
 
 import departments from "../../../assets/mall/departments.json";
+import { ownedTag } from "./homelife";
 import { till } from "../ambient/salvagesfx";
 import type { Economy } from "../economy";
 import type { Dept, Shelf, Shop } from "../shop";
@@ -270,7 +271,7 @@ export class ShopPanel extends Panel {
         const dept = this.dept;
         this.body.append(button("Try it on 👗", () => (this.hide(), this.tryOn(dept, s.item)), owned ? "primary" : ""));
         if (owned) return void this.body.append(el("p", "hint", "It's yours: wear it from any changing room."), this.msg);
-      } else if (owned) this.body.append(el("p", "hint", `You have ${owned}.`));
+      } else this.body.append(el("p", "hint", `You have ${owned}.`));
       this.body.append(coins, this.buyButton(s, "primary"));
     } else {
       // Each item once, cheapest first.
@@ -280,7 +281,7 @@ export class ShopPanel extends Panel {
         const row = el("div", "row");
         const name = el("span", "name", this.eco.name(s.item));
         name.append(this.badges(s));
-        row.append(icon(this.eco.items.get(s.item)), name, el("span", "price", `${s.price}c`), this.buyButton(s, "small"));
+        row.append(icon(this.eco.items.get(s.item)), name, ownedTag(this.eco, s.item), el("span", "price", `${s.price}c`), this.buyButton(s, "small"));
         this.body.append(row);
       }
       this.body.append(coins);

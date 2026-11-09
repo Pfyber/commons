@@ -41,3 +41,43 @@ export function polygon(ctx: CanvasRenderingContext2D, color: string, pts: [numb
     for (let i = 0; i + 1 < xs.length; i += 2) span(ctx, xs[i], xs[i + 1], y);
   }
 }
+
+/**
+ * Outlines every pixel of `color` that touches empty space (side by side,
+ * not corners) with `outline`, but not inside `skip` (x, y, w, h): bare
+ * hands and arms in any pose, without drawing round each one.
+ */
+export function outlineColor(ctx: CanvasRenderingContext2D, color: string, outline: string, skip?: [number, number, number, number]) {
+  const { width: w, height: h } = ctx.canvas;
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  // (Any CSS colour: the canvas hands it back as #rrggbb.)
+  ctx.fillStyle = color;
+  const n = Number.parseInt(String(ctx.fillStyle).slice(1), 16);
+  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255];
+  const o = Number.parseInt(outline.slice(1), 16);
+  const [or, og, ob] = [o >> 16, (o >> 8) & 255, o & 255];
+  const at = (x: number, y: number) => (y * w + x) * 4;
+  const is = (x: number, y: number) => {
+    const i = at(x, y);
+    return d[i + 3] === 255 && d[i] === r && d[i + 1] === g && d[i + 2] === b;
+  };
+  // (A see-through pixel, the ground shadow under the feet, counts as empty.)
+  const empty = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && d[at(x, y) + 3] < 128;
+  const mark: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!is(x, y)) continue;
+      if (skip && x >= skip[0] && y >= skip[1] && x < skip[0] + skip[2] && y < skip[1] + skip[3]) continue;
+      for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) if (empty(nx, ny)) mark.push(at(nx, ny));
+    }
+  }
+  if (!mark.length) return;
+  for (const i of mark) {
+    d[i] = or;
+    d[i + 1] = og;
+    d[i + 2] = ob;
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}

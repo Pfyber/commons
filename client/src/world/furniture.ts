@@ -41,6 +41,13 @@ export class Furniture {
     });
   }
 
+  /** A placed piece at `t` is a seat (or isn't: it's gone, or something else). */
+  placed(t: TileXY, seat: boolean) {
+    const id = this.idAt(t);
+    if (seat) this.seats.set(id, { id, tile: t, table: null });
+    else if (this.map.decor[id] === 0) this.seats.delete(id);
+  }
+
   idAt(t: TileXY): number {
     return t.y * this.map.width + t.x;
   }

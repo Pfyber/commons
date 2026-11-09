@@ -268,7 +268,7 @@ const FILTERS = [
 type FilterKey = (typeof FILTERS)[number]["key"];
 
 /** Which buildings count as what (object kinds, and what to call them). */
-const FUN: Record<string, string> = { arena_bowl: "Arena", arcade_hall: "Arcade", paintball_hall: "Splat Yard", bowling_alley: "Bowling", casino: "Casino", concert_hall: "Concert Hall", bar: "The Mossy Mug", bandstand: "Bandstand" };
+const FUN: Record<string, string> = { arena_bowl: "Arena", arcade_hall: "Arcade", paintball_hall: "Splat Yard", bowling_alley: "Bowling", casino: "Casino", concert_hall: "Concert Hall", bar: "The Cozy Cup", bandstand: "Bandstand" };
 const SHOPS: Record<string, string> = { mall_entrance: "Commons Mall", tailor: "Tailor", post_office: "Post Office", fisherman: "Fisherman" };
 const FILTER_KEY = "commons.mapfilters";
 

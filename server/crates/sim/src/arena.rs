@@ -397,7 +397,7 @@ pub const QUICK_ARROW_DMG: f64 = 6.0;
 /// tiny shove, no reel (it's far too quick to be allowed to lock anyone down),
 /// and a guard shrugs it off (`STAB_BLOCK_COST`).
 pub const STAB: (u32, u32, u32) = (40, 50, 90);
-pub const STAB_DMG: f64 = 8.0;
+pub const STAB_DMG: f64 = 11.0;
 pub const STAB_KB: f64 = 2.0;
 pub const STAB_COST: f64 = 4.5;
 pub const STAB_BLOCK_COST: f64 = 3.0;
@@ -408,8 +408,8 @@ const STAB_BIT: u16 = 8192;
 /// fast as the storm's. It costs more the further it's drawn.
 pub const BURST_ARROWS: u8 = 3;
 pub const BURST_GAP_MS: u32 = 110;
-pub const BURST_DMG: f64 = 6.5;
-pub const DRAWN_DMG: f64 = 5.5;
+pub const BURST_DMG: f64 = 10.0;
+pub const DRAWN_DMG: f64 = 8.5;
 pub const BURST_SPEED: f64 = ARROW_SPEED * 1.7;
 pub const BURST_COST: f64 = 26.0;
 pub const BURST_MIN_COST: f64 = 10.0;
@@ -5974,7 +5974,7 @@ impl Match {
                     let dmg = m.dmg * self.fighters[i].fury(now) * self.fighters[j].ranged_taken();
                     // (An arrow pricks (the quick one barely makes them
                     // flinch); a spear knocks them flying.)
-                    let (kb, stun) = if m.kind == missile::ARROW && m.dmg <= QUICK_ARROW_DMG {
+                    let (kb, stun) = if m.kind == missile::ARROW && m.dmg < BURST_DMG {
                         (1.2, 0)
                     } else if m.kind == missile::ARROW {
                         (3.0, 180)
@@ -11082,7 +11082,7 @@ mod kit_tests {
                 "next to no wind: {wind}"
             );
             // (Dealt in the time a knight lands a combo or two.)
-            assert!(dmg < 130.0, "{dmg}");
+            assert!(dmg < 180.0, "{dmg}");
             assert_ne!(m.fighters[1].act, act::STUN, "no stun-lock");
         }
         // A tiny shove, not a reel.

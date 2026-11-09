@@ -61,7 +61,7 @@ export const BARTENDER: Keeper = {
   id: BARTENDER_ID,
   name: "Bartender 🍺",
   look: encodeLook({ hue: 10, skin: 1, hair: 3, hat: 2, hatHue: 30, style: 0, accessory: 0, outfit: 5 }),
-  hellos: ["Welcome to the Mossy Mug! Pull up a stool.", "Evening! Fire's warm, beer's cold.", "Come on in. The pool shark's been waiting for a challenger."],
+  hellos: ["Welcome to the Cozy Cup! Pull up a stool.", "Evening! Fire's warm, beer's cold.", "Come on in. The pool shark's been waiting for a challenger."],
   tips: [
     "A beer's 5 coins. Fair warning: it goes straight to your head.",
     "Water's free, and it'll set you straight.",

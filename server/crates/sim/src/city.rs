@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn the_club_lots_are_the_club_lot_blocks() {
         let lots = city_club_lots();
-        assert_eq!(lots.len(), 5);
+        assert_eq!(lots.len(), 3);
         assert!(lots.iter().all(|l| l.starts_with("lot:")), "{lots:?}");
         let rent = rent_catalog();
         let house = rent.tier("club_room", 3).expect("a clubhouse tier");
@@ -569,8 +569,8 @@ mod tests {
         assert_eq!(c.block_type(c.spawn_block).key, "market");
         let count = |k: &str| c.blocks().filter(|(_, t)| t.key == k).count();
         assert_eq!(count("home"), 24, "the whole outer ring");
-        // Two of the first eight club lots became the bowling alley and the arena.
-        assert_eq!(count("club_lot") + count("club_hall"), 6);
+        // Of the first eight club lots, four became the bowling alley, the arena and the skatepark (two blocks).
+        assert_eq!(count("club_lot") + count("club_hall"), 4);
         // Everything to play right round the market; the quieter places a ring out.
         for k in [
             "pond",
@@ -578,7 +578,6 @@ mod tests {
             "cinema",
             "cafe",
             "arcade",
-            "bowling",
             "fairground",
             "town_hall",
         ] {
@@ -588,7 +587,7 @@ mod tests {
         }
         for k in [
             "orchard", "woods", "meadow", "lake", "theater", "gallery", "museum", "park",
-            "library", "casino",
+            "library", "casino", "bowling",
         ] {
             let (b, _) = c.blocks().find(|(_, t)| t.key == k).unwrap();
             assert_eq!(c.ring(b), 2, "{k} is in ring 2");
@@ -654,7 +653,7 @@ mod tests {
             );
             assert_eq!(tiers[0].tier, 1);
         }
-        assert_eq!(r.tier("home", 1).unwrap().furniture, Some(12));
+        assert_eq!(r.tier("home", 1).unwrap().furniture, Some(100));
         assert!(r.tier("stall", 9).is_none());
     }
 }

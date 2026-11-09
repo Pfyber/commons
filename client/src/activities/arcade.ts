@@ -775,7 +775,7 @@ export class ArcadePanel extends Panel {
         `${this.who(s.a)} is waiting for a challenger.`,
         [{ icon: "🕹️", label: `Play ${this.who(s.a)}`, sub: "Win 10 🎟️", primary: true, pick: join(false) }],
         () => this.hide(),
-        s.kind === PINBALL ? "🍺 The Mossy Mug" : "🕹️ Arcade",
+        s.kind === PINBALL ? "🍺 The Cozy Cup" : "🕹️ Arcade",
       );
     } else if (s.status !== PLAYING && s.status !== WAITING) {
       const ended = s.status !== EMPTY;
@@ -793,7 +793,7 @@ export class ArcadePanel extends Panel {
           { icon: "👥", label: "Wait for a player", sub: "Someone joins · win 10 🎟️", pick: join(false) },
         ],
         () => this.hide(),
-        ended ? title : s.kind === PINBALL ? "🍺 The Mossy Mug" : "🕹️ Arcade",
+        ended ? title : s.kind === PINBALL ? "🍺 The Cozy Cup" : "🕹️ Arcade",
       );
     } else {
       this.choice.hide();

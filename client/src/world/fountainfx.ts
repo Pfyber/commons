@@ -7,7 +7,7 @@
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 import { TILE } from "./art";
 import type { MapObject } from "./map";
-import type { Scene } from "./scene";
+import { type Scene, fountainFoot } from "./scene";
 
 /** The still drawing's sky above the fountain (its overhang), in pixels. */
 const TOP = 40;
@@ -67,6 +67,13 @@ export class FountainFx {
     this.root.addChild(this.glow, this.g, this.bowlGlow);
     // Just over the fountain itself, under anyone standing in front of it.
     this.root.zIndex = (obj.y + obj.h) * TILE - 0.5;
+    // (Its water is drawn in world pixels; it's held at the pedestal's foot,
+    // so in 3D it stands there with the pedestal, falling into the basin.)
+    const footX = this.x0 + this.cx;
+    const footY = fountainFoot(obj);
+    this.root.pivot.set(footX, footY);
+    this.root.position.set(footX, footY);
+    scene.standOn(this.root, footY);
     scene.sorted.addChild(this.root);
   }
 

@@ -7633,3 +7633,674 @@ body.phone .ar-vote-name {
 .lounge-bar .lounge-live {
   font-weight: 700;
 }
+
+/* Anything you can buy shows how many you have. */
+.owned-tag {
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+  margin: 0 6px;
+}
+
+/* The laptop's drone delivery: a big page of the whole market. */
+.panel.drone {
+  width: min(760px, calc(100vw - 32px)) !important;
+  max-width: none !important;
+  max-height: 86vh !important;
+  left: 50% !important;
+  right: auto !important;
+  top: 7vh !important;
+  transform: translateX(-50%);
+}
+.drone .rows {
+  max-height: 56vh;
+  overflow-y: auto;
+}
+.drone-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 6px 0;
+  padding: 6px 8px;
+}
+.drone .drone-qty {
+  width: 56px !important;
+  flex: none;
+  margin: 0 6px;
+}
+.room-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.room-color {
+  width: 56px;
+  height: 28px;
+  padding: 0;
+}
+
+/* The bag's tabs: all in view, wrapping onto a second row. */
+.panel .bag-tabs {
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.panel .bag-tabs button {
+  white-space: nowrap;
+  flex: none;
+}
+
+/* ---- The skatepark ------------------------------------------------------------ */
+
+/* In the park on foot: hop on. */
+.skate-enter {
+  position: fixed;
+  left: 50%;
+  bottom: 150px;
+  transform: translateX(-50%);
+  /* (Under the panels: the board by the gate, Dusty's window.) */
+  z-index: 4;
+  padding: 12px 22px;
+  font: 800 18px var(--font);
+  color: #fff;
+  background: linear-gradient(#ff7a45, #e8502a);
+  border: 3px solid #3b1f14;
+  border-radius: 14px;
+  box-shadow: 0 4px 0 #3b1f14, 0 8px 20px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  animation: skate-bob 1.6s ease-in-out infinite;
+}
+.skate-enter[hidden] {
+  display: none;
+}
+@keyframes skate-bob {
+  50% {
+    transform: translateX(-50%) translateY(-4px);
+  }
+}
+
+/* On a board: the town's bars make way. */
+body.skate-playing .chat,
+body.skate-playing .emotes,
+body.skate-playing .bottom,
+body.skate-playing .sit,
+body.skate-playing .mood-btn,
+body.skate-playing .ride-btn,
+body.skate-playing .toys-btn,
+body.skate-playing .zoom-pad,
+body.skate-playing .tasks-chip {
+  display: none !important;
+}
+body.skate-playing.skate-touch-mode .minimap,
+body.skate-playing.skate-touch-mode .top,
+body.skate-playing.skate-touch-mode .chat-log {
+  display: none !important;
+}
+
+.skate-hud {
+  position: fixed;
+  inset: 0;
+  /* (Under the panels: the board by the gate opens over it.) */
+  z-index: 4;
+  pointer-events: none;
+  font-family: var(--font);
+  color: #fff;
+  text-shadow: 0 2px 0 #1f1b2e, 2px 0 0 #1f1b2e, -2px 0 0 #1f1b2e, 0 -2px 0 #1f1b2e;
+}
+.skate-hud[hidden] {
+  display: none;
+}
+
+/* The score up top, the special meter under it. */
+.skate-top {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.skate-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 14px;
+  background: rgba(31, 27, 46, 0.72);
+  border: 3px solid #1f1b2e;
+  border-radius: 12px;
+}
+.skate-score b {
+  font-size: 28px;
+  font-weight: 900;
+  color: #ffd23f;
+  letter-spacing: 0.5px;
+}
+.skate-mode-name {
+  font-size: 15px;
+  font-weight: 800;
+}
+.skate-best {
+  font-size: 12px;
+  opacity: 0.85;
+}
+.skate-special {
+  width: 220px;
+  height: 10px;
+  border: 3px solid #1f1b2e;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #3fd8e8, #b48cff, #ff5fa8) left / var(--fill, 0%) 100% no-repeat, rgba(31, 27, 46, 0.6);
+}
+.skate-special.full {
+  animation: skate-glow 0.6s ease-in-out infinite alternate;
+}
+@keyframes skate-glow {
+  to {
+    box-shadow: 0 0 14px 4px rgba(255, 210, 63, 0.9);
+  }
+}
+
+/* The combo building, under the skater. */
+.skate-combo {
+  position: absolute;
+  left: 50%;
+  bottom: 26%;
+  transform: translateX(-50%);
+  text-align: center;
+  max-width: 90vw;
+}
+.skate-combo[hidden] {
+  display: none;
+}
+.skate-combo-names {
+  font-size: 17px;
+  font-weight: 800;
+}
+.skate-combo-pts {
+  font-size: 30px;
+  font-weight: 900;
+  color: #ffd23f;
+}
+
+/* Grinding or on a manual: the balance. */
+.skate-balance {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  width: 180px;
+  height: 14px;
+  transform: translateX(-50%);
+  border: 3px solid #1f1b2e;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #e8502a 0 12%, #ffd23f 12% 30%, #7cf26a 30% 70%, #ffd23f 70% 88%, #e8502a 88%);
+}
+.skate-balance[hidden] {
+  display: none;
+}
+.skate-needle {
+  position: absolute;
+  top: -6px;
+  width: 6px;
+  height: 20px;
+  margin-left: -3px;
+  background: #fff;
+  border: 2px solid #1f1b2e;
+  border-radius: 3px;
+}
+.skate-balance.tipping {
+  animation: skate-shake 0.12s linear infinite;
+}
+@keyframes skate-shake {
+  50% {
+    transform: translateX(calc(-50% + 3px));
+  }
+}
+
+/* Each trick's name as it's counted. */
+.skate-pops {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+}
+.skate-pop {
+  font-size: calc(16px + var(--n, 1) * 1px);
+  font-weight: 900;
+  color: #3fd8e8;
+  animation: skate-pop-up 1.1s ease-out forwards;
+}
+@keyframes skate-pop-up {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-26px);
+    opacity: 0;
+  }
+}
+
+/* Big in the middle: a combo banked, a bail, the countdown. */
+.skate-big {
+  position: absolute;
+  left: 50%;
+  top: 20%;
+  transform: translateX(-50%) scale(0.5);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+}
+.skate-big.show {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+.skate-big-main {
+  font-size: 34px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.skate-big-main.ok {
+  color: #7cf26a;
+}
+.skate-big-main.big {
+  color: #ffd23f;
+  font-size: 44px;
+}
+.skate-big-main.huge {
+  color: #ff5fa8;
+  font-size: 52px;
+  animation: skate-huge 0.4s ease-in-out infinite alternate;
+}
+@keyframes skate-huge {
+  to {
+    color: #ffd23f;
+  }
+}
+.skate-big-main.bail {
+  color: #ff6b5a;
+  font-size: 28px;
+}
+.skate-big-main.count {
+  font-size: 72px;
+  color: #ffd23f;
+}
+.skate-big-main.special {
+  color: #b48cff;
+}
+.skate-big-main.warn {
+  color: #ff8a3d;
+  font-size: 24px;
+}
+.skate-big-main.info {
+  font-size: 22px;
+}
+.skate-big-sub {
+  font-size: 15px;
+  font-weight: 700;
+  max-width: 80vw;
+  white-space: normal;
+}
+
+/* Others' big moments. */
+.skate-feed {
+  position: absolute;
+  left: 12px;
+  top: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 46vw;
+}
+.skate-feed-line {
+  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  background: rgba(31, 27, 46, 0.6);
+  border-radius: 8px;
+}
+
+/* Over someone's head. */
+.skate-float {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font: 900 16px var(--font);
+  color: #ffd23f;
+  text-shadow: 0 2px 0 #1f1b2e, 2px 0 0 #1f1b2e, -2px 0 0 #1f1b2e, 0 -2px 0 #1f1b2e;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.skate-float.bail {
+  color: #ff6b5a;
+}
+.skate-float.run {
+  color: #ff5fa8;
+}
+
+.skate-off {
+  position: absolute;
+  right: 12px;
+  top: 64px;
+  pointer-events: auto;
+  padding: 8px 12px;
+  font: 800 14px var(--font);
+  color: #fff;
+  background: rgba(31, 27, 46, 0.8);
+  border: 3px solid #1f1b2e;
+  border-radius: 10px;
+  cursor: pointer;
+  text-shadow: none;
+}
+
+/* On a phone: the buttons under your right thumb. */
+.skate-touch {
+  display: none;
+  position: absolute;
+  right: 12px;
+  bottom: 24px;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+}
+body.skate-touch-mode .skate-touch {
+  display: flex;
+}
+.skate-touch-row {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.skate-btn {
+  min-width: 64px;
+  height: 56px;
+  padding: 0 12px;
+  font: 900 16px var(--font);
+  color: #fff;
+  background: rgba(31, 27, 46, 0.75);
+  border: 3px solid #1f1b2e;
+  border-radius: 14px;
+  touch-action: none;
+  user-select: none;
+  text-shadow: none;
+}
+.skate-btn.ollie {
+  min-width: 96px;
+  height: 72px;
+  background: #e8502a;
+}
+.skate-btn.flip {
+  background: #3f7fd8;
+}
+.skate-btn.grab {
+  background: #8a4fd8;
+}
+.skate-btn.manual {
+  background: #2fa86a;
+}
+.skate-btn.spin {
+  min-width: 52px;
+  height: 46px;
+}
+.skate-btn.down {
+  filter: brightness(1.35);
+  transform: translateY(2px);
+}
+
+/* The board by the gate: the modes, today's best, how to skate. */
+.panel.skate-board .skate-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+@media (max-width: 560px) {
+  .panel.skate-board .skate-modes {
+    grid-template-columns: 1fr;
+  }
+}
+.panel.skate-board .skate-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  text-align: center;
+  cursor: pointer;
+}
+.skate-mode-icon {
+  font-size: 26px;
+}
+.panel.skate-board .skate-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 560px) {
+  .panel.skate-board .skate-lists {
+    grid-template-columns: 1fr;
+  }
+}
+.panel.skate-board .skate-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 6px;
+  padding: 2px 0;
+}
+.skate-rank {
+  font-weight: 800;
+  color: var(--muted);
+}
+.skate-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skate-pts {
+  font-weight: 800;
+}
+.panel.skate-board .skate-keys {
+  margin-top: 10px;
+}
+.panel.skate-board .skate-key {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.panel.skate-board kbd {
+  font-weight: 800;
+}
+
+/* ---- Dusty's van: building your board ------------------------------------------ */
+
+.panel.skate-shop {
+  width: min(780px, calc(100vw - 24px));
+  max-width: min(780px, calc(100vw - 24px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+.panel.skate-shop .panel-body {
+  display: grid;
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  gap: 14px;
+}
+@media (max-width: 680px) {
+  .panel.skate-shop .panel-body {
+    grid-template-columns: 1fr;
+  }
+}
+/* The window: your board turning in it, big and crisp. */
+.skate-shop-show {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skate-shop-view {
+  width: 100%;
+  aspect-ratio: 200 / 120;
+  image-rendering: pixelated;
+  border: 4px solid #2a2433;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 2px #4a3f63, 0 4px 0 #2a2433;
+  background: #1f1a2b;
+}
+.skate-stat {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.skate-stat-bar {
+  height: 10px;
+  background: #2a2433;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid #2a2433;
+}
+.skate-stat-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #3fd8e8, #7cd36a, #ffd23f);
+  transition: width 0.3s;
+}
+.skate-tricks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.skate-trick {
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  background: rgba(42, 36, 51, 0.12);
+  color: var(--muted);
+}
+.skate-trick.on {
+  background: #d9f2d2;
+  color: #2f6a2a;
+}
+/* The parts: tabs, then tiles. */
+.skate-shop-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.skate-shop-parts .tabs {
+  flex-wrap: wrap;
+}
+.skate-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+.panel .skate-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  position: relative;
+}
+.panel .skate-option.picked {
+  outline: 3px solid #3fa7e8;
+  outline-offset: -3px;
+}
+.panel .skate-option.riding::after {
+  content: "★";
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  color: #e8b923;
+}
+.skate-option-tag {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.skate-swatch {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 14px;
+  border: 2px solid #2a2433;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.skate-swatch.wheels {
+  height: 22px;
+  width: 22px;
+  border-radius: 50%;
+  background: #f4efe2;
+}
+.skate-swatch.shine {
+  background-image: linear-gradient(110deg, transparent 30%, rgba(255, 250, 220, 0.9) 45%, transparent 60%) !important;
+  background-size: 200% 100%;
+  animation: skate-shine 1.6s linear infinite;
+}
+@keyframes skate-shine {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+.skate-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.skate-about {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+}
+.skate-riding {
+  font-weight: 800;
+  color: #2f6a2a;
+}
+/* Bearings: five pips, an upgrade button. */
+.skate-bearings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skate-pips {
+  display: flex;
+  gap: 4px;
+}
+.panel .skate-pip {
+  flex: 1;
+  padding: 8px 0;
+  font-weight: 800;
+  opacity: 0.55;
+}
+.panel .skate-pip.got {
+  opacity: 1;
+  background: #fff3c4;
+}
+.panel .skate-pip.riding {
+  outline: 3px solid #e8b923;
+  outline-offset: -3px;
+}
+.panel .skate-upgrade {
+  font-size: 15px;
+  padding: 10px;
+}

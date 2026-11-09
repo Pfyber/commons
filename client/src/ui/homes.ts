@@ -6,6 +6,7 @@ import type { Homes } from "../homes";
 import { type Lease, type Rent, type Tier, leaseStatus } from "../rent";
 import { Panel, button, el } from "./panels";
 import { itemIconUrl } from "../world/items";
+import { ownedTag } from "./homelife";
 
 export interface PostOfficeHost {
   /** Walks to a named spot on the city map ("door:b0_3:5", "apartments"). */
@@ -211,7 +212,7 @@ export class StallPanel extends Panel {
         const row = el("div", "row");
         row.append(el("span", "name", `${this.eco.name(g.item)} ×${g.qty}`), el("span", "price", `${g.price} each`));
         if (s.mine) row.append(button("Take back", () => this.act(this.rent.take(g.id)), "small"));
-        else row.append(button("Buy 1", () => this.act(this.rent.buy(g.id, 1), `🧺 Bought ${this.eco.name(g.item)} from ${s.name}.`), "small primary-sm"));
+        else row.append(ownedTag(this.eco, g.item), button("Buy 1", () => this.act(this.rent.buy(g.id, 1), `🧺 Bought ${this.eco.name(g.item)} from ${s.name}.`), "small primary-sm"));
         this.body.append(row);
       }
       if (s.mine) this.putForm(s.lease);
@@ -302,7 +303,7 @@ export class YardPanel extends Panel {
       if (item) img.src = itemIconUrl(item.key, item.kind);
       row.append(img, el("span", "name", `${this.eco.name(g.item)} ×${g.qty}`), el("span", "price", `${g.price} each`));
       if (mine) row.append(button("Take back", () => this.act(this.rent.take(g.id)), "small"));
-      else row.append(button("Buy 1", () => this.act(this.rent.buy(g.id, 1), `🧺 Bought ${this.eco.name(g.item)} from ${y?.name}.`), "small primary-sm"));
+      else row.append(ownedTag(this.eco, g.item), button("Buy 1", () => this.act(this.rent.buy(g.id, 1), `🧺 Bought ${this.eco.name(g.item)} from ${y?.name}.`), "small primary-sm"));
       this.body.append(row);
     }
     if (mine) this.putForm(y?.listings ?? this.rent.home?.listings ?? 0, goods.length);

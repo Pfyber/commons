@@ -8,7 +8,7 @@ use crate::econ::{CallError, Plot};
 use commons_common::config;
 use commons_protocol::{ServerMsg, error_code, plot_action};
 use commons_sim::TilePos;
-use commons_sim::garden::Growth;
+use commons_sim::garden::{Growth, UV_SPEED};
 
 /// How often growth is re-evaluated for display.
 const GARDEN_TICK_MS: u32 = 2_000;
@@ -20,6 +20,8 @@ pub(crate) struct PlotView {
     growth: Growth,
     /// (stage, watered) last announced, to send only changes.
     shown: (u8, bool),
+    /// Under a UV light.
+    pub(crate) uv: bool,
 }
 
 impl PlotView {
@@ -34,6 +36,15 @@ impl PlotView {
             owner_name: p.owner_name.clone(),
             growth,
             shown: (u8::MAX, false),
+            uv: p.uv,
+        }
+    }
+
+    fn stage_ms(&self) -> i64 {
+        if self.uv {
+            stage_ms() / UV_SPEED
+        } else {
+            stage_ms()
         }
     }
 }
@@ -52,7 +63,11 @@ impl Instance {
     }
 
     pub(super) fn load_plots(&self) {
-        let (Some(econ), false) = (self.economy.clone(), self.soil.is_empty()) else {
+        // (A home's soil is its planters, which come later: its plots load regardless.)
+        let (Some(econ), false) = (
+            self.economy.clone(),
+            self.soil.is_empty() && self.zone.id != "home",
+        ) else {
             return;
         };
         let space = self.space();
@@ -82,9 +97,9 @@ impl Instance {
     }
 
     fn plot_state(&self, t: TilePos, now_ms: i64) -> ServerMsg {
-        let stage_ms = stage_ms();
         match self.plots.get(&t) {
             Some(p) => {
+                let stage_ms = p.stage_ms();
                 let g = p.growth.at(now_ms, stage_ms);
                 let left = if g.watered {
                     (stage_ms - (now_ms - g.stage_started_ms)).clamp(0, u32::MAX as i64)
@@ -121,7 +136,7 @@ impl Instance {
             .collect()
     }
 
-    fn broadcast_plot(&mut self, t: TilePos) {
+    pub(super) fn broadcast_plot(&mut self, t: TilePos) {
         let msg = self.plot_state(t, now_ms());
         if let Some(p) = self.plots.get_mut(&t)
             && let ServerMsg::PlotState { stage, watered, .. } = &msg
@@ -133,12 +148,11 @@ impl Instance {
 
     fn garden_tick_now(&mut self) {
         let now = now_ms();
-        let stage_ms = stage_ms();
         let changed: Vec<TilePos> = self
             .plots
             .iter()
             .filter(|(_, p)| {
-                let g = p.growth.at(now, stage_ms);
+                let g = p.growth.at(now, p.stage_ms());
                 (g.stage, g.watered) != p.shown
             })
             .map(|(t, _)| *t)
@@ -197,7 +211,7 @@ impl Instance {
         let ripe = self
             .plots
             .get(&t)
-            .map(|p| p.growth.at(now_ms(), stage_ms()).ripe());
+            .map(|p| p.growth.at(now_ms(), p.stage_ms()).ripe());
         match action {
             plot_action::PLANT if self.plots.contains_key(&t) => {
                 self.busy.remove(&t);

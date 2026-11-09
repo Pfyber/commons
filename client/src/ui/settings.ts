@@ -67,7 +67,7 @@ export class SettingsPanel extends Panel {
       button("⚡ Fast", () => (setSettings({ quality: "low" }), this.render()), s.quality === "low" ? "small on" : "small"),
     );
     this.body.append(el("p", "hint", "Sharp: full screen resolution and the colour grade. Fast: lighter on older computers and phones."), quality);
-    const toggle = (label: string, key: "weather" | "daynight" | "names" | "fps" | "view3d") => {
+    const toggle = (label: string, key: "weather" | "daynight" | "names" | "fps" | "view3d" | "vibrant" | "shaders" | "reflections") => {
       const on = s[key];
       this.body.append(button(`${on ? "✅" : "⬜"} ${label}`, () => (setSettings({ [key]: !on } as Partial<Settings>), this.render()), "small set-toggle"));
     };
@@ -77,10 +77,25 @@ export class SettingsPanel extends Panel {
       button("🧊 3D", () => (setSettings({ view3d: true }), this.render()), s.view3d ? "small on" : "small"),
     );
     this.body.append(el("p", "hint", "3D: the camera tilts and the world stands up in perspective. 2D: straight down, as drawn."), view);
+    // Full screen: the browser's own, so it's whatever the page is in now.
+    const full = !!document.fullscreenElement;
+    this.body.append(
+      button(`${full ? "✅" : "⬜"} Full screen`, () => {
+        const done = () => this.render();
+        if (document.fullscreenElement) void document.exitFullscreen().then(done, done);
+        else void document.documentElement.requestFullscreen().then(done, done);
+      }, "small set-toggle"),
+    );
+    toggle("Vibrant colours (richer and punchier)", "vibrant");
     toggle("Weather (rain, mist, cloud shadows)", "weather");
     toggle("Night falls (day and night)", "daynight");
     toggle("Name tags and speech bubbles", "names");
     toggle("Frames per second counter", "fps");
+    // ---- experimental ----
+    this.body.append(el("h4", "set-head", "🧪 Experimental"));
+    this.body.append(el("p", "hint", "Still being worked on, and heavy: turn them off if the game slows down."));
+    toggle("Advanced shaders (soft shadows from the sun and lamps)", "shaders");
+    toggle("Water reflections", "reflections");
     // ---- keys ----
     this.body.append(el("h4", "set-head", "⌨️ Keys"));
     const keys = el("div", "rows set-keys");

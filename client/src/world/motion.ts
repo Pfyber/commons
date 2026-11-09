@@ -58,6 +58,12 @@ function rampRide(speedX10: number): RampRide | null {
   return null;
 }
 
+/** How fast a ramped ride goes flat out (tiles per second; 0 if it isn't one). */
+export function rideTopSpeed(speedX10: number): number {
+  const r = rampRide(speedX10);
+  return r ? r.base * r.top * 1000 : 0;
+}
+
 /** Whether a motion at `speedX10` picks up speed as it goes (a skateboard, a Vespa). */
 export function isRamped(speedX10: number | undefined): boolean {
   return speedX10 !== undefined && rampRide(speedX10) !== null;

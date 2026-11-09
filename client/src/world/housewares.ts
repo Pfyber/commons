@@ -22,8 +22,36 @@ function px(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, 
 export const FLAT = new Set(["round_rug", "rug_persian", "rug_stripes", "rug_heart", "floor_cushions"]);
 /** Pieces that turn on and off. */
 export const TOGGLES = new Set(["fairy_string", "lava_lamp", "paper_lantern", "aquarium", "record_player", "retro_tv", "fireplace", "arcade_cabinet", "disco_ball", ...COZY_TOGGLES]);
-/** Fish tanks, and how many they hold (as the server's `tank`). */
-export const TANKS: Record<string, number> = { fish_bowl: 3, aquarium: 8 };
+/** Fish tanks and display shelves, and how many things they hold (as the server's `tank`). */
+export const TANKS: Record<string, number> = { fish_bowl: 3, aquarium: 8, display_shelf: 6 };
+/** What gives real light when it's on: its colour and how far it reaches. */
+export const LIGHTS: Record<string, [number, number]> = {
+  floor_lamp: [0xffd9a0, 3.4],
+  table_lamp: [0xffd9a0, 2.6],
+  paper_lantern: [0xffe2b0, 3],
+  fairy_string: [0xffe9a8, 2.2],
+  xmas_lights: [0xffc08a, 2.2],
+  lava_lamp: [0xff6a9a, 2],
+  aquarium: [0x6fd6ff, 2.8],
+  retro_tv: [0x8fc8ff, 2.4],
+  arcade_cabinet: [0x8f7bff, 2.4],
+  fireplace: [0xff9a4a, 3.6],
+  neon_heart: [0xff5a9a, 2.4],
+  christmas_tree: [0xffd98a, 3],
+  candle_trio: [0xffb066, 1.8],
+  floor_candles: [0xffb066, 2.2],
+  disco_ball: [0xd8a0ff, 3.4],
+  snow_globe: [0xbfe6ff, 1.4],
+  popcorn_machine: [0xffe08a, 1.8],
+  uv_light: [0xc47bff, 2.6],
+};
+/** What can be sat on, and what's walked over (as the server's `seat` and `walk`). */
+export const SEATS = new Set(["lawn_chair", "wooden_chair", "armchair", "sofa", "rocking_chair", "cozy_armchair", "bean_bag", "floor_cushions"]);
+export const WALK_OVER = new Set(["round_rug", "rug_persian", "rug_stripes", "rug_heart"]);
+/** Lies down when it's turned: seen from above, not stood up. */
+export const TURNS_FLAT = /rug|bed|table|sofa|couch|desk|cabinet|bench|cushions|chest/;
+/** How long fish go without food before they're sluggish (seconds). */
+export const HUNGRY_SECS = 3 * 86_400;
 /** A pet's things: it curls up on them, at home. */
 export const PET_SPOTS = new Set(["dog_bed", "cat_tree", "pet_bowl"]);
 
@@ -472,6 +500,8 @@ export class Tank {
   readonly view = new Container();
   private swimmers: Swimmer[] = [];
   private keys: string[] = [];
+  /** Unfed too long: they barely stir, and sink. */
+  sluggish = false;
 
   constructor(private key: string) {}
 
@@ -498,20 +528,21 @@ export class Tank {
 
   update(now: number, dt: number) {
     const [x0, y0, x1, y1] = this.water;
+    const pace = this.sluggish ? 0.2 : 1;
     for (const f of this.swimmers) {
-      f.x += f.vx * dt;
+      f.x += f.vx * dt * pace;
       if (f.x < x0 || f.x > x1) {
         f.vx = -f.vx;
         f.x = Math.max(x0, Math.min(x1, f.x));
       }
       // Now and then one turns about for nothing.
-      if (Math.random() < 0.004 * dt) f.vx = -f.vx;
-      const y = Math.max(y0, Math.min(y1, f.y + Math.sin(now / 900 + f.phase) * 2));
+      if (Math.random() < 0.004 * dt * pace) f.vx = -f.vx;
+      const y = this.sluggish ? y1 - 1 : Math.max(y0, Math.min(y1, f.y + Math.sin(now / 900 + f.phase) * 2));
       f.s.position.set(Math.round(f.x), Math.round(y));
       // The drawings face left: flip for the right; a little wiggle.
       const sc = Math.abs(f.s.scale.y);
       f.s.scale.x = f.vx > 0 ? -sc : sc;
-      f.s.rotation = Math.sin(now / 200 + f.phase) * 0.08;
+      f.s.rotation = this.sluggish ? 0.2 : Math.sin(now / 200 + f.phase) * 0.08;
     }
   }
 }

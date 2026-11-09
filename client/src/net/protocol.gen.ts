@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 52;
+export const PROTOCOL_VERSION = 55;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -330,6 +330,23 @@ export function decPbPickup(r: Reader): PbPickup {
   };
 }
 
+export interface SkateEntry {
+  name: string;
+  points: number;
+}
+
+export function encSkateEntry(w: Writer, v: SkateEntry) {
+  w.str(v.name);
+  w.u32(v.points);
+}
+
+export function decSkateEntry(r: Reader): SkateEntry {
+  return {
+    name: r.str(),
+    points: r.u32(),
+  };
+}
+
 export interface EntityInfo {
   id: number;
   name: string;
@@ -407,7 +424,7 @@ export type ClientMsg =
   | { t: "FishCast"; x: number; y: number; magnet: boolean }
   | { t: "FishReel"; quality: number }
   | { t: "PlotAction"; x: number; y: number; action: number; item: number }
-  | { t: "Place"; item: number; x: number; y: number }
+  | { t: "Place"; item: number; x: number; y: number; rot: number }
   | { t: "Pickup"; x: number; y: number }
   | { t: "JamNote"; instrument: number; pitch: number; beat: number }
   | { t: "Paint"; easel: number; cell: number; color: number }
@@ -465,6 +482,10 @@ export type ClientMsg =
   | { t: "UseObject"; x: number; y: number }
   | { t: "TankPut"; x: number; y: number; fish: number }
   | { t: "TankTake"; x: number; y: number; index: number }
+  | { t: "TankFeed"; x: number; y: number }
+  | { t: "SkateOn"; on: boolean; kit: number }
+  | { t: "SkateMove"; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number }
+  | { t: "SkateScore"; kind: number; points: number; label: string }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -530,6 +551,7 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u32(m.item);
       w.u16(m.x);
       w.u16(m.y);
+      w.u8(m.rot);
       break;
     case "Pickup":
       w.u8(13);
@@ -786,6 +808,32 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u16(m.y);
       w.u8(m.index);
       break;
+    case "TankFeed":
+      w.u8(71);
+      w.u16(m.x);
+      w.u16(m.y);
+      break;
+    case "SkateOn":
+      w.u8(72);
+      w.bool(m.on);
+      w.u32(m.kit);
+      break;
+    case "SkateMove":
+      w.u8(73);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u8(m.z);
+      w.u16(m.dir);
+      w.u8(m.pose);
+      w.u8(m.trick);
+      w.u16(m.spin);
+      break;
+    case "SkateScore":
+      w.u8(74);
+      w.u8(m.kind);
+      w.u32(m.points);
+      w.str(m.label);
+      break;
   }
   return w.finish();
 }
@@ -829,7 +877,7 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "PlotAction", x: r.u16(), y: r.u16(), action: r.u8(), item: r.u32() };
       break;
     case 12:
-      m = { t: "Place", item: r.u32(), x: r.u16(), y: r.u16() };
+      m = { t: "Place", item: r.u32(), x: r.u16(), y: r.u16(), rot: r.u8() };
       break;
     case 13:
       m = { t: "Pickup", x: r.u16(), y: r.u16() };
@@ -1002,6 +1050,18 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
     case 66:
       m = { t: "TankTake", x: r.u16(), y: r.u16(), index: r.u8() };
       break;
+    case 71:
+      m = { t: "TankFeed", x: r.u16(), y: r.u16() };
+      break;
+    case 72:
+      m = { t: "SkateOn", on: r.bool(), kit: r.u32() };
+      break;
+    case 73:
+      m = { t: "SkateMove", x: r.u16(), y: r.u16(), z: r.u8(), dir: r.u16(), pose: r.u8(), trick: r.u8(), spin: r.u16() };
+      break;
+    case 74:
+      m = { t: "SkateScore", kind: r.u8(), points: r.u32(), label: r.str() };
+      break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
   }
@@ -1026,7 +1086,7 @@ export type ServerMsg =
   | { t: "ScreenState"; screen: number; title: string; source: string; startedT: number; durationMs: number }
   | { t: "FishEvent"; id: number; kind: number; x: number; y: number; item: number }
   | { t: "PlotState"; x: number; y: number; plant: number; stage: number; watered: boolean; owner: string; stageLeftMs: number }
-  | { t: "ObjectUpdate"; x: number; y: number; item: number }
+  | { t: "ObjectUpdate"; x: number; y: number; item: number; rot: number }
   | { t: "Granted"; item: number; added: number; total: number; first: boolean }
   | { t: "JamNote"; id: number; instrument: number; pitch: number; beat: number }
   | { t: "Painted"; id: number; easel: number; cell: number; color: number }
@@ -1061,12 +1121,17 @@ export type ServerMsg =
   | { t: "SalvageJunk"; items: number[] }
   | { t: "ObjectOn"; x: number; y: number; on: boolean }
   | { t: "TankFish"; x: number; y: number; fish: number[] }
-  | { t: "ObjectTop"; x: number; y: number; item: number }
+  | { t: "TankFed"; x: number; y: number; fed: number }
+  | { t: "ObjectTop"; x: number; y: number; item: number; rot: number }
   | { t: "LabState"; lit: number[]; gates: number[]; found: number; attuned: number; finishers: number; out: boolean }
   | { t: "LabEvent"; kind: number; id: number; n: number }
   | { t: "ArenaBetPlaced"; pick: number; pays: number }
   | { t: "ArenaBetSettled"; coins: number; refund: boolean }
   | { t: "ArenaStoodDown" }
+  | { t: "Skating"; id: number; on: boolean }
+  | { t: "Skater"; id: number; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number; kit: number }
+  | { t: "SkateEvent"; id: number; kind: number; points: number; label: string }
+  | { t: "SkateBoard"; runs: SkateEntry[]; combos: SkateEntry[] }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -1179,6 +1244,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.x);
       w.u16(m.y);
       w.u32(m.item);
+      w.u8(m.rot);
       break;
     case "Granted":
       w.u8(18);
@@ -1457,11 +1523,18 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u16(m.y);
       w.vec(m.fish, (x) => w.u32(x));
       break;
+    case "TankFed":
+      w.u8(59);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u32(m.fed);
+      break;
     case "ObjectTop":
       w.u8(52);
       w.u16(m.x);
       w.u16(m.y);
       w.u32(m.item);
+      w.u8(m.rot);
       break;
     case "LabState":
       w.u8(53);
@@ -1490,6 +1563,35 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       break;
     case "ArenaStoodDown":
       w.u8(57);
+      break;
+    case "Skating":
+      w.u8(60);
+      w.u32(m.id);
+      w.bool(m.on);
+      break;
+    case "Skater":
+      w.u8(61);
+      w.u32(m.id);
+      w.u16(m.x);
+      w.u16(m.y);
+      w.u8(m.z);
+      w.u16(m.dir);
+      w.u8(m.pose);
+      w.u8(m.trick);
+      w.u16(m.spin);
+      w.u32(m.kit);
+      break;
+    case "SkateEvent":
+      w.u8(62);
+      w.u32(m.id);
+      w.u8(m.kind);
+      w.u32(m.points);
+      w.str(m.label);
+      break;
+    case "SkateBoard":
+      w.u8(63);
+      w.vec(m.runs, (x) => encSkateEntry(w, x));
+      w.vec(m.combos, (x) => encSkateEntry(w, x));
       break;
   }
   return w.finish();
@@ -1549,7 +1651,7 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "PlotState", x: r.u16(), y: r.u16(), plant: r.u32(), stage: r.u8(), watered: r.bool(), owner: r.str(), stageLeftMs: r.u32() };
       break;
     case 17:
-      m = { t: "ObjectUpdate", x: r.u16(), y: r.u16(), item: r.u32() };
+      m = { t: "ObjectUpdate", x: r.u16(), y: r.u16(), item: r.u32(), rot: r.u8() };
       break;
     case 18:
       m = { t: "Granted", item: r.u32(), added: r.u16(), total: r.u32(), first: r.bool() };
@@ -1653,8 +1755,11 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
     case 51:
       m = { t: "TankFish", x: r.u16(), y: r.u16(), fish: r.vec(() => r.u32()) };
       break;
+    case 59:
+      m = { t: "TankFed", x: r.u16(), y: r.u16(), fed: r.u32() };
+      break;
     case 52:
-      m = { t: "ObjectTop", x: r.u16(), y: r.u16(), item: r.u32() };
+      m = { t: "ObjectTop", x: r.u16(), y: r.u16(), item: r.u32(), rot: r.u8() };
       break;
     case 53:
       m = { t: "LabState", lit: r.vec(() => r.u8()), gates: r.vec(() => r.u8()), found: r.u8(), attuned: r.u8(), finishers: r.u16(), out: r.bool() };
@@ -1670,6 +1775,18 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       break;
     case 57:
       m = { t: "ArenaStoodDown" };
+      break;
+    case 60:
+      m = { t: "Skating", id: r.u32(), on: r.bool() };
+      break;
+    case 61:
+      m = { t: "Skater", id: r.u32(), x: r.u16(), y: r.u16(), z: r.u8(), dir: r.u16(), pose: r.u8(), trick: r.u8(), spin: r.u16(), kit: r.u32() };
+      break;
+    case 62:
+      m = { t: "SkateEvent", id: r.u32(), kind: r.u8(), points: r.u32(), label: r.str() };
+      break;
+    case 63:
+      m = { t: "SkateBoard", runs: r.vec(() => decSkateEntry(r)), combos: r.vec(() => decSkateEntry(r)) };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

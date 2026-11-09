@@ -4,6 +4,7 @@
 // rich (most of all at golden hour). `?hour=21.5` overrides the clock for testing.
 
 import { type Application, ColorMatrixFilter, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { settings } from "../settings";
 import { TILE, buildingLanterns } from "../world/art";
 import type { ZoneMap } from "../world/map";
 import type { Scene } from "../world/scene";
@@ -175,6 +176,11 @@ export class DayNight {
   private shade = new Graphics();
   /** Warm lights, over the night shade (so they stay yellow, not blued). */
   private lights = new Container();
+
+  /** The night's lights (shown after dark, adding light): for things that glow, drawn in world coordinates. */
+  get lightLayer(): Container {
+    return this.lights;
+  }
   /** Each lamp's light, for a faint flicker. */
   private flicker: { s: Sprite; base: number; phase: number }[] = [];
   private grade = new ColorMatrixFilter();
@@ -346,6 +352,11 @@ export class DayNight {
     if (has !== on) this.app.stage.filters = on ? [this.grade] : [];
   }
 
+  /** Under the open sky (not indoors, not a home's rooms): for the shadows. */
+  get outdoors(): boolean {
+    return !this.room && !this.indoors;
+  }
+
   hour(): number {
     if (this.override !== null) return this.override;
     if (this.alwaysDay) return 13;
@@ -355,11 +366,47 @@ export class DayNight {
 
   /** Sets the colour grade (only when it has moved enough to notice). */
   private setGrade(sat: number, con: number) {
+    // (The advanced shaders: the warm, deep look of a shader pack.)
+    if (settings.shaders) {
+      sat += 0.22;
+      con += 0.07;
+    }
+    // (Vibrant colours: richer still.)
+    if (settings.vibrant) {
+      sat += 0.45;
+      con += 0.08;
+    }
     if (Math.abs(sat - this.graded.sat) < 0.004 && Math.abs(con - this.graded.con) < 0.004) return;
     this.graded = { sat, con };
     this.grade.reset();
     this.grade.saturate(sat, true);
     this.grade.contrast(con, true);
+  }
+
+  /** A home: its own light, with sun through its windows. */
+  private room = false;
+  /** How many lights are on in the room. */
+  roomLit = 0;
+  private sunbeams: Sprite[] = [];
+
+  enterRoom(windows: { x: number; y: number }[]) {
+    this.room = true;
+    for (const w of windows) {
+      const s = this.roomGlow(w.x, w.y, 0xfff0c8, 2.4, 3.2);
+      this.sunbeams.push(s);
+    }
+  }
+
+  /** A soft pool of `color` light at (x, y) (world px), `sx` × `sy` big. */
+  roomGlow(x: number, y: number, color: number, sx: number, sy = sx): Sprite {
+    const s = new Sprite(whiteGlow());
+    s.anchor.set(0.5);
+    s.tint = color;
+    s.scale.set(sx, sy);
+    s.alpha = 0.6;
+    s.position.set(x, y);
+    this.lights.addChild(s);
+    return s;
   }
 
   update() {
@@ -378,6 +425,21 @@ export class DayNight {
       const t = performance.now() / 1000;
       // A slow, slight flicker, as screens do.
       this.neon.children.forEach((c, i) => (c.alpha = 0.5 + Math.sin(t * 0.8 + i * 1.7) * 0.06));
+      return;
+    }
+    if (this.room) {
+      // A home: daylight through the windows by day, dim by night; every
+      // light that's on brightens the room, and casts its own pool.
+      const { dark } = lightAt(this.hour());
+      this.setGrade(0.24, 0.07);
+      this.dark = 0;
+      const level = Math.min(1, 0.9 - dark * 0.48 + this.roomLit * 0.07);
+      const ch = (v: number) => Math.round(Math.min(1, v) * 255);
+      const { width, height } = this.app.screen;
+      this.shade.clear().rect(0, 0, width, height).fill((ch(level) << 16) | (ch(level * 0.96) << 8) | ch(level * 0.9));
+      this.lights.alpha = 1;
+      this.lights.visible = true;
+      for (const s of this.sunbeams) s.alpha = (1 - dark) * 0.28;
       return;
     }
     if (this.indoors) {

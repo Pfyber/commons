@@ -39,7 +39,7 @@ const GROUND_KIND: Record<string, number> = {
 const TREES = new Set(["tree", "pine", "apple_tree", "willow", "willow_curtain", "pine_secret", "bush", "hedge"]);
 /** Objects with no symbol of their own (markers, small props). */
 // (`boat_lake` only marks the water the rowboats go on, and `forage` where bugs and mushrooms turn up.)
-const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "arena", "lamp", "boat_lake", "boat_moored", "yard_stand", "forage"]);
+const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "arena", "lamp", "boat_lake", "boat_moored", "yard_stand", "yard", "forage"]);
 
 /** Ground colours: grass, trees (under their crowns), water, road, kerb, paving, soil, brick, woods. */
 const PAPER = ["#cfd3a0", "#bcc48c", "#9cbfc0", "#a3927a", "#e6d9b6", "#ece0c0", "#c8a878", "#b8705a", "#85a05c"];

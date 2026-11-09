@@ -23,6 +23,7 @@ mod lucky;
 mod paintball;
 mod pool;
 mod rps;
+mod skate;
 mod together;
 
 pub use together::nook_map;
@@ -303,6 +304,8 @@ pub struct Instance {
     arena: Option<arena::Arena>,
     /// The Splat Yard's paintball, if the map has a field.
     yard: Option<paintball::Yard>,
+    /// The skatepark, if the map has one.
+    skate: Option<skate::Park>,
     /// The arcade's cabinets, in map order.
     cabinets: Vec<arcade::Cabinet>,
     /// The pitch's ball, if the zone has a pitch.
@@ -329,6 +332,14 @@ pub struct Instance {
     /// Furniture turned on (lamps, the TV…), and fish tanks' fish.
     lit: HashSet<TilePos>,
     tanks: HashMap<TilePos, Vec<u32>>,
+    /// When each tank last ate (unix seconds), and how pieces are turned (layer 0 or 1).
+    fed: HashMap<TilePos, u32>,
+    rots: HashMap<(TilePos, u8), u8>,
+    next_yard_tick: u32,
+    /// The water of the garden ponds placed here.
+    pond_water: HashSet<TilePos>,
+    /// Lawn chairs set up in the open, and whose (a player id): not kept.
+    portable: HashMap<TilePos, String>,
     /// What stands on the tables (layer 1).
     tops: HashMap<TilePos, u32>,
     /// Tiles with an economy call in flight, to refuse double actions.
@@ -365,6 +376,7 @@ impl Instance {
         let lab = labyrinth::Lab::for_zone(&zone);
         let arena_obj = arena::Arena::new(&zone.map.objects);
         let yard = paintball::Yard::new(&zone.map.objects);
+        let skate = skate::Park::new(&zone.map.objects);
         let lanes = zone
             .map
             .objects
@@ -424,6 +436,7 @@ impl Instance {
             lanes,
             arena: arena_obj,
             yard,
+            skate,
             cabinets,
             ball,
             activity_left: Vec::new(),
@@ -440,6 +453,11 @@ impl Instance {
             objects: HashMap::new(),
             lit: HashSet::new(),
             tanks: HashMap::new(),
+            fed: HashMap::new(),
+            rots: HashMap::new(),
+            next_yard_tick: 0,
+            pond_water: HashSet::new(),
+            portable: HashMap::new(),
             tops: HashMap::new(),
             busy: HashSet::new(),
             next_garden_tick: 0,
@@ -568,6 +586,8 @@ impl Instance {
             self.pb_tick(now);
             self.arcade_tick(now);
             self.garden_tick(now);
+            self.yard_tick(now);
+            self.skate_tick(now);
             self.lucky_tick(now);
             self.lab_tick(now);
             self.boat_tick(now);
@@ -804,6 +824,7 @@ impl Instance {
         self.bowl_hello(id);
         self.arena_hello(id);
         self.pb_hello(id);
+        self.skate_hello(id);
         self.arcade_hello(id);
         self.stats
             .population
@@ -823,7 +844,9 @@ impl Instance {
         self.bowl_leave_all(id);
         self.arena_leave(id);
         self.pb_leave(id);
+        self.skate_leave(id);
         self.arcade_leave(id, None);
+        self.fold_chairs(id);
         let Some(a) = self.avatars.remove(&id) else {
             return;
         };
@@ -969,17 +992,33 @@ impl Instance {
             ClientMsg::PbLeave {} => self.pb_leave(id),
             ClientMsg::PbStart { bots } => self.pb_start(id, bots, now),
             ClientMsg::PbMove { x, y, aim } => self.pb_move(id, x, y, aim, now),
+            ClientMsg::SkateOn { on, kit } => self.skate_on(id, on, kit, now),
+            ClientMsg::SkateMove {
+                x,
+                y,
+                z,
+                dir,
+                pose,
+                trick,
+                spin,
+            } => self.skate_move(id, x, y, z, dir, pose, trick, spin, now),
+            ClientMsg::SkateScore {
+                kind,
+                points,
+                label,
+            } => self.skate_score(id, kind, points, label, now),
             ClientMsg::PbFire { shot, x, y, aim } => self.pb_fire(id, shot, x, y, aim, now),
             ClientMsg::PbDash {} => self.pb_dash(id, now),
             ClientMsg::PbReload {} => self.pb_reload(id, now),
             ClientMsg::PlotAction { x, y, action, item } => {
                 self.plot_action(id, (x, y), action, item, now)
             }
-            ClientMsg::Place { item, x, y } => self.place(id, item, (x, y)),
+            ClientMsg::Place { item, x, y, rot } => self.place(id, item, (x, y), rot),
             ClientMsg::Pickup { x, y } => self.pickup(id, (x, y)),
             ClientMsg::UseObject { x, y } => self.use_object(id, (x, y)),
             ClientMsg::TankPut { x, y, fish } => self.tank_put(id, (x, y), fish),
             ClientMsg::TankTake { x, y, index } => self.tank_take(id, (x, y), index),
+            ClientMsg::TankFeed { x, y } => self.tank_feed(id, (x, y)),
             ClientMsg::JamNote {
                 instrument,
                 pitch,
@@ -1009,6 +1048,10 @@ impl Instance {
         // moves you, nothing else. And nobody walks into the arena mid-match.
         if self.arena_fighting(id) || self.pb_playing(id) || self.arena_closed(target) {
             return;
+        }
+        // On a board at the skatepark: walking off is getting off first.
+        if self.skating(id) {
+            self.skate_off(id, now);
         }
         // In a boat the captain rows; passengers go where the boat goes.
         if self.is_captain(id) {

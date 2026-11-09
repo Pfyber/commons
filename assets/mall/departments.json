@@ -81,6 +81,8 @@
         {"item": "sunflowers", "price": 60},
         {"item": "yard_lamp", "price": 110},
         {"item": "garden_pond", "price": 150},
+        {"item": "round_pond", "price": 2000, "always": true},
+        {"item": "lawn_chair", "price": 120, "always": true},
         {"item": "golden_postbox", "price": 150, "limited": 3}
       ]
     },

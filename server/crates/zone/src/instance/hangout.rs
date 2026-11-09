@@ -44,16 +44,16 @@ impl Instance {
         let seat_tile = if seat == SEAT_GROUND {
             tile
         } else {
-            let Some(s) = self.zone.furniture.seats.get(&seat) else {
+            let Some(at) = self.seat_tile(seat) else {
                 return self.error(id, error_code::BAD_MESSAGE, "that's not a seat");
             };
             if self.seat_occupant.contains_key(&seat) {
                 return self.error(id, error_code::SEAT_TAKEN, "someone is sitting there");
             }
-            if !adjacent(tile, s.tile) {
+            if !adjacent(tile, at) {
                 return self.error(id, error_code::TOO_FAR, "walk a little closer");
             }
-            s.tile
+            at
         };
 
         let a = self.avatars.get_mut(&id).unwrap();
@@ -85,9 +85,9 @@ impl Instance {
                 .iter()
                 .filter(|&(&s, &who)| {
                     who != id
-                        && self.zone.furniture.seats.get(&s).is_some_and(|s| {
-                            (s.tile.0 as i32 - seat_tile.0 as i32).abs() <= 1
-                                && (s.tile.1 as i32 - seat_tile.1 as i32).abs() <= 1
+                        && self.seat_tile(s).is_some_and(|s| {
+                            (s.0 as i32 - seat_tile.0 as i32).abs() <= 1
+                                && (s.1 as i32 - seat_tile.1 as i32).abs() <= 1
                         })
                 })
                 .map(|(_, &who)| who)

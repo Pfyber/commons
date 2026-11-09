@@ -1,4 +1,4 @@
-// The Mossy Mug café's art (ADR 0021): fireside armchairs, the long counter
+// The Cozy Cup café's art (ADR 0021): fireside armchairs, the long counter
 // (beer taps at one end, the coffee machine, cups and a cake stand at the
 // other), the shelves behind it (bottles, then coffee jars and mugs) and
 // the chalkboard menu. Drawn at 32×32 a tile like the rest.

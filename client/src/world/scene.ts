@@ -7,8 +7,9 @@
 // is drawn and undone just after, so the rest of the game only ever sees the
 // flat world and goes through `screenToWorld` / `tileToScreen` for the screen.
 
-import { type Application, Container, Graphics, Matrix, MeshPlane, Rectangle, RenderTexture, Sprite, Texture, UPDATE_PRIORITY } from "pixi.js";
+import { type Application, Container, type Filter, Graphics, Matrix, MeshPlane, Rectangle, RenderTexture, Sprite, Texture, UPDATE_PRIORITY } from "pixi.js";
 import { onSettings } from "../settings";
+import { BOWL_BLOCK, bowlArt, bowlGeom, bowlWallBlock } from "./amphitheatre";
 import { TILE, bakeChunk, decorTexture, hash, newTagTexture, objectTexture } from "./art";
 import { itemTexture } from "./items";
 import { type MapObject, type ZoneMap, groundAt } from "./map";
@@ -28,10 +29,25 @@ const NEAR = 0.25;
 const FAR = 60;
 /** Lying flat on the ground (a blanket, the dance floor) rather than standing up. */
 const lying = new WeakSet<Container>();
+/**
+ * Wall tiles running away from the camera: in 3D each stands as a real box,
+ * its faces in true perspective, as tall as the wall at the back of the room
+ * (their edges run straight, not in steps). What each one's faces show.
+ */
+const standingWalls = new WeakMap<Container, Texture>();
+const WALLS = new Set(["wall", "wood_wall", "neon_wall", "library_wall", "home_wall_cap"]);
+
+/** Whether the wall at (x, y) is part of a run going north to south (and not a corner of one going across). */
+function wallRun(map: ZoneMap, x: number, y: number): boolean {
+  const wall = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < map.width && yy < map.height && WALLS.has(map.decor_legend[map.decor[yy * map.width + xx]]);
+  return (wall(x, y - 1) || wall(x, y + 1)) && !wall(x - 1, y) && !wall(x + 1, y);
+}
 /** Flat things bigger than this (tiles, either way) are laid in true perspective, as the ground is. */
 const LAY_TILES = 1.5;
 /** Vertices along a ground chunk's edge (a chunk's bent a little between them). */
 const CHUNK_VERTS = 15;
+/** Vertices along each side of a wall box's face. */
+const WALL_VERTS = 3;
 /** How much ground (px) one cell of a laid thing's grid spans. */
 const LAY_STEP = 64;
 
@@ -67,7 +83,7 @@ const WALL_ABOVE = 1.5;
 const HUD_PX = 72;
 /** Decor drawn flat on the ground. */
 /** Objects that lie flat (people stand on them): the dance floor, the paintball field's markings, pads and bases. */
-const FLAT_OBJECTS = new Set(["dance_floor", "concert_stage", "pb_field", "pb_pad", "pb_spawn", "arena_spikes", "arena_carpet", "arena_bowl"]);
+const FLAT_OBJECTS = new Set(["dance_floor", "concert_stage", "pb_field", "pb_pad", "pb_spawn", "arena_spikes", "arena_carpet", "arena_bowl", "sk_quarter", "sk_kicker", "sk_box", "sk_stairs", "sk_rail", "sk_paint"]);
 /** Drawn from above and laid on the ground in 3D, though they sort like things standing there. */
 const LAID_OBJECTS = new Set(["arena_gate_w", "arena_gate_e", "goal", "pb_x", "pb_snake", "pb_hedge", "bowling_lane", "pool_table", "roulette_table", "blackjack_table"]);
 /** What's around a map smaller than the screen; indoors in 3D, the dark over the walls. */
@@ -78,6 +94,11 @@ const STANDS_ABOVE: Record<string, number> = { stall: 30 };
 const FLAT = new Set(["blanket", "lilypad", "mushrooms", "wildflowers", "daisies", "clover", "pebbles", "bones"]);
 /** Decor that sways in the wind. */
 const SWAY = new Set(["tree", "pine", "apple_tree", "bush", "tallgrass", "reeds", "willow", "willow_curtain", "pine_secret", "fern", "palm", "dry_shrub"]);
+
+/** Where a fountain's pedestal stands (world px down): the middle of its basin. */
+export function fountainFoot(o: MapObject): number {
+  return o.y * TILE + (o.h * TILE) / 2 - 2;
+}
 
 /** Side-by-side bench tiles draw as one long bench (one seat per tile). */
 function benchPiece(map: ZoneMap, x: number, y: number): string {
@@ -214,6 +235,10 @@ export class Scene {
   private haze: Sprite | null = null;
   /** Flat things laid in perspective (3D), and the layers drawn in world coordinates that lie flat. */
   private laid = new Map<Container, Laid>();
+  /** The arena bowl's walls, stood up in 3D: each face, where its corners are, and its depth. */
+  private bowlFaces: { m: MeshPlane; at: (u: number, v: number) => [number, number, number]; foot: number; n: number }[] | null = null;
+  /** The wall tiles stood up as boxes in 3D: their faces (nearest the top of the drawing order last). */
+  private wallBoxes = new Map<Container, MeshPlane[]>();
   private flatLayers = new Set<Container>();
   private flatOver = new WeakSet<Container>();
   private offSettings: () => void;
@@ -235,7 +260,7 @@ export class Scene {
     this.rows = Math.ceil(map.height / CHUNK);
     this.placed = map.objects
       // Drawn elsewhere, or invisible.
-      .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot" && o.kind !== "forage" && o.kind !== "arena" && o.kind !== "yard_stand" && o.kind !== "boat_lake" && (!o.kind.startsWith("lab_") || o.kind === "lab_exit" || o.kind === "lab_heart"))
+      .filter((o) => o.kind !== "grove_slot" && o.kind !== "nook" && o.kind !== "spot" && o.kind !== "sk_park" && o.kind !== "forage" && o.kind !== "arena" && o.kind !== "yard_stand" && o.kind !== "yard" && !(map.name === "Home" && o.kind === "arcade_cabinet") && o.kind !== "boat_lake" && (!o.kind.startsWith("lab_") || o.kind === "lab_exit" || o.kind === "lab_heart"))
       .map((o) => ({ o, x0: o.x - 1, y0: o.y - 4, x1: o.x + o.w, y1: o.y + o.h, sprite: null, art: null, hiddenAt: 0, parts: [], extras: [] }));
     this.resize();
   }
@@ -290,16 +315,29 @@ export class Scene {
 
   /** Draws a placed object (and what's on show on it). */
   private show(p: (typeof this.placed)[number]) {
-    p.art ??= objectTexture(p.o);
+    // A fountain: its basin lies on the ground, its pedestal stands in the middle of it.
+    const fountain = p.o.kind === "fountain";
+    p.art ??= objectTexture(fountain ? { ...p.o, kind: "fountain_basin" } : p.o);
     const { texture, overhang, left } = p.art;
     const cut = STANDS_ABOVE[p.o.kind];
     const s = new Sprite(cut ? this.artPart(p, 0, cut) : texture);
     s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
     // The dance floor lies flat: people stand on it, not behind it.
     s.zIndex = FLAT_OBJECTS.has(p.o.kind) ? p.o.y * TILE + 1 : (p.o.y + p.o.h) * TILE - 1;
-    if (FLAT_OBJECTS.has(p.o.kind) || LAID_OBJECTS.has(p.o.kind)) lying.add(s);
+    if (FLAT_OBJECTS.has(p.o.kind) || LAID_OBJECTS.has(p.o.kind) || fountain) lying.add(s);
     this.sorted.addChild(s);
     p.sprite = s;
+    // The shop inside the skatepark's van sorts behind its seller, but in 3D stands where the van does.
+    if (p.o.kind === "sk_shop_back") this.feet.set(s, (p.o.y + 4) * TILE - 1);
+    if (fountain) {
+      const ped = new Sprite(objectTexture({ ...p.o, kind: "fountain_pedestal" }).texture);
+      ped.position.copyFrom(s.position);
+      ped.zIndex = s.zIndex + 0.1;
+      // (It stands on the basin's floor, in the middle.)
+      this.feet.set(ped, fountainFoot(p.o));
+      this.sorted.addChild(ped);
+      p.extras.push(ped);
+    }
     if (cut) {
       // Its floor lies flat, and what stands, stands along the floor's back edge.
       this.feet.set(s, s.position.y + cut);
@@ -395,12 +433,126 @@ export class Scene {
         // Flat things lie under whoever stands on them.
         s.zIndex = FLAT.has(kind) ? y * TILE + 1 : y * TILE + TILE - 2;
         if (FLAT.has(kind)) lying.add(s);
+        // (A home's side walls wear the same paper as its back wall.)
+        if (WALLS.has(kind) && wallRun(map, x, y)) standingWalls.set(s, (kind === "home_wall_cap" ? decorTexture("home_wall", hash(x, y, 5)) : tex) ?? tex);
         this.sorted.addChild(s);
         chunk.props.push(s);
         if (SWAY.has(kind)) chunk.sway.push({ s, x, y, phase: hash(x, y, 13) % 628 });
+        if (kind === "swing") this.hangSwing(s, x, y, chunk);
       }
     }
     this.chunks.set(cy * this.cols + cx, chunk);
+  }
+
+  /**
+   * A swing: the Old Oak's hangs from its branch; any other stands in a
+   * frame of its own. What swings (the ropes and the seat) hangs from the
+   * top, to be swung (`setSwing`).
+   */
+  private hangSwing(s: Sprite, x: number, y: number, chunk: Chunk) {
+    const foot = y * TILE + TILE - 2;
+    const oak = this.map.objects.some((o) => o.kind === "old_oak" && x >= o.x - 1 && x <= o.x + o.w && y >= o.y + o.h - 1 && y <= o.y + o.h + 2);
+    let ropes = s;
+    let len = 117;
+    if (!oak) {
+      s.texture = decorTexture("swing_frame", 0) ?? s.texture;
+      ropes = new Sprite(decorTexture("swing_ropes", 0) ?? Texture.EMPTY);
+      ropes.zIndex = s.zIndex + 0.1;
+      this.sorted.addChild(ropes);
+      chunk.props.push(ropes);
+      len = 66;
+    }
+    ropes.anchor.set(0.5, 0);
+    ropes.position.set(x * TILE + TILE / 2, foot - (oak ? 128 : 74));
+    this.standOn(ropes, foot);
+    this.swings.set(y * this.map.width + x, { ropes, len });
+  }
+
+  /** The swings, by tile index: what swings, and how far its seat hangs below the pivot. */
+  private swings = new Map<number, { ropes: Sprite; len: number }>();
+
+  /**
+   * Swings the swing at (x, y) to angle `th` (0 at rest; forward is toward
+   * you): the seat swings out and up, the ropes foreshortened. How far the
+   * seat moves on screen (px, for whoever sits on it).
+   */
+  setSwing(x: number, y: number, th: number): number {
+    const sw = this.swings.get(y * this.map.width + x);
+    if (!sw || sw.ropes.destroyed) return 0;
+    const k = Math.cos(th) + 0.6 * Math.sin(th);
+    sw.ropes.scale.set(1 + 0.08 * Math.sin(th), k);
+    return sw.len * (k - 1);
+  }
+
+  /** Whether there's a swing at (x, y). */
+  isSwing(x: number, y: number): boolean {
+    return this.swings.has(y * this.map.width + x);
+  }
+
+  /**
+   * Filters for a flat layer once it's laid on the ground in 3D (applied to
+   * what's drawn there, not while it's drawn into its texture, which would
+   * shift and clip them).
+   */
+  private laidFilters = new WeakMap<Container, Filter[]>();
+  setLaidFilters(c: Container, filters: Filter[]) {
+    this.laidFilters.set(c, filters);
+    const l = this.laid.get(c);
+    if (l) l.mesh.filters = filters;
+  }
+
+  /** What the advanced shaders draw themselves (a reflection): never shadowed or reflected again. */
+  private fxSkip = new WeakSet<Container>();
+  skipFx(c: Container) {
+    this.fxSkip.add(c);
+  }
+
+  /** Where `c` stands on the ground (world px): its feet, as the 3D view has them. */
+  groundOf(c: Container): number {
+    return this.footOf(c);
+  }
+
+  /** Whether the 3D view is on now. */
+  get is3d(): boolean {
+    return this.view3d;
+  }
+
+  /** Something drawn over the world on screen (the advanced shaders' haze): just above it, under the night's shade. */
+  overWorld(c: Container) {
+    this.app.stage.addChildAt(c, this.app.stage.getChildIndex(this.world) + 1);
+  }
+
+  /**
+   * What's standing in the world now (for the advanced shaders' shadows and
+   * reflections): every visible picture that stands up, not what lies flat.
+   */
+  standing(): Sprite[] {
+    const out: Sprite[] = [];
+    for (const c of this.sorted.children) {
+      if (!(c instanceof Sprite) || c instanceof MeshPlane || !c.visible || c.alpha < 0.3 || !c.renderable) continue;
+      if (lying.has(c) || this.flatLayers.has(c) || this.asIs.has(c) || standingWalls.has(c) || this.fxSkip.has(c) || c.zIndex >= 1e7) continue;
+      if (c.texture.height * Math.abs(c.scale.y) < 10) continue;
+      out.push(c);
+    }
+    return out;
+  }
+
+  /** The ground round these tiles is baked again (a pond dug in or filled). */
+  repaintAt(x0: number, y0: number, x1: number, y1: number) {
+    for (let cy = Math.floor((y0 - 1) / CHUNK); cy <= Math.floor((y1 + 1) / CHUNK); cy++) {
+      for (let cx = Math.floor((x0 - 1) / CHUNK); cx <= Math.floor((x1 + 1) / CHUNK); cx++) {
+        const key = cy * this.cols + cx;
+        const c = this.chunks.get(key);
+        if (c) this.unload(key, c);
+      }
+    }
+    this.loaded = null;
+  }
+
+  /** Everything's baked again, as it's come into view: the room's been done up. */
+  repaint() {
+    for (const [key, c] of [...this.chunks]) this.unload(key, c);
+    this.loaded = null;
   }
 
   private unload(key: number, c: Chunk) {
@@ -699,7 +851,7 @@ export class Scene {
   /** The setting, unless the view's locked (it must be the same for everyone). */
   private apply3d() {
     this.view3d = this.want3d && !this.locked;
-    this.app.renderer.background.color = this.view3d && !this.map.streets ? ROOF_DARK : HEDGE;
+    this.app.renderer.background.color = (this.view3d && !this.map.streets) || this.map.name === "Home" ? ROOF_DARK : HEDGE;
     if (!this.view3d) {
       this.ground3d.visible = false;
       if (this.haze) this.haze.visible = false;
@@ -804,6 +956,7 @@ export class Scene {
     }
     if (!l) {
       l = { mesh: groundMesh(texture, n), texture, rt, n };
+      l.mesh.filters = this.laidFilters.get(c) ?? null;
       this.laid.set(c, l);
       this.sorted.addChild(l.mesh);
     }
@@ -886,7 +1039,166 @@ export class Scene {
   }
 
   /** Meshes for things that went away go too. */
+  /** One face of a wall box: `at` gives each corner's ground point and height. */
+  private layFace(m: MeshPlane, at: (u: number, v: number) => [number, number, number], cam: ReturnType<Scene["camera"]>, n = WALL_VERTS) {
+    const pos = m.geometry.positions;
+    const limit = cam.fy + (cam.d * (1 - NEAR)) / COS - 1;
+    let k = 0;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const [wx, wy, h] = at(i / (n - 1), j / (n - 1));
+        const p = this.project(wx, Math.min(wy, limit), cam)!;
+        pos[k++] = p.x;
+        pos[k++] = p.y - h * p.s;
+      }
+    }
+    m.geometry.getBuffer("aPosition").update();
+    m.visible = true;
+  }
+
+  /**
+   * The arena bowl's painted walls, stood up (built the first time it's in
+   * view): its outer wall and the podium wall round the sand, block by block
+   * on the painting's own grid (square, stepped edges, as the town is
+   * drawn), each face wearing the very pixels the painting has there.
+   */
+  private standBowl(cam: ReturnType<Scene["camera"]>) {
+    const p = this.placed.find((q) => q.o.kind === "arena_bowl");
+    if (!p?.sprite) {
+      for (const f of this.bowlFaces ?? []) f.m.visible = false;
+      return;
+    }
+    // (If its picture was ever let go, it's built again from a fresh one.)
+    if (this.bowlFaces?.some((f) => f.m.destroyed || !f.m.texture?.source)) {
+      for (const f of this.bowlFaces) if (!f.m.destroyed) f.m.destroy();
+      this.bowlFaces = null;
+    }
+    if (!this.bowlFaces) {
+      const o = p.o;
+      const g = bowlGeom(o.w, o.h);
+      const art = bowlArt(o.w, o.h);
+      // Its own copy of the painting: the bowl's sprite lets its picture go
+      // when it's out of view for long, and these must never be left
+      // drawing a picture that's gone (that stops everything drawing).
+      const copy = document.createElement("canvas");
+      copy.width = art.c.width;
+      copy.height = art.c.height;
+      copy.getContext("2d")!.drawImage(art.c, 0, 0);
+      const tex = Texture.from(copy);
+      tex.source.scaleMode = "nearest";
+      const [x0, y0] = [o.x * TILE, o.y * TILE];
+      const B = BOWL_BLOCK;
+      const [cols, rows] = [g.W / B, g.H / B];
+      const cells = new Map<number, { kind: number; z: number }>();
+      const cell = (i: number, j: number) => {
+        if (i < 0 || j < 0 || i >= cols || j >= rows) return { kind: 0, z: 0 };
+        const k = j * cols + i;
+        let c = cells.get(k);
+        if (!c) cells.set(k, (c = bowlWallBlock(g, i * B, j * B)));
+        return c;
+      };
+      const same = (a: { kind: number; z: number }, b: { kind: number; z: number }) => a.kind === b.kind && a.z === b.z;
+      const faces: NonNullable<Scene["bowlFaces"]> = [];
+      // A face: `at` its corners in the world, `uv` where each is in the painting.
+      const add = (n: number, at: (u: number, v: number) => [number, number, number], uv: (u: number, v: number) => [number, number], tint = 0xffffff) => {
+        const m = groundMesh(tex, n);
+        m.tint = tint;
+        const uvs = m.geometry.uvs;
+        let k = 0;
+        for (let j = 0; j < n; j++) {
+          for (let i = 0; i < n; i++) {
+            const [ux, uy] = uv(i / (n - 1), j / (n - 1));
+            uvs[k++] = ux / art.c.width;
+            uvs[k++] = uy / art.c.height;
+          }
+        }
+        m.geometry.getBuffer("aUV").update();
+        this.sorted.addChild(m);
+        const foot = Math.max(at(0, 1)[1], at(1, 1)[1], at(0, 0)[1], at(1, 0)[1]);
+        faces.push({ m, at, foot, n });
+      };
+      // Where a point `h` up is painted (from the art's top-left).
+      const paint = (wx: number, wy: number, h: number): [number, number] => [wx - x0, wy - y0 - h + art.overhang];
+      for (let j = 0; j < rows; j++) {
+        for (let i = 0; i < cols; ) {
+          const c = cell(i, j);
+          if (!c.kind) {
+            i++;
+            continue;
+          }
+          // A run of like blocks along the row: one top, one face where it drops to the south.
+          let i1 = i;
+          while (i1 + 1 < cols && same(cell(i1 + 1, j), c)) i1++;
+          const [ax, bx, ay, by, z] = [x0 + i * B, x0 + (i1 + 1) * B, y0 + j * B, y0 + (j + 1) * B, c.z];
+          const n = Math.min(9, i1 - i + 2);
+          add(n, (u, v) => [ax + (bx - ax) * u, ay + (by - ay) * v, z], (u, v) => paint(ax + (bx - ax) * u, ay + (by - ay) * v, z));
+          for (let k = i; k <= i1; ) {
+            if (same(cell(k, j + 1), c)) {
+              k++;
+              continue;
+            }
+            let k1 = k;
+            while (k1 + 1 <= i1 && !same(cell(k1 + 1, j + 1), c)) k1++;
+            const [fx, gx] = [x0 + k * B, x0 + (k1 + 1) * B];
+            add(Math.min(9, k1 - k + 2), (u, v) => [fx + (gx - fx) * u, by, z * (1 - v)], (u, v) => paint(fx + (gx - fx) * u, by, z * (1 - v)));
+            k = k1 + 1;
+          }
+          // Its ends, where the wall steps: their sides, a shade darker.
+          const side = (x: number) =>
+            add(3, (u, v) => [x, ay + (by - ay) * u, z * (1 - v)], (u) => paint(x + (x === ax ? 1 : -1), ay + (by - ay) * u, z), 0xb3a495);
+          if (!same(cell(i - 1, j), c)) side(ax);
+          if (!same(cell(i1 + 1, j), c)) side(bx);
+          i = i1 + 1;
+        }
+      }
+      this.bowlFaces = faces;
+    }
+    for (const f of this.bowlFaces) {
+      f.m.zIndex = f.foot;
+      this.layFace(f.m, f.at, cam, f.n);
+    }
+  }
+
+  /** A wall tile as a box: the side that faces the camera, its south end, its top. */
+  private standWall(c: Sprite, cam: ReturnType<Scene["camera"]>) {
+    const face = standingWalls.get(c)!;
+    let box = this.wallBoxes.get(c);
+    if (!box) {
+      const side = () => {
+        const m = groundMesh(face, WALL_VERTS);
+        m.tint = 0xd8d2ca;
+        return m;
+      };
+      const top = groundMesh(Texture.WHITE, WALL_VERTS);
+      top.tint = 0x2b1f17;
+      box = [side(), side(), groundMesh(face, WALL_VERTS), top];
+      this.sorted.addChild(...box);
+      this.wallBoxes.set(c, box);
+    }
+    const [west, east, end, top] = box;
+    const x0 = c.position.x - TILE / 2;
+    const x1 = x0 + TILE;
+    const y1 = c.position.y;
+    const y0 = y1 - TILE;
+    const h = face.height;
+    for (const m of box) m.zIndex = c.zIndex;
+    west.visible = east.visible = false;
+    const side = (m: MeshPlane, x: number) => this.layFace(m, (u, v) => [x, y0 + TILE * u, h * (1 - v)], cam);
+    if (cam.fx < x0) side(west, x0);
+    if (cam.fx > x1) side(east, x1);
+    this.layFace(end, (u, v) => [x0 + TILE * u, y1, h * (1 - v)], cam);
+    this.layFace(top, (u, v) => [x0 + TILE * u, y0 + TILE * v, h], cam);
+    this.save(c);
+    c.visible = false;
+  }
+
   private pruneLaid() {
+    for (const [c, box] of this.wallBoxes) {
+      if (c.destroyed || !c.parent) {
+        for (const m of box) m.destroy();
+        this.wallBoxes.delete(c);
+      }
+    }
     for (const [c, l] of this.laid) {
       if (c.destroyed || !c.parent) {
         l.mesh.destroy();
@@ -904,7 +1216,24 @@ export class Scene {
   }
 
   /** Just before the frame is drawn: everything where the tilted camera sees it. */
+  /**
+   * The 3D view's frame, made safe: if anything in it fails, the world is put
+   * back level (drawn flat this frame) rather than left half-tilted and blank,
+   * and what failed is logged once.
+   */
   private tilt() {
+    try {
+      this.tiltNow();
+    } catch (e) {
+      if (!this.tiltFailed) console.error("3D view failed; drawing flat", e);
+      this.tiltFailed = true;
+      this.level();
+    }
+  }
+
+  private tiltFailed = false;
+
+  private tiltNow() {
     if (!this.view3d || !this.world.visible) return;
     const cam = this.camera();
     const w = this.world;
@@ -936,11 +1265,13 @@ export class Scene {
     for (const c of [...this.sorted.children]) {
       if (c instanceof MeshPlane || this.asIs.has(c)) continue;
       if (this.flatLayers.has(c)) this.layFlat(c, cam);
+      else if (c instanceof Sprite && standingWalls.has(c)) this.standWall(c, cam);
       else if (lying.has(c) && c instanceof Sprite && (Math.abs(c.width) > LAY_TILES * TILE || Math.abs(c.height) > LAY_TILES * TILE)) this.laySprite(c, cam);
       else if (c.zIndex === 0 && c.position.x === 0 && c.position.y === 0) this.placeWhole(c, cam);
       else if (lying.has(c)) this.place(c, c.position.y, true, cam);
       else this.place(c, this.footOf(c), false, cam);
     }
+    this.standBowl(cam);
     this.layers3d = this.layers3d.filter((l) => !l.c.destroyed);
     const inLayer = new Set(this.layers3d.map((l) => l.c));
     for (const c of w.children) {
@@ -990,6 +1321,8 @@ export class Scene {
     }
     this.saved.length = 0;
     for (const l of this.laid.values()) l.mesh.visible = false;
+    for (const box of this.wallBoxes.values()) for (const m of box) m.visible = false;
+    for (const f of this.bowlFaces ?? []) f.m.visible = false;
     this.world.position.set(this.worldAt.x, this.worldAt.y);
     this.world.scale.set(this.worldAt.s);
     this.ground.visible = true;

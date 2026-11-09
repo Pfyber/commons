@@ -7,6 +7,8 @@ pub const SEED: u8 = 0;
 pub const SPROUT: u8 = 1;
 pub const GROWING: u8 = 2;
 pub const RIPE: u8 = 3;
+/// How much faster a plant grows under a UV light.
+pub const UV_SPEED: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Growth {

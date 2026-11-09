@@ -15,12 +15,12 @@ import { Panel, button, el } from "./panels";
 
 type Tab = "shop" | "mine" | "hair" | "outfit" | "hat" | "extras" | "skin";
 const TABS: [Tab, string][] = [
-  ["mine", "Mine"],
+  ["mine", "My clothes & suits"],
   ["hair", "Hair"],
   ["outfit", "Outfit"],
   ["hat", "Hat"],
   ["extras", "Extras"],
-  ["skin", "Skin"],
+  ["skin", "Skin colour"],
 ];
 const SLOTS = ["outfit", "hat", "accessory", "skin"] as const;
 const SLOT_NAMES: Record<string, string> = { outfit: "Outfits", hat: "Hats", accessory: "Accessories", skin: "Full-body skins" };

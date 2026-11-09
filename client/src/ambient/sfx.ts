@@ -48,6 +48,21 @@ export function setSfxMuted(m: boolean) {
   }
 }
 
+/** The effects' output, or null while muted (for sounds made elsewhere: the skatepark's). */
+export function sfxOut(): GainNode | null {
+  return bus();
+}
+
+/** A second of white noise, looped by whatever needs a hiss or a rumble. */
+export function sfxNoise(): AudioBuffer {
+  return noiseBuffer(audio());
+}
+
+/** How loud what's played now is heard (see `withScale`). */
+export function sfxScale(): number {
+  return scale;
+}
+
 /** The effects' output, or null while muted. */
 function bus(): GainNode | null {
   if (muted) return null;
@@ -730,11 +745,120 @@ class SkateRoll {
 }
 
 export const skate = new SkateRoll();
+
+/**
+ * The Vespa: a recording of its balloon exhaust (public/sfx/vespa.wav, a
+ * looped "pop-pop-pop"), played like an engine. Its revs follow the ride: a
+ * slow, lazy popping standing still; on the throttle (speeding up) it revs
+ * hard, the pops coming quicker and higher, climbing as the speed builds;
+ * cruising, a steady quick putter; easing off and pulling up, it slows back
+ * down to idle.
+ */
+class VespaPutt {
+  private src: AudioBufferSourceNode | null = null;
+  private tone: BiquadFilterNode | null = null;
+  private gain: GainNode | null = null;
+  /** The recording, once loaded (null: not yet; false: couldn't be had). */
+  private buffer: AudioBuffer | null | false = null;
+  private loading = false;
+  /** The engine's revs (0 idle to about 1.2 flat out on the throttle), and how hard it's pushed now. */
+  private rpm = 0;
+  private throttle = 0;
+  private lastSpeed = 0;
+  private last = 0;
+
+  private load() {
+    if (this.loading) return;
+    this.loading = true;
+    fetch("/sfx/vespa.wav")
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then((b) => audio().decodeAudioData(b))
+      .then((buf) => (this.buffer = buf))
+      .catch(() => (this.buffer = false));
+  }
+
+  /**
+   * Every frame: whether you're on it, and how fast it's going (0 standing
+   * to 1 flat out).
+   */
+  update(on: boolean, speed: number, now: number) {
+    if (!on || muted) return this.stop();
+    if (!this.buffer) return this.load();
+    if (!this.src) this.start(this.buffer);
+    if (!this.src || !this.tone || !this.gain) return;
+    const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
+    this.last = now;
+    if (dt <= 0) return;
+    speed = Math.max(0, Math.min(1, speed));
+    // Speeding up is the throttle open; slowing down, closed.
+    const accel = (speed - this.lastSpeed) / dt;
+    this.lastSpeed = speed;
+    const want = accel > 0.02 ? Math.min(1, accel * 3) : 0;
+    this.throttle += (want - this.throttle) * Math.min(1, dt * (want > this.throttle ? 8 : 3));
+    // The revs: idle, plus the speed, plus a kick on the throttle. Up fast, down a little slower.
+    const target = 0.08 + speed * 0.82 + this.throttle * 0.3;
+    this.rpm += (target - this.rpm) * Math.min(1, dt * (target > this.rpm ? 3.2 : 2.2));
+    const rpm = this.rpm;
+    const t = audio().currentTime;
+    // Faster and higher as it revs (the recording's pops come quicker).
+    this.src.playbackRate.setTargetAtTime(0.78 + rpm * 0.95 + this.throttle * 0.12, t, 0.05);
+    // Mellow at idle, brighter as it revs; louder on the throttle. (The
+    // recording's loud: it's played well down.)
+    this.tone.frequency.setTargetAtTime(1400 + rpm * 5200 + this.throttle * 1500, t, 0.05);
+    this.gain.gain.setTargetAtTime((0.05 + rpm * 0.035 + this.throttle * 0.02) * scale, t, 0.08);
+  }
+
+  private start(buf: AudioBuffer) {
+    const o = bus();
+    if (!o) return;
+    const a = audio();
+    const t = a.currentTime;
+    const src = a.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.playbackRate.value = 0.78;
+    const tone = a.createBiquadFilter();
+    tone.type = "lowpass";
+    tone.frequency.value = 1400;
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.05 * scale, t + 0.15);
+    src.connect(tone).connect(g).connect(o);
+    // (From a random point in the loop, so it never starts on the same pop.)
+    src.start(t, Math.random() * buf.duration);
+    this.src = src;
+    this.tone = tone;
+    this.gain = g;
+    this.rpm = 0;
+    this.throttle = 0;
+    this.lastSpeed = 0;
+    this.last = 0;
+  }
+
+  stop() {
+    if (!this.src || !this.gain) return;
+    const t = audio().currentTime;
+    this.gain.gain.cancelScheduledValues(t);
+    this.gain.gain.setValueAtTime(this.gain.gain.value, t);
+    this.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    // (As it dies away, the engine winds down.)
+    this.src.playbackRate.cancelScheduledValues(t);
+    this.src.playbackRate.setValueAtTime(this.src.playbackRate.value, t);
+    this.src.playbackRate.linearRampToValueAtTime(0.5, t + 0.3);
+    this.src.stop(t + 0.35);
+    this.src = null;
+    this.tone = null;
+    this.gain = null;
+  }
+}
+
+export const vespa = new VespaPutt();
 // Frames stop in a background tab; so should the rumble and the rolling.
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       skate.stop();
+      vespa.stop();
       poolRoll.stop();
     }
   });

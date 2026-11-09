@@ -49,6 +49,11 @@ const GROUND: &[&str] = &[
     "brick",
     // The woods' floor: moss and fallen leaves.
     "moss",
+    // Outside a home's walls: nothing.
+    "home_void",
+    // The skatepark's smooth concrete, and the inner ring road where it runs through it.
+    "skate",
+    "skate_road",
 ];
 const DECOR: &[&str] = &[
     "none",
@@ -126,6 +131,11 @@ const DECOR: &[&str] = &[
     "bench_v",
     // The café's fireside armchairs (seats).
     "armchair",
+    // A home's walls: papered, with windows; a cap on the sides; low at the front.
+    "home_wall",
+    "home_window",
+    "home_wall_cap",
+    "home_wall_low",
 ];
 
 fn g(name: &str) -> u8 {
@@ -249,7 +259,7 @@ impl Builder {
             d("willow_curtain"),
             d("pine_secret"),
         ];
-        let blocked_ground = [g("water"), g("fog")];
+        let blocked_ground = [g("water"), g("fog"), g("home_void")];
         let collision: Vec<u8> = (0..self.ground.len())
             .map(|i| {
                 let blocked = self.solid[i]
@@ -453,51 +463,57 @@ impl Builder {
     }
 }
 
-/// A player's home (spec §8.2): a cottage to furnish, a small garden and a
-/// gate back to the park.
+/// A player's home (spec §8.2): all indoors, a living room with a bedroom
+/// nook through an arch, to furnish and paper as they like. The old cottage's
+/// floor (x 3–16, y 2–8) is kept as it was, so what's placed stays placed.
+/// The arcade games you can play from home.
+const HOME_GAMES: [&str; 6] = [
+    "Light Cycles",
+    "Connect Four",
+    "Memory Match",
+    "Basket Catch",
+    "Turbo Racer",
+    "Tank Duel",
+];
+
 fn home() -> MapFile {
-    let (w, h) = (20u16, 15u16);
+    let (w, h) = (26u16, 15u16);
     let mut b = Builder::new(w, h);
-    for y in 0..h {
-        for x in 0..w {
-            if hash(x / 2, y / 2, 9).is_multiple_of(4) {
-                b.ground(x, y, "grass_dark");
-            }
-        }
-    }
-    // Cottage: wooden floor inside walls, door at the bottom middle.
-    b.rect(3, 2, 14, 7, "floor");
-    for x in 2..18 {
-        b.decor(x, 1, "wall");
+    b.rect(0, 0, w, h, "home_void");
+    b.rect(3, 2, 20, 11, "floor");
+    b.rect(17, 2, 1, 3, "home_void");
+    b.rect(17, 7, 1, 2, "home_void");
+    // The back wall (with its windows), capped sides, and a low front wall to see over.
+    for x in 2..24 {
+        let window = [6, 12, 20].contains(&x);
+        b.decor(x, 1, if window { "home_window" } else { "home_wall" });
         if !(9..=10).contains(&x) {
-            b.decor(x, 9, "wall");
+            b.decor(x, 13, "home_wall_low");
         }
     }
-    for y in 1..10 {
-        b.decor(2, y, "wall");
-        b.decor(17, y, "wall");
+    for y in 2..13 {
+        b.decor(2, y, "home_wall_cap");
+        b.decor(23, y, "home_wall_cap");
     }
-    b.rect(9, 9, 2, 6, "path");
-    // Garden plots west of the path.
-    b.rect(3, 11, 5, 2, "soil");
-    // Fence around the yard, with the gate in the middle of the bottom edge.
-    for x in 0..w {
-        if !(9..=10).contains(&x) {
-            b.decor(x, h - 1, "fence");
+    // The bedroom's wall, with an arch through it.
+    for y in 2..9 {
+        if !(5..=6).contains(&y) {
+            b.decor(17, y, "home_wall_cap");
         }
     }
-    for y in 10..h {
-        b.decor(0, y, "fence");
-        b.decor(w - 1, y, "fence");
-    }
-    b.decor(14, 11, "tree");
-    b.decor(16, 12, "bush");
-    b.decor(1, 0, "pine");
-    b.decor(18, 0, "pine");
-    b.object("city_gate", 9, h - 1, 2, 1, Some("To the city"), true);
+    // A rug by the door, and the hearth at the head of the bedroom.
+    b.rect(6, 10, 8, 2, "rug");
+    b.object("fireplace", 19, 2, 2, 1, Some("Hearth"), true);
+    b.object("home_exit", 9, 13, 2, 1, Some("To the city"), true);
     // A wardrobe against the back wall: change clothes at home.
     b.object("wardrobe", 15, 2, 2, 1, Some("Wardrobe"), true);
-    b.finish("Home", (10, 11))
+    // A paint tin by the door, for the walls and floors.
+    b.object("room_paint", 3, 12, 1, 1, Some("Decorate"), true);
+    // The games a laptop or a cabinet plays: machines nobody sees, under the floor.
+    for (i, game) in HOME_GAMES.iter().enumerate() {
+        b.object("arcade_cabinet", 12 + i as u16, 14, 1, 1, Some(game), false);
+    }
+    b.finish("Home", (10, 12))
 }
 
 fn write(name: &str, map: &MapFile) -> std::io::Result<()> {

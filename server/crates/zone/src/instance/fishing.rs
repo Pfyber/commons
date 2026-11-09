@@ -316,6 +316,9 @@ impl Instance {
     }
 
     fn is_water(&self, t: TilePos) -> bool {
+        if self.pond_water.contains(&t) {
+            return true;
+        }
         let m = &self.zone.map;
         if t.0 >= m.width || t.1 >= m.height {
             return false;

@@ -1,4 +1,6 @@
 import { setBetting } from "./activities/arenabets";
+import { HomeLife } from "./homelife";
+import { DronePanel, RoomPanel } from "./ui/homelife";
 import { netIdle } from "./ui/netsign";
 import { Application } from "pixi.js";
 import cityUrl from "../../assets/maps/city.json?url";
@@ -24,7 +26,7 @@ import { Museum } from "./museum";
 import { ArtCard, ArtCataloguePanel, DeskPanel, NaturePanel, StudioPanel } from "./ui/museum";
 import bowlingUrl from "../../assets/maps/bowling.json?url";
 import paintballUrl from "../../assets/maps/paintball.json?url";
-import { Economy } from "./economy";
+import { Economy, type Item } from "./economy";
 import { Game, type Ui } from "./game";
 import { Homes } from "./homes";
 import { Rent } from "./rent";
@@ -67,7 +69,9 @@ import { Hud } from "./ui/hud";
 import { LOGIN_NOTICE, signIn } from "./ui/login";
 import { JournalPanel, NetGame } from "./ui/nature";
 import { Nature } from "./nature";
-import { ActionMenu, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame } from "./ui/panels";
+import { ActionMenu, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame, button } from "./ui/panels";
+import { isWearable } from "./world/items";
+import { styleFor } from "./world/art";
 import { SettingsPanel } from "./ui/settings";
 import { onSettings } from "./settings";
 import { setSfxVolume } from "./ambient/sfx";
@@ -241,6 +245,7 @@ async function main() {
     void travel({ zone: "city" }).then(() => window.setTimeout(() => (game as Game | null)?.walkToSpot(spot), 1500));
   };
   const place = new PlaceBanner(() => place.hide());
+  const life = new HomeLife(auth, eco);
   const friendActions = {
     join: (f: { id: string }) => void travel({ friend: f.id }),
     visit: (f: { id: string }) => void travel({ zone: "home", owner: f.id }),
@@ -435,6 +440,28 @@ async function main() {
     if (reader.open && g && !g.zoneId.startsWith("library") && !library.isBorrowed(reader.bookId)) reader.hide();
   });
   void library.loadLoans().catch(() => {});
+  /** Clothes, hats, extras and full-body skins in the bag: put on or take off right there. */
+  const wearButton = (item: Item) => {
+    if (!isWearable(item.kind)) return null;
+    const shift = 8 * ["outfit", "hat", "accessory", "skin"].indexOf(item.kind);
+    const code = Number(item.meta.code ?? 0);
+    const now = auth.player?.style ?? 0;
+    const on = ((now >>> shift) & 0xff) === code;
+    const b = button(on ? "Take off" : "Wear", () => {
+      const look = auth.player?.look ?? 0;
+      const style = ((now & ~(0xff << shift)) | (on ? 0 : styleFor(item.kind, code))) >>> 0;
+      b.disabled = true;
+      auth
+        .saveLook(look, style)
+        .then(() => {
+          (game as Game | null)?.changeLook(look, style);
+          hud.toast(on ? "👕 Taken off." : "✨ Looking good!", 2500);
+        })
+        .catch((e) => hud.toast(e instanceof ApiError ? e.message : "That didn't work.", 3000))
+        .finally(() => ui.bag.open && ui.bag.render());
+    }, on ? "small" : "small primary-sm");
+    return b;
+  };
   const ui: Ui = {
     eco,
     hud,
@@ -461,13 +488,16 @@ async function main() {
         void (game as Game | null)?.rideOn(rides.ride === item.meta.code ? null : item);
       },
       (item) => rides.ride === item.meta.code,
-      (item) => (game as Game | null)?.bagExtra(item) ?? null,
+      (item) => wearButton(item) ?? (game as Game | null)?.bagExtra(item) ?? null,
       () => (game as Game | null)?.openCrate(),
     ),
     album: new JournalPanel(eco, forage, museum),
     forage,
     net: new NetGame(),
     market: new MarketPanel(eco),
+    life,
+    room: new RoomPanel(eco, life),
+    drone: new DronePanel(eco, life, (text) => (game as Game | null)?.say(text)),
     plot: new PlotMenu(eco, (x, y, action, item) => game?.plotAction(x, y, action, item)),
     reel: new ReelGame(),
     salvage: new SalvageGame(),

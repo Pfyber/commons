@@ -288,6 +288,9 @@ const KIND_ORDER: [string, string][] = [
   ["plant", "Harvest"],
   ["seed", "Seeds"],
   ["furniture", "Furniture"],
+  ["construction", "Construction"],
+  ["room", "Wallpaper & flooring"],
+  ["supply", "Supplies"],
   ["vehicle", "To ride"],
   ["tool", "Tools"],
   ["instrument", "Instruments"],
@@ -297,10 +300,36 @@ const KIND_ORDER: [string, string][] = [
   ["exterior", "For your house"],
   ["ticket", "Arcade tickets"],
   ["crate", "Lucky finds"],
+  ["wear", "Clothes & suits"],
+];
+
+/** Which group an item's listed under (mostly its kind; the shovel's for building, and all you wear together). */
+const groupOf = (it: Item) => (it.key === "shovel" ? "construction" : ["outfit", "hat", "accessory", "skin"].includes(it.kind) ? "wear" : it.kind);
+
+/** The bag's tabs, and the groups each shows. */
+const BAG_TABS: { key: string; label: string; groups: string[] }[] = [
+  { key: "all", label: "All", groups: KIND_ORDER.map(([k]) => k) },
+  { key: "catch", label: "🐟 Catch", groups: ["fish", "junk", "scrap", "plant"] },
+  { key: "garden", label: "🌱 Garden", groups: ["seed"] },
+  { key: "home", label: "🛋️ Home", groups: ["furniture", "supply", "exterior"] },
+  { key: "build", label: "🪏 Construction", groups: ["construction", "room"] },
+  { key: "wear", label: "👕 Clothes", groups: ["wear"] },
+  { key: "gear", label: "🎣 Gear", groups: ["tool", "vehicle", "instrument", "toy"] },
+  { key: "other", label: "🎁 Other", groups: ["wrap", "card", "ticket", "crate"] },
 ];
 
 export class BagPanel extends Panel {
   placeable = false;
+  /** Out in the city: a lawn chair goes down anywhere. */
+  anywhere = false;
+  /** The tab open (remembered on this device). */
+  private tab = (() => {
+    try {
+      return localStorage.getItem("commons.bagTab") ?? "all";
+    } catch {
+      return "all";
+    }
+  })();
 
   constructor(
     private eco: Economy,
@@ -321,10 +350,28 @@ export class BagPanel extends Panel {
     this.body.replaceChildren();
     const coins = el("div", "coins");
     coins.append(icon(this.eco.items.get(COIN)), `${this.eco.coins} coins`);
-    this.body.append(coins);
+    // Tabs to sort by, each with how many different things are in it.
+    const held = [...this.eco.items.values()].filter((i) => this.eco.qty(i.id) > 0);
+    const count = (groups: string[]) => held.filter((i) => groups.includes(groupOf(i))).length;
+    if (!BAG_TABS.some((t) => t.key === this.tab)) this.tab = "all";
+    const tabs = el("div", "tabs bag-tabs");
+    for (const t of BAG_TABS) {
+      const n = count(t.groups);
+      if (!n && t.key !== "all" && t.key !== this.tab) continue;
+      tabs.append(button(`${t.label} ${n}`, () => {
+        this.tab = t.key;
+        try {
+          localStorage.setItem("commons.bagTab", t.key);
+        } catch {}
+        this.render();
+      }, this.tab === t.key ? "on" : ""));
+    }
+    this.body.append(tabs, coins);
+    const shown = BAG_TABS.find((t) => t.key === this.tab)!.groups;
     let any = false;
     for (const [kind, label] of KIND_ORDER) {
-      const items = this.eco.ofKind(kind).filter((i) => this.eco.qty(i.id) > 0);
+      if (!shown.includes(kind)) continue;
+      const items = held.filter((i) => groupOf(i) === kind);
       if (!items.length) continue;
       any = true;
       this.body.append(el("h3", "", label));
@@ -333,7 +380,7 @@ export class BagPanel extends Panel {
         const cell = el("div", "item");
         cell.title = it.name;
         cell.append(icon(it), el("span", "qty", `${this.eco.qty(it.id)}`), el("span", "name", it.name));
-        if (kind === "furniture" && this.placeable) cell.append(button("Place", () => this.onPlace(it), "small"));
+        if (kind === "furniture" && (this.placeable || (this.anywhere && it.meta.portable))) cell.append(button(this.placeable ? "Place" : "Set up", () => this.onPlace(it), "small"));
         if (kind === "seed") cell.append(el("span", "hint", "Tap a garden plot"));
         if (kind === "vehicle" && this.onRide) cell.append(button(this.ridingNow?.(it) ? "Get off" : "Ride", () => this.onRide?.(it), "small"));
         const more = this.extra?.(it);
@@ -351,7 +398,7 @@ export class BagPanel extends Panel {
       }
       this.body.append(grid);
     }
-    if (!any) this.body.append(el("p", "empty", "Your bag is empty. Try fishing at the pond or a look round the Commons Mall."));
+    if (!any) this.body.append(el("p", "empty", this.tab === "all" ? "Your bag is empty. Try fishing at the pond or a look round the Commons Mall." : "Nothing here yet."));
   }
 }
 
@@ -396,7 +443,15 @@ export class MarketPanel extends Panel {
         list.append(row);
       }
     } else {
-      list.append(el("p", "empty", "Seeds, furniture and garden things are sold at the Commons Mall now: the big doors on the north side of the Market."));
+      list.append(el("p", "hint", "Home supplies. Seeds, furniture and garden things are at the Commons Mall: the big doors on the north side of the Market."));
+      for (const it of [...this.eco.items.values()].filter((i) => (i.meta as { market?: boolean }).market)) {
+        const row = el("div", "row");
+        const price = it.meta.buy ?? 0;
+        const buy = button("Buy 1", () => this.act(() => this.eco.buy(it.id, 1)), "small");
+        buy.disabled = this.eco.coins < price;
+        row.append(icon(it), el("span", "name", it.name), el("span", "owned-tag", `🎒 ${this.eco.qty(it.id)}`), el("span", "price", `${price}c`), buy);
+        list.append(row);
+      }
     }
     this.body.append(list);
   }
@@ -616,7 +671,7 @@ export class FishermanPanel extends Panel {
       card.append(icon(rod), text);
       if (owned) card.append(el("span", "fisher-rod-owned", "✓ Yours"));
       else {
-        const buy = button(`Buy · ${price} coins`, () => this.buyRod(), "primary");
+        const buy = button(`Buy · ${price} coins (have ${this.eco.qty(rod.id)})`, () => this.buyRod(), "primary");
         buy.disabled = this.busy || this.eco.coins < price;
         card.append(buy);
       }
@@ -633,7 +688,7 @@ export class FishermanPanel extends Panel {
       card.append(icon(magnet), text);
       if (owned) card.append(el("span", "fisher-rod-owned", "✓ Yours"));
       else {
-        const buy = button(`Buy · ${price} coins`, () => this.buyMagnet(), "primary");
+        const buy = button(`Buy · ${price} coins (have ${this.eco.qty(magnet.id)})`, () => this.buyMagnet(), "primary");
         buy.disabled = this.busy || this.eco.coins < price;
         card.append(buy);
       }
@@ -651,7 +706,7 @@ export class FishermanPanel extends Panel {
         el("small", "", "Throw it in the water: for 5 minutes, rarer fish bite in the circle round it, for anyone fishing there"),
       );
       card.append(icon(lure), text);
-      const buy = button(`Buy · $${price}`, () => this.buyLure(), "primary");
+      const buy = button(`Buy · $${price} (have ${have})`, () => this.buyLure(), "primary");
       buy.disabled = this.busy || this.eco.coins < price;
       card.append(buy);
       this.body.append(card);
@@ -668,7 +723,7 @@ export class FishermanPanel extends Panel {
         el("small", "", "Turns its circle of water gold for 3 minutes: only epic fish and rarer bite there, for anyone fishing in it"),
       );
       card.append(icon(gold), text);
-      const buy = button(`Buy · $${price}`, () => this.buyLure(GOLD_LURE_ITEM), "primary");
+      const buy = button(`Buy · $${price} (have ${this.eco.qty(GOLD_LURE_ITEM)})`, () => this.buyLure(GOLD_LURE_ITEM), "primary");
       buy.disabled = this.busy || this.eco.coins < price;
       card.append(buy);
       this.body.append(card);
@@ -685,7 +740,7 @@ export class FishermanPanel extends Panel {
         el("small", "", "Attracts rare metals to the area of your magnet. Turns its circle of water purple for 5 minutes"),
       );
       card.append(icon(ml), text);
-      const buy = button(`Buy · $${price}`, () => this.buyLure(MAGNET_LURE_ITEM), "primary");
+      const buy = button(`Buy · $${price} (have ${this.eco.qty(MAGNET_LURE_ITEM)})`, () => this.buyLure(MAGNET_LURE_ITEM), "primary");
       buy.disabled = this.busy || this.eco.coins < price;
       card.append(buy);
       this.body.append(card);
@@ -702,7 +757,7 @@ export class FishermanPanel extends Panel {
         el("small", "", "Turns its circle of water rose-gold for 3 minutes: only epic metals and rarer lie there, and your magnet finds them sooner, for anyone dropping one in."),
       );
       card.append(icon(lm), text);
-      const buy = button(`Buy · $${price}`, () => this.buyLure(GOLD_MAGNET_LURE_ITEM), "primary");
+      const buy = button(`Buy · $${price} (have ${this.eco.qty(GOLD_MAGNET_LURE_ITEM)})`, () => this.buyLure(GOLD_MAGNET_LURE_ITEM), "primary");
       buy.disabled = this.busy || this.eco.coins < price;
       card.append(buy);
       this.body.append(card);
@@ -1037,6 +1092,8 @@ export class ReelGame {
 export class PlaceBanner {
   private el = el("div", "place-banner");
   item: Item | null = null;
+  /** Quarter turns (the mouse wheel, R, or the button). */
+  rot = 0;
 
   constructor(private onCancel: () => void) {
     this.el.hidden = true;
@@ -1045,12 +1102,27 @@ export class PlaceBanner {
 
   show(item: Item) {
     this.item = item;
-    this.el.replaceChildren(icon(item), `Tap a spot to place your ${item.name}`, button("Cancel", () => this.onCancel(), "small"));
+    this.rot = 0;
+    this.el.replaceChildren(icon(item), `Tap a spot to place your ${item.name} (scroll or R to turn)`, button("Turn ⟳", () => this.turn(1), "small"), button("Cancel", () => this.onCancel(), "small"));
+    this.el.hidden = false;
+  }
+
+  turn(by: number) {
+    this.rot = (this.rot + by + 4) % 4;
+  }
+
+  /** Shovel in hand: what's tapped in your yard is dug up, until you stop. */
+  digging = false;
+
+  showDig() {
+    this.digging = true;
+    this.el.replaceChildren("🪏 Tap something in your yard to dig it up", button("Done", () => this.onCancel(), "small"));
     this.el.hidden = false;
   }
 
   hide() {
     this.item = null;
+    this.digging = false;
     this.el.hidden = true;
   }
 

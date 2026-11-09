@@ -2,13 +2,17 @@
 // soft outlines). Drawn once into canvases and turned into nearest-filtered
 // textures; replaced by real atlases from assets/ when they exist.
 
+import { homeWall, paintFloor, roomSkin } from "./roomskin";
 import { cafeDecor, cafeObject } from "./cafeart";
 import { labDecor, labObject } from "./labart";
 import { FACADES, POSTBOX } from "./goods";
 import { BUILDINGS, drawFacade, lanternSpots } from "./facade";
 import { Texture } from "pixi.js";
 import type { MapObject } from "./map";
-import { disc, oval, polygon } from "./pixeldraw";
+import { disc, outlineColor, oval, polygon } from "./pixeldraw";
+import { MUG_TOP, mugArt, mugLights } from "./mugart";
+import { drawSkateGround, drawSkateRoad, skateObject } from "./skateart";
+import { SHOP_TOP, skateShopLights, skateShopObject } from "./skateshopart";
 import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
 import { decodeLook } from "./look";
 import { LIBRARY_GROUND, drawLibraryGround, libraryDecor, libraryObject } from "./libraryart";
@@ -98,6 +102,18 @@ function px(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, 
   ctx.fillRect(x, y, w, h);
 }
 
+/**
+ * An arm (or anything) drawn in front of the body: its pieces (colour, x, y,
+ * w, h) filled over a dark outline all round, so it stands out from what's behind.
+ */
+function limb(ctx: CanvasRenderingContext2D, o: string, parts: [string, number, number, number, number][]) {
+  for (const [, x, y, w, h] of parts) {
+    px(ctx, o, x - 1, y, w + 2, h);
+    px(ctx, o, x, y - 1, w, h + 2);
+  }
+  for (const [c, x, y, w, h] of parts) px(ctx, c, x, y, w, h);
+}
+
 // Hard-edged circles (see pixeldraw.ts).
 const circle = disc;
 
@@ -131,6 +147,8 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
     curb: "#cfc6b2",
     arcade_carpet: "#211c30",
     tavern_floor: "#3e2a1c",
+    skate: "#b8b4ab",
+    skate_road: "#a7a39a",
     ...LIBRARY_GROUND,
   };
   px(ctx, base[kind] ?? P.grass, ox, oy, TILE, TILE);
@@ -140,6 +158,12 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
   };
 
   switch (kind) {
+    case "skate":
+      drawSkateGround(ctx, tx, ty, ox, oy, differs);
+      break;
+    case "skate_road":
+      drawSkateRoad(ctx, tx, ty, ox, oy);
+      break;
     case "grass":
     case "grass_dark":
     case "flowers":
@@ -203,7 +227,12 @@ export function drawGround(ctx: CanvasRenderingContext2D, kind: string, tx: numb
       }
       break;
     case "floor":
-      for (let r = 0; r < TILE; r += 8) px(ctx, P.woodDark, ox, oy + r, TILE, 1);
+      // (In a home: its flooring.)
+      if (roomSkin()) paintFloor(ctx, ox, oy, tx, ty);
+      else for (let r = 0; r < TILE; r += 8) px(ctx, P.woodDark, ox, oy + r, TILE, 1);
+      break;
+    case "home_void":
+      px(ctx, "#17110c", ox, oy, TILE, TILE);
       break;
     case "road":
       // Cobbles in staggered rows, each a little different.
@@ -448,6 +477,8 @@ function soften(ctx: CanvasRenderingContext2D, kind: string, tx: number, ty: num
 const decorCache = new Map<string, Texture>();
 
 export function decorTexture(kind: string, variant: number): Texture | null {
+  // A home's walls, in their wallpaper.
+  if (kind.startsWith("home_")) return homeWall(kind, variant);
   // The amphitheatre's walls and seats: the painted bowl has them, cushions
   // on the public ones and all (the tiles are only there to bump into and
   // sit on).
@@ -902,6 +933,31 @@ export function decorTexture(kind: string, variant: number): Texture | null {
       px(ctx, "rgba(0,0,0,0.15)", 6, 124, 20, 3);
       break;
     }
+    case "swing_frame": {
+      // A swing set's frame: two splayed legs each side and a beam across.
+      [c, ctx] = makeCanvas(32, 80);
+      px(ctx, "rgba(0,0,0,0.15)", 0, 76, 32, 3);
+      for (const [x, lean] of [[2, 1], [28, -1]]) {
+        for (let y = 6; y < 78; y++) {
+          const off = Math.round(((y - 6) / 72) * 2) * lean;
+          px(ctx, P.outline, x - off - 1, y, 3, 1);
+          px(ctx, "#a05a3c", x - off, y, 1, 1);
+        }
+      }
+      px(ctx, P.outline, 0, 3, 32, 5);
+      px(ctx, "#8b4a32", 0, 4, 32, 3);
+      px(ctx, "#b8694a", 0, 4, 32, 1);
+      break;
+    }
+    case "swing_ropes": {
+      // What swings on the frame: two chains, and the seat at the bottom.
+      [c, ctx] = makeCanvas(32, 72);
+      px(ctx, "#6f6a66", 8, 0, 1, 64);
+      px(ctx, "#6f6a66", 23, 0, 1, 64);
+      px(ctx, P.outline, 5, 63, 22, 6);
+      px(ctx, P.wood, 6, 64, 20, 3);
+      break;
+    }
     case "lantern": {
       [c, ctx] = makeCanvas(16, 40);
       px(ctx, P.outline, 7, 12, 2, 28);
@@ -1206,6 +1262,8 @@ const FACADE_TOP: Record<string, number> = { building: 32, apartments: 32, mall_
  * lights); none for anything that isn't one of the facade buildings.
  */
 export function buildingLanterns(o: MapObject): { x: number; y: number }[] {
+  if (o.kind === "bar") return mugLights(o.w * TILE).map((p) => ({ x: o.x * TILE + p.x, y: o.y * TILE - MUG_TOP + p.y }));
+  if (o.kind === "sk_shop") return skateShopLights().map((p) => ({ x: o.x * TILE + p.x, y: o.y * TILE - SHOP_TOP + p.y }));
   const top = FACADE_TOP[o.kind];
   if (top === undefined) return [];
   const name = o.kind === "arcade_hall" ? "Arcade" : o.kind === "bowling_alley" ? "Bowling" : o.kind === "paintball_hall" ? "Splat Yard" : o.kind === "town_hall" ? "Town Hall" : o.label ?? "";
@@ -1222,6 +1280,11 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
   // The café's counter, shelves and menu board (cafeart.ts).
   const cafe = cafeObject(o);
   if (cafe) return cafe;
+  // The skatepark's shop truck (skateshopart.ts), and its ramps, boxes, rails and board (skateart.ts).
+  const shop = skateShopObject(o);
+  if (shop) return shop;
+  const skate = skateObject(o);
+  if (skate) return skate;
   const P = PALETTE;
   const w = o.w * TILE;
   const h = o.h * TILE;
@@ -1230,11 +1293,16 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
   let c: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D;
   switch (o.kind) {
-    case "fountain": {
+    case "fountain":
+    case "fountain_basin":
+    case "fountain_pedestal": {
       // An old stone fountain, drawn pixel by pixel: an oval basin with a
       // bricked front wall and a rim of worn blocks gone mossy in places,
       // deep water with ripples, lily pads and wishing coins, and a
-      // two-tier pedestal spilling water into it.
+      // two-tier pedestal spilling water into it. (In 3D the basin lies on
+      // the ground and the pedestal stands in it: each drawn on its own.)
+      const basin = o.kind !== "fountain_pedestal";
+      const pedestal = o.kind !== "fountain_basin";
       const top = 40;
       [c, ctx] = makeCanvas(w, h + top);
       overhang = top;
@@ -1250,93 +1318,97 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
         }
       };
       const wall = 9;
-      // Its shadow on the grass.
-      oval("rgba(0,0,0,0.18)", cx + 2, cy + wall + 3, rx + 2, ry + 2);
-      // The front wall: outline, stone, and courses of bricks.
-      oval(P.outline, cx, cy + wall, rx + 1, ry + 1);
-      oval("#8a8273", cx, cy + wall, rx, ry);
-      for (let x = cx - rx; x < cx + rx; x++) {
-        const dx = x - cx;
-        const rimBottom = cy + Math.round(ry * Math.sqrt(Math.max(0, 1 - (dx / rx) ** 2)));
-        if (rimBottom <= cy) continue;
-        // A mortar line halfway down, and joints staggered course by course.
-        px(ctx, "#6f685c", x, rimBottom + 5, 1, 1);
-        const course = Math.floor((x - cx + rx) / 9);
-        if ((x - cx + rx) % 9 === 0) px(ctx, "#6f685c", x, rimBottom + 1 + (course % 2 ? 0 : 5), 1, 4);
-      }
-      // The rim: worn blocks, lit along the top.
-      oval(P.outline, cx, cy, rx + 1, ry + 1);
-      oval("#b8b0a0", cx, cy, rx, ry);
-      oval("#cfc8b8", cx, cy - 1, rx - 2, ry - 2);
-      oval("#b8b0a0", cx, cy + 1, rx - 3, ry - 3);
-      // The basin inside: its shaded inner wall, then the water.
-      const ix = rx - 9;
-      const iy = ry - 7;
-      oval(P.outline, cx, cy + 1, ix + 1, iy + 1);
-      oval("#6f685c", cx, cy + 1, ix, iy);
-      oval("#2f6f9a", cx, cy + 3, ix - 1, iy - 3);
-      oval("#3f86b5", cx, cy + 4, ix - 4, iy - 6);
-      oval("#4f9acb", cx, cy + 5, ix - 10, iy - 11);
-      // Joints between the rim's blocks, all the way round.
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * Math.PI * 2;
-        for (let t = 1; t < 8; t++) {
-          const r = 1 - t / rx;
-          px(ctx, "#8f8778", Math.round(cx + Math.cos(a) * rx * r), Math.round(cy + Math.sin(a) * ry * r), 1, 1);
+      if (basin) {
+        // Its shadow on the grass.
+        oval("rgba(0,0,0,0.18)", cx + 2, cy + wall + 3, rx + 2, ry + 2);
+        // The front wall: outline, stone, and courses of bricks.
+        oval(P.outline, cx, cy + wall, rx + 1, ry + 1);
+        oval("#8a8273", cx, cy + wall, rx, ry);
+        for (let x = cx - rx; x < cx + rx; x++) {
+          const dx = x - cx;
+          const rimBottom = cy + Math.round(ry * Math.sqrt(Math.max(0, 1 - (dx / rx) ** 2)));
+          if (rimBottom <= cy) continue;
+          // A mortar line halfway down, and joints staggered course by course.
+          px(ctx, "#6f685c", x, rimBottom + 5, 1, 1);
+          const course = Math.floor((x - cx + rx) / 9);
+          if ((x - cx + rx) % 9 === 0) px(ctx, "#6f685c", x, rimBottom + 1 + (course % 2 ? 0 : 5), 1, 4);
+        }
+        // The rim: worn blocks, lit along the top.
+        oval(P.outline, cx, cy, rx + 1, ry + 1);
+        oval("#b8b0a0", cx, cy, rx, ry);
+        oval("#cfc8b8", cx, cy - 1, rx - 2, ry - 2);
+        oval("#b8b0a0", cx, cy + 1, rx - 3, ry - 3);
+        // The basin inside: its shaded inner wall, then the water.
+        const ix = rx - 9;
+        const iy = ry - 7;
+        oval(P.outline, cx, cy + 1, ix + 1, iy + 1);
+        oval("#6f685c", cx, cy + 1, ix, iy);
+        oval("#2f6f9a", cx, cy + 3, ix - 1, iy - 3);
+        oval("#3f86b5", cx, cy + 4, ix - 4, iy - 6);
+        oval("#4f9acb", cx, cy + 5, ix - 10, iy - 11);
+        // Joints between the rim's blocks, all the way round.
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          for (let t = 1; t < 8; t++) {
+            const r = 1 - t / rx;
+            px(ctx, "#8f8778", Math.round(cx + Math.cos(a) * rx * r), Math.round(cy + Math.sin(a) * ry * r), 1, 1);
+          }
+        }
+        // Moss on the old stone.
+        for (const [mx, my, n] of [
+          [cx - rx + 6, cy - 6, 9],
+          [cx + rx - 14, cy + 10, 7],
+          [cx - 18, cy + ry - 4, 8],
+          [cx + 20, cy - ry + 2, 6],
+        ] as [number, number, number][]) {
+          for (let i = 0; i < n; i++) px(ctx, i % 3 ? "#6e9a46" : "#8fbb5c", mx + ((i * 5) % 9) - 2, my + ((i * 3) % 4), 2, 1);
+        }
+        // Lily pads (one with a flower) and wishing coins. (The ripples, the
+        // falling water and the jet are animated: world/fountainfx.ts.)
+        for (const [lx, ly, flower] of [
+          [cx - ix + 12, cy + 8, true],
+          [cx + ix - 16, cy - 2, false],
+        ] as [number, number, boolean][]) {
+          oval("#3f7a35", lx, ly, 6, 3);
+          oval("#5f9e4a", lx, ly - 1, 5, 2);
+          px(ctx, "#2f6f9a", lx + 1, ly - 2, 4, 1);
+          if (flower) {
+            px(ctx, "#f4a7c8", lx - 2, ly - 3, 3, 2);
+            px(ctx, "#ffe08a", lx - 1, ly - 3, 1, 1);
+          }
+        }
+        for (const [gx, gy] of [[cx + 14, cy + 12], [cx - 22, cy + 3], [cx + 26, cy + 9], [cx - 6, cy + 15]]) {
+          px(ctx, "#c99a2a", gx, gy, 2, 1);
+          px(ctx, "#f6c343", gx, gy - 1, 2, 1);
         }
       }
-      // Moss on the old stone.
-      for (const [mx, my, n] of [
-        [cx - rx + 6, cy - 6, 9],
-        [cx + rx - 14, cy + 10, 7],
-        [cx - 18, cy + ry - 4, 8],
-        [cx + 20, cy - ry + 2, 6],
-      ] as [number, number, number][]) {
-        for (let i = 0; i < n; i++) px(ctx, i % 3 ? "#6e9a46" : "#8fbb5c", mx + ((i * 5) % 9) - 2, my + ((i * 3) % 4), 2, 1);
+      if (pedestal) {
+        // The pedestal: a stone column with a wide bowl, a narrow one above
+        // and a knob on top.
+        const colTop = cy - 46;
+        px(ctx, P.outline, cx - 7, colTop, 14, 48);
+        px(ctx, "#9a9284", cx - 6, colTop, 12, 47);
+        px(ctx, "#b8b0a0", cx - 6, colTop, 4, 47);
+        px(ctx, "#7e7768", cx + 3, colTop, 3, 47);
+        const bowl = (y0: number, ax: number, ay: number) => {
+          oval(P.outline, cx, y0 + 2, ax + 1, ay + 2);
+          oval("#9a9284", cx, y0 + 2, ax, ay + 1);
+          oval(P.outline, cx, y0, ax + 1, ay + 1);
+          oval("#c4bcac", cx, y0, ax, ay);
+          oval("#3f86b5", cx, y0, ax - 3, ay - 2);
+          oval("#7fc0e3", cx - 2, y0 - 1, ax - 8, Math.max(1, ay - 4));
+        };
+        const low = cy - 22;
+        bowl(low, 22, 7);
+        const high = cy - 44;
+        px(ctx, P.outline, cx - 4, high, 8, 22);
+        px(ctx, "#a59d8e", cx - 3, high, 6, 22);
+        bowl(high, 11, 4);
+        // The knob on top.
+        oval(P.outline, cx, high - 7, 4, 4);
+        oval("#c4bcac", cx, high - 7, 3, 3);
+        px(ctx, "#ffffff", cx - 1, high - 9, 1, 1);
       }
-      // Lily pads (one with a flower) and wishing coins. (The ripples, the
-      // falling water and the jet are animated: world/fountainfx.ts.)
-      for (const [lx, ly, flower] of [
-        [cx - ix + 12, cy + 8, true],
-        [cx + ix - 16, cy - 2, false],
-      ] as [number, number, boolean][]) {
-        oval("#3f7a35", lx, ly, 6, 3);
-        oval("#5f9e4a", lx, ly - 1, 5, 2);
-        px(ctx, "#2f6f9a", lx + 1, ly - 2, 4, 1);
-        if (flower) {
-          px(ctx, "#f4a7c8", lx - 2, ly - 3, 3, 2);
-          px(ctx, "#ffe08a", lx - 1, ly - 3, 1, 1);
-        }
-      }
-      for (const [gx, gy] of [[cx + 14, cy + 12], [cx - 22, cy + 3], [cx + 26, cy + 9], [cx - 6, cy + 15]]) {
-        px(ctx, "#c99a2a", gx, gy, 2, 1);
-        px(ctx, "#f6c343", gx, gy - 1, 2, 1);
-      }
-      // The pedestal: a stone column with a wide bowl, a narrow one above
-      // and a knob on top.
-      const colTop = cy - 46;
-      px(ctx, P.outline, cx - 7, colTop, 14, 48);
-      px(ctx, "#9a9284", cx - 6, colTop, 12, 47);
-      px(ctx, "#b8b0a0", cx - 6, colTop, 4, 47);
-      px(ctx, "#7e7768", cx + 3, colTop, 3, 47);
-      const bowl = (y0: number, ax: number, ay: number) => {
-        oval(P.outline, cx, y0 + 2, ax + 1, ay + 2);
-        oval("#9a9284", cx, y0 + 2, ax, ay + 1);
-        oval(P.outline, cx, y0, ax + 1, ay + 1);
-        oval("#c4bcac", cx, y0, ax, ay);
-        oval("#3f86b5", cx, y0, ax - 3, ay - 2);
-        oval("#7fc0e3", cx - 2, y0 - 1, ax - 8, Math.max(1, ay - 4));
-      };
-      const low = cy - 22;
-      bowl(low, 22, 7);
-      const high = cy - 44;
-      px(ctx, P.outline, cx - 4, high, 8, 22);
-      px(ctx, "#a59d8e", cx - 3, high, 6, 22);
-      bowl(high, 11, 4);
-      // The knob on top.
-      oval(P.outline, cx, high - 7, 4, 4);
-      oval("#c4bcac", cx, high - 7, 3, 3);
-      px(ctx, "#ffffff", cx - 1, high - 9, 1, 1);
       break;
     }
     case "big_screen": {
@@ -1963,66 +2035,10 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       break;
     }
     case "bar": {
-      // The Mossy Mug: a log cabin with a mossy roof and a stone chimney,
-      // warm windows with flower boxes, a round-windowed door and a hanging
-      // sign with a mug on it.
-      [c, ctx] = makeCanvas(w, h + 64);
-      overhang = 64;
-      const top = 64;
-      px(ctx, "rgba(0,0,0,0.18)", 6, top + h - 8, w - 12, 8);
-      // log walls
-      px(ctx, P.outline, 8, top - 10, w - 16, h + 6);
-      for (let i = 0; i * 8 < h + 2; i++) {
-        const y = top - 8 + i * 8;
-        px(ctx, i % 2 ? "#9a6a3f" : "#8a5a33", 10, y, w - 20, 7);
-        px(ctx, "#5a3a22", 10, y + 7, w - 20, 1);
-        oval(ctx, "#c99567", 12, y + 3, 3, 3);
-        oval(ctx, "#c99567", w - 12, y + 3, 3, 3);
-      }
-      // chimney
-      px(ctx, P.outline, w - 52, 2, 20, 40);
-      px(ctx, P.stone, w - 50, 4, 16, 36);
-      for (let y = 8; y < 40; y += 6) px(ctx, P.stoneDark, w - 50 + ((y / 6) % 2) * 6, y, 6, 2);
-      px(ctx, P.outline, w - 54, 0, 24, 5);
-      circle(ctx, "rgba(220,220,220,0.5)", w - 40, -2, 6);
-      // roof, with moss
-      polygon(ctx, P.outline, [[0, top + 2], [30, top - 46], [w - 30, top - 46], [w, top + 2]]);
-      polygon(ctx, "#5d4a3a", [[4, top], [32, top - 43], [w - 32, top - 43], [w - 4, top]]);
-      for (let i = 1; i < 5; i++) px(ctx, "#4e3d30", 6 + i * 5, top - 43 + i * 9, w - 12 - i * 10, 2);
-      for (let i = 0; i < 14; i++) {
-        const mx = 30 + ((i * 37) % (w - 60));
-        const my = top - 38 + ((i * 13) % 34);
-        oval(ctx, i % 3 ? "#6f9a4f" : "#86b86b", mx, my, 5, 2);
-      }
-      px(ctx, "#3d2f24", 0, top - 2, w, 6);
-      // windows, lit from inside, with flower boxes
-      for (const wx of [24, w - 24 - 44]) {
-        const wy = top + 20;
-        px(ctx, P.outline, wx, wy, 44, 36);
-        px(ctx, "#ffd77a", wx + 3, wy + 3, 38, 30);
-        px(ctx, "#ffe9a8", wx + 5, wy + 5, 10, 12);
-        px(ctx, P.outline, wx + 21, wy + 3, 2, 30);
-        px(ctx, P.outline, wx + 3, wy + 17, 38, 2);
-        px(ctx, P.outline, wx - 2, wy + 36, 48, 8);
-        px(ctx, "#8a5a33", wx - 1, wy + 37, 46, 6);
-        for (let k = 0; k < 6; k++) px(ctx, ["#e8566b", "#f6c343", "#f28c9b"][k % 3], wx + 2 + k * 7, wy + 32, 4, 4);
-      }
-      // the door
-      const dx = w / 2 - 18;
-      px(ctx, P.outline, dx, top + h - 70, 36, 64);
-      px(ctx, "#6e4b30", dx + 2, top + h - 68, 32, 62);
-      for (const x of [dx + 9, dx + 17, dx + 25]) px(ctx, "#5a3a22", x, top + h - 66, 1, 58);
-      circle(ctx, P.outline, w / 2, top + h - 52, 7);
-      circle(ctx, "#ffd77a", w / 2, top + h - 52, 5);
-      px(ctx, "#f6c343", dx + 28, top + h - 34, 3, 3);
-      // hanging sign: a mug, and the name
-      px(ctx, P.outline, w / 2 - 70, top - 4, 140, 22);
-      px(ctx, "#f3e2c0", w / 2 - 68, top - 2, 136, 18);
-      label(ctx, o.label ?? "The Mossy Mug", w / 2 + 6, top + 7, "#5a3b2b", 12);
-      px(ctx, P.outline, w / 2 - 64, top, 11, 13);
-      px(ctx, "#e9b949", w / 2 - 63, top + 3, 9, 9);
-      px(ctx, "#fff8e3", w / 2 - 63, top + 1, 9, 3);
-      px(ctx, P.outline, w / 2 - 53, top + 4, 3, 6);
+      // The Cozy Cup: an old timber tavern (mugart.ts).
+      c = mugArt(w, h, o.label ?? "The Cozy Cup");
+      ctx = c.getContext("2d")!;
+      overhang = MUG_TOP;
       break;
     }
     case "pool_table": {
@@ -2208,6 +2224,19 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       polygon(ctx, "#fff1b0", [[w / 2 - 6, top + h - 12], [w / 2, top + 28], [w / 2 + 6, top + h - 12]]);
       break;
     }
+    case "room_paint": {
+      // A paint tin and brush, by the door.
+      [c, ctx] = makeCanvas(w, h);
+      px(ctx, "rgba(0,0,0,0.2)", 7, 27, 18, 3);
+      px(ctx, P.outline, 8, 12, 16, 17);
+      px(ctx, "#c9ced6", 9, 13, 14, 15);
+      px(ctx, "#e8566b", 9, 13, 14, 5);
+      px(ctx, "#4f86d8", 9, 21, 14, 4);
+      px(ctx, "#8a5a33", 19, 3, 3, 12);
+      px(ctx, "#f2c94c", 18, 9, 5, 4);
+      break;
+    }
+    case "home_exit":
     case "bar_exit": {
       // The door out: a glimpse of the park and a doormat.
       [c, ctx] = makeCanvas(w, h + 16);
@@ -2909,7 +2938,7 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
   // A full-body skin from the mall: the suit in the basic poses (walking,
   // sprinting, sitting; standing for the rest).
   if (m.skin) {
-    drawSkin(ctx, m.skin, frame <= 2 || frame === 16 || frame === 17 ? (frame as 0 | 1 | 2 | 16 | 17) : 0, p.skinColor);
+    drawSkin(ctx, m.skin, frame <= 3 || frame === 5 || frame === 6 || frame === 16 || frame === 17 ? (frame as 0 | 1 | 2 | 3 | 5 | 6 | 16 | 17) : 0, p.skinColor);
     canvasCache.set(key, c);
     return c;
   }
@@ -3107,9 +3136,11 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
       const right = dir > 0;
       if (frame === BOWL_HOLD || frame === SWORD_GUARD) {
         // Both forearms in to the ball held at the waist.
-        px(ctx, arm, ax, 18, 2, 3);
-        px(ctx, arm, right ? ax - 3 : ax + 1, 21, 4, 2);
-        px(ctx, p.skinColor, right ? ax - 4 : ax + 4, 21, 2, 2);
+        limb(ctx, o, [
+          [arm, ax, 18, 2, 3],
+          [arm, right ? ax - 3 : ax + 1, 21, 4, 2],
+          [p.skinColor, right ? ax - 4 : ax + 4, 21, 2, 2],
+        ]);
       } else if (frame === BOWL_BACK || frame === SWORD_RAISE) {
         // The bowling arm up beside the head with the ball; the other out for balance.
         if (right) px(ctx, arm, ax + 1, 11, 2, 9);
@@ -3120,9 +3151,11 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
       } else if (frame === BOWL_RELEASE) {
         // The bowling arm swung through, low and forward; the other back.
         if (right) {
-          px(ctx, arm, ax, 18, 2, 6);
-          px(ctx, arm, ax - 1, 23, 2, 3);
-          px(ctx, p.skinColor, ax - 1, 26, 2, 1);
+          limb(ctx, o, [
+            [arm, ax, 18, 2, 6],
+            [arm, ax - 1, 23, 2, 3],
+            [p.skinColor, ax - 1, 26, 2, 1],
+          ]);
         } else {
           px(ctx, arm, ax - 2, 17, 4, 2);
           px(ctx, p.skinColor, ax - 3, 16, 2, 2);
@@ -3139,9 +3172,11 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
       // swinging back was drawn behind it (see above).
       if (dir === sprint) continue;
       const arm = armColor;
-      px(ctx, arm, ax, 18, 2, 2);
-      px(ctx, arm, ax + 1, 19, 3, 2);
-      px(ctx, p.skinColor, ax + 3, 18, 2, 2);
+      limb(ctx, o, [
+        [arm, ax, 18, 2, 2],
+        [arm, ax + 1, 19, 3, 2],
+        [p.skinColor, ax + 3, 18, 2, 2],
+      ]);
       continue;
     }
     if (!out) {
@@ -3319,6 +3354,10 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
     px(ctx, "#b5544a", 7, 3, 10, 1);
     px(ctx, "#8fca6b", 15, 1, 2, 2);
   }
+  // Bare hands and arms get the dark outline the rest of the figure has, in
+  // every pose. (The face is inside the head's own outline already.)
+  outlineColor(ctx, p.skinColor, o);
+  if (armColor !== p.skinColor) outlineColor(ctx, armColor, o);
   canvasCache.set(key, c);
   return c;
 }
@@ -3416,11 +3455,27 @@ function drawMallHat(ctx: CanvasRenderingContext2D, code: number) {
 }
 
 /** A full-body skin: the whole figure in a suit (fox, frog, bear, robot). */
-function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 | 16 | 17, face: string) {
+/** The full-body suits' colours (fox, frog, bear, robot): the suit, and its light belly. */
+const SUITS: Record<number, [string, string]> = { 1: ["#e07a2f", "#fff4e0"], 2: ["#6aa152", "#c5e0a8"], 3: ["#8f6a4a", "#d9b48a"], 4: ["#9aa3a8", "#d6dde0"] };
+
+/** The colour of an avatar's legs (trousers, or the suit it's in), for the back leg drawn mid-push. */
+export function legColor(style: number): number {
+  const code = styleParts(style).skin;
+  return code ? Number.parseInt((SUITS[code] ?? SUITS[4])[0].slice(1), 16) : 0x4a4a5a;
+}
+
+function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 | 3 | 5 | 6 | 16 | 17, face: string) {
   const o = PALETTE.outline;
-  const [suit, light] = ({ 1: ["#e07a2f", "#fff4e0"], 2: ["#6aa152", "#c5e0a8"], 3: ["#8f6a4a", "#d9b48a"], 4: ["#9aa3a8", "#d6dde0"] } as Record<number, [string, string]>)[code] ?? ["#9aa3a8", "#d6dde0"];
+  const [suit, light] = SUITS[code] ?? SUITS[4];
   // legs
-  if (frame === 2) {
+  if (frame in PUSH_CROUCH) {
+    // Pushing a skateboard: the front leg on the board, its knee bent (the
+    // body sinks with it); the back leg's drawn reaching for the ground.
+    const c = PUSH_CROUCH[frame];
+    px(ctx, o, 13, 25 + c, 4, 7 - c);
+    px(ctx, suit, 14, 25 + c, 2, 6 - c);
+    ctx.translate(0, c);
+  } else if (frame === 2) {
     px(ctx, o, 6, 27, 12, 5);
     px(ctx, suit, 7, 28, 10, 3);
     ctx.translate(0, 4);
@@ -3459,9 +3514,11 @@ function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 
   if (sprint) {
     // ...and the other forward and up, in front of it.
     const ax = sprint < 0 ? 18 : 4;
-    px(ctx, suit, ax, 18, 2, 2);
-    px(ctx, suit, ax + 1, 19, 3, 2);
-    px(ctx, suit, ax + 3, 18, 2, 2);
+    limb(ctx, o, [
+      [suit, ax, 18, 2, 2],
+      [suit, ax + 1, 19, 3, 2],
+      [suit, ax + 3, 18, 2, 2],
+    ]);
   } else for (const ax of [4, 18]) px(ctx, suit, ax, 18, 2, 6);
   if (code === 4) {
     px(ctx, "#5f6a70", 9, 18, 6, 1);
@@ -3477,6 +3534,7 @@ function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 
     px(ctx, "#fff", 9, 8, 2, 1);
     px(ctx, o, 11, 0, 2, 4);
     px(ctx, "#e8566b", 11, -1, 2, 2);
+    outlineColor(ctx, suit, o);
     return;
   }
   px(ctx, face, 8, 7, 8, 7);
@@ -3505,6 +3563,8 @@ function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 
       px(ctx, light, x + 2, 3, 1, 1);
     }
   }
+  // The suit's arms and paws outlined like the rest of it, in every pose.
+  outlineColor(ctx, suit, o);
 }
 
 // ---- ambient creatures (client-only, spec §7.1) -------------------------

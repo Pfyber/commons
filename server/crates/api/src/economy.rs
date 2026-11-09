@@ -23,8 +23,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub const COIN: i32 = 1;
-/// Coins and seeds every new player starts with.
-pub const WELCOME: &[(i32, i32)] = &[(COIN, 100), (200, 3)];
+/// Coins, seeds and the shovel every new player starts with.
+pub const WELCOME: &[(i32, i32)] = &[(COIN, 100), (200, 3), (1205, 1)];
 /// Kinds that count towards the album.
 const COLLECTABLE: &[&str] = &["fish", "plant", "junk", "bug", "shroom"];
 

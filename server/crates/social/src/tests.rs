@@ -1869,7 +1869,7 @@ fn at_cafe(s: &State, p: &P, instance: Option<u16>) {
             zone: if instance.is_some() { "bar" } else { "city" }.into(),
             instance: instance.unwrap_or(1),
             owner: None,
-            label: "The Mossy Mug".into(),
+            label: "The Cozy Cup".into(),
         },
         true,
         chrono::Utc::now().timestamp_millis(),

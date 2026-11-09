@@ -6,16 +6,21 @@ import type { Economy } from "../economy";
 import type { PlotInfo } from "../ui/panels";
 import { TILE } from "./art";
 import { CAST_SWING_MS } from "./avatars";
-import { type Alive, FLAT, PET_SPOTS, TANKS, Tank, alive } from "./housewares";
+import { type Alive, FLAT, HUNGRY_SECS, LIGHTS, PET_SPOTS, TANKS, WALK_OVER, TURNS_FLAT, Tank, alive } from "./housewares";
 import { SURFACE_H, TOPS, WALLS } from "./cozyart";
 import { groundAt } from "./map";
-import { bobberTexture, furnitureTexture, magnetBobberTexture, plantTexture, wetSoilTexture } from "./items";
+import { pondTexture } from "./roomskin";
+import { bobberTexture, furnitureTexture, itemTexture, magnetBobberTexture, plantTexture, wetSoilTexture } from "./items";
 import { petTexture } from "./pets";
 import type { ZoneMap } from "./map";
 import type { TileXY } from "./motion";
 import type { Scene } from "./scene";
 
 const k = (x: number, y: number) => `${x},${y}`;
+
+const POND = "round_pond";
+/** A garden pond's tiles, from its top left. */
+const pondTiles = (x: number, y: number): [number, number][] => [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]];
 
 interface PlotSprites {
   plant: Sprite;
@@ -31,6 +36,9 @@ interface Placed {
   on: boolean;
   live: Alive | null;
   tank: Tank | null;
+  /** A display shelf's things, and the light it's giving. */
+  shelf: Container | null;
+  glow: Sprite | null;
   pet: Sprite | null;
   zzz: Graphics | null;
   over: Container | null;
@@ -43,6 +51,10 @@ export class Props {
   readonly tops = new Map<string, Placed>();
   /** Your pet (its code), curled up on its bed or tree at home (0: none, or not your home). */
   petCode = 0;
+  /** How lights reach the room (the day and night's light layer). */
+  lightUp: { add: (x: number, y: number, color: number, scale: number) => Sprite; lit: (n: number) => void } | null = null;
+  /** Outdoors: where a piece may go (your own front yard). */
+  yardRule: ((x: number, y: number) => boolean) | null = null;
   private lastFx = 0;
   private bobbers = new Map<number, { sprite: Sprite; line: Graphics; tile: TileXY; castAt: number; biteAt: number }>();
   /** The map's original collision, to restore when furniture is picked up. */
@@ -77,7 +89,7 @@ export class Props {
       const plant = new Sprite();
       plant.anchor.set(0.5, 1);
       plant.position.set(x * TILE + TILE / 2, y * TILE + TILE);
-      plant.zIndex = y * TILE + TILE - 6;
+      plant.zIndex = y * TILE + TILE - 1;
       this.scene.onGround(wet);
       this.scene.sorted.addChild(plant);
       p = { plant, wet, info };
@@ -87,39 +99,131 @@ export class Props {
     const key2 = this.eco.items.get(info.plant)?.key ?? "tulip";
     p.plant.texture = plantTexture(key2, info.stage);
     p.wet.visible = info.watered;
+    this.seatPlant(x, y);
   }
+
+  /** What grows in a planter stands in its soil, not on the floor. */
+  private seatPlant(x: number, y: number) {
+    const p = this.plots.get(k(x, y));
+    if (!p) return;
+    const potted = this.objects.get(k(x, y))?.key === "planter_pot";
+    p.plant.y = y * TILE + TILE - (potted ? 16 : 0);
+    if (potted) p.wet.visible = false;
+  }
+
+  /** The garden pond's water at (x, y), as its top left tile. */
+  pondAt(x: number, y: number): TileXY | null {
+    const at = this.pondWater.get(k(x, y));
+    if (!at) return null;
+    const [ax, ay] = at.split(",").map(Number);
+    return { x: ax, y: ay };
+  }
+
+  private pondWater = new Map<string, string>();
+  /** What the ground was under each pond's tiles. */
+  private pondWas = new Map<number, number>();
 
   objectAt(x: number, y: number): number | null {
     return this.objects.get(k(x, y))?.item ?? null;
   }
 
-  setObject(x: number, y: number, item: number) {
+  setObject(x: number, y: number, item: number, rot = 0) {
     const key = k(x, y);
     const old = this.objects.get(key);
-    old?.sprite.destroy();
-    old?.over?.destroy({ children: true });
+    this.clear(old);
     this.objects.delete(key);
+    if (old?.key === POND) {
+      for (const [px, py] of pondTiles(x, y)) {
+        const at = py * this.map.width + px;
+        this.map.collision[at] = this.baseCollision[at];
+        this.map.ground[at] = this.pondWas.get(at) ?? this.map.ground[at];
+        this.pondWater.delete(k(px, py));
+      }
+      this.scene.repaintAt(x, y, x + 1, y + 1);
+    }
     const i = y * this.map.width + x;
     if (!item) {
       this.map.collision[i] = this.baseCollision[i];
       return;
     }
-    this.objects.set(key, this.make(x, y, item, 0));
+    this.objects.set(key, this.make(x, y, item, 0, rot));
+    if (this.objects.get(key)!.key === POND) {
+      // Plain water, like any pond: it's baked into the ground, corners rounded off.
+      for (const [px, py] of pondTiles(x, y)) {
+        const at = py * this.map.width + px;
+        this.map.collision[at] = 1;
+        if (!this.pondWater.has(k(px, py))) this.pondWas.set(at, this.map.ground[at]);
+        this.map.ground[at] = this.map.ground_legend.indexOf("water");
+        this.pondWater.set(k(px, py), key);
+      }
+      this.scene.repaintAt(x, y, x + 1, y + 1);
+      return;
+    }
     this.dressPet(this.objects.get(key)!);
-    // Furniture blocks walking, as on the server.
-    this.map.collision[i] = 1;
+    this.seatPlant(x, y);
+    this.shine(x, y, this.objects.get(key)!);
+    // Furniture blocks walking, as on the server (rugs are walked over).
+    this.map.collision[i] = WALK_OVER.has(this.objects.get(key)!.key) ? this.baseCollision[i] : 1;
   }
 
   /** What stands on the table at (x, y) (0: taken off): lifted onto its top. */
-  setTop(x: number, y: number, item: number) {
+  setTop(x: number, y: number, item: number, rot = 0) {
     const key = k(x, y);
-    const old = this.tops.get(key);
-    old?.sprite.destroy();
-    old?.over?.destroy({ children: true });
+    this.clear(this.tops.get(key));
     this.tops.delete(key);
     if (!item) return;
     const under = this.objects.get(key)?.key ?? "";
-    this.tops.set(key, this.make(x, y, item, SURFACE_H[under] ?? 12));
+    this.tops.set(key, this.make(x, y, item, SURFACE_H[under] ?? 12, rot));
+  }
+
+  private clear(o: Placed | undefined) {
+    if (!o) return;
+    o.sprite.destroy();
+    o.over?.destroy({ children: true });
+    if (o.glow) {
+      o.glow.destroy();
+      o.glow = null;
+      this.countLit();
+    }
+  }
+
+  /**
+   * Turns a sprite: mirrored (2), or side on (1 and 3): what lies flat
+   * rotates, what stands is drawn foreshortened, as it would look on a side
+   * wall or facing along the room.
+   */
+  private turn(s: Sprite, key: string, rot: number, wallSide: boolean) {
+    s.rotation = 0;
+    s.skew.set(0, 0);
+    s.scale.set(1);
+    if (rot === 2) s.scale.x = -1;
+    if (rot !== 1 && rot !== 3) return;
+    const dir = rot === 1 ? 1 : -1;
+    if (!wallSide && (FLAT.has(key) || TURNS_FLAT.test(key))) {
+      s.anchor.set(0.5);
+      s.y -= TILE / 2;
+      s.rotation = (dir * Math.PI) / 2;
+    } else {
+      s.scale.x = 0.62 * dir;
+      s.skew.y = 0.38 * dir;
+    }
+  }
+
+  /** A light's pool on the room, while it's on. */
+  private shine(x: number, y: number, o: Placed) {
+    const light = LIGHTS[o.key];
+    const on = o.on || o.key === "uv_light";
+    if (!this.lightUp || !light || !!o.glow === on) return;
+    if (on) o.glow = this.lightUp.add(x * TILE + TILE / 2, y * TILE + TILE / 2, light[0], light[1]);
+    else {
+      o.glow?.destroy();
+      o.glow = null;
+    }
+    this.countLit();
+  }
+
+  private countLit() {
+    this.lightUp?.lit([...this.objects.values(), ...this.tops.values()].filter((o) => o.glow).length);
   }
 
   topAt(x: number, y: number): number | null {
@@ -135,29 +239,43 @@ export class Props {
    * A piece's picture (and its live part over it): on the floor, lifted
    * `lift` px onto a table, or hung on a wall (drawn over it).
    */
-  private make(x: number, y: number, item: number, lift: number): Placed {
+  private make(x: number, y: number, item: number, lift: number, rot = 0): Placed {
     const itemKey = this.eco.items.get(item)?.key ?? "";
+    const isPond = itemKey === POND;
     const s = new Sprite(furnitureTexture(itemKey));
     s.anchor.set(0.5, 1);
     s.position.set(x * TILE + TILE / 2, y * TILE + TILE - lift);
+    if (isPond) {
+      // (It's in the ground itself: nothing stands there.)
+      s.visible = false;
+      this.scene.sorted.addChild(s);
+      return { sprite: s, item, key: itemKey, on: false, live: null, tank: null, shelf: null, glow: null, pet: null, zzz: null, over: null };
+    }
     const flat = FLAT.has(itemKey);
     const wall = WALLS.has(itemKey) && this.baseCollision[y * this.map.width + x] !== 0;
+    const side = wall && (rot === 1 || rot === 3);
+    this.turn(s, itemKey, rot, side);
+    // Side on, it hangs on the face of the wall, towards the room.
+    if (side) s.position.set(x * TILE + (rot === 1 ? TILE + 3 : -3), y * TILE + TILE - 6);
     if (flat) this.scene.layOnGround(s);
     s.zIndex = flat ? y * TILE - 30 : wall ? y * TILE + TILE + 4 : y * TILE + TILE - 2 + (lift ? 1 : 0);
     this.scene.sorted.addChild(s);
     // Its live part (a lamp's glow, the fire, a tank's fish, a pet on its bed), over it.
     const live = alive(itemKey);
-    const tank = TANKS[itemKey] ? new Tank(itemKey) : null;
+    const isShelf = itemKey === "display_shelf";
+    const tank = TANKS[itemKey] && !isShelf ? new Tank(itemKey) : null;
+    const shelf = isShelf ? new Container() : null;
     let over: Container | null = null;
-    if (live || tank || PET_SPOTS.has(itemKey)) {
+    if (live || tank || shelf || PET_SPOTS.has(itemKey)) {
       over = new Container();
       over.position.set(x * TILE, y * TILE - lift);
       over.zIndex = s.zIndex + 0.5;
       if (tank) over.addChild(tank.view);
+      if (shelf) over.addChild(shelf);
       if (live) over.addChild(live.view);
       this.scene.sorted.addChild(over);
     }
-    return { sprite: s, item, key: itemKey, on: false, live, tank, pet: null, zzz: null, over };
+    return { sprite: s, item, key: itemKey, on: false, live, tank, shelf, glow: null, pet: null, zzz: null, over };
   }
 
   // ---- placing: a see-through preview under the pointer ----
@@ -169,14 +287,22 @@ export class Props {
    * wall (with the floor just below), onto a table's top, or on free floor;
    * and whether it may (`lift`: how high a table lifts it).
    */
-  placeCheck(x: number, y: number, key: string): { ok: boolean; lift: number } {
+  placeCheck(x: number, y: number, key: string, rot = 0): { ok: boolean; lift: number } {
     const w = this.map.width;
     if (x < 0 || y < 0 || x >= w || y >= this.map.height) return { ok: false, lift: 0 };
+    if (key === POND) {
+      const free = ([px, py]: [number, number]) => !!this.yardRule?.(px, py) && px < w && py < this.map.height && !this.objects.has(k(px, py)) && this.map.collision[py * w + px] === 0;
+      return { ok: pondTiles(x, y).every(free), lift: 0 };
+    }
+    // (A lawn chair goes down anywhere out in the city.)
+    if (this.yardRule && !this.yardRule(x, y) && key !== "lawn_chair") return { ok: false, lift: 0 };
     const here = this.objects.has(k(x, y));
     if (WALLS.has(key)) {
-      const below = (y + 1) * w + x;
-      const ok = !here && this.baseCollision[y * w + x] !== 0 && y + 1 < this.map.height && this.map.collision[below] === 0 && groundAt(this.map, x, y + 1) === "floor";
-      return { ok, lift: 0 };
+      const [fx, fy] = rot === 1 ? [x + 1, y] : rot === 3 ? [x - 1, y] : [x, y + 1];
+      const front = fy * w + fx;
+      const ok = !here && this.baseCollision[y * w + x] !== 0 && fy < this.map.height && fx >= 0 && fx < w && this.map.collision[front] === 0 && groundAt(this.map, fx, fy) === "floor";
+      // (A UV light stands on the floor as well as hanging.)
+      if (ok || key !== "uv_light") return { ok, lift: 0 };
     }
     const lift = this.surfaceAt(x, y);
     if (TOPS.has(key) && lift) return { ok: !this.tops.has(k(x, y)), lift };
@@ -184,16 +310,33 @@ export class Props {
   }
 
   /** The preview of `key` at (x, y): see-through, reddened where it can't go. */
-  ghostAt(x: number, y: number, key: string) {
+  ghostAt(x: number, y: number, key: string, rot = 0) {
     if (!this.ghost) {
       this.ghost = new Sprite();
       this.ghost.anchor.set(0.5, 1);
       this.scene.sorted.addChild(this.ghost);
     }
-    const { ok, lift } = this.placeCheck(x, y, key);
+    const { ok, lift } = this.placeCheck(x, y, key, rot);
     const g = this.ghost;
-    g.texture = furnitureTexture(key);
+    g.texture = key === POND ? pondTexture() : furnitureTexture(key);
+    g.anchor.set(0.5, 1);
     g.position.set(x * TILE + TILE / 2, y * TILE + TILE - lift);
+    if (key === POND) {
+      g.rotation = 0;
+      g.skew.set(0, 0);
+      g.scale.set(1);
+      g.anchor.set(0, 0);
+      g.position.set(x * TILE, y * TILE);
+      g.alpha = ok ? 0.6 : 0.45;
+      g.tint = ok ? 0xffffff : 0xff6a6a;
+      g.zIndex = 1e8;
+      this.scene.standOn(g, y * TILE + TILE - 2);
+      g.visible = true;
+      return;
+    }
+    const side = WALLS.has(key) && (rot === 1 || rot === 3) && this.baseCollision[y * this.map.width + x] !== 0;
+    this.turn(g, key, rot, side);
+    if (side) g.position.set(x * TILE + (rot === 1 ? TILE + 3 : -3), y * TILE + TILE - 6);
     g.alpha = ok ? 0.6 : 0.45;
     g.tint = ok ? 0xffffff : 0xff6a6a;
     g.zIndex = 1e8;
@@ -213,7 +356,9 @@ export class Props {
   /** A piece turned on or off (ObjectOn). */
   setOn(x: number, y: number, on: boolean) {
     const o = this.usedAt(x, y);
-    if (o) o.on = on;
+    if (!o) return;
+    o.on = on;
+    this.shine(x, y, o);
   }
 
   isOn(x: number, y: number): boolean {
@@ -223,10 +368,38 @@ export class Props {
   /** A tank's fish (TankFish), as item ids. */
   setTank(x: number, y: number, fish: number[]) {
     const o = this.usedAt(x, y);
-    if (!o?.tank) return;
+    if (!o) return;
     this.tankFish.set(k(x, y), fish);
-    o.tank.set(fish.map((f) => this.eco.items.get(f)?.key ?? "minnow"));
+    if (o.shelf) {
+      // Two rows of three, standing on the shelves.
+      o.shelf.removeChildren().forEach((c) => c.destroy());
+      fish.forEach((f, i) => {
+        const it = this.eco.items.get(f);
+        if (!it) return;
+        const s = new Sprite(itemTexture(it.key, it.kind));
+        s.anchor.set(0.5, 1);
+        s.scale.set(0.3);
+        s.position.set(10 + (i % 3) * 6, i < 3 ? 15 : 28);
+        o.shelf!.addChild(s);
+      });
+    }
+    o.tank?.set(fish.map((f) => this.eco.items.get(f)?.key ?? "minnow"));
   }
+
+  /** When a tank's fish last ate (TankFed, unix seconds). */
+  setFed(x: number, y: number, fed: number) {
+    this.tankFed.set(k(x, y), fed);
+    const o = this.usedAt(x, y);
+    if (o?.tank) o.tank.sluggish = this.hungry(x, y);
+  }
+
+  /** Whether the tank's fish have gone three days and more without food. */
+  hungry(x: number, y: number): boolean {
+    const fed = this.tankFed.get(k(x, y));
+    return fed !== undefined && Date.now() / 1000 - fed >= HUNGRY_SECS;
+  }
+
+  private tankFed = new Map<string, number>();
 
   /** What's in the tank at (x, y) (item ids). */
   tankAt(x: number, y: number): number[] {

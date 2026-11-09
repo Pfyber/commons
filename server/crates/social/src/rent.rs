@@ -325,7 +325,9 @@ pub async fn release(state: &SocialState, lease: &Lease, reason: &str) -> ApiRes
         vec![]
     } else if slot_of(&lease.kind) == "home" {
         let rows = sqlx::query_as(
-            "SELECT item_id, count(*) FROM home_objects WHERE owner_id = $1 GROUP BY item_id ORDER BY item_id",
+            // (With whatever's in the tanks and on the shelves.)
+            "SELECT item_id, count(*) FROM (SELECT item_id FROM home_objects WHERE owner_id = $1 \
+             UNION ALL SELECT unnest(fish) FROM home_objects WHERE owner_id = $1) t GROUP BY item_id ORDER BY item_id",
         )
         .bind(lease.player)
         .fetch_all(&mut *tx)
@@ -490,11 +492,12 @@ pub async fn mine(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_j
     let (me, _) = me(&state, &headers)?;
     let home = lease_of(&state.db, me, "home").await.map_err(db_err)?;
     let stall = lease_of(&state.db, me, "stall").await.map_err(db_err)?;
-    let used: i64 = sqlx::query_scalar("SELECT count(*) FROM home_objects WHERE owner_id = $1")
-        .bind(me)
-        .fetch_one(&state.db)
-        .await
-        .map_err(db_err)?;
+    let used: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM home_objects WHERE owner_id = $1 AND NOT yard")
+            .bind(me)
+            .fetch_one(&state.db)
+            .await
+            .map_err(db_err)?;
     let kinds: BTreeMap<_, _> = RENT.kinds.iter().collect();
     Ok(Json(json!({
         "home": home.as_ref().map(Lease::json),
@@ -568,12 +571,13 @@ pub async fn change_tier(
             })?;
     } else {
         let (have, cap, what) = if slot_of(&lease.kind) == "home" {
-            let n: i64 =
-                sqlx::query_scalar("SELECT count(*) FROM home_objects WHERE owner_id = $1")
-                    .bind(me)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(db_err)?;
+            let n: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM home_objects WHERE owner_id = $1 AND NOT yard",
+            )
+            .bind(me)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?;
             (n, new.furniture.unwrap_or(0), "pieces of furniture")
         } else {
             let n: i64 =
