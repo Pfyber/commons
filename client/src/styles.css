@@ -1531,10 +1531,6 @@ body.fading #stage {
 
 /* ---- the founding experience: the Caretaker, founders, the grove ---- */
 
-.label.npc .name {
-  background: rgba(79, 122, 62, 0.85);
-}
-
 .label .name .founder {
   margin-left: 3px;
   font-size: 11px;
@@ -2232,10 +2228,6 @@ img.px-icon,
   padding: 1px 5px;
   background: rgba(36, 28, 18, 0.62);
   letter-spacing: 0.3px;
-}
-
-.label.npc .name {
-  background: rgba(64, 104, 48, 0.88);
 }
 
 .bubble {
@@ -7801,6 +7793,161 @@ body.skate-playing.skate-touch-mode .chat-log {
   }
 }
 
+/* The run's last seconds: the clock goes red and throbs. */
+.skate-score.hurry .skate-mode-name {
+  color: #ff6b5a;
+  animation: skate-hurry 0.5s ease-in-out infinite alternate;
+}
+@keyframes skate-hurry {
+  to {
+    transform: scale(1.18);
+  }
+}
+
+/* Surf trucks: the pump's rhythm, under the special meter. */
+.skate-flow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.skate-flow[hidden] {
+  display: none;
+}
+.skate-flow-bar {
+  width: 150px;
+  height: 8px;
+  border: 3px solid #1f1b2e;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #2a7fff, #3fd8e8, #f4f1e8) left / var(--fill, 0%) 100% no-repeat, rgba(31, 27, 46, 0.6);
+  transition: background-size 0.12s linear;
+}
+.skate-flow.full .skate-flow-bar {
+  animation: skate-flow-glow 0.4s ease-in-out infinite alternate;
+}
+@keyframes skate-flow-glow {
+  to {
+    box-shadow: 0 0 10px 3px rgba(63, 216, 232, 0.85);
+  }
+}
+
+/* The run's card, when the horn goes. */
+.skate-results {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(380px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 18px 20px 14px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  text-align: center;
+  background: rgba(31, 27, 46, 0.9);
+  border: 4px solid #1f1b2e;
+  border-radius: 18px;
+  box-shadow: 0 0 0 3px #ffd23f, 0 12px 40px rgba(0, 0, 0, 0.45);
+  animation: skate-results-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.skate-results[hidden] {
+  display: none;
+}
+.skate-results.record {
+  box-shadow: 0 0 0 3px #ff5fa8, 0 0 28px 6px rgba(255, 95, 168, 0.55), 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+@keyframes skate-results-in {
+  from {
+    transform: translate(-50%, -50%) scale(0.6);
+    opacity: 0;
+  }
+}
+.skate-results-title {
+  font-size: 30px;
+  font-weight: 900;
+  color: #ffd23f;
+  letter-spacing: 1px;
+}
+.skate-results-label {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.85;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.skate-results-total {
+  font-size: 54px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.skate-results-total.done {
+  color: #ffd23f;
+  animation: skate-results-pop 0.3s ease-out;
+}
+@keyframes skate-results-pop {
+  50% {
+    transform: scale(1.15);
+  }
+}
+.skate-results-badge {
+  min-height: 18px;
+  font-size: 14px;
+  font-weight: 800;
+  opacity: 0.85;
+}
+.skate-results-badge.best {
+  color: #ff8fc8;
+  opacity: 1;
+  animation: skate-huge 0.4s ease-in-out infinite alternate;
+}
+.skate-results-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+.skate-results-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.skate-results-stat b {
+  font-size: 22px;
+  font-weight: 900;
+  color: #3fd8e8;
+}
+.skate-results-stat span {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.skate-results-stat small {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  opacity: 0.7;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.skate-results-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  text-shadow: none;
+}
+.skate-results-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
 /* The combo building, under the skater. */
 .skate-combo {
   position: absolute;
@@ -7892,7 +8039,8 @@ body.skate-playing.skate-touch-mode .chat-log {
 .skate-big {
   position: absolute;
   left: 50%;
-  top: 20%;
+  /* (Clear of the score and meters up top, however short the screen.) */
+  top: max(20%, 190px);
   transform: translateX(-50%) scale(0.5);
   text-align: center;
   opacity: 0;
@@ -8303,4 +8451,431 @@ body.skate-touch-mode .skate-touch {
 .panel .skate-upgrade {
   font-size: 15px;
   padding: 10px;
+}
+
+/* Pixel-art icons drawn over their emoji wherever they appear (ui/pixicons.ts): a
+   little bigger than the text so they read at a glance; each icon's class sets
+   its picture and its shape (--px-w by --px-h pixels). */
+.px-icon {
+  display: inline-block;
+  height: 1.25em;
+  width: calc(1.25em * var(--px-w, 16) / var(--px-h, 16));
+  overflow: hidden;
+  vertical-align: -0.3em;
+  color: transparent;
+  text-shadow: none;
+  line-height: 1;
+  background: center / contain no-repeat;
+  image-rendering: pixelated;
+}
+/* Over heads, a pixel of the picture to a pixel of the screen: crisp at that small size. */
+.label .name .px-icon {
+  height: calc(var(--px-h, 16) * 1px);
+  width: calc(var(--px-w, 16) * 1px);
+  vertical-align: -4px;
+}
+
+/* The skatepark's 1v1: a row on the board's panel, a banner while you wait,
+   their score beside yours, the result. */
+.panel.skate-board .skate-duel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 8px 10px;
+  background: var(--paper-2);
+  border-radius: 10px;
+}
+.skate-duel-title {
+  flex: 1 1 100%;
+  font-weight: 800;
+}
+.skate-duel {
+  position: absolute;
+  left: 50%;
+  top: 150px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 12px;
+  pointer-events: auto;
+  font-size: 15px;
+  font-weight: 800;
+  background: rgba(31, 27, 46, 0.85);
+  border: 3px solid #1f1b2e;
+  border-radius: 12px;
+}
+.skate-duel[hidden] {
+  display: none;
+}
+.skate-duel button {
+  text-shadow: none;
+}
+.skate-vs {
+  font-size: 14px;
+  font-weight: 800;
+  color: #ff8fc8;
+}
+.skate-vs b {
+  font-size: 20px;
+  color: #ff8fc8;
+}
+.skate-duel-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 6px 0;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 18px;
+  font-weight: 800;
+}
+.skate-duel-line b {
+  font-size: 28px;
+}
+.skate-duel-line.lead {
+  background: rgba(255, 210, 63, 0.22);
+  color: #ffd23f;
+}
+
+/* Dusty's daily quests. */
+.skate-quests {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skate-quest-intro {
+  margin: 0;
+  font-style: italic;
+  color: var(--muted);
+}
+.skate-quest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--paper-3);
+  border-radius: 10px;
+  box-shadow: var(--frame-thin);
+}
+.skate-quest.done:not(.claimed) {
+  background: #fff3b8;
+}
+.skate-quest.claimed {
+  opacity: 0.6;
+}
+.skate-quest-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.skate-quest-bar {
+  height: 8px;
+  border-radius: 6px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.skate-quest-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #6a9a4a, #8cbf63);
+}
+.skate-quest.done .skate-quest-fill {
+  background: linear-gradient(90deg, #f6c343, #ffd23f);
+}
+.skate-quest-prog {
+  font-size: 12px;
+  color: var(--muted);
+}
+.skate-quest-coins,
+.skate-quest-got {
+  font-weight: 800;
+  white-space: nowrap;
+}
+.panel.skate-shop .tabs button.ready {
+  animation: skate-bob 1.2s ease-in-out infinite;
+  background: #ffd23f;
+}
+
+/* The skatepark board's modes, each its own colour: free skate green, the run yellow, a line red. */
+.panel.skate-board .skate-mode.m-free {
+  background: #9fd27a;
+}
+.panel.skate-board .skate-mode.m-run {
+  background: #ffd84a;
+}
+.panel.skate-board .skate-mode.m-line {
+  background: #f28a78;
+}
+.panel.skate-board .skate-mode.m-free:hover {
+  background: #b2df90;
+}
+.panel.skate-board .skate-mode.m-run:hover {
+  background: #ffe27a;
+}
+.panel.skate-board .skate-mode.m-line:hover {
+  background: #f6a090;
+}
+.panel.skate-board .skate-mode .hint {
+  color: var(--ink);
+  opacity: 0.8;
+}
+
+/* Dusty's quests on the park's board. */
+.skate-board-quests {
+  margin: 10px 0 4px;
+}
+.skate-board-quests h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+/* The 1v1's sort: every trick, or grinds only. */
+.skate-duel-kinds {
+  display: flex;
+  flex: 1 1 100%;
+  gap: 4px;
+}
+.skate-duel-kinds button {
+  flex: 1;
+}
+.skate-duel-kinds button.on {
+  background: #6a9a4a;
+  color: #fff;
+}
+.skate-duel-hint {
+  flex: 1 1 100%;
+  margin: 0;
+}
+.skate-grinds {
+  font-size: 13px;
+  font-weight: 800;
+  color: #b8cbe0;
+}
+
+/* New notifications, popped up top right to answer at once (ui/social.ts NotifyPopups). */
+.notify-pops {
+  position: fixed;
+  /* (Below the top bar and the banners and toasts under it.) */
+  top: max(116px, calc(env(safe-area-inset-top) + 108px));
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.notify-pop {
+  position: relative;
+  pointer-events: auto;
+  padding: 10px 34px 10px 12px;
+  background: var(--paper-3);
+  color: var(--ink);
+  font-size: 14px;
+  box-shadow: var(--frame), var(--drop);
+  border-left: 6px solid #f6c343;
+  animation: notify-in 0.28s cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+.notify-pop.k-home_invite,
+.notify-pop.k-club_invite,
+.notify-pop.k-club_meetup_now,
+.notify-pop.k-club_event_now {
+  border-left-color: #6a9a4a;
+}
+.notify-pop.k-friend_request {
+  border-left-color: #4da6ff;
+}
+.notify-pop.k-gift {
+  border-left-color: #ff8fc8;
+}
+.notify-pop.going {
+  opacity: 0;
+  transform: translateX(30px);
+  transition: opacity 0.25s, transform 0.25s;
+}
+@keyframes notify-in {
+  from {
+    opacity: 0;
+    transform: translateX(60px);
+  }
+}
+.notify-text {
+  font-weight: 700;
+  line-height: 1.3;
+}
+.notify-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.notify-pop .notify-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 13px;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The Skate Trainer's book of lessons. */
+.panel.skate-trainer {
+  width: min(560px, calc(100vw - 32px));
+}
+.trainer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+.trainer-bar {
+  flex: 1;
+  min-width: 80px;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.trainer-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #6a9a4a, #8cbf63);
+}
+.panel.skate-trainer .tabs {
+  flex-wrap: wrap;
+}
+.trainer-lessons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.trainer-lesson {
+  padding: 8px 10px;
+  background: var(--paper-3);
+  border-radius: 10px;
+  box-shadow: var(--frame-thin);
+}
+.trainer-lesson.done {
+  background: #e8f4d8;
+}
+.trainer-lesson p {
+  margin: 4px 0;
+}
+.trainer-lesson-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.trainer-keys,
+.skate-coach-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.trainer-keys kbd,
+.skate-coach-keys kbd {
+  padding: 1px 6px;
+  font-size: 12px;
+  font-weight: 800;
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  color: var(--ink);
+  text-shadow: none;
+}
+.trainer-tip {
+  font-size: 13px;
+  color: var(--muted);
+}
+.trainer-tips {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+
+/* The coach while you try a lesson: what to do, at the top. */
+.skate-coach {
+  position: fixed;
+  /* (Top left, under the tasks chip: clear of the score, the balance bar and the tricks in the middle.) */
+  left: 16px;
+  top: max(110px, calc(env(safe-area-inset-top) + 102px));
+  z-index: 55;
+  width: min(300px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 10px 34px 10px 12px;
+  color: #fff;
+  background: rgba(31, 27, 46, 0.9);
+  border: 3px solid #1f1b2e;
+  border-left: 6px solid #3fd8e8;
+  border-radius: 12px;
+  font-family: var(--font);
+}
+.skate-coach[hidden] {
+  display: none;
+}
+.skate-coach.done {
+  border-left-color: #7cf26a;
+}
+.skate-coach-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: #3fd8e8;
+}
+.skate-coach.done .skate-coach-title {
+  color: #7cf26a;
+}
+.skate-coach-goal {
+  margin: 4px 0;
+  font-weight: 700;
+}
+.skate-coach-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.skate-coach-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.skate-coach .skate-coach-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 0;
+  padding: 0 6px;
+  background: transparent;
+  box-shadow: none;
+  color: #fff;
+}
+
+/* Watching the arena on a TV: no chat or emotes (nobody there to hear them). */
+body.watching-tv form.chat,
+body.watching-tv .emotes,
+body.watching-tv .emote-fab,
+body.watching-tv .chat-fab {
+  display: none;
+}
+/* (At the foot of the screen, where the chat was: the arena's own banners use the top.) */
+.place-banner.watch-banner {
+  top: auto;
+  bottom: 18px;
+  z-index: 30;
 }

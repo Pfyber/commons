@@ -39,6 +39,9 @@ struct JoinReq {
     /// owner, or `"home"` (your own), to come out of that door.
     #[serde(default)]
     arrive: Option<String>,
+    /// Watching the arena from a home TV (city only): unseen, in the arena.
+    #[serde(default)]
+    watch: bool,
 }
 
 #[derive(Serialize)]
@@ -293,6 +296,7 @@ async fn join(
         owner: owner.clone(),
         muted_until: who.muted_until,
         arrive,
+        watch: req.watch && zone == "city",
     };
     Ok(Json(JoinResp {
         server_url: state.zone_server_url.clone(),

@@ -2,7 +2,8 @@
 
 import { COIN, type Economy } from "../economy";
 import { ApiError } from "../net/api";
-import { type Friend, type Social, describe } from "../social";
+import { type Friend, type Notification, type Social, describe } from "../social";
+import { notifyChime } from "../ambient/sfx";
 import { Panel, button, el, icon } from "./panels";
 
 export interface FriendActions {
@@ -85,6 +86,14 @@ export class FriendsPanel extends Panel {
       if (input.value.trim()) void this.act(() => s.request(input.value.trim()));
     };
     this.body.append(add, this.msg);
+    // Your home: friends dropping by whenever they like (the default), or only when you invite them.
+    const open = el("label", "row voice-switch");
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = s.dropIn;
+    box.onchange = () => void this.act(() => s.setDropIn(box.checked), box.checked ? "Friends can drop by your home any time." : "Friends now need an invitation to come in.");
+    open.append(box, el("span", "name", "Friends can visit my home any time"));
+    this.body.append(open);
 
     if (s.incoming.length) {
       this.body.append(el("h3", "", "Requests"));
@@ -109,7 +118,7 @@ export class FriendsPanel extends Panel {
       const where = el("div", "where", f.online ? (f.where?.label ?? "online") : "away");
       const btns = el("div", "btns");
       if (f.online && f.where) btns.append(button("Join", () => this.actions.join(f), "small primary-sm"));
-      if (f.level >= 2) btns.append(button("Visit home", () => this.actions.visit(f), "small"));
+      if (f.level >= 2 || f.drop_in) btns.append(button("Visit home", () => this.actions.visit(f), "small"));
       btns.append(
         button("Message", () => this.chatWith(f), "small"),
         button("Gift", () => ((this.view = { kind: "gift", friend: f }), this.render()), "small"),
@@ -215,19 +224,99 @@ export class FriendsPanel extends Panel {
   }
 }
 
+/** What can be done about a notification (accept, visit, join…). */
+export type NoteActions = FriendActions & {
+  visitId(id: string, name: string): void;
+  /** Whether the invite into club `id` is still waiting for an answer. */
+  clubInvited?(id: string): boolean;
+  answerClub?(id: string, accept: boolean): void;
+  /** Up to the club's room (a meetup that's on). */
+  goToClubRoom?(id: string): void;
+  /** To a place in the city (a club event's). */
+  walkToSpot?(spot: string): void;
+};
+
+/**
+ * The buttons for notification `n` still worth pressing (an invite not yet
+ * gone stale, a request still waiting…), each doing its thing then `done`.
+ * `gifts`: a gift's "Go home" (when there are gifts waiting there).
+ */
+function noteButtons(n: Notification, social: Social, actions: NoteActions, done: () => void, gifts = false, fresh = false): HTMLButtonElement[] {
+  const out: HTMLButtonElement[] = [];
+  const act = (label: string, f: () => void, cls = "small") => out.push(button(label, () => (f(), done()), cls));
+  const from = n.body.from_id;
+  const name = n.body.from_name ?? "";
+  const age = Date.now() / 1000 - n.at;
+  // (Just come in, a request's waiting: the friends list may not have caught up yet.)
+  if (n.kind === "friend_request" && from && (fresh || social.incoming.some((p) => p.id === from))) {
+    act("Accept", () => void social.respond(from, true), "small primary-sm");
+    act("Decline", () => void social.respond(from, false));
+  }
+  if (n.kind === "home_invite" && from && age < INVITE_SECS) act("Visit", () => actions.visitId(from, name), "small primary-sm");
+  const club = n.body.club_id;
+  if (n.kind === "club_invite" && club && actions.clubInvited?.(club)) {
+    act("Join", () => actions.answerClub?.(club, true), "small primary-sm");
+    act("No thanks", () => actions.answerClub?.(club, false));
+  }
+  const place = (n.body as { place?: string }).place;
+  if ((n.kind === "club_event_soon" || n.kind === "club_event_now") && place && age < 7200) act("Show me", () => actions.walkToSpot?.(place), "small primary-sm");
+  if (n.kind === "club_meetup_now" && club && age < 3600) act("Go up", () => actions.goToClubRoom?.(club), "small primary-sm");
+  if (n.kind === "gift" && gifts) act("Go home", () => actions.goHome());
+  return out;
+}
+
+/**
+ * New notifications popping up in a card top right, with a chime: what's
+ * happened, and (an invite, a request) buttons to answer at once, without
+ * going to the bell. Each goes after a while (an invite, a while longer),
+ * or when it's answered or closed; three at most at once.
+ */
+export class NotifyPopups {
+  private box = el("div", "notify-pops");
+
+  constructor(
+    private social: Social,
+    private actions: NoteActions,
+  ) {
+    document.body.append(this.box);
+  }
+
+  show(n: Notification) {
+    notifyChime(n.kind);
+    const card = el("div", `notify-pop k-${n.kind}`);
+    let timer = 0;
+    const close = () => {
+      window.clearTimeout(timer);
+      card.classList.add("going");
+      window.setTimeout(() => card.remove(), 250);
+    };
+    // Gifts: "Go home" (they wait on the doorstep).
+    const buttons = noteButtons(n, this.social, this.actions, () => {
+      void this.social.markRead();
+      close();
+    }, true, true);
+    const x = button("✕", close, "notify-close");
+    x.title = "Dismiss";
+    const text = el("div", "notify-text", describe(n));
+    const row = el("div", "notify-btns");
+    row.append(...buttons);
+    card.append(x, text);
+    if (buttons.length) card.append(row);
+    this.box.prepend(card);
+    while (this.box.children.length > 3) this.box.lastElementChild?.remove();
+    // Up a while (something to answer: longer), not going while the pointer's on it.
+    const ms = buttons.length ? 20_000 : 7_000;
+    const arm = () => (timer = window.setTimeout(close, ms));
+    card.addEventListener("pointerenter", () => window.clearTimeout(timer));
+    card.addEventListener("pointerleave", arm);
+    arm();
+  }
+}
+
 export class NotificationsPanel extends Panel {
   constructor(
     private social: Social,
-    private actions: FriendActions & {
-      visitId(id: string, name: string): void;
-      /** Whether the invite into club `id` is still waiting for an answer. */
-      clubInvited?(id: string): boolean;
-      answerClub?(id: string, accept: boolean): void;
-      /** Up to the club's room (a meetup that's on). */
-      goToClubRoom?(id: string): void;
-      /** To a place in the city (a club event's). */
-      walkToSpot?(spot: string): void;
-    },
+    private actions: NoteActions,
   ) {
     super("Notifications", "notifications");
     social.onChange(() => this.open && this.render());
@@ -256,30 +345,9 @@ export class NotificationsPanel extends Panel {
     for (const n of ns) {
       const row = el("div", n.read ? "note" : "note unread");
       row.append(el("span", "text", describe(n)), el("span", "time", ago(n.at)));
-      const from = n.body.from_id;
-      const name = n.body.from_name ?? "";
-      const pending = from && this.social.incoming.some((p) => p.id === from);
-      if (n.kind === "friend_request" && pending && from) {
-        row.append(
-          button("Accept", () => void this.social.respond(from, true), "small primary-sm"),
-          button("Decline", () => void this.social.respond(from, false), "small"),
-        );
-      }
-      const inviteLive = Date.now() / 1000 - n.at < INVITE_SECS;
-      if (n.kind === "home_invite" && from && inviteLive) row.append(button("Visit", () => this.actions.visitId(from, name), "small primary-sm"));
-      const club = n.body.club_id;
-      if (n.kind === "club_invite" && club && this.actions.clubInvited?.(club)) {
-        row.append(
-          button("Join", () => this.actions.answerClub?.(club, true), "small primary-sm"),
-          button("No thanks", () => this.actions.answerClub?.(club, false), "small"),
-        );
-      }
-      const place = (n.body as { place?: string }).place;
-      if ((n.kind === "club_event_soon" || n.kind === "club_event_now") && place && Date.now() / 1000 - n.at < 7200) {
-        row.append(button("Show me", () => (this.hide(), this.actions.walkToSpot?.(place)), "small primary-sm"));
-      }
-      if (n.kind === "club_meetup_now" && club && Date.now() / 1000 - n.at < 3600) row.append(button("Go up", () => this.actions.goToClubRoom?.(club), "small primary-sm"));
-      if (n === newestGift && this.waitingGifts > 0) row.append(button("Go home", () => this.actions.goHome(), "small"));
+      // (Going somewhere: the panel shuts.)
+      const going = n.kind === "club_event_soon" || n.kind === "club_event_now";
+      row.append(...noteButtons(n, this.social, this.actions, () => going && this.hide(), n === newestGift && this.waitingGifts > 0));
       this.body.append(row);
     }
   }

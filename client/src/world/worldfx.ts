@@ -117,6 +117,22 @@ export class WorldFx {
     });
   }
 
+  /** Indoors (a home): the lights that are on (world px, how bright now), to cast shadows from. */
+  roomLights: (() => { x: number; y: number; power: number }[]) | null = null;
+  private litNow: { x: number; y: number; power: number }[] = [];
+
+  /** The nearest light that's on in the room within `reach` tiles of (x, y) (tiles), and how bright it is. */
+  private nearestRoomLight(x: number, y: number, reach: number): { x: number; y: number; d: number; power: number } | null {
+    let best: { x: number; y: number; d: number; power: number } | null = null;
+    for (const l of this.litNow) {
+      const lx = l.x / TILE;
+      const ly = l.y / TILE + 0.5;
+      const d = Math.hypot(lx - x, ly - y);
+      if (d <= reach && d > 0.3 && (!best || d < best.d)) best = { x: lx, y: ly, d, power: l.power };
+    }
+    return best;
+  }
+
   /** The nearest lamp within `reach` tiles of (x, y) (tiles), if any. */
   private nearestLamp(x: number, y: number, reach: number): { x: number; y: number; d: number } | null {
     let best: { x: number; y: number; d: number } | null = null;
@@ -254,6 +270,8 @@ export class WorldFx {
     this.shadowAlpha.alpha = strength;
     this.shadows.alpha = in3d ? strength : 1;
     const shade = 0x0b0e22;
+    // Indoors: the room's lights that are on this frame (flickering with them).
+    this.litNow = !outdoors && this.roomLights ? this.roomLights() : [];
     for (const s of this.scene.standing()) {
       let p = this.pairs.get(s);
       if (!p) {
@@ -306,7 +324,9 @@ export class WorldFx {
       p.shadow.visible = p.penumbra.visible = grounded;
       p.shadow.visible = p.penumbra.visible = true;
       // After dark: away from the nearest street lamp, longer the further from it.
-      const lamp = night > 0.15 && grounded ? this.nearestLamp(x / TILE, foot / TILE, 5.5) : null;
+      // (Indoors: away from the nearest light that's on in the room, flickering as it does.)
+      const indoor = this.litNow.length && grounded ? this.nearestRoomLight(x / TILE, foot / TILE, 6) : null;
+      const lamp = indoor ?? (night > 0.15 && grounded ? this.nearestLamp(x / TILE, foot / TILE, 5.5) : null);
       p.lampShadow.visible = !!lamp;
       if (lamp) {
         const dx = x / TILE - lamp.x;
@@ -314,7 +334,9 @@ export class WorldFx {
         const d = Math.max(0.5, lamp.d);
         const len = h * reach * Math.min(1.8, 0.35 + d * 0.35);
         this.cast(p.lampShadow, s, x, foot, (dx / d) * len, (dy / d) * len, h);
-        p.lampShadow.alpha = night * Math.max(0, 1 - d / 5.5) * 0.8 * p.fade;
+        p.lampShadow.alpha = indoor
+          ? Math.min(1, indoor.power * 1.25) * Math.max(0, 1 - d / 6) * 0.9 * p.fade
+          : night * Math.max(0, 1 - d / 5.5) * 0.8 * p.fade;
       }
       // And where it meets the ground, the darkest: as wide as it, a sliver deep.
       const width = Math.min(110, s.texture.width * Math.abs(s.scale.x) * 0.8);

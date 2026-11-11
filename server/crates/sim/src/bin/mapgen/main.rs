@@ -501,9 +501,8 @@ fn home() -> MapFile {
             b.decor(17, y, "home_wall_cap");
         }
     }
-    // A rug by the door, and the hearth at the head of the bedroom.
+    // A rug by the door. (No hearth built in: a fireplace is bought and put where you like.)
     b.rect(6, 10, 8, 2, "rug");
-    b.object("fireplace", 19, 2, 2, 1, Some("Hearth"), true);
     b.object("home_exit", 9, 13, 2, 1, Some("To the city"), true);
     // A wardrobe against the back wall: change clothes at home.
     b.object("wardrobe", 15, 2, 2, 1, Some("Wardrobe"), true);

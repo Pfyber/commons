@@ -4,9 +4,12 @@
 import { Container, Graphics, Sprite } from "pixi.js";
 import type { Economy } from "../economy";
 import type { PlotInfo } from "../ui/panels";
-import { TILE } from "./art";
+import { TILE, objectTexture } from "./art";
 import { CAST_SWING_MS } from "./avatars";
-import { type Alive, FLAT, HUNGRY_SECS, LIGHTS, PET_SPOTS, TANKS, WALK_OVER, TURNS_FLAT, Tank, alive } from "./housewares";
+import { type Alive, FLAT, HUNGRY_SECS, LIGHTS, PET_SPOTS, TANKS, WALK_OVER, Tank, alive } from "./housewares";
+import { turnedAway } from "./furnviews";
+import { WIDE } from "./sofas";
+import { furnitureRelief, hasShape } from "./furniture3d";
 import { SURFACE_H, TOPS, WALLS } from "./cozyart";
 import { groundAt } from "./map";
 import { pondTexture } from "./roomskin";
@@ -18,7 +21,22 @@ import type { Scene } from "./scene";
 
 const k = (x: number, y: number) => `${x},${y}`;
 
+/**
+ * A placed piece's `rot`: the way it faces in its low two bits (0 toward
+ * you, 1 right, 2 away, 3 left), and in bits 2 and 3 half a tile right and
+ * down (placed finer than whole tiles; it still stands on its tile).
+ */
+const facing = (rot: number) => rot & 3;
+/** A two-tile piece's other tile: to the right facing you or away, behind it turned side on. */
+const wideOther = (x: number, y: number, rot: number): [number, number] => ((rot & 1) === 0 ? [x + 1, y] : [x, y + 1]);
+const nudged = (rot: number): [number, number] => [((rot >> 2) & 1) * (TILE / 2), ((rot >> 3) & 1) * (TILE / 2)];
+
 const POND = "round_pond";
+/** A pool table, three tiles by two from its top left (played on: the pool panel). */
+const POOL = "pool_table";
+const poolTiles = (x: number, y: number): [number, number][] => [[x, y], [x + 1, y], [x + 2, y], [x, y + 1], [x + 1, y + 1], [x + 2, y + 1]];
+/** The pool table's picture, the bar's own at three tiles by two. */
+const poolArt = () => objectTexture({ kind: "pool_table", x: 0, y: 0, w: 3, h: 2, label: "Pool table" });
 /** A garden pond's tiles, from its top left. */
 const pondTiles = (x: number, y: number): [number, number][] => [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]];
 
@@ -32,6 +50,8 @@ interface PlotSprites {
 interface Placed {
   sprite: Sprite;
   item: number;
+  /** Which way it faces and how it's been put off its tile (see `facing`, `nudged`). */
+  rot: number;
   key: string;
   on: boolean;
   live: Alive | null;
@@ -52,7 +72,7 @@ export class Props {
   /** Your pet (its code), curled up on its bed or tree at home (0: none, or not your home). */
   petCode = 0;
   /** How lights reach the room (the day and night's light layer). */
-  lightUp: { add: (x: number, y: number, color: number, scale: number) => Sprite; lit: (n: number) => void } | null = null;
+  lightUp: { add: (x: number, y: number, color: number, scale: number, key: string) => Sprite; lit: (n: number) => void } | null = null;
   /** Outdoors: where a piece may go (your own front yard). */
   yardRule: ((x: number, y: number) => boolean) | null = null;
   private lastFx = 0;
@@ -111,6 +131,26 @@ export class Props {
     if (potted) p.wet.visible = false;
   }
 
+  /** The pool table put up here (its top left, three by two), if there is one. */
+  get poolTable(): { x: number; y: number; w: number; h: number } | null {
+    for (const [key, p] of this.objects) {
+      if (p.key !== POOL) continue;
+      const [x, y] = key.split(",").map(Number);
+      return { x, y, w: 3, h: 2 };
+    }
+    return null;
+  }
+
+  /** The pool table over (x, y), as its top left tile. */
+  poolAt(x: number, y: number): TileXY | null {
+    for (const [key, p] of this.objects) {
+      if (p.key !== POOL) continue;
+      const [ax, ay] = key.split(",").map(Number);
+      if (x >= ax && x < ax + 3 && y >= ay && y < ay + 2) return { x: ax, y: ay };
+    }
+    return null;
+  }
+
   /** The garden pond's water at (x, y), as its top left tile. */
   pondAt(x: number, y: number): TileXY | null {
     const at = this.pondWater.get(k(x, y));
@@ -122,6 +162,34 @@ export class Props {
   private pondWater = new Map<string, string>();
   /** What the ground was under each pond's tiles. */
   private pondWas = new Map<number, number>();
+
+  /** Sitting on the piece at (x, y): how far it's been put off its tile (px), and which way it faces (1 right, -1 left, 0 neither). */
+  seatAt(x: number, y: number): { dx: number; dy: number; face: number } {
+    const o = this.objects.get(k(x, y));
+    if (!o) return { dx: 0, dy: 0, face: 0 };
+    const [dx, dy] = nudged(o.rot);
+    const f = facing(o.rot);
+    return { dx, dy, face: f === 1 ? 1 : f === 3 ? -1 : 0 };
+  }
+
+  /** The two-tile piece over (x, y), by its own tile (null: none, or that is its own tile). */
+  wideAt(x: number, y: number): TileXY | null {
+    for (const [ax, ay] of [[x - 1, y], [x, y - 1]]) {
+      const o = this.objects.get(k(ax, ay));
+      if (!o || !WIDE.has(o.key)) continue;
+      const [ox, oy] = wideOther(ax, ay, o.rot);
+      if (ox === x && oy === y) return { x: ax, y: ay };
+    }
+    return null;
+  }
+
+  /** The other tile of the two-tile piece at (x, y), if that's what's there. */
+  wideTile(x: number, y: number): TileXY | null {
+    const o = this.objects.get(k(x, y));
+    if (!o || !WIDE.has(o.key)) return null;
+    const [ox, oy] = wideOther(x, y, o.rot);
+    return { x: ox, y: oy };
+  }
 
   objectAt(x: number, y: number): number | null {
     return this.objects.get(k(x, y))?.item ?? null;
@@ -141,12 +209,30 @@ export class Props {
       }
       this.scene.repaintAt(x, y, x + 1, y + 1);
     }
+    if (old && WIDE.has(old.key)) {
+      const [ox, oy] = wideOther(x, y, old.rot);
+      const at = oy * this.map.width + ox;
+      if (at < this.map.collision.length) this.map.collision[at] = this.baseCollision[at];
+    }
+    if (old?.key === POOL) {
+      for (const [px, py] of poolTiles(x, y)) {
+        const at = py * this.map.width + px;
+        if (at < this.map.collision.length) this.map.collision[at] = this.baseCollision[at];
+      }
+    }
     const i = y * this.map.width + x;
     if (!item) {
       this.map.collision[i] = this.baseCollision[i];
       return;
     }
     this.objects.set(key, this.make(x, y, item, 0, rot));
+    if (this.objects.get(key)!.key === POOL) {
+      for (const [px, py] of poolTiles(x, y)) {
+        const at = py * this.map.width + px;
+        if (at < this.map.collision.length) this.map.collision[at] = 1;
+      }
+      return;
+    }
     if (this.objects.get(key)!.key === POND) {
       // Plain water, like any pond: it's baked into the ground, corners rounded off.
       for (const [px, py] of pondTiles(x, y)) {
@@ -158,6 +244,11 @@ export class Props {
       }
       this.scene.repaintAt(x, y, x + 1, y + 1);
       return;
+    }
+    if (WIDE.has(this.objects.get(key)!.key)) {
+      const [ox, oy] = wideOther(x, y, rot);
+      const at = oy * this.map.width + ox;
+      if (at < this.map.collision.length) this.map.collision[at] = 1;
     }
     this.dressPet(this.objects.get(key)!);
     this.seatPlant(x, y);
@@ -187,26 +278,12 @@ export class Props {
     }
   }
 
-  /**
-   * Turns a sprite: mirrored (2), or side on (1 and 3): what lies flat
-   * rotates, what stands is drawn foreshortened, as it would look on a side
-   * wall or facing along the room.
-   */
-  private turn(s: Sprite, key: string, rot: number, wallSide: boolean) {
-    s.rotation = 0;
-    s.skew.set(0, 0);
-    s.scale.set(1);
-    if (rot === 2) s.scale.x = -1;
-    if (rot !== 1 && rot !== 3) return;
-    const dir = rot === 1 ? 1 : -1;
-    if (!wallSide && (FLAT.has(key) || TURNS_FLAT.test(key))) {
-      s.anchor.set(0.5);
-      s.y -= TILE / 2;
-      s.rotation = (dir * Math.PI) / 2;
-    } else {
-      s.scale.x = 0.62 * dir;
-      s.skew.y = 0.38 * dir;
-    }
+  /** In the 3D view, `s` (piece `key` facing `f`) built up as its shape is, from its feet. */
+  private buildUp(s: Sprite, key: string, f: number) {
+    if (!hasShape(key)) return;
+    const c = s.texture.source.resource as HTMLCanvasElement;
+    const r = furnitureRelief(c, key, f);
+    if (r) this.scene.setRelief(s, r, s.position.y);
   }
 
   /** A light's pool on the room, while it's on. */
@@ -214,12 +291,22 @@ export class Props {
     const light = LIGHTS[o.key];
     const on = o.on || o.key === "uv_light";
     if (!this.lightUp || !light || !!o.glow === on) return;
-    if (on) o.glow = this.lightUp.add(x * TILE + TILE / 2, y * TILE + TILE / 2, light[0], light[1]);
+    if (on) o.glow = this.lightUp.add(x * TILE + TILE / 2, y * TILE + TILE / 2, light[0], light[1], o.key);
     else {
       o.glow?.destroy();
       o.glow = null;
     }
     this.countLit();
+  }
+
+  /** The lights that are on (world px, how strong, which piece), for the shadows they cast. */
+  lightsOn(): { x: number; y: number; power: number; key: string }[] {
+    const out: { x: number; y: number; power: number; key: string }[] = [];
+    for (const o of [...this.objects.values(), ...this.tops.values()]) {
+      if (!o.glow) continue;
+      out.push({ x: o.glow.position.x, y: o.glow.position.y, power: o.glow.alpha, key: o.key });
+    }
+    return out;
   }
 
   private countLit() {
@@ -245,21 +332,49 @@ export class Props {
     const s = new Sprite(furnitureTexture(itemKey));
     s.anchor.set(0.5, 1);
     s.position.set(x * TILE + TILE / 2, y * TILE + TILE - lift);
+    if (itemKey === POOL) {
+      // Three tiles by two, from its top left: drawn whole, standing on its front edge.
+      const art = poolArt();
+      s.texture = art.texture;
+      s.anchor.set(0, 1);
+      s.position.set(x * TILE, (y + 2) * TILE);
+      s.zIndex = (y + 2) * TILE - 2;
+      this.scene.sorted.addChild(s);
+      return { sprite: s, item, rot, key: itemKey, on: false, live: null, tank: null, shelf: null, glow: null, pet: null, zzz: null, over: null };
+    }
+    if (WIDE.has(itemKey)) {
+      // Two tiles long, standing on both: across them facing you or away, back over them turned.
+      const f = facing(rot);
+      const [ox, oy] = nudged(rot);
+      s.texture = furnitureTexture(itemKey, f);
+      const across = (f & 1) === 0;
+      s.position.set((across ? x * TILE + TILE : x * TILE + TILE / 2) + ox, (across ? y * TILE + TILE : (y + 2) * TILE) + oy);
+      s.zIndex = (across ? y * TILE + TILE : (y + 2) * TILE) - 2 + oy;
+      this.scene.sorted.addChild(s);
+      this.buildUp(s, itemKey, f);
+      return { sprite: s, item, rot, key: itemKey, on: false, live: null, tank: null, shelf: null, glow: null, pet: null, zzz: null, over: null };
+    }
     if (isPond) {
       // (It's in the ground itself: nothing stands there.)
       s.visible = false;
       this.scene.sorted.addChild(s);
-      return { sprite: s, item, key: itemKey, on: false, live: null, tank: null, shelf: null, glow: null, pet: null, zzz: null, over: null };
+      return { sprite: s, item, rot, key: itemKey, on: false, live: null, tank: null, shelf: null, glow: null, pet: null, zzz: null, over: null };
     }
     const flat = FLAT.has(itemKey);
     const wall = WALLS.has(itemKey) && this.baseCollision[y * this.map.width + x] !== 0;
-    const side = wall && (rot === 1 || rot === 3);
-    this.turn(s, itemKey, rot, side);
+    const f = facing(rot);
+    const [ox, oy] = nudged(rot);
+    const side = wall && (f === 1 || f === 3);
+    // Its own picture the way it faces (its back, its side), half a tile over if it's been put so.
+    s.texture = furnitureTexture(itemKey, f, side);
+    s.position.set(x * TILE + TILE / 2 + ox, y * TILE + TILE - lift + oy);
     // Side on, it hangs on the face of the wall, towards the room.
-    if (side) s.position.set(x * TILE + (rot === 1 ? TILE + 3 : -3), y * TILE + TILE - 6);
+    if (side) s.position.set(x * TILE + (f === 1 ? TILE + 3 : -3), y * TILE + TILE - 6 + oy);
     if (flat) this.scene.layOnGround(s);
-    s.zIndex = flat ? y * TILE - 30 : wall ? y * TILE + TILE + 4 : y * TILE + TILE - 2 + (lift ? 1 : 0);
+    s.zIndex = (flat ? y * TILE - 30 : wall ? y * TILE + TILE + 4 : y * TILE + TILE - 2 + (lift ? 1 : 0)) + oy;
     this.scene.sorted.addChild(s);
+    // In the 3D view, built up (a bed lying flat, a table's top, a sofa's seat and back), not a card.
+    if (!lift && !wall && !flat) this.buildUp(s, itemKey, f);
     // Its live part (a lamp's glow, the fire, a tank's fish, a pet on its bed), over it.
     const live = alive(itemKey);
     const isShelf = itemKey === "display_shelf";
@@ -268,14 +383,16 @@ export class Props {
     let over: Container | null = null;
     if (live || tank || shelf || PET_SPOTS.has(itemKey)) {
       over = new Container();
-      over.position.set(x * TILE, y * TILE - lift);
+      over.position.set(x * TILE + ox, y * TILE - lift + oy);
       over.zIndex = s.zIndex + 0.5;
+      // (Its screen, its flames, its fish are drawn for its front: turned away, they're out of sight.)
+      over.visible = !turnedAway(itemKey, f);
       if (tank) over.addChild(tank.view);
       if (shelf) over.addChild(shelf);
       if (live) over.addChild(live.view);
       this.scene.sorted.addChild(over);
     }
-    return { sprite: s, item, key: itemKey, on: false, live, tank, shelf, glow: null, pet: null, zzz: null, over };
+    return { sprite: s, item, rot, key: itemKey, on: false, live, tank, shelf, glow: null, pet: null, zzz: null, over };
   }
 
   // ---- placing: a see-through preview under the pointer ----
@@ -294,11 +411,24 @@ export class Props {
       const free = ([px, py]: [number, number]) => !!this.yardRule?.(px, py) && px < w && py < this.map.height && !this.objects.has(k(px, py)) && this.map.collision[py * w + px] === 0;
       return { ok: pondTiles(x, y).every(free), lift: 0 };
     }
+    if (key === POOL) {
+      // Indoors, on three tiles by two of free floor (one table to a room).
+      const free = ([px, py]: [number, number]) => px < w && py < this.map.height && !this.objects.has(k(px, py)) && this.map.collision[py * w + px] === 0;
+      const one = ![...this.objects.values()].some((o) => o.key === POOL);
+      return { ok: !this.yardRule && one && poolTiles(x, y).every(free), lift: 0 };
+    }
     // (A lawn chair goes down anywhere out in the city.)
     if (this.yardRule && !this.yardRule(x, y) && key !== "lawn_chair") return { ok: false, lift: 0 };
     const here = this.objects.has(k(x, y));
+    // Two tiles long: its other tile free floor too.
+    if (WIDE.has(key)) {
+      const [ox, oy] = wideOther(x, y, rot);
+      const free = (px: number, py: number) => px >= 0 && py >= 0 && px < w && py < this.map.height && !this.objects.has(k(px, py)) && this.map.collision[py * w + px] === 0;
+      return { ok: free(x, y) && free(ox, oy) && !this.wideAt(x, y) && !this.wideAt(ox, oy), lift: 0 };
+    }
     if (WALLS.has(key)) {
-      const [fx, fy] = rot === 1 ? [x + 1, y] : rot === 3 ? [x - 1, y] : [x, y + 1];
+      const f = facing(rot);
+      const [fx, fy] = f === 1 ? [x + 1, y] : f === 3 ? [x - 1, y] : [x, y + 1];
       const front = fy * w + fx;
       const ok = !here && this.baseCollision[y * w + x] !== 0 && fy < this.map.height && fx >= 0 && fx < w && this.map.collision[front] === 0 && groundAt(this.map, fx, fy) === "floor";
       // (A UV light stands on the floor as well as hanging.)
@@ -306,7 +436,10 @@ export class Props {
     }
     const lift = this.surfaceAt(x, y);
     if (TOPS.has(key) && lift) return { ok: !this.tops.has(k(x, y)), lift };
-    return { ok: !here && this.map.collision[y * w + x] === 0, lift: 0 };
+    // Half a tile over: not into a wall (or off the room) on that side.
+    const [ox, oy] = nudged(rot);
+    const intoWall = (ox && (x + 1 >= w || this.baseCollision[y * w + x + 1] !== 0)) || (oy && (y + 1 >= this.map.height || this.baseCollision[(y + 1) * w + x] !== 0));
+    return { ok: !here && !intoWall && this.map.collision[y * w + x] === 0, lift: 0 };
   }
 
   /** The preview of `key` at (x, y): see-through, reddened where it can't go. */
@@ -321,6 +454,19 @@ export class Props {
     g.texture = key === POND ? pondTexture() : furnitureTexture(key);
     g.anchor.set(0.5, 1);
     g.position.set(x * TILE + TILE / 2, y * TILE + TILE - lift);
+    if (key === POOL) {
+      g.texture = poolArt().texture;
+      g.rotation = 0;
+      g.skew.set(0, 0);
+      g.scale.set(1);
+      g.anchor.set(0, 1);
+      g.position.set(x * TILE, (y + 2) * TILE);
+      g.alpha = ok ? 0.6 : 0.45;
+      g.tint = ok ? 0xffffff : 0xff6a6a;
+      g.zIndex = 1e8;
+      g.visible = true;
+      return;
+    }
     if (key === POND) {
       g.rotation = 0;
       g.skew.set(0, 0);
@@ -334,14 +480,43 @@ export class Props {
       g.visible = true;
       return;
     }
-    const side = WALLS.has(key) && (rot === 1 || rot === 3) && this.baseCollision[y * this.map.width + x] !== 0;
-    this.turn(g, key, rot, side);
-    if (side) g.position.set(x * TILE + (rot === 1 ? TILE + 3 : -3), y * TILE + TILE - 6);
+    const f = facing(rot);
+    const [ox, oy] = nudged(rot);
+    const side = WALLS.has(key) && (f === 1 || f === 3) && this.baseCollision[y * this.map.width + x] !== 0;
+    g.rotation = 0;
+    g.skew.set(0, 0);
+    g.scale.set(1);
+    g.texture = furnitureTexture(key, f, side);
+    g.position.set(x * TILE + TILE / 2 + ox, y * TILE + TILE - lift + oy);
+    // (Two tiles long: across both, or back over both turned.)
+    if (WIDE.has(key)) g.position.set(((f & 1) === 0 ? x * TILE + TILE : x * TILE + TILE / 2) + ox, ((f & 1) === 0 ? y * TILE + TILE : (y + 2) * TILE) + oy);
+    if (side) g.position.set(x * TILE + (f === 1 ? TILE + 3 : -3), y * TILE + TILE - 6 + oy);
     g.alpha = ok ? 0.6 : 0.45;
     g.tint = ok ? 0xffffff : 0xff6a6a;
     g.zIndex = 1e8;
-    this.scene.standOn(g, y * TILE + TILE - 2);
+    this.scene.standOn(g, y * TILE + TILE - 2 + oy);
     g.visible = true;
+  }
+
+  /**
+   * Where piece `key` facing `rot` goes for the ground point (wx, wy) (art
+   * px): to the nearest half tile, as its tile and its `rot` (with the
+   * half-tile bits). A pond and the pool table go by whole tiles; what hangs
+   * on a wall slides along it only; what stands on a table stays on its top.
+   */
+  spotFor(wx: number, wy: number, key: string, rot: number): { x: number; y: number; rot: number } {
+    const f = facing(rot);
+    const tx = Math.floor(wx / TILE);
+    const ty = Math.floor(wy / TILE);
+    if (key === POND || key === POOL) return { x: tx, y: ty, rot: f };
+    const kx = Math.round((wx - TILE / 2) / (TILE / 2));
+    const ky = Math.round((wy - TILE / 2) / (TILE / 2));
+    let [x, y, bx, by] = [Math.floor(kx / 2), Math.floor(ky / 2), kx & 1, ky & 1];
+    const onWall = WALLS.has(key) && tx >= 0 && ty >= 0 && tx < this.map.width && ty < this.map.height && this.baseCollision[ty * this.map.width + tx] !== 0;
+    if (onWall && (f === 1 || f === 3)) [x, bx] = [tx, 0];
+    else if (onWall) [y, by] = [ty, 0];
+    if (TOPS.has(key) && this.surfaceAt(tx, ty)) [x, y, bx, by] = [tx, ty, 0, 0];
+    return { x, y, rot: f | (bx << 2) | (by << 3) };
   }
 
   hideGhost() {

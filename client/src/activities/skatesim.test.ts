@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MapObject } from "../world/map";
-import { Combo, NO_INPUT, Park, QUARTER_H, Skater, type Input, type SkateEvent } from "./skatesim";
+import { Combo, NO_INPUT, Park, QUARTER_H, Skater, type Input, type SkateEvent, wrap } from "./skatesim";
+import { ride } from "./skatekit";
 
 const T = 32;
 
@@ -57,6 +58,52 @@ describe("the park", () => {
 });
 
 describe("a skater", () => {
+  it("riding off the concrete says which way it was going (not the way the bounce turned it)", () => {
+    // Rolling south off the bottom of the pad.
+    const s = new Skater(park(), 18 * T, 13 * T + 20, steady());
+    s.heading = Math.PI / 2;
+    s.speed = 200;
+    const edge = run(s, 0.5, { ...NO_INPUT, y: 1 }).find((e) => e.t === "edge");
+    expect(edge).toBeTruthy();
+    if (edge?.t !== "edge") return;
+    expect(edge.dy).toBeGreaterThan(0.9);
+  });
+
+  it("doing nothing between two quarter pipes, runs down and scores nothing (no free ride)", () => {
+    const p = new Park(
+      [
+        { kind: "sk_park", x: 0, y: 0, w: 14, h: 14 },
+        { kind: "sk_quarter", x: 0, y: 0, w: 12, h: 3, label: "n" },
+        { kind: "sk_quarter", x: 0, y: 11, w: 12, h: 3, label: "s" },
+      ],
+      (tx, ty) => tx >= 0 && ty >= 0 && tx < 14 && ty < 14,
+    );
+    const s = new Skater(p, 6 * T, 7 * T, steady());
+    s.heading = -Math.PI / 2;
+    s.speed = 300;
+    const ev = run(s, 20);
+    expect(s.speed).toBeLessThan(5);
+    expect(ev.some((e) => e.t === "trick")).toBe(false);
+  });
+
+  it("rides a volcano up and over at speed, never walled by its steep top", () => {
+    const p = new Park(
+      [
+        { kind: "sk_park", x: 0, y: 0, w: 20, h: 20 },
+        { kind: "sk_volcano", x: 8, y: 8, w: 5, h: 5, label: "65" },
+      ],
+      (tx, ty) => tx >= 0 && ty >= 0 && tx < 20 && ty < 20,
+    );
+    for (const speed of [250, 350, 450]) {
+      const s = new Skater(p, 4 * T, 10.5 * T, steady());
+      s.heading = 0;
+      s.speed = speed;
+      const ev = run(s, 1.2, { ...NO_INPUT, x: 1 });
+      expect(ev.some((e) => e.t === "wall")).toBe(false);
+      expect(s.x).toBeGreaterThan(13 * T);
+    }
+  });
+
   it("builds speed push by push, gliding between, up to full speed", () => {
     const s = new Skater(park(), 3 * T, 6 * T, steady());
     const hold = { ...NO_INPUT, x: 1 };
@@ -129,8 +176,9 @@ describe("a skater", () => {
     let vert = false;
     let landed = false;
     const ev: SkateEvent[] = [];
+    // (Riding it: up at it, then hands off in the air.)
     for (let t = 0; t < 3 && !landed; t += 1 / 120) {
-      const e = s.step(1 / 120, NO_INPUT);
+      const e = s.step(1 / 120, s.mode === "ground" && !vert ? { ...NO_INPUT, y: -1 } : NO_INPUT);
       ev.push(...e);
       peak = Math.max(peak, s.z);
       vert ||= s.mode === "air" && !!s.air.vert;
@@ -303,5 +351,104 @@ describe("a combo", () => {
     expect(c.base).toBe(250);
     expect(c.total).toBe(750);
     expect(c.label).toBe("Kickflip + 50-50 Grind + Kickflip");
+  });
+});
+
+describe("surf trucks", () => {
+  /** A big flat pad, room to get going. */
+  const flat = () => new Park([{ kind: "sk_park", x: 0, y: 0, w: 200, h: 200 }], (tx, ty) => tx >= 0 && ty >= 0 && tx < 200 && ty < 200);
+  const on = (trucks: number) => {
+    const s = new Skater(flat(), 20 * T, 100 * T);
+    s.kit = ride({ deck: 0, wheels: 0, bearings: 1, trucks, trail: 0 });
+    return s;
+  };
+  const go = (x: number, y: number): Input => ({ ...NO_INPUT, x, y });
+  /** A push east, then up, down, up, down (every `p` s): across the way you're going. */
+  const pumping = (p: number) => (t: number) => (t < 0.5 ? go(1, 0) : Math.floor((t - 0.5) / p) % 2 ? go(0, 1) : go(0, -1));
+
+  it("pump you along, side to side, far quicker than pushing, and past where pushing tops out", () => {
+    const pushed = on(0);
+    run(pushed, 3, go(1, 0));
+    const surf = on(5);
+    const ev = run(surf, 3, pumping(0.3));
+    expect(ev.filter((e) => e.t === "pump").length).toBeGreaterThan(6);
+    expect(surf.speed).toBeGreaterThan(pushed.speed * 1.8);
+    expect(surf.speed).toBeGreaterThan(260);
+    // Still going your way (east), give or take the wiggle.
+    expect(Math.abs(wrap(surf.line))).toBeLessThan(0.6);
+  });
+
+  it("don't on other trucks: side to side there is just turning about", () => {
+    const s = on(4);
+    const ev = run(s, 3, pumping(0.3));
+    expect(ev.some((e) => e.t === "pump")).toBe(false);
+    expect(s.speed).toBeLessThan(120);
+  });
+
+  it("pay nothing for one long turn: a held press brings your line round", () => {
+    const s = on(5);
+    run(s, 0.5, go(1, 0));
+    const ev = run(s, 2, go(0, 1));
+    expect(ev.some((e) => e.t === "pump")).toBe(false);
+    expect(wrap(s.heading)).toBeGreaterThan(1.2);
+  });
+
+  it("powerslide you round, pulled straight back, like any trucks", () => {
+    const s = on(5);
+    s.speed = 300;
+    s.line = 0;
+    run(s, 0.65, go(-1, 0));
+    expect(Math.abs(wrap(s.heading - Math.PI))).toBeLessThan(0.3);
+    expect(s.speed).toBeGreaterThan(120);
+  });
+});
+
+describe("riding about", () => {
+  const open = () => new Park([{ kind: "sk_park", x: 0, y: 0, w: 40, h: 40 }], (tx, ty) => tx >= 0 && ty >= 0 && tx < 40 && ty < 40);
+
+  it("pressing back the way you came swings you round in a powerslide, not a dead stop", () => {
+    const s = new Skater(open(), 10 * T, 20 * T);
+    s.kit = ride({ deck: 0, wheels: 0, bearings: 1, trucks: 0, trail: 0 });
+    s.speed = 250;
+    const ev = run(s, 0.1, { ...NO_INPUT, x: -1, y: 0 });
+    expect(s.slideDir).not.toBe(0);
+    ev.push(...run(s, 0.55, { ...NO_INPUT, x: -1, y: 0 }));
+    // Round, and off the other way at a fair lick.
+    expect(Math.abs(wrap(s.heading - Math.PI))).toBeLessThan(0.3);
+    expect(s.speed).toBeGreaterThan(90);
+    expect(ev.some((e) => e.t === "wall")).toBe(false);
+  });
+
+  it("rolls up onto a kicker over its low side; into a box as low, stops", () => {
+    // A kicker rising east (low at x 10 tiles, 16 high at 13), on the open pad.
+    const p = new Park([{ kind: "sk_park", x: 0, y: 0, w: 40, h: 40 }, { kind: "sk_kicker", x: 10, y: 10, w: 3, h: 3, label: "e" }], (tx, ty) => tx >= 0 && ty >= 0 && tx < 40 && ty < 40);
+    // From the north, over its side near the low end: onto the slope, still going.
+    const s = new Skater(p, 10.5 * T, 8 * T);
+    s.speed = 200;
+    s.heading = Math.PI / 2;
+    const ev = run(s, 0.25);
+    expect(ev.some((e) => e.t === "wall")).toBe(false);
+    expect(s.speed).toBeGreaterThan(150);
+    // A box as low is no ramp: still a wall to roll into (an ollie gets you up).
+    const q = new Park([{ kind: "sk_park", x: 0, y: 0, w: 40, h: 40 }, { kind: "sk_box", x: 10, y: 10, w: 3, h: 3, label: "10" }], (tx, ty) => tx >= 0 && ty >= 0 && tx < 40 && ty < 40);
+    const b = new Skater(q, 11.5 * T, 8 * T);
+    b.speed = 200;
+    b.heading = Math.PI / 2;
+    expect(run(b, 0.4).some((e) => e.t === "wall")).toBe(true);
+  });
+
+  it("scrapes along a wall it meets side-on, keeping its speed; head on, bounces off", () => {
+    const s = new Skater(open(), 20 * T, 12);
+    s.speed = 250;
+    // Heading east and a little north, into the north edge.
+    s.heading = -0.3;
+    run(s, 0.4);
+    expect(s.speed).toBeGreaterThan(180);
+    expect(Math.abs(wrap(s.heading))).toBeLessThan(0.1);
+    const h = new Skater(open(), 20 * T, 12);
+    h.speed = 250;
+    h.heading = -Math.PI / 2;
+    run(h, 0.4);
+    expect(h.speed).toBeLessThan(120);
   });
 });

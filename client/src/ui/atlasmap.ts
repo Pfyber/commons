@@ -20,6 +20,8 @@ const SOIL = 6;
 /** The ring roads' brick, and grass under woods (thick with trees round about). */
 const BRICK = 7;
 const WOODS = 8;
+/** The skatepark's poured concrete. */
+const CONCRETE = 9;
 
 const GROUND_KIND: Record<string, number> = {
   water: WATER,
@@ -35,14 +37,17 @@ const GROUND_KIND: Record<string, number> = {
   soil: SOIL,
   brick: BRICK,
   moss: WOODS,
+  skate: CONCRETE,
+  skate_road: ROAD,
 };
 const TREES = new Set(["tree", "pine", "apple_tree", "willow", "willow_curtain", "pine_secret", "bush", "hedge"]);
 /** Objects with no symbol of their own (markers, small props). */
 // (`boat_lake` only marks the water the rowboats go on, and `forage` where bugs and mushrooms turn up.)
-const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "arena", "lamp", "boat_lake", "boat_moored", "yard_stand", "yard", "forage"]);
+// (The skatepark's own outline, its painted logos and the back of its van: the pieces show it.)
+const HIDDEN = new Set(["spot", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "arena", "lamp", "boat_lake", "boat_moored", "yard_stand", "yard", "forage", "sk_park", "sk_paint", "sk_shop_back"]);
 
 /** Ground colours: grass, trees (under their crowns), water, road, kerb, paving, soil, brick, woods. */
-const PAPER = ["#cfd3a0", "#bcc48c", "#9cbfc0", "#a3927a", "#e6d9b6", "#ece0c0", "#c8a878", "#b8705a", "#85a05c"];
+const PAPER = ["#cfd3a0", "#bcc48c", "#9cbfc0", "#a3927a", "#e6d9b6", "#ece0c0", "#c8a878", "#b8705a", "#85a05c", "#dcd7c8"];
 const INK = "#3a2a1a";
 
 function rnd(x: number, y: number, s = 0): number {
@@ -118,6 +123,116 @@ function groundImage(map: ZoneMap): HTMLCanvasElement {
   }
   ctx.putImageData(img, 0, 0);
   return c;
+}
+
+/**
+ * A skatepark piece on the map, from above: a quarter pipe or kicker a
+ * wedge shaded from its foot (light) to its high end (dark), a quarter
+ * pipe's lip inked; a box a raised slab with its shadow; stairs stepped;
+ * a rail a steel line; Dusty's van a little yellow van; the board a sign.
+ */
+function skatePiece(ctx: CanvasRenderingContext2D, kind: string, label: string, x: number, y: number, w: number, h: number, k: number) {
+  const outline = (lw = 0.6) => {
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = Math.max(0.5, lw);
+    ctx.strokeRect(x + 0.25, y + 0.25, w - 0.5, h - 0.5);
+  };
+  const shadow = (d: number) => {
+    ctx.fillStyle = "rgba(50,35,20,0.28)";
+    ctx.fillRect(x + d, y + d, w, h);
+  };
+  const dir = label.split(":")[0];
+  if (kind === "sk_quarter" || kind === "sk_kicker") {
+    // Light at its foot, darkening up to its high end.
+    const [x0, y0, x1, y1] = dir === "n" ? [x, y + h, x, y] : dir === "s" ? [x, y, x, y + h] : dir === "e" ? [x, y, x + w, y] : [x + w, y, x, y];
+    shadow(Math.max(0.6, k * (kind === "sk_quarter" ? 0.45 : 0.25)));
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, "#efe9da");
+    g.addColorStop(kind === "sk_quarter" ? 0.55 : 0.2, "#d6cfbd");
+    g.addColorStop(1, kind === "sk_quarter" ? "#8f8676" : "#b3aa98");
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
+    outline();
+    if (kind === "sk_quarter") {
+      // Its coping, along the lip.
+      ctx.fillStyle = "#4a525a";
+      const t = Math.max(0.8, k * 0.3);
+      if (dir === "n") ctx.fillRect(x, y, w, t);
+      else if (dir === "s") ctx.fillRect(x, y + h - t, w, t);
+      else if (dir === "e") ctx.fillRect(x + w - t, y, t, h);
+      else ctx.fillRect(x, y, t, h);
+    }
+    return;
+  }
+  if (kind === "sk_volcano" || kind === "sk_pyramid") {
+    // From above: light round its foot, darkening up to its top (round, or square), the top's edge inked.
+    shadow(Math.max(0.6, k * 0.3));
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) / 2);
+    g.addColorStop(0, "#9a917f");
+    g.addColorStop(0.32, "#a99f8c");
+    g.addColorStop(1, "#efe9da");
+    ctx.fillStyle = g;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    if (kind === "sk_volcano") ctx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "#4a525a";
+    ctx.beginPath();
+    if (kind === "sk_volcano") ctx.ellipse(cx, cy, w * 0.16, h * 0.16, 0, 0, Math.PI * 2);
+    else ctx.rect(cx - w * 0.15, cy - h * 0.15, w * 0.3, h * 0.3);
+    ctx.stroke();
+    return;
+  }
+  if (kind === "sk_box") {
+    shadow(Math.max(0.6, k * 0.3));
+    ctx.fillStyle = "#ebe6d8";
+    ctx.fillRect(x, y, w, h);
+    outline();
+    return;
+  }
+  if (kind === "sk_stairs") {
+    ctx.fillStyle = "#e2dccd";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "rgba(60,45,30,0.45)";
+    const steps = 4;
+    for (let s = 1; s < steps; s++) {
+      if (dir === "n" || dir === "s") ctx.fillRect(x, y + (h * s) / steps, w, Math.max(0.5, k * 0.12));
+      else ctx.fillRect(x + (w * s) / steps, y, Math.max(0.5, k * 0.12), h);
+    }
+    outline();
+    return;
+  }
+  if (kind === "sk_rail") {
+    ctx.fillStyle = "#5a6470";
+    const t = Math.max(0.8, k * 0.22);
+    if (dir === "v") ctx.fillRect(x + w / 2 - t / 2, y, t, h);
+    else ctx.fillRect(x, y + h / 2 - t / 2, w, t);
+    return;
+  }
+  if (kind === "sk_shop") {
+    // Dusty's van: yellow, a white roof, little wheels.
+    shadow(Math.max(0.6, k * 0.3));
+    ctx.fillStyle = "#e8b923";
+    ctx.fillRect(x, y + h * 0.15, w, h * 0.7);
+    ctx.fillStyle = "#fff4d6";
+    ctx.fillRect(x + w * 0.18, y + h * 0.28, w * 0.64, h * 0.44);
+    ctx.fillStyle = INK;
+    for (const fx of [0.2, 0.75]) ctx.fillRect(x + w * fx, y + h * 0.82, Math.max(0.8, w * 0.08), Math.max(0.6, h * 0.12));
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.6;
+    ctx.strokeRect(x + 0.25, y + h * 0.15, w - 0.5, h * 0.7);
+    return;
+  }
+  if (kind === "sk_board") {
+    ctx.fillStyle = "#2b2f45";
+    ctx.fillRect(x, y, w, h);
+    return;
+  }
 }
 
 /** Roof colours for houses (picked per house) and for each kind of building. */
@@ -515,6 +630,11 @@ export function atlasMap(map: ZoneMap, size: number): HTMLCanvasElement {
       ctx.beginPath();
       ctx.ellipse(x + w / 2, y + h / 2, w * 0.44, h * 0.42, 0, 0, Math.PI * 2);
       ctx.stroke();
+      continue;
+    }
+    // The skatepark's pieces, as what they are (not buildings).
+    if (o.kind.startsWith("sk_")) {
+      skatePiece(ctx, o.kind, o.label ?? "", x, y, w, h, k);
       continue;
     }
     if (w < 1.2 || h < 1.2) continue;

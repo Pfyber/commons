@@ -31,6 +31,9 @@ pub struct ActivityRow {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Applied {
+    /// Paid before, under the same key (nothing changed this time).
+    #[serde(default)]
+    pub duplicate: bool,
     #[serde(default)]
     pub totals: Vec<(i32, i32)>,
     #[serde(default)]
@@ -101,6 +104,9 @@ pub struct HomeObject {
     /// When its fish last ate (unix seconds).
     #[serde(default)]
     pub fed: i64,
+    /// Switched on (a lamp, the TV, a fireplace): it stays on while you're away.
+    #[serde(default)]
+    pub on: bool,
 }
 
 /// A tank changed: what it holds now, and the bag's change.
@@ -160,6 +166,10 @@ pub struct ZoneCatalog {
     pub walk: HashSet<u32>,
     /// Garden ponds (two tiles by two, and fishable).
     pub ponds: HashSet<u32>,
+    /// Pool tables (three tiles by two, played on: `pool.rs`).
+    pub pool_tables: HashSet<u32>,
+    /// Two tiles long (a double sofa): side by side facing front or back, one behind the other turned.
+    pub wide: HashSet<u32>,
     /// Set up anywhere outdoors (a lawn chair), not kept.
     pub portable: HashSet<u32>,
     pub names: HashMap<u32, String>,
@@ -226,6 +236,12 @@ impl ZoneCatalog {
                     }
                     if flag("pond") {
                         c.ponds.insert(id);
+                    }
+                    if flag("pool_table") {
+                        c.pool_tables.insert(id);
+                    }
+                    if flag("wide") {
+                        c.wide.insert(id);
                     }
                     if flag("portable") {
                         c.portable.insert(id);
@@ -457,6 +473,20 @@ impl EconomyClient {
     }
 
     /// A pinch of fish food for the tank at (x, y).
+    /// A piece at home switched on or off (kept for next time).
+    pub async fn light(
+        &self,
+        owner: &str,
+        x: u16,
+        y: u16,
+        layer: u8,
+        on: bool,
+    ) -> Result<serde_json::Value, CallError> {
+        let body = serde_json::json!({ "owner": owner, "x": x, "y": y, "layer": layer, "on": on });
+        self.call(reqwest::Method::POST, "/internal/home/light", Some(&body))
+            .await
+    }
+
     pub async fn tank_feed(
         &self,
         owner: &str,
@@ -664,6 +694,8 @@ impl ZoneCatalog {
             seats: Default::default(),
             walk: Default::default(),
             ponds: Default::default(),
+            pool_tables: Default::default(),
+            wide: Default::default(),
             portable: Default::default(),
             names: Default::default(),
         }

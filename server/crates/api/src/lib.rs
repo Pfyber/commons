@@ -11,6 +11,7 @@ pub mod devtools;
 pub mod economy;
 pub mod error;
 pub mod fishquest;
+pub mod fridge;
 pub mod goods;
 pub mod gov;
 pub mod homelife;

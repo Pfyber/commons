@@ -255,6 +255,16 @@ pub async fn apply(
         if op.delta > 0 {
             out.added.push((op.item, op.delta));
         }
+        // Fish keep a week from when they come (see `fridge`).
+        if op.delta > 0 && item.kind == "fish" {
+            sqlx::query("INSERT INTO fish_lots (player_id, item_id, qty) VALUES ($1, $2, $3)")
+                .bind(player)
+                .bind(op.item)
+                .bind(op.delta)
+                .execute(&mut *conn)
+                .await
+                .map_err(EconError::Db)?;
+        }
         if op.delta > 0 && COLLECTABLE.contains(&item.kind.as_str()) {
             let first: bool = sqlx::query_scalar(
                 "INSERT INTO collection (player_id, item_id, total) VALUES ($1, $2, $3)
@@ -343,6 +353,8 @@ struct Stack {
 
 async fn inventory(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_json::Value>> {
     let player = player_uuid(&state, &headers)?;
+    // Fish a week out of the fridge have gone off by now.
+    let went_off = crate::fridge::settle_now(&state, player).await?;
     let rows = sqlx::query(
         "SELECT item_id, qty FROM inventory WHERE player_id = $1 AND qty > 0 ORDER BY item_id",
     )
@@ -357,7 +369,9 @@ async fn inventory(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_
             qty: r.get("qty"),
         })
         .collect();
-    Ok(Json(serde_json::json!({ "items": items })))
+    Ok(Json(
+        serde_json::json!({ "items": items, "went_off": went_off }),
+    ))
 }
 
 async fn album(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_json::Value>> {
@@ -398,6 +412,14 @@ async fn sell(
 ) -> ApiResult<Json<Applied>> {
     let player = player_uuid(&state, &headers)?;
     check_trade(&req)?;
+    // (Fish that have gone off sell as what they are now.)
+    if state
+        .catalog
+        .get(req.item)
+        .is_some_and(|i| i.kind == "fish")
+    {
+        crate::fridge::settle_now(&state, player).await?;
+    }
     let price = state
         .catalog
         .get(req.item)

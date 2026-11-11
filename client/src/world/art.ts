@@ -11,10 +11,10 @@ import { Texture } from "pixi.js";
 import type { MapObject } from "./map";
 import { disc, outlineColor, oval, polygon } from "./pixeldraw";
 import { MUG_TOP, mugArt, mugLights } from "./mugart";
-import { drawSkateGround, drawSkateRoad, skateObject } from "./skateart";
+import { drawSkateGround, drawSkateRoad, skateObject, type Relief } from "./skateart";
 import { SHOP_TOP, skateShopLights, skateShopObject } from "./skateshopart";
 import { canPixel, drawPixelText, pixelWidth } from "./pixelfont";
-import { decodeLook } from "./look";
+import { decodeLook, encodeLook } from "./look";
 import { LIBRARY_GROUND, drawLibraryGround, libraryDecor, libraryObject } from "./libraryart";
 import { clubObject } from "./clubart";
 import { concertObject } from "./concertart";
@@ -1273,7 +1273,7 @@ export function buildingLanterns(o: MapObject): { x: number; y: number }[] {
   return lanternSpots(w, H, f).map((p) => ({ x: o.x * TILE + p.x, y: o.y * TILE - top + p.y }));
 }
 
-export function objectTexture(o: MapObject): { texture: Texture; overhang: number; left: number } {
+export function objectTexture(o: MapObject): { texture: Texture; overhang: number; left: number; relief?: Relief } {
   // The Glowroot Labyrinth's stair and Glowroot (labart.ts).
   const lab = labObject(o);
   if (lab) return lab;
@@ -2063,14 +2063,14 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
       let k = 0;
       for (let row = 0; row < 3; row++) {
         for (let i = 0; i <= row; i++) {
-          const bx = 84 + row * 4;
+          const bx = Math.round(w * 0.656) + row * 4;
           const by = top + 20 + i * 4 - row * 2;
           px(ctx, balls[k++ % balls.length], bx, by, 3, 3);
         }
       }
-      px(ctx, "#fff8e3", 36, top + 22, 3, 3);
+      px(ctx, "#fff8e3", Math.round(w * 0.28), top + 22, 3, 3);
       // a cue lying across
-      for (let i = 0; i < 40; i++) px(ctx, i < 30 ? "#d2a06a" : "#4e3420", 20 + i, top + 36 - Math.floor(i / 6), 2, 1);
+      for (let i = 0; i < 40; i++) px(ctx, i < 30 ? "#d2a06a" : "#4e3420", Math.round(w * 0.156) + i, top + 36 - Math.floor(i / 6), 2, 1);
       break;
     }
     case "pinball": {
@@ -2823,6 +2823,13 @@ export function objectTexture(o: MapObject): { texture: Texture; overhang: numbe
 const SKIN = ["#f5d0b0", "#e0ac84", "#b97c55", "#7d5136"];
 /** The Caretaker NPC's look: a gardener in a straw sun hat and green apron. */
 export const CARETAKER_LOOK = 0xfffffff1;
+/**
+ * The Skate Trainer: a real street skater. A charcoal hoodie, shades, a
+ * beanie over spiky hair, and baggy jeans bunched over his sneakers (drawn
+ * for him alone: a look has no trousers of its own).
+ */
+export const STREET_SKATER_LOOK = 0xfffffff2;
+const STREET_SKATER = encodeLook({ hue: 200, skin: 2, hair: 0, hat: 1, hatHue: 0, style: 5, accessory: 2, outfit: 4 });
 const HAIR = ["#2b211c", "#5a3b25", "#a5662f", "#e3c16f", "#c4c4c4", "#b4473a", "#3f4f8f", "#6f4d8f"];
 export const SKIN_COLORS = SKIN;
 export const HAIR_COLORS = HAIR;
@@ -2842,7 +2849,7 @@ export function lookParts(look: number) {
 }
 
 /** 0, 1 walking; 2 sitting; 4 riding a skateboard; 3, 5, 6 pushing one; 7–12 the robot; 13–15 dozing; 16, 17 sprinting. */
-export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23;
+export type AvatarFrame = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26;
 /** The arena: 22 the sword arm raised to strike (knees bent), 23 on guard to parry (arms up in front). The sword itself is drawn over them. */
 export const SWORD_RAISE: AvatarFrame = 22;
 export const SWORD_GUARD: AvatarFrame = 23;
@@ -2882,6 +2889,17 @@ export const ROBOT_ARMS: Record<number, [ArmPose, ArmPose]> = {
 
 /** For the pushing frames: how many pixels the standing knee bends. */
 export const PUSH_CROUCH: Record<number, number> = { 5: 1, 6: 2, 3: 3 };
+/**
+ * Riding a board crouched (both feet on it, both knees bent this many
+ * pixels, the arms out for balance): ready to pop, a grab, a flip, a carve.
+ * (The pushing frames draw only the front leg: these, both.)
+ */
+export const SKATE_CROUCH: Record<number, number> = { 24: 1, 25: 2, 26: 3 };
+
+/** The crouch on a board with the knees bent `c` (1–3) pixels. */
+export function skateCrouch(c: number): AvatarFrame {
+  return (23 + Math.max(1, Math.min(3, Math.round(c)))) as AvatarFrame;
+}
 
 const avatarCache = new Map<string, Texture>();
 const canvasCache = new Map<string, HTMLCanvasElement>();
@@ -2923,9 +2941,12 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
   const cached = canvasCache.get(key);
   if (cached) return cached;
   const caretaker = look === CARETAKER_LOOK;
+  const skater = look === STREET_SKATER_LOOK;
   const p = caretaker
     ? { ...lookParts(0), outfitColor: "#e8dcc0", outfitDark: "#5f8f4e", skinColor: SKIN[1], hairColor: "#c4c4c4", hat: 0 }
-    : lookParts(look);
+    : skater
+      ? { ...lookParts(STREET_SKATER), outfitColor: "#3d3f48", outfitDark: "#26272e", hairColor: "#1e1a1c" }
+      : lookParts(look);
   const m = styleParts(caretaker ? 0 : style);
   // Mall pieces take the place of the look's own in their slot.
   if (m.hat) p.hat = 0;
@@ -2934,11 +2955,11 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
   const o = PALETTE.outline;
   const hair = p.hairColor;
   // On a board the shadow is on the ground below it, drawn with the board.
-  if (frame < 3 || frame in ROBOT_ARMS || frame >= 13) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
+  if (frame < 3 || frame in ROBOT_ARMS || (frame >= 13 && !(frame in SKATE_CROUCH))) px(ctx, "rgba(0,0,0,0.2)", 5, 31, 14, 3);
   // A full-body skin from the mall: the suit in the basic poses (walking,
   // sprinting, sitting; standing for the rest).
   if (m.skin) {
-    drawSkin(ctx, m.skin, frame <= 3 || frame === 5 || frame === 6 || frame === 16 || frame === 17 ? (frame as 0 | 1 | 2 | 3 | 5 | 6 | 16 | 17) : 0, p.skinColor);
+    drawSkin(ctx, m.skin, frame <= 3 || frame === 5 || frame === 6 || frame === 16 || frame === 17 || frame in SKATE_CROUCH ? (frame as SkinFrame) : 0, p.skinColor);
     canvasCache.set(key, c);
     return c;
   }
@@ -2952,6 +2973,14 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
     px(ctx, o, 6, 31, 3, 2);
     px(ctx, o, 15, 31, 3, 2);
     ctx.translate(0, 4);
+  } else if (frame in SKATE_CROUCH) {
+    // Crouched on a board: both feet on it, both knees bent (the body sinks with them).
+    const c = SKATE_CROUCH[frame];
+    px(ctx, o, 7, 25 + c, 4, 7 - c);
+    px(ctx, o, 13, 25 + c, 4, 7 - c);
+    px(ctx, "#4a4a5a", 8, 25 + c, 2, 6 - c);
+    px(ctx, "#4a4a5a", 14, 25 + c, 2, 6 - c);
+    ctx.translate(0, c);
   } else if (frame in PUSH_CROUCH) {
     // Pushing a skateboard: the front leg stays on the board, its knee bent
     // by `c` pixels (the body sinks with it); the back leg, the same 7
@@ -2981,6 +3010,18 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
     px(ctx, "#4a4a5a", upX + 1, 25, 2, 4);
     px(ctx, o, backX, 25, 4, 7);
     px(ctx, "#4a4a5a", backX + 1, 25, 2, 6);
+  } else if (skater) {
+    // Baggy jeans: wide legs, sagging, bunched over white-soled sneakers.
+    const w = frame === 1 ? 1 : 0;
+    px(ctx, o, 5 - w, 24, 14 + 2 * w, 7);
+    px(ctx, "#4a6a9c", 6 - w, 24, 12 + 2 * w, 6);
+    px(ctx, "#5c7fb4", 6 - w, 24, 12 + 2 * w, 1);
+    px(ctx, o, 12, 26, 1, 5);
+    for (const [x, y] of [[7 - w, 27], [15 + w, 28], [8 - w, 29], [14 + w, 26]] as [number, number][]) px(ctx, "#3a557f", x, y, 2, 1);
+    px(ctx, o, 5 - w, 31, 6, 1);
+    px(ctx, o, 13 + w, 31, 6, 1);
+    px(ctx, "#f2f2ee", 6 - w, 30, 4, 1);
+    px(ctx, "#f2f2ee", 14 + w, 30, 4, 1);
   } else {
     px(ctx, o, frame === 1 ? 7 : 8, 25, 4, 7);
     px(ctx, o, frame === 1 ? 14 : 13, 25, 4, 7);
@@ -3100,7 +3141,7 @@ export function avatarCanvas(look: number, frame: AvatarFrame, style = 0): HTMLC
   const armColor = mallSleeve ?? (sleeves ? dark : p.skinColor);
   // On a skateboard the arms come out for balance: a pixel while riding,
   // two while pushing off.
-  const out = frame === 4 ? 1 : frame in PUSH_CROUCH ? 2 : 0;
+  const out = frame === 4 ? 1 : frame in PUSH_CROUCH || frame in SKATE_CROUCH ? 2 : 0;
   const robot = ROBOT_ARMS[frame];
   for (const [ax, dir] of [
     [4, -1],
@@ -3464,11 +3505,22 @@ export function legColor(style: number): number {
   return code ? Number.parseInt((SUITS[code] ?? SUITS[4])[0].slice(1), 16) : 0x4a4a5a;
 }
 
-function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 | 3 | 5 | 6 | 16 | 17, face: string) {
+/** The poses a full-body suit has: walking, sitting, pushing a board, sprinting, crouched on a board. */
+type SkinFrame = 0 | 1 | 2 | 3 | 5 | 6 | 16 | 17 | 24 | 25 | 26;
+
+function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: SkinFrame, face: string) {
   const o = PALETTE.outline;
   const [suit, light] = SUITS[code] ?? SUITS[4];
   // legs
-  if (frame in PUSH_CROUCH) {
+  if (frame in SKATE_CROUCH) {
+    // Crouched on a board: both knees bent, the body sunk with them.
+    const c = SKATE_CROUCH[frame];
+    px(ctx, o, 7, 25 + c, 4, 7 - c);
+    px(ctx, o, 13, 25 + c, 4, 7 - c);
+    px(ctx, suit, 8, 25 + c, 2, 6 - c);
+    px(ctx, suit, 14, 25 + c, 2, 6 - c);
+    ctx.translate(0, c);
+  } else if (frame in PUSH_CROUCH) {
     // Pushing a skateboard: the front leg on the board, its knee bent (the
     // body sinks with it); the back leg's drawn reaching for the ground.
     const c = PUSH_CROUCH[frame];
@@ -3479,7 +3531,7 @@ function drawSkin(ctx: CanvasRenderingContext2D, code: number, frame: 0 | 1 | 2 
     px(ctx, o, 6, 27, 12, 5);
     px(ctx, suit, 7, 28, 10, 3);
     ctx.translate(0, 4);
-  } else if (frame >= 16) {
+  } else if (frame === 16 || frame === 17) {
     // Sprinting: one knee up high, the other leg stretched out behind (as the plain avatar).
     const [upX, backX] = frame === 16 ? [7, 15] : [13, 5];
     px(ctx, o, upX, 25, 4, 5);

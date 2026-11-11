@@ -4,7 +4,8 @@
 //! lands on your doorstep a little later for you to pick up.
 //!
 //! `GET /api/home/look/{owner}`, `POST /api/home/look`, `GET /api/drone/catalog`,
-//! `POST /api/drone/order`, `GET /api/drone/parcels`, `POST /api/drone/claim`.
+//! `POST /api/drone/order`, `GET /api/drone/parcels`, `POST /api/drone/claim`,
+//! `GET /api/drone/flights` (everyone else's drones, to see them flying).
 
 use crate::AppState;
 use crate::economy::{Applied, COIN, Op, apply, bearer_player, key_used, totals};
@@ -40,6 +41,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/drone/order", post(order))
         .route("/drone/parcels", get(parcels))
         .route("/drone/claim", post(claim))
+        .route("/drone/flights", get(flights))
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -250,6 +252,36 @@ async fn parcels(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_js
         .collect();
     Ok(Json(
         json!({ "parcels": parcels, "now": chrono::Utc::now().timestamp() }),
+    ))
+}
+
+/// The most of everyone else's drones sent at once.
+const FLIGHTS_MAX: i64 = 60;
+
+/// Everyone else's drones in the air (or parcels waiting on their step,
+/// a day at most), and whose home each's for (its plot): to see them
+/// flying over the city. Not what's in them.
+async fn flights(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_json::Value>> {
+    let player = bearer_player(&state, &headers)?;
+    let rows = sqlx::query(
+        "SELECT p.id, l.plot, extract(epoch FROM p.ordered_at)::bigint AS ordered,          extract(epoch FROM p.ready_at)::bigint AS ready FROM drone_parcels p          JOIN leases l ON l.player_id = p.owner_id AND l.slot = 'home' AND l.state IN ('active', 'grace')          WHERE NOT p.claimed AND p.owner_id <> $1 AND p.ready_at > now() - interval '1 day'          ORDER BY p.ordered_at DESC LIMIT $2",
+    )
+    .bind(player)
+    .bind(FLIGHTS_MAX)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?;
+    let flights: Vec<_> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.get::<Uuid, _>("id"), "plot": r.get::<String, _>("plot"),
+                "ordered": r.get::<i64, _>("ordered"), "ready": r.get::<i64, _>("ready"),
+            })
+        })
+        .collect();
+    Ok(Json(
+        json!({ "flights": flights, "now": chrono::Utc::now().timestamp() }),
     ))
 }
 

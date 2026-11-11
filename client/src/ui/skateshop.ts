@@ -4,21 +4,25 @@
 // decks (colours, and one that glows in the dark), wheels, bearings (upgraded
 // a level at a time), trucks (which tricks) and trails. Tap a part to see it
 // on your board; buy it (it's yours for good) or pick it from what you've
-// got.
+// got. And a tab of Dusty's daily quests: three to do, coins for each.
 
 import { till } from "../ambient/salvagesfx";
 import type { Economy } from "../economy";
 import { ApiError } from "../net/api";
 import { drawBoard3d } from "../world/skateboard3d";
 import { DECKS, OPTIONS, itemOf, owns, ride, type Kit, type Part } from "../activities/skatekit";
+import type { Quests } from "../activities/skatequests";
 import { Panel, button, el } from "./panels";
 
-const TABS: [Part, string][] = [
+type Tab = Part | "quests";
+
+const TABS: [Tab, string][] = [
   ["deck", "🛹 Deck"],
   ["wheels", "⚪ Wheels"],
   ["bearings", "⚙️ Bearings"],
   ["trucks", "🔩 Trucks"],
   ["trail", "✨ Trail"],
+  ["quests", "🎯 Quests"],
 ];
 
 /** The window's board, in art pixels (drawn twice the size, crisp). */
@@ -28,7 +32,7 @@ const VIEW_H = 120;
 const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
 
 export class SkateShopPanel extends Panel {
-  private tab: Part = "deck";
+  private tab: Tab = "deck";
   /** The part being looked at (on the board in the window), if it isn't the one ridden. */
   private looking: { part: Part; code: number } | null = null;
   private view = document.createElement("canvas");
@@ -41,6 +45,9 @@ export class SkateShopPanel extends Panel {
     /** Your board as it's built now, and building it anew. */
     private board: () => Kit,
     private build: (k: Kit) => void,
+    /** Dusty's daily quests, and claiming one's coins. */
+    private quests: Quests,
+    private claim: (day: number, slot: number) => void,
   ) {
     super("🛹 Dusty's Skate Shop", "skate-shop");
     this.view.width = VIEW_W;
@@ -99,17 +106,22 @@ export class SkateShopPanel extends Panel {
     chip("All grabs", r.grabs);
     chip("All grinds", r.grinds);
     chip("Backflips", r.body);
-    show.append(this.view, bar("Acceleration", r.accel, 1.6), bar("Top speed", r.top, 1.2), tricks);
+    chip("🌊 Pumping", r.pump > 0);
+    show.append(this.view, bar("Acceleration", r.accel, 3.2), bar("Top speed", r.top, 1.2), tricks);
     // The parts: tabs, then the options.
     const shop = el("div", "skate-shop-parts");
     const tabs = el("div", "tabs");
     for (const [t, label] of TABS) {
-      tabs.append(button(label, () => ((this.tab = t), (this.looking = null), this.render()), t === this.tab ? "on" : ""));
+      const waiting = t === "quests" ? this.quests.waiting : 0;
+      tabs.append(button(waiting ? `${label} (${waiting}!)` : label, () => ((this.tab = t), (this.looking = null), this.render()), `${t === this.tab ? "on" : ""}${waiting ? " ready" : ""}`));
     }
     shop.append(tabs, el("p", "hint", `You have ${this.eco.coins} coins.`));
-    if (this.tab === "bearings") shop.append(this.bearings());
-    else shop.append(this.options(this.tab));
-    shop.append(this.action(), this.msg);
+    if (this.tab === "quests") shop.append(this.questList(), this.msg);
+    else {
+      if (this.tab === "bearings") shop.append(this.bearings());
+      else shop.append(this.options(this.tab));
+      shop.append(this.action(), this.msg);
+    }
     this.body.append(show, shop);
   }
 
@@ -143,7 +155,7 @@ export class SkateShopPanel extends Panel {
     } else if (part === "wheels") {
       sw.textContent = ["●", "•", "⬤"][code];
     } else if (part === "trucks") {
-      sw.style.background = ["#b9c2c9", "#e8566b", "#3a3a44", "#e8b923", "#3fd8e8"][code];
+      sw.style.background = ["#b9c2c9", "#e8566b", "#3a3a44", "#e8b923", "#3fd8e8", "linear-gradient(135deg,#3fd8e8,#2a7fff 55%,#f4f1e8)"][code];
     } else if (part === "trail") {
       sw.style.background = ["transparent", "linear-gradient(90deg,#ffd23f,#fff3a0)", "linear-gradient(90deg,#3fd8e8,#ff8fd8)", "linear-gradient(90deg,#ff4d4d,#ffa53d,#ffe14d,#5fe06a,#4da6ff,#a66bff)", "linear-gradient(90deg,#ff3a1a,#ffa53d,#ffe14d)", "linear-gradient(90deg,#2a1450,#5a2a9a,#4d6bff)"][code];
       if (!code) sw.textContent = "—";
@@ -155,30 +167,40 @@ export class SkateShopPanel extends Panel {
   private bearings(): HTMLElement {
     const box = el("div", "skate-bearings");
     const on = this.board().bearings;
-    const top = [1, 2, 3, 4, 5].filter((l) => owns(this.eco, "bearings", l)).pop() ?? 1;
+    const top = [1, 2, 3, 4, 5, 6].filter((l) => owns(this.eco, "bearings", l)).pop() ?? 1;
     const pips = el("div", "skate-pips");
-    for (let l = 1; l <= 5; l++) {
+    for (let l = 1; l <= 6; l++) {
       const mine = owns(this.eco, "bearings", l);
-      const b = button(`Lv ${l}`, () => mine && l !== on && this.equip("bearings", l), `skate-pip${l <= top ? " got" : ""}${l === on ? " riding" : ""}`);
+      const b = button(l === 6 ? "Pro" : `Lv ${l}`, () => mine && l !== on && this.equip("bearings", l), `skate-pip${l <= top ? " got" : ""}${l === on ? " riding" : ""}`);
       b.disabled = !mine;
       pips.append(b);
     }
     box.append(pips);
-    if (top < 5) {
+    if (top < 6) {
       const next = top + 1;
       const it = itemOf(this.eco, "bearings", next);
       const price = it?.meta.buy ?? 0;
-      const up = button(`⬆ Upgrade to Lv ${next} — ${price} 🪙`, () => it && void this.buy("bearings", next, price), "primary skate-upgrade");
+      const up = button(`⬆ Upgrade to ${next === 6 ? "Pro bearings" : `Lv ${next}`} — ${price} 🪙`, () => it && void this.buy("bearings", next, price), "primary skate-upgrade");
       up.disabled = this.busy || this.eco.coins < price;
       box.append(up, el("p", "hint", OPTIONS.bearings[next - 1].about));
     } else box.append(el("p", "hint", "Maxed out: the fastest bearings there are."));
     return box;
   }
 
+  /** Dusty's quests for today: each, how far you've got, its coins (claimed here). */
+  private questList(): HTMLElement {
+    const box = questList(this.quests, (day, slot) => {
+      this.claim(day, slot);
+      this.msg.textContent = "";
+    });
+    box.prepend(el("p", "skate-quest-intro", "“Three things for you today, dude. Pull 'em off and the coins are yours.”"));
+    return box;
+  }
+
   /** Under the options: buy what you're looking at, or ride it. */
   private action(): HTMLElement {
     const row = el("div", "skate-action");
-    if (this.tab === "bearings") return row;
+    if (this.tab === "bearings" || this.tab === "quests") return row;
     const part = this.tab;
     const code = this.looking?.part === part ? this.looking.code : this.board()[part];
     const o = OPTIONS[part].find((x) => x.code === code)!;
@@ -223,4 +245,28 @@ export class SkateShopPanel extends Panel {
       if (this.open) this.render();
     }
   }
+}
+
+/** Today's quests from `quests`: each, how far you've got, its coins (a Claim button, done). */
+export function questList(quests: Quests, claim: (day: number, slot: number) => void): HTMLElement {
+  const box = el("div", "skate-quests");
+  for (const q of quests.today()) {
+    const row = el("div", `skate-quest${q.done ? " done" : ""}${q.claimed ? " claimed" : ""}`);
+    const bar = el("span", "skate-quest-bar");
+    const fill = el("span", "skate-quest-fill");
+    fill.style.width = `${Math.round(Math.min(1, q.progress / q.target) * 100)}%`;
+    bar.append(fill);
+    const info = el("div", "skate-quest-info");
+    info.append(el("strong", "", q.text), bar, el("span", "skate-quest-prog", q.shown));
+    const side = el("div", "skate-quest-side");
+    if (q.claimed) side.append(el("span", "skate-quest-got", "✓ Paid"));
+    else if (q.done) {
+      side.append(button(`Claim ${q.coins} 🪙`, () => claim(quests.day, q.slot), "primary"));
+    } else side.append(el("span", "skate-quest-coins", `${q.coins} 🪙`));
+    row.append(info, side);
+    box.append(row);
+  }
+  const left = 86_400_000 - (Date.now() % 86_400_000);
+  box.append(el("p", "hint", `New quests in ${Math.floor(left / 3_600_000)}h ${Math.floor((left % 3_600_000) / 60_000)}m.`));
+  return box;
 }

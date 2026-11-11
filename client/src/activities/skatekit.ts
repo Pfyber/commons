@@ -68,7 +68,8 @@ export const OPTIONS: Record<Part, Option[]> = {
     { code: 2, name: "Lv 2", about: "Smoother: faster acceleration.", key: "bearings_2" },
     { code: 3, name: "Lv 3", about: "Faster still.", key: "bearings_3" },
     { code: 4, name: "Lv 4", about: "Ceramic. Zippy.", key: "bearings_4" },
-    { code: 5, name: "Lv 5", about: "Swiss. The fastest there is.", key: "bearings_5" },
+    { code: 5, name: "Lv 5", about: "Swiss. Seriously quick.", key: "bearings_5" },
+    { code: 6, name: "Pro", about: "Professional bearings: twice the acceleration of Lv 5. The fastest there is.", key: "bearings_pro" },
   ],
   trucks: [
     { code: 0, name: "Stock", about: "Ollies, an Indy grab, 50-50 grinds and manuals." },
@@ -76,6 +77,7 @@ export const OPTIONS: Record<Part, Option[]> = {
     { code: 2, name: "Grind", about: "Every grind and grab, and steadier on rails.", key: "trucks_grind" },
     { code: 3, name: "Vert", about: "Full body flips off ramps, every grab, bigger air.", key: "trucks_vert" },
     { code: 4, name: "Pro", about: "Everything. The lot. Steady as a rock.", key: "trucks_pro" },
+    { code: 5, name: "Surf", about: "Everything Pro does, a tighter carve, and pump: steer side to side, left-right-left-right, to fly along without pushing.", key: "trucks_surf" },
   ],
   trail: [
     { code: 0, name: "None", about: "No trail." },
@@ -102,6 +104,10 @@ export interface Ride {
   wobble: number;
   /** Times the stock air off a quarter pipe. */
   vert: number;
+  /** Times the stock carve (how quick you turn; more, a tighter turn at speed). */
+  turn: number;
+  /** Surf trucks: steering side to side pumps you along (0: it doesn't). */
+  pump: number;
 }
 
 const ALL_FLIPS = ["", "left", "right", "up", "down"];
@@ -113,17 +119,27 @@ export function ride(k: Kit): Ride {
     { accel: 0.93, top: 1.15 },
   ][k.wheels] ?? { accel: 1, top: 1 };
   const t = k.trucks;
+  // (Surf trucks do all Pro trucks do, and pump.)
+  const pro = t === 4 || t === 5;
   return {
-    accel: wheel.accel * (1 + 0.12 * (Math.max(1, k.bearings) - 1)),
+    accel: wheel.accel * bearingAccel(k.bearings),
     top: wheel.top,
-    flips: new Set(t === 1 || t === 4 ? ALL_FLIPS : t === 3 ? ["", "left"] : []),
-    doubles: t === 1 || t === 4,
+    flips: new Set(t === 1 || pro ? ALL_FLIPS : t === 3 ? ["", "left"] : []),
+    doubles: t === 1 || pro,
     grabs: t >= 2,
-    grinds: t === 2 || t === 4,
-    body: t === 3 || t === 4,
-    wobble: t === 2 ? 0.7 : t === 4 ? 0.6 : 1,
-    vert: t === 3 || t === 4 ? 1.12 : 1,
+    grinds: t === 2 || pro,
+    body: t === 3 || pro,
+    wobble: t === 2 ? 0.7 : pro ? 0.6 : 1,
+    vert: t === 3 || pro ? 1.12 : 1,
+    turn: t === 5 ? 1.25 : 1,
+    pump: t === 5 ? 1 : 0,
   };
+}
+
+/** Times the stock acceleration, by bearings level: 12% more a level up to Lv 5; the Pro ones (6), twice Lv 5. */
+export function bearingAccel(level: number): number {
+  const lv = Math.max(1, Math.min(6, level));
+  return lv === 6 ? 2 * bearingAccel(5) : 1 + 0.12 * (lv - 1);
 }
 
 /** The trucks a locked trick needs, to say so. */

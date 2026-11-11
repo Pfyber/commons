@@ -671,6 +671,14 @@ export function burst(t: number, len: number, level: number, type: BiquadFilterT
   src.stop(t + len + 0.02);
 }
 
+/** A notification come in: a soft two-note chime (an invite or a request, a brighter three). */
+export function notifyChime(kind: string) {
+  const t = at(0);
+  const ask = kind.endsWith("invite") || kind === "friend_request" || kind.endsWith("_now");
+  const notes = ask ? [784, 988, 1319] : [880, 1175];
+  notes.forEach((hz, i) => tone(t + i * 0.09, i === notes.length - 1 ? 0.45 : 0.16, 0.07, "triangle", hz));
+}
+
 /** A pitched blip that glides from `from` to `to` Hz. */
 export function tone(t: number, len: number, level: number, type: OscillatorType, from: number, to = from) {
   level *= scale;

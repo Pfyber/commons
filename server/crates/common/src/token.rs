@@ -132,6 +132,10 @@ pub struct JoinClaims {
     /// leaving it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrive: Option<String>,
+    /// Watching the arena on a home TV: in the city unseen, in the middle of
+    /// the arena, watching (no walking, no talking, nobody sees you there).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub watch: bool,
 }
 
 impl Claims for JoinClaims {

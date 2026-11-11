@@ -48,6 +48,7 @@ async fn objects(
                 layer: 0,
                 rot: 0,
                 fed: 0,
+                on: false,
             })
             .collect(),
     ))

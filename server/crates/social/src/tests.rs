@@ -391,6 +391,21 @@ async fn homes_are_claimed_once_and_lead_home() {
         (st, body["lot"].as_str()),
         (StatusCode::OK, Some(lot.as_str()))
     );
+    // A picket fence comes with it: theirs, and up out front.
+    let fence: Option<i32> =
+        sqlx::query_scalar("SELECT item_id FROM home_exterior WHERE owner = $1 AND slot = 'fence'")
+            .bind(a.id)
+            .fetch_optional(&s.db)
+            .await
+            .unwrap();
+    assert_eq!(fence, Some(845));
+    let owned: Option<i32> =
+        sqlx::query_scalar("SELECT qty FROM inventory WHERE player_id = $1 AND item_id = 845")
+            .bind(a.id)
+            .fetch_optional(&s.db)
+            .await
+            .unwrap();
+    assert_eq!(owned, Some(1));
     // Taken, and nobody gets two; made-up lots don't exist.
     let (st, body) = call(
         &s,
@@ -460,6 +475,25 @@ async fn visiting_and_joining_friends() {
         call(&s, "GET", &can_visit(&a, &a), &svc, None).await.0,
         StatusCode::OK
     );
+    // By default friends drop by any time; once a closes that, an invitation.
+    assert_eq!(
+        call(&s, "GET", &can_visit(&b, &a), &svc, None).await.0,
+        StatusCode::OK,
+        "friends drop by"
+    );
+    let (_, list) = call(&s, "GET", "/api/social/friends", &a.token, None).await;
+    assert_eq!(list["drop_in"], true);
+    let (_, list) = call(&s, "GET", "/api/social/friends", &b.token, None).await;
+    assert_eq!(list["friends"][0]["drop_in"], true);
+    let (st, _) = call(
+        &s,
+        "POST",
+        "/api/social/drop_in",
+        &a.token,
+        Some(json!({ "open": false })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
     assert_eq!(
         call(&s, "GET", &can_visit(&b, &a), &svc, None).await.0,
         StatusCode::FORBIDDEN,

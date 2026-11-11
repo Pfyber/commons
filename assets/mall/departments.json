@@ -34,6 +34,9 @@
         {"item": "cozy_bed", "price": 120},
         {"item": "armchair", "price": 95},
         {"item": "sofa", "price": 140},
+        {"item": "double_sofa", "price": 280, "always": true},
+        {"item": "double_sofa_green", "price": 300, "always": true},
+        {"item": "double_sofa_navy", "price": 300, "always": true},
         {"item": "side_table", "price": 55},
         {"item": "potted_palm", "price": 75},
         {"item": "wall_clock", "price": 65},
@@ -155,7 +158,7 @@
         {"item": "flute", "price": 110, "always": true}
       ]
     },
-    {"key": "housing", "name": "Inside Housing", "type": "gallery", "unit": [72, 61, 93, 77], "door": "n", "open": true, "slots": 61,
+    {"key": "housing", "name": "Inside Housing", "type": "gallery", "unit": [72, 61, 93, 77], "door": "n", "open": true, "slots": 64,
       "catalog": [
         {"item": "painting_sunset", "price": 120, "always": true},
         {"item": "painting_sea", "price": 140, "always": true},
@@ -178,6 +181,9 @@
         {"item": "record_player", "price": 200, "always": true},
         {"item": "retro_tv", "price": 260, "always": true},
         {"item": "fireplace", "price": 320, "always": true, "limited": 6},
+        {"item": "fireplace_grey", "price": 360, "always": true, "limited": 6},
+        {"item": "fireplace_obsidian", "price": 900, "always": true, "limited": 4},
+        {"item": "mini_fridge", "price": 250, "always": true},
         {"item": "arcade_cabinet", "price": 350, "always": true, "limited": 6},
         {"item": "disco_ball", "price": 240, "always": true},
         {"item": "pet_bowl", "price": 30, "always": true},

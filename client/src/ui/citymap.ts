@@ -415,8 +415,14 @@ export class CityMapPanel extends Panel {
     cityFile.blocks.forEach((row, by) =>
       row.forEach((key, bx) => {
         if (key === "home") return;
+        // (A place over several blocks side by side, the skatepark: one name, across the lot.)
+        const one = key === "skatepark";
+        if (one && row[bx - 1] === key) return;
+        let run = 1;
+        while (one && row[bx + run] === key) run++;
         const o = blockOrigin(geometry, { bx, by });
-        const cx = (o.x + geometry.blockTiles / 2) * k;
+        const last = blockOrigin(geometry, { bx: bx + run - 1, by });
+        const cx = ((o.x + last.x) / 2 + geometry.blockTiles / 2) * k;
         const cy = (o.y + geometry.blockTiles / 2) * k;
         const name = blockName(bx, by).replace(" & Greenhouse", "");
         const tw = ctx.measureText(name).width + 6 * dpr;

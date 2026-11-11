@@ -56,6 +56,12 @@ const EXHIBIT_AFTER_MS: u32 = 5000;
 const LOBBY_IDLE_MS: u32 = 20_000;
 
 impl Arena {
+    /// The middle of the ring (a tile): where a TV's watcher looks on from.
+    pub(super) fn ring_middle(&self) -> (u16, u16) {
+        let (x, y, w, h) = self.ring;
+        (x + w / 2, y + h / 2)
+    }
+
     pub(super) fn new(objects: &[MapObject]) -> Option<Arena> {
         let (ring, origin) = sim::Ring::from_map(objects)?;
         let a = objects.iter().find(|o| o.kind == "arena")?;
@@ -323,9 +329,10 @@ impl Instance {
         let inside: Vec<u32> = self
             .avatars
             .iter()
-            // (Anyone sitting watching stays put.)
+            // (Anyone sitting watching stays put, and so does anyone watching on a TV.)
             .filter(|(id, a)| {
                 a.state != state::SITTING
+                    && !a.watching
                     && ar.inside(a.tile)
                     && !fighters.iter().any(|(f, _)| f == *id)
             })
@@ -875,6 +882,46 @@ mod tests {
             ServerMsg::ArenaState { status, slots, .. } => Some((*status, slots.clone())),
             _ => None,
         })
+    }
+
+    #[test]
+    fn a_tv_watcher_looks_on_unseen_and_stays_put() {
+        let mut inst = park();
+        let mut a = connect(&mut inst, 1, "a", (20, 22));
+        let mut tv = claims("tv");
+        tv.watch = true;
+        let mut w = connect_with(&mut inst, 2, tv, (20, 22));
+        send(
+            &mut inst,
+            2,
+            ClientMsg::MoveTo {
+                x: 3,
+                y: 3,
+                sprint: false,
+            },
+        );
+        send(&mut inst, 2, ClientMsg::ChatSay { text: "hi".into() });
+        inst.flush();
+        a.pump();
+        w.pump();
+        // A round begins with the ring cleared: they're not shown out (they're not there).
+        send(&mut inst, 1, ClientMsg::ArenaJoin {});
+        send(&mut inst, 1, ClientMsg::ArenaStart { bots: true });
+        inst.flush();
+        a.pump();
+        w.pump();
+        // Over the middle of the ring, seeing the arena; nobody sees them, and they go nowhere.
+        assert_eq!(inst.avatars[&2].tile, (21, 12));
+        assert!(last_state(&w).is_some());
+        assert!(w.known.contains(&1));
+        assert!(!a.known.contains(&2));
+        assert!(w.known.contains(&2), "they know where they are");
+        assert!(inst.avatars[&2].motion.is_none());
+        assert!(
+            !a.log
+                .iter()
+                .any(|m| matches!(m, ServerMsg::ChatBubble { .. }))
+        );
     }
 
     #[test]

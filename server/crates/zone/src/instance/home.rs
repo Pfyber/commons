@@ -76,6 +76,20 @@ impl Instance {
         if o.fed > 0 {
             self.fed.insert(t, o.fed as u32);
         }
+        // Left on: still on (and anyone already here is told: the home's
+        // pieces load after the first of them has come in).
+        if o.on {
+            self.lit.insert(t);
+            self.broadcast(
+                self.cell_of(t),
+                &ServerMsg::ObjectOn {
+                    x: t.0,
+                    y: t.1,
+                    on: true,
+                },
+                None,
+            );
+        }
         if !o.fish.is_empty() {
             self.set_tank(t, o.fish.iter().map(|&f| f as u32).collect());
             // (Anyone here already hears when they last ate.)
@@ -162,14 +176,83 @@ impl Instance {
         }
         let w = self.zone.map.width as u32;
         let t = ((seat % w) as u16, (seat / w) as u16);
-        let item = self.objects.get(&t)?;
         let catalog = self.economy.as_ref()?.catalog()?;
+        // (A double sofa's other half is a seat too.)
+        let Some(item) = self.objects.get(&t) else {
+            let under = self.wide_over(t)?;
+            return catalog
+                .seats
+                .contains(self.objects.get(&under)?)
+                .then_some(t);
+        };
         catalog.seats.contains(item).then_some(t)
     }
 
     /// A garden pond's tiles, from its top left.
     fn pond_tiles(t: TilePos) -> [TilePos; 4] {
         [t, (t.0 + 1, t.1), (t.0, t.1 + 1), (t.0 + 1, t.1 + 1)]
+    }
+
+    /// A two-tile piece's other tile: to the right facing front or back, below turned side on.
+    fn wide_other(t: TilePos, rot: u8) -> TilePos {
+        if rot & 1 == 0 {
+            (t.0 + 1, t.1)
+        } else {
+            (t.0, t.1 + 1)
+        }
+    }
+
+    /// Whether a two-tile piece fits at `t` facing `rot`: its other tile free floor too.
+    fn wide_fits(&self, t: TilePos, rot: u8) -> bool {
+        let p = Self::wide_other(t, rot);
+        p.0 < self.zone.map.width
+            && p.1 < self.zone.map.height
+            && self.grid.walkable(p.0, p.1)
+            && !self.objects.contains_key(&p)
+            && !self.soil.contains(&p)
+            && !self.avatars.values().any(|a| a.tile == p)
+    }
+
+    /// The two-tile piece whose other tile is `t`, if one is: its own tile.
+    fn wide_over(&self, t: TilePos) -> Option<TilePos> {
+        let cat = self.economy.as_ref()?.catalog()?;
+        [
+            (t.0.wrapping_sub(1), t.1, 0u8),
+            (t.0, t.1.wrapping_sub(1), 1u8),
+        ]
+        .into_iter()
+        .find(|&(x, y, odd)| {
+            self.objects
+                .get(&(x, y))
+                .is_some_and(|i| cat.wide.contains(i))
+                && self.rots.get(&((x, y), 0)).is_some_and(|r| r & 1 == odd)
+        })
+        .map(|(x, y, _)| (x, y))
+    }
+
+    /// A pool table's tiles, from its top left (three wide, two deep).
+    fn pool_tiles(t: TilePos) -> [TilePos; 6] {
+        let (x, y) = t;
+        [
+            (x, y),
+            (x + 1, y),
+            (x + 2, y),
+            (x, y + 1),
+            (x + 1, y + 1),
+            (x + 2, y + 1),
+        ]
+    }
+
+    /// Whether a pool table fits at `t`: all its floor free, nothing (and nobody) there.
+    fn pool_fits(&self, t: TilePos) -> bool {
+        Self::pool_tiles(t).iter().all(|&p| {
+            p.0 < self.zone.map.width
+                && p.1 < self.zone.map.height
+                && self.grid.walkable(p.0, p.1)
+                && !self.objects.contains_key(&p)
+                && !self.soil.contains(&p)
+                && !self.avatars.values().any(|a| a.tile == p)
+        })
     }
 
     /// Whether a pond fits at `t`, all of it in one yard.
@@ -218,6 +301,48 @@ impl Instance {
             .as_ref()
             .zip(self.objects.get(&t))
             .is_some_and(|(c, old)| c.ponds.contains(old));
+        let table = cat.as_ref().is_some_and(|c| c.pool_tables.contains(&item));
+        // A two-tile piece: its other tile blocked too (or freed, as it goes).
+        let wide = cat.as_ref().is_some_and(|c| c.wide.contains(&item));
+        let was_wide = cat
+            .as_ref()
+            .zip(self.objects.get(&t))
+            .is_some_and(|(c, old)| c.wide.contains(old));
+        if was_wide && item == 0 {
+            let p = Self::wide_other(t, self.rots.get(&(t, 0)).copied().unwrap_or(0));
+            self.grid.set_blocked(
+                p.0,
+                p.1,
+                self.zone.grid.blocked[self.zone.grid.idx(p.0, p.1)],
+            );
+        }
+        if wide {
+            let p = Self::wide_other(t, rot);
+            self.grid.set_blocked(p.0, p.1, true);
+        }
+        let was_table = cat
+            .as_ref()
+            .zip(self.objects.get(&t))
+            .is_some_and(|(c, old)| c.pool_tables.contains(old));
+        // A pool table: its floor blocked, and a table to play on (one to a room); taken away, a game on it ends.
+        if was_table && item == 0 {
+            for p in Self::pool_tiles(t) {
+                self.grid.set_blocked(
+                    p.0,
+                    p.1,
+                    self.zone.grid.blocked[self.zone.grid.idx(p.0, p.1)],
+                );
+            }
+            self.pool_put_away(t);
+        }
+        if table {
+            for p in Self::pool_tiles(t) {
+                self.grid.set_blocked(p.0, p.1, true);
+            }
+            if self.pool.is_none() {
+                self.pool = Some(super::pool::Table::new(t));
+            }
+        }
         if was_pond && item == 0 {
             for p in Self::pond_tiles(t) {
                 self.pond_water.remove(&p);
@@ -434,6 +559,20 @@ impl Instance {
         if on {
             self.lit.insert(t);
         }
+        // At home, kept: it's as it was left when anyone comes back.
+        if self.zone.id == "home"
+            && let (Some(owner), Some(econ)) = (self.owner.clone(), self.economy.clone())
+        {
+            let layer = self.used_at(t).map_or(0, |(_, l)| l);
+            self.spawn_call(
+                async move { econ.light(&owner, t.0, t.1, layer, on).await },
+                |_, r| {
+                    if let Err(e) = r {
+                        tracing::warn!(?e, "keeping a light on");
+                    }
+                },
+            );
+        }
         self.broadcast(
             self.cell_of(t),
             &ServerMsg::ObjectOn { x: t.0, y: t.1, on },
@@ -644,7 +783,8 @@ impl Instance {
     }
 
     pub(super) fn place(&mut self, id: u32, item: u32, t: TilePos, rot: u8) {
-        let rot = rot % 4;
+        // (Its low two bits the way it faces, the next two half a tile right and down: see `Place`.)
+        let rot = rot & 0x0f;
         let portable = self
             .economy
             .as_ref()
@@ -680,6 +820,32 @@ impl Instance {
         if is(|c| &c.planters, item) && self.zone.id != "home" {
             return self.error(id, error_code::NOT_ALLOWED, "planters are for indoors");
         }
+        if is(|c| &c.pool_tables, item) {
+            if yard.is_some() {
+                return self.error(id, error_code::NOT_ALLOWED, "a pool table goes indoors");
+            }
+            if self.pool.is_some() {
+                return self.error(
+                    id,
+                    error_code::NOT_ALLOWED,
+                    "there's a pool table here already",
+                );
+            }
+            if !self.pool_fits(t) {
+                return self.error(
+                    id,
+                    error_code::NOT_ALLOWED,
+                    "a pool table needs three tiles by two of free floor",
+                );
+            }
+        }
+        if is(|c| &c.wide, item) && !self.wide_fits(t, rot) {
+            return self.error(
+                id,
+                error_code::NOT_ALLOWED,
+                "it's two tiles long: it needs the floor beside it free too",
+            );
+        }
         if is(|c| &c.ponds, item) {
             let fits = yard.as_deref().is_some_and(|lot| self.pond_fits(t, lot));
             if !fits {
@@ -690,7 +856,7 @@ impl Instance {
                 );
             }
         }
-        let on_wall = self.wall_face(t, rot);
+        let on_wall = self.wall_face(t, rot & 3);
         // Where it goes: on a wall, on a table, or on the floor.
         let layer: u8 = if home && is(|c| &c.walls, item) && (on_wall || !is(|c| &c.stands, item)) {
             if !on_wall || self.objects.contains_key(&t) {

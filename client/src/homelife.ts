@@ -49,6 +49,11 @@ export class HomeLife {
     return this.auth.get("/api/drone/parcels");
   }
 
+  /** Everyone else's drones in the air (or parcels on their step): whose home each's for (its plot). */
+  flights(): Promise<{ flights: { id: string; plot: string; ordered: number; ready: number }[]; now: number }> {
+    return this.auth.get("/api/drone/flights");
+  }
+
   async claim(id: string) {
     this.eco.applyResult(await this.auth.send<Applied>("/api/drone/claim", { id }));
   }

@@ -13,6 +13,8 @@ export interface Friend {
   points: number;
   online: boolean;
   where: { zone: string; label: string } | null;
+  /** They let their friends drop by their home any time. */
+  drop_in: boolean;
 }
 
 export interface Person {
@@ -50,6 +52,8 @@ export interface Gift {
 
 export class Social {
   friends: Friend[] = [];
+  /** You let your friends drop by your home any time (no invitation needed). */
+  dropIn = true;
   incoming: Person[] = [];
   outgoing: Person[] = [];
   blocked: Person[] = [];
@@ -63,6 +67,8 @@ export class Social {
   private listeners = new Set<() => void>();
   /** Called for live events worth a toast. */
   onToast: (text: string) => void = () => {};
+  /** A notification just come in (an invite, a gift…): popped up for you to act on (else, a toast). */
+  onNotify: (n: Notification) => void = (n) => this.onToast(describe(n));
   /** Other pushes (phone calls: `call_ring`, `call`, …), for whoever handles them. */
   private pushListeners = new Set<(m: { t: string; [k: string]: unknown }) => void>();
 
@@ -147,7 +153,7 @@ export class Social {
       case "notify": {
         const n = m.n as Notification;
         this.notifications.unshift(n);
-        this.onToast(describe(n));
+        this.onNotify(n);
         if (["friend_request", "friend_accepted", "close_friend"].includes(n.kind)) void this.refresh();
         else this.emit();
         for (const f of this.pushListeners) f(m);
@@ -169,10 +175,11 @@ export class Social {
   }
 
   async refresh() {
-    const r = await this.auth.get<{ friends: Friend[]; incoming: Person[]; outgoing: Person[]; blocked: Person[] }>(
+    const { drop_in, ...r } = await this.auth.get<{ friends: Friend[]; incoming: Person[]; outgoing: Person[]; blocked: Person[]; drop_in?: boolean }>(
       "/api/social/friends",
     );
     Object.assign(this, r);
+    this.dropIn = drop_in ?? true;
     this.emit();
   }
 
@@ -237,6 +244,18 @@ export class Social {
   /** Leaves a gift on a friend's doorstep (in wrapping and with a card, if chosen: items, 0 for none). */
   async gift(to: string, item: number, qty: number, note: string, wrap = 0, card = 0) {
     await this.auth.send("/api/social/gift", { to, item, qty, note, wrap, card, key: crypto.randomUUID() });
+  }
+
+  async setDropIn(open: boolean) {
+    await this.auth.send("/api/social/drop_in", { open });
+    this.dropIn = open;
+    this.emit();
+  }
+
+  /** Whether you can go into `id`'s home without an invitation (a close friend, or one who lets friends drop by). */
+  canDropIn(id: string): boolean {
+    const f = this.friends.find((x) => x.id === id);
+    return !!f && (f.level >= 2 || f.drop_in);
   }
 
   async invite(id: string) {

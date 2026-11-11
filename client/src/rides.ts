@@ -7,7 +7,7 @@ import type { Auth } from "./net/api";
 import { TEST_RIDE } from "./world/vehicles";
 
 /** The skateboard's code (`commons_sim::vehicles::SKATEBOARD`): everyone has one. */
-const SKATEBOARD = 5;
+export const SKATEBOARD = 5;
 
 export class Rides {
   /** The saved ride: a vehicle's code (with `TEST_RIDE` on a test ride), 0 on foot. */

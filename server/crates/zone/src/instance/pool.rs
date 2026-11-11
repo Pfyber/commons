@@ -1,4 +1,5 @@
-//! The bar's pool table: who's playing, whose shot, and the bar's bot.
+//! A pool table (the bar's, or one put up in a home or a club room): who's
+//! playing, whose shot, and the bot.
 //!
 //! The game itself (physics and 8-ball rules) is `commons_sim::pool`. Shots
 //! go out as `PoolShot` (so everyone nearby watches it roll, with the same
@@ -140,6 +141,20 @@ impl Instance {
     }
 
     /// `id` puts the cue down or leaves: a game in progress goes to the other side.
+    /// The table at `t` picked up (a home's): any game on it over, and it's gone.
+    pub(super) fn pool_put_away(&mut self, t: TilePos) {
+        if !self.pool.as_ref().is_some_and(|p| p.tile == t) {
+            return;
+        }
+        if let Some(p) = self.pool.as_mut() {
+            p.status = pool::EMPTY;
+            p.a = 0;
+            p.b = 0;
+        }
+        self.pool_send();
+        self.pool = None;
+    }
+
     pub(super) fn pool_leave(&mut self, id: u32) {
         let Some(t) = self.pool.as_mut() else { return };
         if t.a != id && t.b != id {

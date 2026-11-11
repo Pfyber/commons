@@ -1,6 +1,7 @@
-// Your drone deliveries, in the city: each flies from the Market to your
-// front door over its flight time, then leaves a parcel on the step to pick
-// up. Only you see your own (they're yours to wait for).
+// Drone deliveries, in the city: each flies from the Market to its
+// owner's front door over its flight time, then leaves a parcel on the step.
+// Yours you pick up (and are told of when it lands); everyone else's you see
+// flying over and waiting on their steps.
 
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 import type { HomeLife, Parcel } from "../homelife";
@@ -35,6 +36,8 @@ interface Flying {
   shadow: Graphics;
   landed: boolean;
   tile: TileXY;
+  /** Yours (to pick up), not someone else's. */
+  mine: boolean;
 }
 
 export class Drones {
@@ -52,6 +55,8 @@ export class Drones {
     private from: TileXY,
     private door: () => TileXY | null,
     private toast: (text: string) => void,
+    /** The front door of a home, by its plot (someone else's drone's going there). */
+    private doorOf: (plot: string) => TileXY | null = () => null,
   ) {
     const was = life.onOrder;
     life.onOrder = () => void this.poll();
@@ -60,16 +65,28 @@ export class Drones {
 
   private async poll() {
     const door = this.door();
-    if (!door) return;
-    const r = await this.life.parcels().catch(() => null);
-    if (!r) return;
-    this.skew = r.now - Date.now() / 1000;
+    const [mine, others] = await Promise.all([door ? this.life.parcels().catch(() => null) : null, this.life.flights().catch(() => null)]);
+    if (!mine && !others) return;
+    const now = mine?.now ?? others!.now;
+    this.skew = now - Date.now() / 1000;
+    // Every parcel, and the door it's for.
+    const all: { p: Parcel; door: TileXY; mine: boolean }[] = [];
+    if (mine && door) for (const p of mine.parcels) all.push({ p, door, mine: true });
+    for (const f of others?.flights ?? []) {
+      const d = this.doorOf(f.plot);
+      if (d) all.push({ p: { id: f.id, item: 0, qty: 0, ordered: f.ordered, ready: f.ready }, door: d, mine: false });
+    }
     for (const [id, f] of this.flying) {
-      if (r.parcels.some((p) => p.id === id)) continue;
+      if (all.some((a) => a.p.id === id)) continue;
       this.remove(id, f);
     }
-    r.parcels.forEach((p, i) => {
-      if (this.flying.has(p.id)) return;
+    // On each step, side by side.
+    const onStep = new Map<string, number>();
+    for (const { p, door: d, mine: own } of all) {
+      const at = `${d.x},${d.y}`;
+      const i = onStep.get(at) ?? 0;
+      onStep.set(at, i + 1);
+      if (this.flying.has(p.id)) continue;
       const view = new Container();
       const shadow = new Graphics().ellipse(0, 0, 10, 4).fill({ color: 0, alpha: 0.25 });
       const rotors = new Graphics();
@@ -77,10 +94,11 @@ export class Drones {
       box.anchor.set(0.5, 1);
       view.addChild(box, rotors);
       this.scene.sorted.addChild(shadow, view);
-      // On the step, side by side.
-      const tile = { x: door.x + (i % 2 ? (i + 1) / 2 : -i / 2), y: door.y + 1 };
-      this.flying.set(p.id, { parcel: p, view, rotors, box, shadow, landed: false, tile });
-    });
+      const tile = { x: d.x + (i % 2 ? (i + 1) / 2 : -i / 2), y: d.y + 1 };
+      // (Already down when first seen: no fuss about it landing.)
+      const landed = !own && Date.now() / 1000 + this.skew >= p.ready;
+      this.flying.set(p.id, { parcel: p, view, rotors, box, shadow, landed, tile, mine: own });
+    }
   }
 
   private remove(id: string, f: Flying) {
@@ -106,7 +124,7 @@ export class Drones {
       if (a >= 1) {
         if (!f.landed) {
           f.landed = true;
-          this.toast(`📦 Your parcel's on the doorstep!`);
+          if (f.mine) this.toast(`📦 Your parcel's on the doorstep!`);
         }
         f.view.position.set(x, y);
         f.view.zIndex = y;
@@ -138,7 +156,7 @@ export class Drones {
 
   /** A tap at `t`: the parcel there, if it's landed. */
   at(t: TileXY): Parcel | null {
-    for (const f of this.flying.values()) if (f.landed && f.tile.x === t.x && f.tile.y === t.y) return f.parcel;
+    for (const f of this.flying.values()) if (f.mine && f.landed && f.tile.x === t.x && f.tile.y === t.y) return f.parcel;
     return null;
   }
 

@@ -13,7 +13,7 @@ pub mod wire;
 pub use wire::{DecodeError, Wire, push_framed, split_frame};
 
 /// Bumped on any incompatible message change.
-pub const PROTOCOL_VERSION: u16 = 55;
+pub const PROTOCOL_VERSION: u16 = 57;
 
 /// Spatial-hash cell size in tiles (spec §3).
 pub const CELL_TILES: u16 = 16;
@@ -121,7 +121,10 @@ message_enum! {
         /// Garden plot action (`plot_action::*`); `item` is the seed to plant.
         11 PlotAction { x: u16, y: u16, action: u8, item: u32 }
         /// Place a furniture item at (x, y) in your home or front yard, turned
-        /// `rot` quarter turns (0 front, 1 and 3 side on, 2 mirrored).
+        /// `rot`: the way it faces in its low two bits (0 toward you, 1 right,
+        /// 2 away, 3 left); bit 2 sets it half a tile right of the tile, bit 3
+        /// half a tile down (placed finer than whole tiles; it still stands on
+        /// the tile).
         12 Place { item: u32, x: u16, y: u16, rot: u8 }
         /// Pick up the furniture at (x, y) in your home.
         13 Pickup { x: u16, y: u16 }
@@ -267,10 +270,25 @@ message_enum! {
         /// height off the ground in px, which way you're headed as a fraction
         /// of a full turn), your pose (`skate::pose`) and the trick you're
         /// doing (the client's own numbering, shown to others as it is).
-        73 SkateMove { x: u16, y: u16, z: u8, dir: u16, pose: u8, trick: u8, spin: u16 }
+        /// `sent`: when you sent it (your clock, ms, wrapping), so others play
+        /// your moves back evenly however the network bunches them; `kit`: as
+        /// `SkateOn` (a move from someone the park's lost puts them back on).
+        73 SkateMove { x: u16, y: u16, z: u8, dir: u16, pose: u8, trick: u8, spin: u16, sent: u16, kit: u32 }
         /// A combo landed (or a bail, or a timed run over: `skate::score`),
         /// what it was worth, and its name ("Kickflip + 50-50 Grind").
         74 SkateScore { kind: u8, points: u32, label: String }
+        /// Dusty's daily quests: quest `slot` (0 the easy one, 1, 2 the hard
+        /// one) of `day` (days since 1970, UTC) done, its coins to be paid
+        /// (`skate::QUEST_COINS`; once a day each).
+        75 SkateQuest { day: u32, slot: u8 }
+        /// A 1v1 (two skaters, a 60-second run each, the higher score wins):
+        /// looking for someone to take on (`bot`: the park's bot, at once),
+        /// or (`join` false) not any more, or giving one up. `grinds`: only
+        /// grinds count (paired only with someone else after the same).
+        76 SkateDuel { join: bool, bot: bool, grinds: bool }
+        /// Your score in the 1v1 so far (passed on to whoever you're up
+        /// against); `done`: your minute's up, that's your score.
+        77 SkateDuelScore { points: u32, done: bool }
     }
 }
 
@@ -455,11 +473,21 @@ message_enum! {
         /// Someone got on a board at the skatepark (or off it).
         60 Skating { id: u32, on: bool }
         /// A skater where they are now (as `SkateMove`).
-        61 Skater { id: u32, x: u16, y: u16, z: u8, dir: u16, pose: u8, trick: u8, spin: u16, kit: u32 }
+        61 Skater { id: u32, x: u16, y: u16, z: u8, dir: u16, pose: u8, trick: u8, spin: u16, sent: u16, kit: u32 }
         /// A skater's combo landed, bail or run over (as `SkateScore`).
         62 SkateEvent { id: u32, kind: u8, points: u32, label: String }
         /// The skatepark's board: today's best timed runs and best combos.
         63 SkateBoard { runs: Vec<SkateEntry>, combos: Vec<SkateEntry> }
+        /// A daily quest's coins paid (`already`: it was, before).
+        64 SkateQuestPaid { day: u32, slot: u8, coins: u16, already: bool }
+        /// Your 1v1: `phase` (`skate::duel`), who you're up against (0: the
+        /// bot) and their name, (starting) how long till it goes (ms), and
+        /// whether only grinds count.
+        65 SkateDuelState { phase: u8, opp: u32, name: String, start_in: u16, grinds: bool }
+        /// The other skater's score in your 1v1 so far.
+        66 SkateDuelScore { points: u32 }
+        /// Your 1v1's over: both scores, and how it went (`skate::duel` results).
+        67 SkateDuelEnd { mine: u32, theirs: u32, result: u8 }
     }
 }
 
@@ -518,6 +546,21 @@ pub mod skate {
     pub const MAX_POINTS: u32 = 5_000_000;
     /// How many lines each of the board's lists holds.
     pub const BOARD_LINES: usize = 8;
+    /// The coins a daily quest pays, by its slot (easy, medium, hard).
+    pub const QUEST_COINS: [u16; 3] = [20, 35, 50];
+    /// A 1v1: `SkateDuelState.phase`, `SkateDuelEnd.result`, its countdown and length (ms).
+    pub mod duel {
+        pub const NONE: u8 = 0;
+        pub const WAITING: u8 = 1;
+        pub const STARTING: u8 = 2;
+        pub const LOST: u8 = 0;
+        pub const WON: u8 = 1;
+        pub const DRAW: u8 = 2;
+        /// The other skater left (or got off their board): yours.
+        pub const WALKOVER: u8 = 3;
+        pub const COUNT_MS: u32 = 3_500;
+        pub const RUN_MS: u32 = 60_000;
+    }
 }
 
 /// Looks reserved for non-player characters (the Caretaker).

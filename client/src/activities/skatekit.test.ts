@@ -15,6 +15,9 @@ describe("a board's build", () => {
     expect(ride({ ...STOCK, wheels: 1 }).top).toBeLessThan(stock.top);
     expect(ride({ ...STOCK, wheels: 2 }).top).toBeGreaterThan(stock.top);
     expect(ride({ ...STOCK, bearings: 3 }).accel).toBeGreaterThan(ride({ ...STOCK, bearings: 2 }).accel);
+    // Pro bearings: twice Lv 5 (on Pro trucks), and they pack.
+    expect(ride({ ...STOCK, bearings: 6, trucks: 4 }).accel).toBeCloseTo(2 * ride({ ...STOCK, bearings: 5, trucks: 4 }).accel);
+    expect(unpackKit(packKit({ ...STOCK, bearings: 6 })).bearings).toBe(6);
   });
 
   it("does the tricks its trucks can", () => {
@@ -24,6 +27,13 @@ describe("a board's build", () => {
     expect(ride({ ...STOCK, trucks: 2 }).grinds).toBe(true);
     const pro = ride({ ...STOCK, trucks: 4 });
     expect(pro.flips.size && pro.doubles && pro.grabs && pro.grinds && pro.body).toBeTruthy();
+    expect(pro.pump).toBe(0);
+    // Surf trucks: all Pro trucks do, a tighter carve, and pumping.
+    const surf = ride({ ...STOCK, trucks: 5 });
+    expect(surf.flips.size && surf.doubles && surf.grabs && surf.grinds && surf.body).toBeTruthy();
+    expect(surf.pump).toBeGreaterThan(0);
+    expect(surf.turn).toBeGreaterThan(pro.turn);
+    expect(unpackKit(packKit({ ...STOCK, trucks: 5 })).trucks).toBe(5);
   });
 
   it("on stock trucks a kickflip won't go: it says so instead", () => {

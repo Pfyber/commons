@@ -342,6 +342,12 @@ pub fn city() -> MapFile {
         // A metro station's entrance beside the signpost on some (ADR 0016):
         // stairs down to the underground; you come up at `door:metro_<key>`.
         if let Some((_, _, key, name)) = STATIONS.iter().find(|s| (s.0, s.1) == (id.bx, id.by)) {
+            // (The Market's: on the lawn east of the roundabout, at the head of the garden path below the east road.)
+            let (metro, spot) = if *key == "market" {
+                ((42, 28), (42, 30))
+            } else {
+                (metro, spot)
+            };
             for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
                 k.decor(metro.0 + x, metro.1 + y, "none");
             }
@@ -1875,11 +1881,14 @@ fn skate_district(b: &mut Builder, ring: &Ring, inner: &Ring, geo: &Geometry, ci
     // The bowl: quarter pipes all round a sunken floor, open at the corners.
     put("sk_quarter", 74, 216, 12, 3, "n");
     put("sk_quarter", 74, 227, 12, 3, "s");
-    put("sk_quarter", 71, 219, 3, 8, "w");
+    // (The west side: a really big one, deep and tall, from the north fence down to the south ramp.)
+    put("sk_quarter", 67, 216, 7, 11, "w:100");
     put("sk_quarter", 86, 219, 3, 8, "e");
     // The mini ramp: two quarter pipes face to face.
     put("sk_quarter", 92, 216, 3, 10, "w");
     put("sk_quarter", 105, 216, 3, 10, "e");
+    // …and back to back with it, its twin facing the other way: a spine, ridden and jumped from either side.
+    put("sk_quarter", 108, 216, 3, 10, "w");
     // The plaza: a deck with a stair set down off it and a handrail down that.
     put("sk_box", 80, 232, 12, 5, "22");
     put("sk_stairs", 82, 237, 8, 3, "s:22");
@@ -1896,11 +1905,12 @@ fn skate_district(b: &mut Builder, ring: &Ring, inner: &Ring, geo: &Geometry, ci
     // A long flat rail, a ledge and a manual pad.
     put("sk_rail", 95, 247, 14, 1, "h:13:13");
     put("sk_box", 110, 244, 10, 1, "10");
-    put("sk_box", 112, 232, 7, 2, "7");
-    put("sk_paint", 94, 228, 11, 2, "SKATE");
+    // A pyramid: four faces up to a square top.
+    put("sk_pyramid", 112, 231, 5, 5, "50");
     // ---- East of the road ----
     // Quarter pipes along the back and the east side (either side of the gate).
-    put("sk_quarter", 123, 215, 11, 3, "n");
+    // (The big one: taller and deeper than the rest.)
+    put("sk_quarter", 123, 215, 11, 4, "n:62");
     put("sk_quarter", 150, 220, 3, 6, "e");
     put("sk_quarter", 150, 230, 3, 14, "e");
     // The deck in the corner, its stairs, the handrail down them.
@@ -1912,13 +1922,12 @@ fn skate_district(b: &mut Builder, ring: &Ring, inner: &Ring, geo: &Geometry, ci
     put("sk_box", 133, 226, 6, 3, "14");
     put("sk_kicker", 139, 226, 3, 3, "w");
     put("sk_rail", 133, 227, 6, 1, "h:30:30");
-    // A launch ramp kicking up northward.
-    put("sk_kicker", 127, 221, 4, 3, "n");
+    // A volcano: a round mound, ridden up and over from any side.
+    put("sk_volcano", 126, 220, 5, 5, "65");
     // A long ledge, a manual pad and a flat rail down the south.
     put("sk_box", 135, 233, 9, 1, "10");
     put("sk_box", 140, 237, 6, 2, "7");
     put("sk_rail", 142, 240, 6, 1, "h:13:13");
-    put("sk_paint", 133, 230, 9, 2, "COMMONS");
     // The skate shop: a little camper van parked by the north fence, its
     // hatch open to the park (the shop inside it a row behind, so its
     // seller stands between).
@@ -1928,6 +1937,23 @@ fn skate_district(b: &mut Builder, ring: &Ring, inner: &Ring, geo: &Geometry, ci
     }
     for (x, y, v) in trucks {
         b.object("sk_shop_back", x, y - 1, 7, 1, Some(v), false);
+    }
+    // No street lamp in the fence right behind a ramp or a box (it'd peek over its top).
+    let pieces: Vec<(u16, u16, u16, u16)> = b
+        .objects
+        .iter()
+        .filter(|o| o.kind.starts_with("sk_"))
+        .map(|o| (o.x, o.y, o.w, o.h))
+        .collect();
+    for (x, y, w, h) in pieces {
+        for yy in y.saturating_sub(2)..y + h + 1 {
+            for xx in x.saturating_sub(1)..x + w + 1 {
+                let i = b.i(xx, yy);
+                if b.decor[i] == lamp {
+                    b.decor[i] = d("fence");
+                }
+            }
+        }
     }
     // The boards: today's best runs and combos.
     b.object("sk_board", 107, 229, 3, 1, Some("Skatepark"), true);

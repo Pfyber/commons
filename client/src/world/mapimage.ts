@@ -24,6 +24,8 @@ const GROUND: Record<string, string> = {
   straw: "#e3c77a",
   track: "#c0674e",
   fog: "#e3e9e6",
+  skate: "#d8d3c4",
+  skate_road: "#a7a39a",
 };
 
 /** Decor drawn on the map (anything else is too small to show). */
@@ -63,11 +65,20 @@ const OBJECTS: Record<string, string> = {
   mall_exit: "#3f7a8a",
   stall: "#c27a3c",
   boat_hire: "#4f86b0",
+  sk_quarter: "#bdb6a6",
+  sk_kicker: "#c9c2b1",
+  sk_box: "#e6e1d3",
+  sk_volcano: "#c4bdac",
+  sk_pyramid: "#c9c2b1",
+  sk_stairs: "#cfc8b8",
+  sk_rail: "#6d7680",
+  sk_shop: "#e8b923",
+  sk_board: "#2b2f45",
 };
 
 /** Kinds that aren't drawn at all: markers and tiny props. */
 // (`boat_lake` only marks the water the rowboats go on; `boat_moored` sits on it.)
-const HIDDEN = new Set(["spot", "forage", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "boat_lake", "boat_moored", "yard_stand", "yard"]);
+const HIDDEN = new Set(["spot", "forage", "nook", "grove_slot", "signpost", "postbox", "dept", "shopfront", "boat_lake", "boat_moored", "yard_stand", "yard", "sk_park", "sk_paint", "sk_shop_back"]);
 
 export function mapImage(map: ZoneMap): HTMLCanvasElement {
   const c = document.createElement("canvas");

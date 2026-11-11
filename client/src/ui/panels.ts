@@ -1092,7 +1092,7 @@ export class ReelGame {
 export class PlaceBanner {
   private el = el("div", "place-banner");
   item: Item | null = null;
-  /** Quarter turns (the mouse wheel, R, or the button). */
+  /** Which way it faces: 0 toward you, 1 right, 2 away, 3 left (the mouse wheel, R, or the button turn it). */
   rot = 0;
 
   constructor(private onCancel: () => void) {
@@ -1103,7 +1103,7 @@ export class PlaceBanner {
   show(item: Item) {
     this.item = item;
     this.rot = 0;
-    this.el.replaceChildren(icon(item), `Tap a spot to place your ${item.name} (scroll or R to turn)`, button("Turn ⟳", () => this.turn(1), "small"), button("Cancel", () => this.onCancel(), "small"));
+    this.el.replaceChildren(icon(item), `Tap a spot to place your ${item.name}: to the half tile (scroll or R to turn it)`, button("Turn ⟳", () => this.turn(1), "small"), button("Cancel", () => this.onCancel(), "small"));
     this.el.hidden = false;
   }
 

@@ -172,6 +172,16 @@ const CABINET_NEON: Record<string, number> = {
   "Dance Off": 0xff4fa3,
 };
 
+type LightKind = "fire" | "screen" | "neon" | "lamp";
+
+/** How a piece's light lives: a fire, a screen, neon, or a steady lamp. */
+function lightKind(key: string): LightKind {
+  if (/fireplace|candle|pumpkin|founders_lantern|hearth/.test(key)) return "fire";
+  if (/tv|arcade|laptop|aquarium|popcorn/.test(key)) return "screen";
+  if (/neon|lava|disco|uv_light|xmas|fairy/.test(key)) return "neon";
+  return "lamp";
+}
+
 export class DayNight {
   private shade = new Graphics();
   /** Warm lights, over the night shade (so they stay yellow, not blued). */
@@ -397,8 +407,12 @@ export class DayNight {
     }
   }
 
-  /** A soft pool of `color` light at (x, y) (world px), `sx` × `sy` big. */
-  roomGlow(x: number, y: number, color: number, sx: number, sy = sx): Sprite {
+  /**
+   * A soft pool of `color` light at (x, y) (world px), `sx` × `sy` big;
+   * `key`, the piece giving it (with the advanced shaders it lives as its
+   * source does: a fire flickers, a screen shimmers, neon breathes).
+   */
+  roomGlow(x: number, y: number, color: number, sx: number, sy = sx, key = ""): Sprite {
     const s = new Sprite(whiteGlow());
     s.anchor.set(0.5);
     s.tint = color;
@@ -406,7 +420,43 @@ export class DayNight {
     s.alpha = 0.6;
     s.position.set(x, y);
     this.lights.addChild(s);
+    this.living.push({ s, kind: lightKind(key), sx, sy, phase: Math.random() * 10 });
     return s;
+  }
+
+  /** The room's lights, and how each lives (the advanced shaders). */
+  private living: { s: Sprite; kind: LightKind; sx: number; sy: number; phase: number }[] = [];
+
+  /**
+   * The advanced shaders, in a home: each light alive as its source is (a
+   * fire's quick flicker and breath, a screen's shimmer, neon's slow pulse,
+   * a lamp steady), brighter against a deeper room. Off: as they were set.
+   */
+  private liveLights(on: boolean) {
+    this.living = this.living.filter((l) => !l.s.destroyed);
+    const t = performance.now() / 1000;
+    for (const l of this.living) {
+      if (!on) {
+        l.s.alpha = 0.6;
+        l.s.scale.set(l.sx, l.sy);
+        continue;
+      }
+      const p = l.phase;
+      let a = 0.72;
+      let k = 1;
+      if (l.kind === "fire") {
+        const n = 0.55 * Math.sin(t * 9.3 + p) + 0.3 * Math.sin(t * 17.1 + p * 2) + 0.15 * Math.sin(t * 31.7 + p * 3);
+        a = 0.74 + 0.16 * n;
+        k = 1 + 0.05 * n;
+      } else if (l.kind === "screen") {
+        a = 0.6 + 0.12 * Math.sin(t * 6.1 + p) * Math.sin(t * 1.3 + p) + (Math.sin(t * 2.7 + p) > 0.92 ? 0.12 : 0);
+      } else if (l.kind === "neon") {
+        a = 0.66 + 0.1 * Math.sin(t * 1.4 + p);
+        k = 1 + 0.03 * Math.sin(t * 1.4 + p);
+      } else a = 0.74 + 0.02 * Math.sin(t * 0.8 + p);
+      l.s.alpha = a;
+      l.s.scale.set(l.sx * k, l.sy * k);
+    }
   }
 
   update() {
@@ -433,7 +483,10 @@ export class DayNight {
       const { dark } = lightAt(this.hour());
       this.setGrade(0.24, 0.07);
       this.dark = 0;
-      const level = Math.min(1, 0.9 - dark * 0.48 + this.roomLit * 0.07);
+      // (The advanced shaders: a deeper room, so its lights really light it, and live.)
+      const deep = settings.shaders;
+      this.liveLights(deep);
+      const level = deep ? Math.min(0.97, 0.84 - dark * 0.52 + this.roomLit * 0.05) : Math.min(1, 0.9 - dark * 0.48 + this.roomLit * 0.07);
       const ch = (v: number) => Math.round(Math.min(1, v) * 255);
       const { width, height } = this.app.screen;
       this.shade.clear().rect(0, 0, width, height).fill((ch(level) << 16) | (ch(level * 0.96) << 8) | ch(level * 0.9));

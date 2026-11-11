@@ -10,6 +10,7 @@ import { Container, Graphics, Sprite } from "pixi.js";
 import { disc, oval, polygon } from "./pixeldraw";
 import { itemTexture } from "./items";
 import { COZY_TOGGLES, cozyLive, drawCozy } from "./cozyart";
+import { drawFireplace, fireplaceFire } from "./fireplaces";
 
 const O = "#2b2233";
 
@@ -21,7 +22,7 @@ function px(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, 
 /** Rugs lie flat (drawn under whoever stands on them). */
 export const FLAT = new Set(["round_rug", "rug_persian", "rug_stripes", "rug_heart", "floor_cushions"]);
 /** Pieces that turn on and off. */
-export const TOGGLES = new Set(["fairy_string", "lava_lamp", "paper_lantern", "aquarium", "record_player", "retro_tv", "fireplace", "arcade_cabinet", "disco_ball", ...COZY_TOGGLES]);
+export const TOGGLES = new Set(["fairy_string", "lava_lamp", "paper_lantern", "aquarium", "record_player", "retro_tv", "fireplace", "fireplace_grey", "fireplace_obsidian", "arcade_cabinet", "disco_ball", ...COZY_TOGGLES]);
 /** Fish tanks and display shelves, and how many things they hold (as the server's `tank`). */
 export const TANKS: Record<string, number> = { fish_bowl: 3, aquarium: 8, display_shelf: 6 };
 /** What gives real light when it's on: its colour and how far it reaches. */
@@ -36,6 +37,8 @@ export const LIGHTS: Record<string, [number, number]> = {
   retro_tv: [0x8fc8ff, 2.4],
   arcade_cabinet: [0x8f7bff, 2.4],
   fireplace: [0xff9a4a, 3.6],
+  fireplace_grey: [0xff9a4a, 3.6],
+  fireplace_obsidian: [0x4aff7a, 3.6],
   neon_heart: [0xff5a9a, 2.4],
   christmas_tree: [0xffd98a, 3],
   candle_trio: [0xffb066, 1.8],
@@ -46,7 +49,7 @@ export const LIGHTS: Record<string, [number, number]> = {
   uv_light: [0xc47bff, 2.6],
 };
 /** What can be sat on, and what's walked over (as the server's `seat` and `walk`). */
-export const SEATS = new Set(["lawn_chair", "wooden_chair", "armchair", "sofa", "rocking_chair", "cozy_armchair", "bean_bag", "floor_cushions"]);
+export const SEATS = new Set(["lawn_chair", "wooden_chair", "armchair", "sofa", "rocking_chair", "cozy_armchair", "bean_bag", "floor_cushions", "double_sofa", "double_sofa_green", "double_sofa_navy"]);
 export const WALK_OVER = new Set(["round_rug", "rug_persian", "rug_stripes", "rug_heart"]);
 /** Lies down when it's turned: seen from above, not stood up. */
 export const TURNS_FLAT = /rug|bed|table|sofa|couch|desk|cabinet|bench|cushions|chest/;
@@ -57,6 +60,8 @@ export const PET_SPOTS = new Set(["dog_bed", "cat_tree", "pet_bowl"]);
 
 /** Draws `key` (one of these) at 32×32; false if it isn't one. */
 export function drawHouseware(ctx: CanvasRenderingContext2D, key: string): boolean {
+  // The fireplaces (red brick, grey stone, obsidian): fireplaces.ts.
+  if (drawFireplace(ctx, key)) return true;
   switch (key) {
     case "painting_sunset":
     case "painting_sea":
@@ -272,15 +277,6 @@ export function drawHouseware(ctx: CanvasRenderingContext2D, key: string): boole
       px(ctx, O, 10, 1, 1, 5);
       px(ctx, O, 21, 1, 1, 5);
       return true;
-    case "fireplace":
-      px(ctx, O, 1, 4, 30, 27);
-      px(ctx, "#b8503a", 2, 5, 28, 25);
-      for (let y = 7; y < 30; y += 4) for (let x = 2 + ((y / 4) % 2) * 3; x < 30; x += 6) px(ctx, "#8a3a2a", x, y, 5, 1);
-      px(ctx, "#d8c8b0", 1, 4, 30, 3);
-      px(ctx, O, 8, 13, 16, 17);
-      px(ctx, "#1a1418", 9, 14, 14, 16);
-      px(ctx, "#6a4a2a", 10, 26, 12, 3);
-      return true;
     case "arcade_cabinet":
       polygon(ctx, O, [[5, 31], [27, 31], [27, 2], [5, 2]]);
       px(ctx, "#3a2a6a", 6, 3, 20, 27);
@@ -327,6 +323,9 @@ export function alive(key: string): Alive | null {
   const g = new Graphics();
   const view = new Container();
   view.addChild(g);
+  // A fireplace's fire (fireplaces.ts).
+  const fire = fireplaceFire(key);
+  if (fire) return { view, update: (now, on) => fire(g, now, on) };
   switch (key) {
     case "fairy_string":
       return {
@@ -402,24 +401,6 @@ export function alive(key: string): Alive | null {
           for (let y = 10; y < 23; y += 2) g.rect(6, y, 15, 1).fill({ color: 0x000000, alpha: 0.12 });
           if (Math.floor(now / 90) % 31 === 0) g.rect(6, 10, 15, 13).fill({ color: 0xffffff, alpha: 0.4 });
           g.rect(2, 6, 28, 22).fill({ color: 0x9fe8ff, alpha: 0.06 });
-        },
-      };
-    case "fireplace":
-      return {
-        view,
-        update(now, on) {
-          g.clear();
-          if (!on) return;
-          // Flames licking up off the logs, sparks, and the glow on the floor.
-          g.ellipse(16, 31, 18, 4).fill({ color: 0xff8a3f, alpha: 0.18 + 0.05 * Math.sin(now / 120) });
-          for (let i = 0; i < 5; i++) {
-            const h = 7 + Math.sin(now / (90 + i * 13) + i) * 3;
-            const x = 11 + i * 2.5;
-            g.poly([x - 2, 26, x + 2, 26, x + Math.sin(now / 150 + i) * 1.2, 26 - h]).fill({ color: i % 2 ? 0xff6a2a : 0xffb02a });
-          }
-          g.poly([13, 26, 19, 26, 16 + Math.sin(now / 110), 20]).fill({ color: 0xffe14f });
-          const sp = (now / 600) % 1;
-          g.rect(14 + Math.sin(now / 200) * 3, 22 - sp * 9, 1, 1).fill({ color: 0xffe14f, alpha: 1 - sp });
         },
       };
     case "arcade_cabinet":

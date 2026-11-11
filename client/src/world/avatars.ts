@@ -205,9 +205,13 @@ export class Avatar {
   shown: TileXY = { x: 0, y: 0 };
   private facing = 1;
   showName = true;
+  /** Not here to be seen (watching the arena on a TV): drawn as nothing, no name over it. */
+  ghost = false;
   private nameW = 0;
   /** Sitting on a swing: how far the seat's carried them (px, on screen). */
   seatDy = 0;
+  /** Sat on a piece put half a tile over: how far over (px), so you sit on it, not beside it. */
+  private seatShift = { x: 0, y: 0 };
   /** Posture (protocol `state::*`): 0 idle, 1 sitting. */
   state = 0;
   /** Where we stood before sitting down; standing up returns here. */
@@ -380,6 +384,7 @@ export class Avatar {
 
   /** In the arena's fight, or on a board at the skatepark (`noRide`: what you'd ride's not drawn), or out of it (null). */
   setArena(a: { x: number; y: number; facing: 1 | -1; frame: AvatarFrame | null; walking: boolean; hurt: boolean; lean?: number; lift?: number; hide?: boolean; height?: number; tint?: number; noRide?: boolean } | null) {
+    if (!a && this.arena) this.lastArena = { x: this.arena.x, y: this.arena.y };
     this.arena = a;
     if (a) {
       this.motion = null;
@@ -456,6 +461,12 @@ export class Avatar {
     if (!keepWalk) this.snap(at);
   }
 
+  /** Sat down on a piece placed `dx`, `dy` px off its tile, turned to face `face` (1 right, -1 left, 0 as you were). */
+  sitOn(dx: number, dy: number, face: number) {
+    this.seatShift = { x: dx, y: dy };
+    if (face) this.facing = face > 0 ? 1 : -1;
+  }
+
   /** FishEvent CAST: face the water and swing the rod out. */
   castLine(target: TileXY, now: number) {
     const dx = target.x - this.destination.x;
@@ -490,6 +501,22 @@ export class Avatar {
     this.motion = m;
     const target = posAt(m, now);
     this.blend = { x: before.x - target.x, y: before.y - target.y, until: performance.now() + BLEND_MS };
+  }
+
+  /** Where it was last drawn by an activity (a board in the skatepark), as it let go: to ease on from. */
+  private lastArena: TileXY | null = null;
+
+  /**
+   * Snapped to tile `t` without a jump: it goes on being drawn where it was
+   * (the last spot an activity drew it, or where it stood) and eases across.
+   */
+  snapSoft(t: TileXY) {
+    const from = this.lastArena ?? this.pos;
+    this.lastArena = null;
+    this.motion = null;
+    this.tile = t;
+    this.pos = { ...t };
+    this.blend = { x: from.x - t.x, y: from.y - t.y, until: performance.now() + BLEND_MS };
   }
 
   snap(t: TileXY) {
@@ -693,9 +720,9 @@ export class Avatar {
     const seat = afloat && vehicle >= BOAT_PASSENGER ? vehicle - BOAT_PASSENGER : -1;
     if (seat >= 0) leanX += SEAT_X[seat] ?? 0;
     const wave = afloat ? Math.round(Math.sin(wallNow / 450)) : 0;
-    const feetX = x * TILE + TILE / 2 + leanX;
+    const feetX = x * TILE + TILE / 2 + leanX + (sitting ? this.seatShift.x : 0);
     // Seated avatars sit on the bench's slats, drawn just in front of it.
-    const feetY = y * TILE + TILE - (sitting ? 6 - this.seatDy : 4) + leanY;
+    const feetY = y * TILE + TILE - (sitting ? 6 - this.seatDy : 4) + leanY + (sitting ? this.seatShift.y : 0);
     // Woozy: a slow sway, a stagger from side to side while walking, a tilt.
     const woozy = wallNow < this.woozyUntil && !sitting;
     const sway = woozy ? Math.sin(wallNow / 420) * 2.5 + (walking ? Math.sin(wallNow / 140) * 3 : 0) : 0;
@@ -708,7 +735,8 @@ export class Avatar {
     // The robot turns on the beat: every four beats it faces the other way.
     this.sprite.scale.x = robot && Math.floor(beat / 4) % 2 === 1 ? -this.facing : this.facing;
     // (In the arena, the Goliath's drawn by the arena, in its place; its name goes over its head.)
-    this.sprite.visible = !fighting?.hide;
+    this.sprite.visible = !fighting?.hide && !this.ghost;
+    if (this.ghost) this.stack.hidden = true;
     const height = fighting?.height ?? 34;
     this.sprite.zIndex = sitting ? y * TILE + TILE : feetY + 0.5;
     this.drawBoard(skating, feetX, feetY, push);

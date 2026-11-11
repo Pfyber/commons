@@ -70,13 +70,14 @@ import { LOGIN_NOTICE, signIn } from "./ui/login";
 import { JournalPanel, NetGame } from "./ui/nature";
 import { Nature } from "./nature";
 import { ActionMenu, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame, button } from "./ui/panels";
+import { FridgePanel } from "./ui/fridge";
 import { isWearable } from "./world/items";
 import { styleFor } from "./world/art";
 import { SettingsPanel } from "./ui/settings";
 import { onSettings } from "./settings";
 import { setSfxVolume } from "./ambient/sfx";
 import { setMusicVolume } from "./activities/jam";
-import { FriendsPanel, NotificationsPanel } from "./ui/social";
+import { FriendsPanel, type NoteActions, NotificationsPanel, NotifyPopups } from "./ui/social";
 import { GoalPanel, QuarterPanel, RequestsPanel } from "./ui/town";
 import { EaselPanel } from "./activities/easel";
 import { WordPanel } from "./activities/word";
@@ -89,6 +90,7 @@ import "@fontsource/pixelify-sans/700.css";
 import silkscreen400 from "@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2?url";
 import silkscreen700 from "@fontsource/silkscreen/files/silkscreen-latin-700-normal.woff2?url";
 import "./styles.css";
+import { installPixelIcons } from "./ui/pixicons";
 
 const MAP_URLS: Record<string, string> = {
   city: cityUrl,
@@ -125,6 +127,9 @@ for (const [url, weight] of [[silkscreen400, "400"], [silkscreen700, "700"]]) {
   document.fonts.add(face);
   void face.load().catch(() => {});
 }
+
+// Pixel-art icons in place of emoji (the bots, the arena's disasters).
+installPixelIcons();
 
 const overlay = document.getElementById("overlay")!;
 
@@ -495,6 +500,7 @@ async function main() {
     forage,
     net: new NetGame(),
     market: new MarketPanel(eco),
+    fridge: new FridgePanel(eco),
     life,
     room: new RoomPanel(eco, life),
     drone: new DronePanel(eco, life, (text) => (game as Game | null)?.say(text)),
@@ -582,7 +588,7 @@ async function main() {
     if (!s || s.founder || (!s.season.open && welcome.done < 3)) return hud.setTasks(null);
     hud.setTasks(welcome.done === 3 ? "🌱 Plant your seedling!" : `🌿 Caretaker's tasks ${welcome.done}/3`);
   });
-  const notifications = new NotificationsPanel(social, {
+  const noteActions: NoteActions = {
     ...friendActions,
     clubInvited: (id) => clubs.invites.some((i) => i.id === id),
     goToClubRoom: (id) => void travel({ zone: "clubroom", owner: id }),
@@ -592,8 +598,13 @@ async function main() {
         .answer(id, accept)
         .then((r) => r.joined && hud.toast(`🛡 Welcome to ${clubs.club(id)?.name ?? "the club"}!`, 4000))
         .catch((e) => hud.toast(e instanceof ApiError ? e.message : "That didn't work.", 4000)),
-  });
+  };
+  const notifications = new NotificationsPanel(social, noteActions);
+  // New ones pop up (with a chime) to answer at once.
+  const popups = new NotifyPopups(social, noteActions);
+  social.onNotify = (n) => popups.show(n);
   eco.onChange(() => hud.setCoins(eco.coins));
+  eco.onWentOff = (n) => hud.toast(`🐟 ${n} fish in your bag went off (a week out of the fridge): they're Rotten Fish now.`, 6000);
   social.onChange(() => hud.setBadge(social.unreadCount));
   social.onToast = (t) => hud.toast(t, 4000);
   await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {}), pets.load().catch(() => {}), rides.load().catch(() => {})]);
@@ -603,6 +614,8 @@ async function main() {
   });
 
   let dest: Destination = { zone: "city" };
+  /** Watching the arena on a TV: whose home it was (to go back to). */
+  let watchBack: string | null = null;
   let retry = 0;
   /** Joins `dest`; on failure either retries (connection trouble) or throws (refused). */
   const enter = async (refusalThrows = false) => {
@@ -642,8 +655,8 @@ async function main() {
           o.color = c.color;
         }
       }
-      const placeInfo = { label: ticket.label, owner: ticket.owner };
-      if (!game || game.zoneId !== ticket.zone_id || game.place.owner !== placeInfo.owner) {
+      const placeInfo = { label: ticket.label, owner: ticket.owner, watch: dest.watch ? { back: watchBack } : undefined };
+      if (!game || game.zoneId !== ticket.zone_id || game.place.owner !== placeInfo.owner || !!game.place.watch !== !!placeInfo.watch) {
         game?.destroy();
         game = new Game(app, map, ticket.zone_id, placeInfo, ui, document.getElementById("labels")!, {
           onWelcome: () => (retry = 0),
@@ -680,11 +693,17 @@ async function main() {
             void travel({ zone: z, arrive });
           },
           onVisit: (owner) => void travel({ zone: "home", owner }),
+          // A home TV: watch the arena (unseen, in the middle of it); stop, and back to that home.
+          onWatch: (owner, stop) => {
+            if (stop) return void travel({ zone: "home", owner: owner ?? undefined });
+            watchBack = owner;
+            void travel({ zone: "city", watch: true });
+          },
         });
         if (import.meta.env.DEV) (window as unknown as { __commons: Game }).__commons = game;
       }
       // A friend's location becomes the place to reconnect to.
-      dest = { zone: ticket.zone_id, owner: ticket.owner ?? undefined };
+      dest = { zone: ticket.zone_id, owner: ticket.owner ?? undefined, watch: dest.watch };
       game.connect(ticket.server_url, ticket.join_token);
       hideOverlay();
     } catch (e) {

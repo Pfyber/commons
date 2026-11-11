@@ -1,6 +1,7 @@
 // Ties the zone connection, world rendering, avatars, input and HUD together.
 
 import { Labyrinth } from "./labyrinth";
+import { plainName } from "./ui/pixicons";
 import { type Application, type FederatedPointerEvent, Graphics, Sprite, Text } from "pixi.js";
 import { Ball } from "./activities/ball";
 import { ChessPanel, type GameStateMsg } from "./activities/chess";
@@ -18,6 +19,7 @@ import { BOT as BOWL_BOT, BowlingPanel, scoreSoFar } from "./activities/bowling"
 import { ArenaShow } from "./activities/arena";
 import { SkatePark } from "./activities/skate";
 import { SkateShop } from "./activities/skateshop";
+import { SkateTrainer } from "./activities/skatetrainer";
 import { SkateShopPanel } from "./ui/skateshop";
 import { PaintballShow, PB_VIEW } from "./activities/paintball";
 import { CANCELLED, CHOOSING, RpsPicker, beats, pickIcon } from "./activities/rps";
@@ -58,7 +60,7 @@ import { BOWL_RELEASE_MS, type PlayKind } from "./world/avatars";
 import { type CloseReason, ZoneSocket } from "./net/socket";
 import type { Homes } from "./homes";
 import type { Pets } from "./pets";
-import type { Rides } from "./rides";
+import { type Rides, SKATEBOARD } from "./rides";
 import type { Goods } from "./goods";
 import type { DecoratePanel } from "./ui/exterior";
 import { HouseFronts } from "./world/housefronts";
@@ -73,6 +75,7 @@ import type { ApartmentsPanel, PostOfficePanel, StallPanel } from "./ui/homes";
 import type { Hud } from "./ui/hud";
 import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
+import type { FridgePanel } from "./ui/fridge";
 import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, GOLD_MAGNET_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, MAGNET_LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
@@ -128,6 +131,9 @@ const TOAST_CODES = new Set([ERR.RATE_LIMITED, 9, 10, 11, 12, 13]);
 const FISHING = 2;
 /** The Dance Off's AI bot dancer (not a server avatar): an id clear of real ones, and a party look. */
 const DANCE_BOT_ID = 0xfffffff7;
+/** The skatepark's bot (in a 1v1 with it): its id (as `skate.ts` BOT_ID) and look. */
+const SKATE_BOT_ID = 0xfffffff6;
+const SKATE_BOT_LOOK = encodeLook({ hue: 30, skin: 2, hair: 2, hat: 0, hatHue: 0, style: 4, accessory: 0, outfit: 4 });
 const DANCE_BOT_LOOK = encodeLook({ hue: 200, skin: 0, hair: 4, hat: 0, hatHue: 0, style: 5, accessory: 2, outfit: 6 });
 
 /** Protocol `drink::*`. */
@@ -166,6 +172,7 @@ export interface Ui {
   forage: Nature;
   net: NetGame;
   market: MarketPanel;
+  fridge: FridgePanel;
   plot: PlotMenu;
   reel: ReelGame;
   salvage: SalvageGame;
@@ -286,10 +293,10 @@ function found(): Set<string> {
 export interface Place {
   label: string;
   owner: string | null;
+  /** Watching the arena on a TV (unseen in the city, in the middle of the arena): `back`, whose home to go back to. */
+  watch?: { back: string | null };
 }
 
-/** The fish food item (key `fish_food`). */
-const FISH_FOOD = 1203;
 
 /** Tiles in front of the cottage door where gifts are left (home map). */
 const DOORSTEP: TileXY[] = [
@@ -474,6 +481,8 @@ export class Game {
   private leadersAt = 0;
   /** The pointer over the game canvas (css px), for the placing preview. */
   private hover: { x: number; y: number } | null = null;
+  /** Where on the screen the last tap was (furniture goes to the half tile under it). */
+  private tapPoint: { x: number; y: number } | null = null;
   /** The other junk about what the magnet found (the server's, for the greedy). */
   private salvageJunk: number[] = [];
   private disposers: (() => void)[] = [];
@@ -553,6 +562,9 @@ export class Game {
   /** The skatepark, if this map has one, and its shop truck's seller. */
   private skate: SkatePark | null = null;
   private skateShop: SkateShop | null = null;
+  /** The Skate Trainer by the park's gate, and a lesson waiting for you to get into the park to start. */
+  private trainer: SkateTrainer | null = null;
+  private rideWhenIn: "free" | "run" | "line" | null = null;
   /** Dusty's van: building your board. */
   private skateShopPanel: SkateShopPanel | null = null;
   /** Shoes from the alley's counter (just for fun: the shoe man remembers). */
@@ -635,6 +647,8 @@ export class Game {
       onTravel(zone: string, arrive?: string): void;
       /** Knock on someone's home: visit them if they've invited you. */
       onVisit(owner: string): void;
+      /** Watch the arena on a TV (`owner`: whose home the TV's in, to come back to), or (null) stop and go back. */
+      onWatch(owner: string | null, stop?: boolean): void;
     },
   ) {
     this.hud = ui.hud;
@@ -660,7 +674,8 @@ export class Game {
       this.inMyYard = (t) => !!yard && t.x >= yard.x && t.x < yard.x + yard.w && t.y >= yard.y && t.y < yard.y + yard.h;
       this.props.yardRule = (x, y) => this.inMyYard({ x, y }) && groundAt(map, x, y) !== "path" && groundAt(map, x, y) !== "water";
       const from = spot(map, "mall") ?? { x: 0, y: 0 };
-      this.drones = new Drones(this.scene, ui.life, from, () => (mine ? spot(map, mine.startsWith("apt:") ? "apartments" : `door:${mine}`) : null), (text) => this.hud.toast(text, 4000));
+      const doorOf = (plot: string) => spot(map, plot.startsWith("apt:") ? "apartments" : `door:${plot}`);
+      this.drones = new Drones(this.scene, ui.life, from, () => (mine ? doorOf(mine) : null), (text) => this.hud.toast(text, 4000), doorOf);
     }
     this.furniture = new Furniture(map);
     const screenObj = map.objects.find((o) => o.kind === "big_screen");
@@ -679,7 +694,7 @@ export class Game {
     this.milestones = new Milestones(this.scene, map, (x, y, s) => this.daynight.addLight(x, y, s), app.stage);
     // Lamps really light things, in a home and in a front yard.
     this.props.lightUp = {
-      add: (x, y, color, scale) => this.daynight.roomGlow(x, y, color, scale),
+      add: (x, y, color, scale, key) => this.daynight.roomGlow(x, y, color, scale, scale, key),
       lit: (n) => (this.daynight.roomLit = n),
     };
     if (zoneId === "home") {
@@ -932,9 +947,60 @@ export class Game {
         (text, ms) => this.hud.toast(text, ms ?? 3000),
         ui.eco,
         this.daynight.lightLayer,
+        // The bot you take on in a 1v1: a skater of its own, beside you.
+        (x, y) => {
+          const info = { id: SKATE_BOT_ID, name: "Skate bot 🤖", look: SKATE_BOT_LOOK, x, y, state: 0, speedX10: 0, t0: 0, sprintIn: 0, path: [], mood: 0, away: false, style: 0, pet: 0, vehicle: 0, tool: 0, reading: 0, calling: false };
+          const bot = new Avatar(info, this.scene, this.labels, false, 0);
+          bot.markNpc();
+          return bot;
+        },
+        // Riding out of the park (through a gate, onto the street): no stop, no
+        // getting off: out of the park's skating and onto your everyday
+        // skateboard, rolling on the way you were going.
+        (tx, ty, dx, dy) => {
+          const self = this.self;
+          if (!self || !walkable(map, tx, ty)) return false;
+          this.leftParkAt = performance.now();
+          this.skate?.stop();
+          // Onto the tile the server has you on, drawn on from where you were (no jump).
+          const was = self.pos;
+          // (The tile under your feet, as the server reckons it from where your board was.)
+          self.snapSoft({ x: Math.floor(was.x + 0.5), y: Math.floor(was.y + 0.875) });
+          // (Your everyday board is already under you: put there as you started skating.)
+          const rides = this.ui.rides;
+          const board = rides.owned().find((v) => v.meta.code === SKATEBOARD);
+          if (board && !rides.riding) void this.rideOn(board, true);
+          // As far on as the way goes (up to eight tiles), so you keep rolling.
+          let far = { x: tx, y: ty };
+          for (let k = 1; k <= 8; k++) {
+            const p = { x: Math.round(tx + dx * k), y: Math.round(ty + dy * k) };
+            if (!walkable(map, p.x, p.y)) break;
+            far = p;
+          }
+          this.moveTo(far, false);
+          return true;
+        },
       );
       const skate = this.skate;
-      this.skateShopPanel = new SkateShopPanel(ui.eco, () => skate.board, (k) => skate.setKit(k));
+      // The Skate Trainer: lessons, tried on a board (in the park, walked in first if you're not).
+      if (zoneId === "city") {
+        this.trainer = new SkateTrainer(this.scene, labels, (mode) => {
+          const self = this.self;
+          if (!self) return false;
+          if (skate.capturing || skate.inPark(self.pos.x, self.pos.y)) {
+            skate.start(mode);
+            return skate.capturing;
+          }
+          const gate = { x: 88, y: 217 };
+          this.moveTo(nearestWalkable(map, gate.x, gate.y, 3) ?? gate, true);
+          this.rideWhenIn = mode;
+          return true;
+        });
+        skate.watch = (e, me) => this.trainer?.watch(e, me);
+      }
+      this.skateShopPanel = new SkateShopPanel(ui.eco, () => skate.board, (k) => skate.setKit(k), skate.quests, (day, slot) => this.socket?.send({ t: "SkateQuest", day, slot }));
+      const panel = this.skateShopPanel;
+      skate.questsChanged = () => panel.open && panel.render();
     }
     if (map.objects.some((o) => o.kind === "pb_field")) {
       this.paintball = new PaintballShow(
@@ -951,7 +1017,8 @@ export class Game {
     }
     const shoes = map.objects.find((o) => o.kind === "shoe_counter");
     if (shoes) this.clerk = new Clerk(map, shoes, this.scene, labels, SHOE_GUY);
-    if (map.objects.some((o) => o.kind === "pool_table")) {
+    // (At home and in a club room, a pool table may be put up: one to play on.)
+    if (map.objects.some((o) => o.kind === "pool_table") || zoneId === "home" || zoneId === "clubroom") {
       this.pool = new PoolPanel(
         () => this.selfId,
         (id) => this.avatars.get(id)?.info.name ?? "someone",
@@ -1219,7 +1286,9 @@ export class Game {
       else if (pet) actions.push([`Take ${pet.name} for a walk 🐾`, () => void this.petLife.takeOut().catch(() => {})]);
       menu.showWith("Your home", "", actions);
     } else if (r) {
-      menu.showWith(`${r.name}'s home`, "Friends can come in when they're invited.", [["Knock", () => this.events.onVisit(r.owner)]]);
+      // A friend who lets you drop by: straight in. Anyone else: a knock (in if they've invited you).
+      if (this.ui.social.canDropIn(r.owner)) menu.showWith(`${r.name}'s home`, "Friends are welcome any time.", [["Go in", () => this.events.onVisit(r.owner)]]);
+      else menu.showWith(`${r.name}'s home`, "Friends can come in when they're invited.", [["Knock", () => this.events.onVisit(r.owner)]]);
     } else if (homes.mine) {
       menu.showWith("A free house", "Someone new could make it their home.", []);
     } else {
@@ -1268,6 +1337,34 @@ export class Game {
   }
 
   /** Tapping the Caretaker opens their panel. */
+  /** The Skate Trainer: over to him, a hello, and his lessons. */
+  private tapTrainer(sx: number, sy: number): boolean {
+    const t = this.trainer;
+    if (!t) return false;
+    const w = this.scene.screenToWorld(sx, sy);
+    if (!t.hit(w.x / TILE, w.y / TILE)) return false;
+    const at = { x: Math.round(t.pos.x), y: Math.round(t.pos.y) };
+    const self = this.self;
+    if (self && cheb(self.destination, at) > 2) {
+      const spot = nearestWalkable(this.scene.map, at.x - 1, at.y, 2);
+      if (spot) this.moveTo(spot, true);
+    }
+    t.greet();
+    this.near(t.panel, at, 7).show();
+    return true;
+  }
+
+  /** Tapped on your board: the Skate Trainer's lessons, there and then (you ride on; it's open while you're nearby). */
+  private trainerOnBoard(sx: number, sy: number): boolean {
+    const t = this.trainer;
+    if (!t) return false;
+    const w = this.scene.screenToWorld(sx, sy);
+    if (!t.hit(w.x / TILE, w.y / TILE)) return false;
+    t.greet();
+    this.near(t.panel, { x: Math.round(t.pos.x), y: Math.round(t.pos.y) }, 14).show();
+    return true;
+  }
+
   private tapCaretaker(sx: number, sy: number): boolean {
     if (!this.caretaker) return false;
     const w = this.scene.screenToWorld(sx, sy);
@@ -1640,7 +1737,7 @@ export class Game {
           for (const id of [st.a, st.b]) at.set(id, { x: o.x + o.w / 2 - 0.5, y: o.y + o.h / 2, kind: "arcade" });
         });
     }
-    const table = map.objects.find((o) => o.kind === "pool_table");
+    const table = map.objects.find((o) => o.kind === "pool_table") ?? this.props.poolTable;
     if (table && this.pool) for (const id of this.pool.players) at.set(id, { x: table.x + table.w / 2 - 0.5, y: table.y + table.h / 2, kind: "pool" });
     // Bowlers stand at the foot of their lane, facing up it.
     if (this.bowling) {
@@ -2165,7 +2262,8 @@ export class Game {
     if (!d || !this.arcade) return;
     const st = this.arcade.stateOf(d.cab);
     const g = d.lights.clear();
-    const name = (id: number) => (id === ARCADE_BOT ? "AI bot" : (this.avatars.get(id)?.info.name ?? "someone"));
+    // (Canvas text: no pixel robot to show there, so a bot's name goes without it.)
+    const name = (id: number) => (id === ARCADE_BOT ? "AI bot" : plainName(this.avatars.get(id)?.info.name ?? "someone"));
     // The AI bot dances on the floor beside you while you take it on.
     const botDancing = st?.status === ARCADE_PLAYING && st.b === ARCADE_BOT;
     if (botDancing && !this.danceBot && st) {
@@ -2330,13 +2428,13 @@ export class Game {
   }
 
   /** Gets on something of yours (outdoors only), or off with null. */
-  async rideOn(it: Item | null) {
+  async rideOn(it: Item | null, quiet = false) {
     if (it && this.zoneId !== "city") return this.hud.toast("Vehicles are for outdoors: ride once you're back outside.", 3500);
     try {
       await this.ui.rides.set(it?.id ?? 0);
       this.refreshLook();
       this.showRideButton();
-      if (it) this.hud.toast(`${it.name}: off you go! Zip anywhere outdoors; you'll hop off at doors.`, 3500);
+      if (it && !quiet) this.hud.toast(`${it.name}: off you go! Zip anywhere outdoors; you'll hop off at doors.`, 3500);
     } catch (e) {
       this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 3500);
     }
@@ -2532,6 +2630,9 @@ export class Game {
         break;
       }
       case "Snap":
+        // (On a board, you're where your own skating says: the server's word would only drag you back;
+        // and just out of the park, rolling on, its step off the board would only stop you.)
+        if (m.id === this.selfId && (this.skate?.capturing || performance.now() - this.leftParkAt < 1500)) break;
         this.avatars.get(m.id)?.snap({ x: m.x, y: m.y });
         break;
       case "AwayChanged":
@@ -2563,6 +2664,11 @@ export class Game {
         // server walked us on, and jumping there later.
         const walkingOff = m.id === this.selfId && m.state === 0 && (a.moving || this.sentMoves.length > 0);
         a.setState(m.state, { x: m.x, y: m.y }, walkingOff);
+        // Sat on a chair turned or put half a tile over: on it, facing its way.
+        if (m.state === SITTING) {
+          const seat = this.props.seatAt(m.x, m.y);
+          a.sitOn(seat.dx, seat.dy, seat.face);
+        }
         // Walking off mid-cast ends fishing without a FishEvent.
         if (m.state !== FISHING) this.props.reelIn(m.id);
         if (m.id === this.selfId) this.onSelfState(m.state, { x: m.x, y: m.y });
@@ -2642,11 +2748,18 @@ export class Game {
         this.ui.plot.update(m.x, m.y, info);
         break;
       }
-      case "ObjectUpdate":
+      case "ObjectUpdate": {
+        // (A double sofa's other half: a seat of its own, gone with it.)
+        const wasWide = this.props.wideTile(m.x, m.y);
         this.props.setObject(m.x, m.y, m.item, m.rot);
         // A chair or sofa is a seat like any bench.
-        this.furniture.placed({ x: m.x, y: m.y }, SEATS.has(this.ui.eco.items.get(m.item)?.key ?? ""));
+        const seat = SEATS.has(this.ui.eco.items.get(m.item)?.key ?? "");
+        this.furniture.placed({ x: m.x, y: m.y }, seat);
+        if (wasWide) this.furniture.placed(wasWide, false);
+        const wide = this.props.wideTile(m.x, m.y);
+        if (wide) this.furniture.placed(wide, seat);
         break;
+      }
       case "ObjectTop":
         this.props.setTop(m.x, m.y, m.item, m.rot);
         break;
@@ -2769,6 +2882,10 @@ export class Game {
       case "Skater":
       case "SkateEvent":
       case "SkateBoard":
+      case "SkateQuestPaid":
+      case "SkateDuelState":
+      case "SkateDuelScore":
+      case "SkateDuelEnd":
         this.skate?.onMsg(m);
         break;
       case "PbState":
@@ -2920,7 +3037,23 @@ export class Game {
    * the server, then tells the server. Its MoveStart echo is ignored when it
    * agrees with the prediction.
    */
+  /** Dusty's van (`van`, its front or back): over to its hatch, he says hello, and his shop opens. */
+  private openSkateShop(van: MapObject) {
+    const self = this.self;
+    if (!self || !this.skateShop) return;
+    const truck = van.kind === "sk_shop" ? van : { ...van, y: van.y + 1 };
+    const front = { x: truck.x + 3, y: truck.y + truck.h };
+    if (!this.skate?.capturing && cheb(self.destination, front) > 2) {
+      const at = nearestWalkable(this.scene.map, front.x, front.y, 2);
+      if (at) this.moveTo(at, true);
+    }
+    this.skateShop.greet(truck);
+    if (this.skateShopPanel) this.near(this.skateShopPanel, front, 6).show();
+  }
+
   private moveTo(t: TileXY, marker: boolean) {
+    // (Watching on a TV: you're not really there to walk about.)
+    if (this.place.watch) return;
     const self = this.self;
     if (!this.socket || !self) return;
     // In a rowboat: the captain rows; passengers go where the boat goes.
@@ -3179,10 +3312,22 @@ export class Game {
     stage.eventMode = "static";
     stage.hitArea = this.app.screen;
     const tap = (e: FederatedPointerEvent) => {
+      if (this.place.watch) return;
       // A pinch isn't a tap.
       if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
-      // Out on the paintball field: the mouse aims and shoots, it doesn't walk. (Nor on a skateboard.)
-      if (this.paintball?.capturing || this.arena?.capturing || this.skate?.capturing) return;
+      // Out on the paintball field: the mouse aims and shoots, it doesn't walk.
+      if (this.paintball?.capturing || this.arena?.capturing) return;
+      // On a skateboard, nor: only Dusty's van (off your board, into his shop) and the Skate Trainer answer a tap.
+      if (this.skate?.capturing) {
+        if (this.trainerOnBoard(e.global.x, e.global.y)) return;
+        const t = this.scene.screenToTile(e.global.x, e.global.y);
+        const van = this.scene.map.objects.find((o) => (o.kind === "sk_shop" || o.kind === "sk_shop_back") && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 2 && t.y < o.y + o.h);
+        if (van) {
+          this.skate.stop();
+          this.openSkateShop(van);
+        }
+        return;
+      }
       // A menu or shop open: a tap on the world closes it, and that's all.
       if (Panel.dismissOnWorldTap()) return;
       // Tapping anywhere else puts the lure back in the bag: its menu and highlight go.
@@ -3204,6 +3349,7 @@ export class Game {
       if (this.tapPet(e.global.x, e.global.y)) return;
       if (this.tapCat(e.global.x, e.global.y)) return;
       if (this.tapCaretaker(e.global.x, e.global.y)) return;
+      if (this.tapTrainer(e.global.x, e.global.y)) return;
       if (this.tapClerk(e.global.x, e.global.y)) return;
       if (this.tapFrancy(e.global.x, e.global.y)) return;
       if (this.tapAvatar(e.global.x, e.global.y)) return;
@@ -3212,6 +3358,7 @@ export class Game {
       // Taking your own steps ends following someone.
       if (this.following !== null) this.stopFollowing(true);
       if (this.tapGift(t)) return;
+      this.tapPoint = { x: e.global.x, y: e.global.y };
       if (this.tapCollect(t)) return;
       const id = this.furniture.idAt(t);
       const seat = this.furniture.seats.get(id);
@@ -3318,7 +3465,7 @@ export class Game {
   // ---- people & gifts ---------------------------------------------------------
 
   /** A placed piece tapped: use it (turn it on, feed the tank…), or pick it up. */
-  private furnitureMenu(t: TileXY, item: number) {
+  private furnitureMenu(t: TileXY, item: number, tapped: TileXY = t) {
     const ui = this.ui;
     const key = ui.eco.items.get(item)?.key ?? "";
     // (What's out in a yard is dug up with the shovel.)
@@ -3332,7 +3479,7 @@ export class Game {
         if (spot) this.moveTo(spot, true);
       }
     };
-    const seat = this.furniture.seats.get(this.furniture.idAt(t));
+    const seat = this.furniture.seats.get(this.furniture.idAt(tapped));
     if (seat) actions.push(["🪑 Sit down", () => this.sitAt(seat.id)]);
     // Things you can use: the games, the drone, what's growing.
     if ((key === "laptop" || key === "arcade_cabinet") && this.arcade) {
@@ -3341,6 +3488,19 @@ export class Game {
       actions.push(["🕹️ Play a game", () => this.near(ui.menu, t, 6).showWith("🕹️ Games", "The arcade's cabinets, right here.", games.map((g, i) => [g.label ?? "Arcade", () => this.near(arcade, t, 6).openCab(i)]))]);
     }
     if (key === "laptop" && this.isOwnHome) actions.push(["🚁 Drone delivery", () => this.near(ui.drone, t, 6).show()]);
+    // A pool table: 8-ball, with whoever's here (or the bot).
+    if (key === "pool_table" && this.pool) {
+      const pool = this.pool;
+      const front = { x: t.x + 1, y: t.y + 2 };
+      actions.push(["🎱 Play pool", () => {
+        const self = this.self;
+        if (self && cheb(self.destination, front) > 2) {
+          const spot = nearestWalkable(this.scene.map, front.x, front.y, 2);
+          if (spot) this.moveTo(spot, true);
+        }
+        this.near(pool, front, 7).show();
+      }]);
+    }
     // (Out in the city a lawn chair is anyone's to sit on; whoever set it up folds it away.)
     if (key === "lawn_chair" && this.zoneId === "city") actions.push(["🪑 Fold it up", () => this.socket?.send({ t: "Pickup", x: t.x, y: t.y })]);
     if (key === "planter_pot" && this.isOwnHome) {
@@ -3348,6 +3508,10 @@ export class Game {
       note = growing ? `${ui.eco.name(growing.plant)}${ui.eco.items.get(this.props.objectAt(t.x, t.y - 1) ?? 0)?.key === "uv_light" ? " · ☀️ under a UV light" : ""}` : "Plant any seed here. Put a UV light on the tile above and it grows much faster.";
       actions.push([growing ? "🌱 Tend it" : "🌱 Plant something", () => this.near(ui.plot, t, 4).showFor(t.x, t.y, growing)]);
     }
+    // The mini fridge: fish keep in it (a week out of it, they go off).
+    if (key === "mini_fridge" && this.isOwnHome) actions.push(["🧊 Open the fridge", () => (walkUp(), this.near(ui.fridge, t, 4), void ui.fridge.openUp())]);
+    // A TV: the arena's matches, live (watched from here, unseen in the crowd).
+    if (key === "retro_tv") actions.push(["📺 Watch the arena", () => this.events.onWatch(this.place.owner)]);
     if (TOGGLES.has(key)) {
       const on = this.props.isOn(t.x, t.y);
       actions.push([on ? "🔌 Turn it off" : "✨ Turn it on", () => (walkUp(), this.socket?.send({ t: "UseObject", x: t.x, y: t.y }))]);
@@ -3373,8 +3537,8 @@ export class Game {
       note = inside.length ? `${inside.length} of ${holds} fish: ${inside.map((f) => ui.eco.name(f)).join(", ")}` : `Empty: it holds ${holds} fish.`;
       if (inside.length && this.props.hungry(t.x, t.y)) note += " They look sluggish: they haven't eaten in days.";
       if (this.isOwnHome && inside.length) {
-        actions.push([`🍤 Feed them (${ui.eco.qty(FISH_FOOD)} food)`, () => {
-          if (!ui.eco.qty(FISH_FOOD)) return this.hud.toast("🍤 You're out of fish food: the Market cart sells it.", 3000);
+        // (Fish food is free: there's always a pinch to hand.)
+        actions.push(["🍤 Feed them", () => {
           walkUp();
           this.socket?.send({ t: "TankFeed", x: t.x, y: t.y });
           this.hud.toast("🍤 The fish dart up for it!", 2500);
@@ -3538,11 +3702,13 @@ export class Game {
     if (ui.place.item) {
       // (Where it can't go, say why instead of trying.)
       const key = ui.place.item.key;
-      if (!this.props.placeCheck(t.x, t.y, key, ui.place.rot).ok) {
+      const p = this.tapPoint ? this.scene.screenToWorld(this.tapPoint.x, this.tapPoint.y) : { x: t.x * TILE + TILE / 2, y: t.y * TILE + TILE / 2 };
+      const spot = this.props.spotFor(p.x, p.y, key, ui.place.rot);
+      if (!this.props.placeCheck(spot.x, spot.y, key, spot.rot).ok) {
         this.hud.toast(this.zoneId === "city" || key === "round_pond" ? "🏡 That goes in your own front yard (a pond needs 2×2 free tiles)." : WALLS.has(key) ? "🖼 Hang it on a wall: turn it to face the room." : "There's no room there.", 2500);
         return true;
       }
-      this.socket?.send({ t: "Place", item: ui.place.item.id, x: t.x, y: t.y, rot: ui.place.rot });
+      this.socket?.send({ t: "Place", item: ui.place.item.id, x: spot.x, y: spot.y, rot: spot.rot });
       ui.place.hide();
       this.props.hideGhost();
       return true;
@@ -3560,6 +3726,13 @@ export class Game {
         .catch(() => this.hud.toast("That parcel can't be picked up yet.", 2500));
       return true;
     }
+    // (A pool table: any of its tiles is it, at its top left.)
+    const poolAt = this.props.poolAt(t.x, t.y);
+    if (poolAt) t = poolAt;
+    // (A double sofa: either half is it; each half's a seat of its own.)
+    const tapped = t;
+    const wideAt = this.props.wideAt(t.x, t.y);
+    if (wideAt) t = wideAt;
     const placed = this.props.topAt(t.x, t.y) ?? this.props.objectAt(t.x, t.y);
     // A house's yard stand, when there's something on it (or it's yours).
     const stand = map.objects.find((o) => o.kind === "yard_stand" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 1 && t.y <= o.y);
@@ -3577,7 +3750,7 @@ export class Game {
     // (A rug's walked on: its menu is for when you're standing on it.)
     const onRug = !pond && placed !== null && WALK_OVER.has(ui.eco.items.get(placed)?.key ?? "") && cheb(self.destination, t) > 0;
     if (placed && !pond && !onRug && (this.zoneId === "home" || this.zoneId === "clubroom" || this.zoneId === "city")) {
-      this.furnitureMenu(t, placed);
+      this.furnitureMenu(t, placed, tapped);
       return true;
     }
     const tree = this.grove?.at(t);
@@ -3693,14 +3866,7 @@ export class Game {
     }
     // The skatepark's van: Dusty says hello, and you build your board.
     if ((obj?.kind === "sk_shop" || obj?.kind === "sk_shop_back") && this.skateShop) {
-      const truck = obj.kind === "sk_shop" ? obj : { ...obj, y: obj.y + 1 };
-      const front = { x: truck.x + 3, y: truck.y + truck.h };
-      if (!this.skate?.capturing && cheb(self.destination, front) > 2) {
-        const at = nearestWalkable(map, front.x, front.y, 2);
-        if (at) this.moveTo(at, true);
-      }
-      this.skateShop.greet(truck);
-      if (this.skateShopPanel) this.near(this.skateShopPanel, front, 6).show();
+      this.openSkateShop(obj);
       return true;
     }
     // The skatepark's board by its gate: get on a board (free skate, a run, a line), and today's best.
@@ -4505,9 +4671,55 @@ export class Game {
 
   // ---- frame -------------------------------------------------------------
 
+  /** Watching the arena on a TV: the banner over it, and the way back home. */
+  private watchBanner: HTMLElement | null = null;
+  /** When you last rode out of the skatepark (its board, straight onto your own). */
+  private leftParkAt = -Infinity;
+  /** Skating in the park last frame, and whether you were riding your own board before it. */
+  private skatingWas = false;
+  private rodeBefore = false;
+
+  /**
+   * Your everyday skateboard, ready under you while you skate the park (so
+   * riding out of it is instant: no wait for it): on as you start; off again
+   * if you stop in the park and weren't riding before.
+   */
+  private boardReady() {
+    const on = !!this.skate?.capturing;
+    if (on === this.skatingWas) return;
+    this.skatingWas = on;
+    const rides = this.ui.rides;
+    if (on) {
+      this.rodeBefore = rides.riding;
+      const board = rides.owned().find((v) => v.meta.code === SKATEBOARD);
+      if (board && !rides.riding) void this.rideOn(board, true);
+    } else if (performance.now() - this.leftParkAt > 1500 && !this.rodeBefore && rides.riding) void this.rideOn(null, true);
+  }
+
+  private watching() {
+    if (!this.place.watch) return;
+    if (this.self) this.self.ghost = true;
+    // The whole ring in view, whatever the screen (the arena's 22 × 15, and its walls).
+    this.scene.lockView({ w: 26, h: 19 });
+    if (this.watchBanner) return;
+    const b = document.createElement("div");
+    b.className = "place-banner watch-banner";
+    const back = document.createElement("button");
+    back.className = "small";
+    back.textContent = "🏠 Back home";
+    back.onclick = () => this.events.onWatch(this.place.watch?.back ?? null, true);
+    b.append("📺 Watching the arena, live. ", back);
+    document.body.appendChild(b);
+    // (Nobody there to hear you, nowhere to walk: the chat and the emotes are put away.)
+    document.body.classList.add("watching-tv");
+    this.watchBanner = b;
+  }
+
   private update() {
     const wallNow = performance.now();
     const serverNow = this.socket?.clock.now() ?? 0;
+    this.watching();
+    this.boardReady();
     this.keyboardMove(wallNow);
     // The arena first: it places the fighters, so they're drawn (and the camera follows) where their gear is.
     this.arena?.update(serverNow, wallNow);
@@ -4555,8 +4767,9 @@ export class Game {
     // Placing furniture: a see-through preview of it where it would go.
     const placing = this.ui.place.item;
     if (placing && this.hover) {
-      const t = this.scene.screenToTile(this.hover.x, this.hover.y);
-      this.props.ghostAt(t.x, t.y, placing.key, this.ui.place.rot);
+      const p = this.scene.screenToWorld(this.hover.x, this.hover.y);
+      const spot = this.props.spotFor(p.x, p.y, placing.key, this.ui.place.rot);
+      this.props.ghostAt(spot.x, spot.y, placing.key, spot.rot);
     } else this.props.hideGhost();
     // The leaderboards, fresh every minute while their signs are about.
     if (this.leaderSigns && wallNow - this.leadersAt > 60_000) {
@@ -4574,6 +4787,8 @@ export class Game {
     const fx = settings.shaders || settings.reflections;
     if (fx && !this.worldFx) this.worldFx = new WorldFx(this.scene, this.scene.map);
     if (this.worldFx) {
+      // (In a home, shadows from its lights that are on.)
+      this.worldFx.roomLights = this.zoneId === "home" ? () => this.props.lightsOn() : null;
       this.worldFx.shade = settings.shaders;
       this.worldFx.reflect = settings.reflections;
     }
@@ -4607,6 +4822,13 @@ export class Game {
     }
     this.clerk?.update(Date.now(), wallNow);
     this.skateShop?.update(Date.now(), wallNow);
+    this.trainer?.update(Date.now(), wallNow);
+    // A lesson waiting: into the park, and on your board.
+    const me = this.self;
+    if (this.rideWhenIn && me && this.skate && !this.skate.capturing && this.skate.inPark(me.pos.x, me.pos.y)) {
+      this.skate.start(this.rideWhenIn);
+      this.rideWhenIn = null;
+    }
     this.rouletteFx?.update();
     this.francy?.update(Date.now(), wallNow);
     if (this.libraryRoom) {
@@ -4685,6 +4907,8 @@ export class Game {
   }
 
   destroy() {
+    this.watchBanner?.remove();
+    document.body.classList.remove("watching-tv");
     this.drones?.destroy();
     this.worldFx?.destroy();
     this.socket?.close();
@@ -4712,6 +4936,7 @@ export class Game {
     this.paintball?.destroy();
     this.skate?.destroy();
     this.skateShop?.destroy();
+    this.trainer?.destroy();
     this.skateShopPanel?.hide();
     this.skateShopPanel?.el.remove();
     this.arcade?.destroy();

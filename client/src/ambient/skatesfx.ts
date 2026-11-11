@@ -234,3 +234,26 @@ export function horn() {
   tone(t, 0.6, 0.09, "sawtooth", 330, 320);
   tone(t, 0.6, 0.07, "sawtooth", 415, 410);
 }
+
+/**
+ * A pump on surf trucks: the urethane hissing round the carve, the deck's
+ * flex thumping as it springs back, a little higher the deeper and more in
+ * rhythm (`power`, 0–1).
+ */
+export function pump(power: number) {
+  const t = at(0);
+  const k = 0.4 + 0.6 * power;
+  burst(t, 0.18, 0.06 * k, "bandpass", 900 + power * 500, 2400 + power * 900, 1.4);
+  tone(t, 0.09, 0.07 * k, "sine", 95 + power * 30, 60);
+}
+
+/** The run's last seconds: a tick each, sharper at the very end. */
+export function hurry(n: number) {
+  const t = at(0);
+  tone(t, 0.06, n <= 3 ? 0.07 : 0.045, "square", n <= 3 ? 990 : 780);
+}
+
+/** The run's score counting up on the card: a tiny tick. */
+export function tally() {
+  tone(at(0), 0.03, 0.025, "square", 1180 + Math.random() * 80);
+}

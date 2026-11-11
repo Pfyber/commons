@@ -62,11 +62,13 @@ pub struct Friend {
     pub look: i64,
     pub level: i16,
     pub points: i32,
+    /// They let their friends drop by their home any time.
+    pub drop_in: bool,
 }
 
 pub async fn friends_of(db: &PgPool, me: Uuid) -> sqlx::Result<Vec<Friend>> {
     let rows = sqlx::query(
-        "SELECT p.id, p.display_name, COALESCE((p.avatar->>'look')::bigint, 0) AS look, f.level, f.points
+        "SELECT p.id, p.display_name, COALESCE((p.avatar->>'look')::bigint, 0) AS look, f.level, f.points, p.friends_drop_in
          FROM friendships f JOIN players p ON p.id = CASE WHEN f.a = $1 THEN f.b ELSE f.a END
          WHERE f.a = $1 OR f.b = $1
          ORDER BY lower(p.display_name)",
@@ -82,6 +84,7 @@ pub async fn friends_of(db: &PgPool, me: Uuid) -> sqlx::Result<Vec<Friend>> {
             look: r.get("look"),
             level: r.get("level"),
             points: r.get("points"),
+            drop_in: r.get("friends_drop_in"),
         })
         .collect())
 }

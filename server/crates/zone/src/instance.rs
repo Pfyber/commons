@@ -196,6 +196,9 @@ struct Avatar {
     calling: bool,
     /// Instance time the next sky lantern may go up.
     next_lantern: u32,
+    /// Watching the arena from a home TV: nobody sees them, they don't walk
+    /// or talk; they only watch (and may bet and vote, as the crowd does).
+    watching: bool,
     fish: Option<fishing::FishSession>,
 }
 
@@ -745,7 +748,12 @@ impl Instance {
                 })
                 .and_then(|o| self.grid.nearest_walkable((o.x, o.y), 2))
         });
-        let tile = door
+        // Watching on a TV: right over the middle of the arena (unseen, so anywhere will do).
+        let watching = claims.watch && self.arena.is_some();
+        let ring = self.arena.as_ref().map(|a| a.ring_middle());
+        let tile = ring
+            .filter(|_| watching)
+            .or(door)
             .or_else(|| self.grid.nearest_walkable(jitter, 8))
             .unwrap_or((spawn.x, spawn.y));
         let cell = self.cell_of(tile);
@@ -791,6 +799,7 @@ impl Instance {
             reading: 0,
             calling: false,
             next_lantern: 0,
+            watching,
         };
         avatar.send(
             &ServerMsg::Welcome {
@@ -807,8 +816,14 @@ impl Instance {
         self.avatars.insert(id, avatar);
         self.by_conn.insert(conn, id);
         self.by_player.insert(claims.sub, id);
-        self.members[cell as usize].push(id);
-        self.broadcast(cell, &spawn_msg, Some(id));
+        // (Watching: not among anyone there, so never seen; only they know where
+        // they are, so their view settles over the arena.)
+        if watching {
+            self.send_to(id, &spawn_msg);
+        } else {
+            self.members[cell as usize].push(id);
+            self.broadcast(cell, &spawn_msg, Some(id));
+        }
         self.update_subs(id, now);
         let player = self.avatars[&id].player_id.clone();
         self.report_presence(&player, true);
@@ -861,7 +876,9 @@ impl Instance {
         for c in &a.subs {
             self.watchers[*c as usize].retain(|&w| w != id);
         }
-        self.broadcast(a.cell, &ServerMsg::Despawn { id }, None);
+        if !a.watching {
+            self.broadcast(a.cell, &ServerMsg::Despawn { id }, None);
+        }
         self.report_presence(&a.player_id, false);
         self.stats
             .population
@@ -873,6 +890,15 @@ impl Instance {
 
     fn on_message(&mut self, id: u32, msg: ClientMsg) {
         let now = self.clock.now_ms();
+        // Watching on a TV: only keeping in touch, and the crowd's bets and votes.
+        if self.avatars.get(&id).is_some_and(|a| a.watching)
+            && !matches!(
+                msg,
+                ClientMsg::Ping { .. } | ClientMsg::ArenaBet { .. } | ClientMsg::ArenaVote { .. }
+            )
+        {
+            return;
+        }
         if matches!(
             msg,
             ClientMsg::ChatSay { .. }
@@ -1001,12 +1027,21 @@ impl Instance {
                 pose,
                 trick,
                 spin,
-            } => self.skate_move(id, x, y, z, dir, pose, trick, spin, now),
+                sent,
+                kit,
+            } => self.skate_move(id, x, y, z, dir, pose, trick, spin, sent, kit, now),
             ClientMsg::SkateScore {
                 kind,
                 points,
                 label,
             } => self.skate_score(id, kind, points, label, now),
+            ClientMsg::SkateQuest { day, slot } => self.skate_quest(id, day, slot, now),
+            ClientMsg::SkateDuel { join, bot, grinds } => {
+                self.skate_duel(id, join, bot, grinds, now)
+            }
+            ClientMsg::SkateDuelScore { points, done } => {
+                self.skate_duel_score(id, points, done, now)
+            }
             ClientMsg::PbFire { shot, x, y, aim } => self.pb_fire(id, shot, x, y, aim, now),
             ClientMsg::PbDash {} => self.pb_dash(id, now),
             ClientMsg::PbReload {} => self.pb_reload(id, now),
@@ -1564,7 +1599,7 @@ pub(crate) mod tests {
         instance_for(zone())
     }
 
-    fn claims(name: &str) -> JoinClaims {
+    pub(crate) fn claims(name: &str) -> JoinClaims {
         JoinClaims {
             sub: name.into(),
             name: name.into(),
@@ -1577,6 +1612,7 @@ pub(crate) mod tests {
             owner: None,
             muted_until: 0,
             arrive: None,
+            watch: false,
         }
     }
 
@@ -1614,10 +1650,20 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn connect(inst: &mut Instance, conn: ConnId, name: &str, view: (u8, u8)) -> Client {
+        connect_with(inst, conn, claims(name), view)
+    }
+
+    /// Joins with these claims (watching on a TV, say).
+    pub(crate) fn connect_with(
+        inst: &mut Instance,
+        conn: ConnId,
+        claims: JoinClaims,
+        view: (u8, u8),
+    ) -> Client {
         let (tx, rx) = mpsc::channel(1024);
         inst.handle(Cmd::Join {
             conn,
-            claims: claims(name),
+            claims,
             view,
             out: tx,
         });

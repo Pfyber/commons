@@ -9,6 +9,8 @@ import { drawBug, drawShroom } from "./critterart";
 import { drawFish } from "./fish";
 import { drawScrap } from "./scrapart";
 import { drawHouseware } from "./housewares";
+import { turnedPiece } from "./furnviews";
+import { drawSofaIcon, sofaCanvas } from "./sofas";
 import { petCanvas, petTexture } from "./pets";
 import { vehicleCanvas, vehicleTexture } from "./vehicles";
 import { drawGoodsIcon } from "./goods";
@@ -341,6 +343,8 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
 /** 32×32 furniture, drawn to sit on its tile. */
 function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
   if (drawHomeLife(ctx, key)) return;
+  // (A double sofa, two tiles long: its front shrunk to a tile.)
+  if (drawSofaIcon(ctx, key)) return;
   const W = PALETTE.wood;
   const D = PALETTE.woodDark;
   switch (key) {
@@ -631,8 +635,18 @@ export function itemTexture(key: string, kind: string): Texture {
   );
 }
 
-export function furnitureTexture(key: string): Texture {
-  return cachedTex(`furn:${key}`, () => canvas(32, 32, (ctx) => drawFurniture(ctx, key)));
+export function furnitureTexture(key: string, rot = 0, sideWall = false): Texture {
+  const r = rot & 3;
+  return cachedTex(`furn:${key}:${r}:${sideWall ? 1 : 0}`, () => furnitureCanvas(key, r, sideWall));
+}
+
+/** Piece `key` facing `rot` (0 toward you, 1 right, 2 away, 3 left), at 32×32: its own picture each way (see furnviews.ts). */
+export function furnitureCanvas(key: string, rot = 0, sideWall = false): HTMLCanvasElement {
+  // (Two tiles long: a picture of its own size each way.)
+  const wide = sofaCanvas(key, rot);
+  if (wide) return wide;
+  const front = canvas(32, 32, (ctx) => drawFurniture(ctx, key));
+  return turnedPiece(front, key, rot, sideWall);
 }
 
 /** A plant growing in a plot: stage 0 seed mound … 3 in bloom. */

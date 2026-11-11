@@ -20,10 +20,10 @@ function shade(color: string, k: number): string {
   return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
 }
 
-/** The trucks' metal, by which (stock silver, flip red, grind black, vert gold, pro cyan). */
-const TRUCK_METAL = ["#b9c2c9", "#e8566b", "#3a3a44", "#e8b923", "#3fd8e8"];
+/** The trucks' metal, by which (stock silver, flip red, grind black, vert gold, pro cyan, surf ocean blue). */
+const TRUCK_METAL = ["#b9c2c9", "#e8566b", "#3a3a44", "#e8b923", "#3fd8e8", "#2a7fff"];
 /** The bearings' glint, by level. */
-const BEARING = ["", "#b9c2c9", "#c9874a", "#ffd23f", "#f4f1e8", "#ff8fd8"];
+const BEARING = ["", "#b9c2c9", "#c9874a", "#ffd23f", "#f4f1e8", "#ff8fd8", "#3fd8e8"];
 /** The wheels' radius, by size (standard, small, big). */
 const WHEEL_R = [5, 4, 6.4];
 
@@ -73,16 +73,13 @@ export function drawBoard3d(ctx: CanvasRenderingContext2D, kit: Kit, t: number) 
 
   // The trail streaming past behind it.
   trail(ctx, kit.trail, t, W, cy);
-  // The glow deck's light behind it.
+  // The glow deck: only the faintest haze round it (it's the deck that glows).
   if (deck.glow) {
-    const g = hex(deck.glow);
-    for (let r = 46; r > 6; r -= 8) {
-      ctx.fillStyle = g;
-      ctx.globalAlpha = 0.07 + 0.03 * Math.sin(t * 3);
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, r * 1.9, r * 0.8, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    ctx.fillStyle = hex(deck.glow);
+    ctx.globalAlpha = 0.05 + 0.02 * Math.sin(t * 3);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 82, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.globalAlpha = 1;
   }
 
@@ -116,18 +113,11 @@ export function drawBoard3d(ctx: CanvasRenderingContext2D, kit: Kit, t: number) 
       fill(ctx, [[tx - 5, -6, -1.5], [tx + 5, -6, -1.5], [tx + 5, 6, -1.5], [tx - 5, 6, -1.5]].map((p) => project(p as V3).at), shade(metal, 0.8));
       fill(ctx, [[tx - 2, -14, -7], [tx + 2, -14, -7], [tx + 2, 14, -7], [tx - 2, 14, -7]].map((p) => project(p as V3).at), metal);
       fill(ctx, [[tx - 1.5, -3, -1.5], [tx + 1.5, -3, -1.5], [tx + 1.5, 3, -7], [tx - 1.5, 3, -7]].map((p) => project(p as V3).at), shade(metal, 0.65));
-      // The wheels, the near one last: cream urethane, a bearing glinting in the middle.
-      const wheels = [-16, 16].map((wy) => project([tx, wy, -7 - wr * 0.2]));
-      wheels.sort((a, b) => a.depth - b.depth);
-      for (const w of wheels) {
-        const r = wr * s * 0.62;
-        disc(ctx, O, w.at[0], w.at[1], r + 1);
-        disc(ctx, "#f4efe2", w.at[0], w.at[1], r);
-        disc(ctx, "#d9d0bb", w.at[0] + r * 0.25, w.at[1] + r * 0.25, r * 0.7);
-        disc(ctx, BEARING[kit.bearings] ?? BEARING[1], w.at[0], w.at[1], Math.max(1.2, r * 0.35));
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(Math.round(w.at[0] - r * 0.5), Math.round(w.at[1] - r * 0.55), 1, 1);
-      }
+      // The wheels, the near one last: short cream urethane cylinders on the
+      // axle (a tread round, a flat face out, a bearing in its middle).
+      const wheels = [-16, 16].map((wy) => ({ wy, at: project([tx, wy, -7 - wr * 0.2]) }));
+      wheels.sort((a, b) => a.at.depth - b.at.depth);
+      for (const w of wheels) wheel(ctx, project, tx, w.wy, -7 - wr * 0.2, wr * 0.62, BEARING[kit.bearings] ?? BEARING[1]);
     }
   };
   const edge = () => {
@@ -170,12 +160,19 @@ export function drawBoard3d(ctx: CanvasRenderingContext2D, kit: Kit, t: number) 
       star.push(project([Math.cos((i / 10) * Math.PI * 2) * r, Math.sin((i / 10) * Math.PI * 2) * r, z]).at);
     }
     fill(ctx, star, stripe, false);
-    // The gold deck's shine sweeping along it; the glow deck's light on itself.
+    // The gold deck's shine sweeping along it (on the deck only); the glow
+    // deck lit up from within, its edge a bright neon line.
     if (deck.shine) {
       const sx = ((t * 40) % 140) - 70;
+      ctx.save();
+      clipTo(ctx, pts);
       fill(ctx, [[sx, -wid, z], [sx + 5, -wid, z], [sx + 9, wid, z], [sx + 4, wid, z]].map((p) => project(p as V3).at), "rgba(255,250,220,0.75)", false);
+      ctx.restore();
     }
-    if (deck.glow) fill(ctx, pts, `rgba(200,255,230,${0.15 + 0.1 * Math.sin(t * 3)})`, false);
+    if (deck.glow) {
+      fill(ctx, pts, `rgba(200,255,230,${0.12 + 0.06 * Math.sin(t * 3)})`, false);
+      neonEdge(ctx, pts, hex(deck.glow));
+    }
   };
   if (nz > 0) {
     // Grip side toward us: the gear's behind the deck.
@@ -183,6 +180,7 @@ export function drawBoard3d(ctx: CanvasRenderingContext2D, kit: Kit, t: number) 
     fill(ctx, bottom, O);
     edge();
     gripFace(top);
+    if (deck.glow) neonEdge(ctx, top, hex(deck.glow));
   } else {
     fill(ctx, top, O);
     edge();
@@ -197,16 +195,94 @@ function fill(ctx: CanvasRenderingContext2D, pts: P2[], color: string, outlined 
   polygon(ctx, color, pts);
 }
 
-function disc(ctx: CanvasRenderingContext2D, color: string, cx: number, cy: number, r: number) {
-  ctx.fillStyle = color;
-  for (let y = Math.floor(cy - r); y < Math.ceil(cy + r); y++) {
-    const dy = (y + 0.5 - cy) / r;
-    if (Math.abs(dy) > 1) continue;
-    const hw = r * Math.sqrt(1 - dy * dy);
-    const a = Math.round(cx - hw);
-    const b = Math.round(cx + hw);
-    if (b > a) ctx.fillRect(a, y, b - a, 1);
+/** Clips drawing to inside the polygon `pts`. */
+function clipTo(ctx: CanvasRenderingContext2D, pts: P2[]) {
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  ctx.clip();
+}
+
+/** A neon line round the polygon `pts`: a bright core, a soft glow either side. */
+function neonEdge(ctx: CanvasRenderingContext2D, pts: P2[], color: string) {
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.3;
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#f2fff9";
+  ctx.stroke();
+}
+
+/**
+ * A wheel: a short cylinder of urethane on the axle (along y), its middle at
+ * (x, y, z), radius `r` (units). Its tread (the band round it, shaded by
+ * which way each bit faces), then its flat outer face if that's toward us,
+ * a bearing in the middle.
+ */
+function wheel(ctx: CanvasRenderingContext2D, project: (p: V3) => { at: P2; depth: number }, x: number, y: number, z: number, r: number, bearing: string) {
+  const half = r * 0.55;
+  const N = 16;
+  const rim = (dy: number) => {
+    const out: { at: P2; depth: number }[] = [];
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      out.push(project([x + Math.cos(a) * r, y + dy, z + Math.sin(a) * r]));
+    }
+    return out;
+  };
+  const outward = Math.sign(y) || 1;
+  const near = rim(outward * half);
+  const far = rim(-outward * half);
+  const faceNear = project([x, y + outward * half, z]);
+  const faceFar = project([x, y - outward * half, z]);
+  // The face toward us (the one nearer the eye) is drawn last.
+  const [front, back, frontC] = faceNear.depth >= faceFar.depth ? [near, far, faceNear] : [far, near, faceFar];
+  // The tread: a quad between the rims for each step round, the farthest first.
+  const quads = [];
+  for (let i = 0; i < N; i++) {
+    const j = (i + 1) % N;
+    const a = ((i + 0.5) / N) * Math.PI * 2;
+    quads.push({ pts: [front[i].at, front[j].at, back[j].at, back[i].at] as P2[], depth: (front[i].depth + back[j].depth) / 2, lit: Math.sin(a) });
   }
+  quads.sort((p, q) => p.depth - q.depth);
+  // Outlined as a whole first (the dark pixel round it), then shaded.
+  const all = [...front.map((p) => p.at), ...back.map((p) => p.at)];
+  const hull = convexHull(all);
+  fill(ctx, hull, "#d9d0bb");
+  for (const q of quads) polygon(ctx, q.lit > 0.3 ? "#fff8ea" : q.lit > -0.3 ? "#ece3cf" : "#cfc4ab", q.pts);
+  // The face: flat, a touch darker at its edge, the bearing in the middle.
+  polygon(ctx, "#f4efe2", front.map((p) => p.at));
+  const inner = front.map((p) => [frontC.at[0] + (p.at[0] - frontC.at[0]) * 0.62, frontC.at[1] + (p.at[1] - frontC.at[1]) * 0.62] as P2);
+  polygon(ctx, "#e4dac4", inner);
+  const hub = front.map((p) => [frontC.at[0] + (p.at[0] - frontC.at[0]) * 0.3, frontC.at[1] + (p.at[1] - frontC.at[1]) * 0.3] as P2);
+  polygon(ctx, bearing, hub);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(Math.round(frontC.at[0] - 1), Math.round(frontC.at[1] - 1), 1, 1);
+}
+
+/** The convex hull of `pts` (a monotone chain), round the outside. */
+function convexHull(pts: P2[]): P2[] {
+  const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o: P2, a: P2, b: P2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: P2[] = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  const upper: P2[] = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
 /** The trail, streaming past behind the board in its skin. */

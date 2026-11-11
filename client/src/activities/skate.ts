@@ -20,30 +20,60 @@ import { type Container, Graphics } from "pixi.js";
 import * as sfx from "../ambient/skatesfx";
 import type { ServerMsg } from "../net/protocol.gen";
 import { Panel, button, el, isTyping } from "../ui/panels";
-import { TILE, legColor, type AvatarFrame } from "../world/art";
+import { TILE, legColor, skateCrouch, type AvatarFrame } from "../world/art";
 import { type Avatar, PUSH_POSES, drawPushLeg, pushPose } from "../world/avatars";
 import type { ZoneMap } from "../world/map";
 import type { Scene } from "../world/scene";
-import { NO_INPUT, PUSH_S, Park, Skater, TRICK, type Input, type SkateEvent } from "./skatesim";
+import { NO_INPUT, PUSH_S, Park, Skater, TRICK, type Input, type SkateEvent, wrap } from "./skatesim";
 import type { Economy } from "../economy";
 import { DECKS, STOCK, loadKit, needs, packKit, ride, saveKit, unpackKit, type Kit } from "./skatekit";
+import { GRINDS } from "./skatesim";
+import { Quests, type Metric } from "./skatequests";
+import { BotRider } from "./skatebot";
+import { questList } from "../ui/skateshop";
 
 export type SkateSend =
   | { t: "SkateOn"; on: boolean; kit: number }
-  | { t: "SkateMove"; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number }
-  | { t: "SkateScore"; kind: number; points: number; label: string };
+  | { t: "SkateMove"; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number; sent: number; kit: number }
+  | { t: "SkateScore"; kind: number; points: number; label: string }
+  | { t: "SkateQuest"; day: number; slot: number }
+  | { t: "SkateDuel"; join: boolean; bot: boolean; grinds: boolean }
+  | { t: "SkateDuelScore"; points: number; done: boolean };
 
 /** `SkateMove.pose` / `SkateScore.kind` (commons_protocol::skate). */
 const POSE = { ROLL: 0, CROUCH: 1, AIR: 2, GRIND: 3, MANUAL: 4, BAIL: 5 };
 const SCORE = { COMBO: 0, BAIL: 1, RUN: 2 };
-/** How often your moves go out (ms). */
-const SEND_MS = 80;
-/** How far behind others are drawn, between their moves (ms). */
-const BEHIND_MS = 110;
-/** A skater not heard from for this long has gone (ms). */
-const GONE_MS = 3000;
+/** As `skate::duel`: `SkateDuelState.phase` and `SkateDuelEnd.result`. */
+const DUEL = { WAITING: 1, STARTING: 2, LOST: 0, WON: 1, DRAW: 2, WALKOVER: 3 };
+/** The bot's id, for what's shown over its head (as the dance floor's, its own). */
+const BOT_ID = 0xfffffff6;
+
+/** Text for HTML. */
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+/** A manual: how far the board's nose is tipped up (px). */
+const MANUAL_TILT = 7;
+/** The surf trucks' code (`skatekit.ts`): they lean into their carves. */
+const SURF_TRUCKS = 5;
+/** How often your moves go out (ms), and how soon after the last a change of pose (a pop, a landing) goes out at once. */
+const SEND_MS = 50;
+const QUICK_MS = 20;
+/** A skater not heard from for this long has gone (ms): long enough to ride out a bad patch of network. */
+const GONE_MS = 8000;
+/** Others are drawn a beat behind their latest move, more the more the network's jittering (ms). */
+const DELAY_MIN = 70;
+const DELAY_MAX = 450;
+/** Past their latest move (the network's stalled), they're carried on the way they were going this long (ms), then held. */
+const COAST_MS = 300;
+/** Drawn this far (px) from where they should be, they're moved there at once rather than glided. */
+const TELEPORT_PX = 160;
+/** Back within this long (ms) of the connection dropping, you're put back on your board where you were. */
+const RESUME_MS = 20000;
 const RUN_S = 60;
 const COUNT_S = 3;
+/** The run's last seconds, ticked off (s). */
+const HURRY_S = 10;
+/** Time's up with a trick still in the air: how long it's given to land (ms). */
+const LATE_MS = 3000;
 const STEP_S = 1 / 120;
 const STICK_R = 56;
 /** How far above the feet a skater's middle is (they turn round it, head over heels). */
@@ -75,16 +105,34 @@ interface Pose {
   balance?: number;
   crouch?: number;
   bailT?: number;
+  /** Your own: powersliding round. */
+  slide?: boolean;
 }
 
-/** Someone else on a board: their last few moves, to draw them smoothly between. */
+/**
+ * Someone else on a board: their moves, by when they sent them (their own
+ * clock, `SkateMove.sent`, unwrapped), played back a little behind so the
+ * network's lumps and gaps don't show; how late their moves have been
+ * reaching us (to pick that delay); and where they're drawn now (glided
+ * toward where they should be).
+ */
 interface Other {
-  snaps: { t: number; p: Pose }[];
+  snaps: { st: number; p: Pose }[];
   heard: number;
   /** Their board, as they've built it (`SkateOn.kit`). */
   kit: number;
   rig: Rig;
+  /** Their clock: the last `t` as sent (it wraps), and unwrapped. */
+  raw: number;
+  st: number;
+  /** How late their recent moves reached us (our clock less theirs: a base, plus jitter). */
+  lags: number[];
+  shown: Pose | null;
+  drawnAt: number;
 }
+
+/** What's carried over a dropped connection: your board as it was, to be put back on. */
+let carried: { x: number; y: number; z: number; heading: number; speed: number; mode: "free" | "run" | "line"; at: number } | null = null;
 
 const lerpAngle = (a: number, b: number, t: number) => {
   let d = b - a;
@@ -114,13 +162,20 @@ class Rig {
   private glowG = new Graphics();
   private trailG = new Graphics();
   private facing: 1 | -1 = 1;
-  private sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
+  private sparks: { x: number; y: number; vx: number; vy: number; life: number; dust?: boolean }[] = [];
   private lastSparks = 0;
   private bailFrom: { x: number; y: number } | null = null;
   private kit: Kit = { ...STOCK };
   /** The trail: where the board's been, and its bits (sparks, flames, stars). */
   private path: { x: number; y: number; t: number }[] = [];
   private bits: { x: number; y: number; vx: number; vy: number; life: number; max: number; c: number }[] = [];
+  /** Surf trucks: how hard they're carving (rad/s, smoothed) and how fast they're going (px/s), from how they've moved; the streaks off them when they're flying. */
+  private carve = 0;
+  /** Where the deck was drawn this frame (the glow deck lights just that up), if it was. */
+  private deckAt: { x: number; y: number; w: number; h: number } | null = null;
+  private going = 0;
+  private was: { heading: number; x: number; y: number; at: number } | null = null;
+  private streaks: { x: number; y: number; len: number; life: number }[] = [];
 
   /** The same glow and trail again on the night's lights (`lit`), so after dark they really glow. */
   private litGlow: Graphics | null = null;
@@ -148,6 +203,7 @@ class Rig {
 
   draw(avatar: Avatar, p: Pose, ground: number, wallNow: number) {
     const g = this.g.clear();
+    this.deckAt = null;
     const x = Math.round(p.x);
     const gy = Math.round(p.y - ground);
     const air = p.z - ground;
@@ -158,6 +214,17 @@ class Rig {
     const spinC = Math.cos(p.spin);
     const facing: 1 | -1 = (spinC >= 0 ? this.facing : -this.facing) as 1 | -1;
     const squash = Math.max(0.2, Math.abs(spinC));
+    // How they're carving and how fast (for surf trucks' lean, and the streaks).
+    const w = this.was;
+    const dtR = w ? Math.min(0.1, (wallNow - w.at) / 1000) : 0;
+    if (w && dtR > 0) {
+      const ease = 1 - Math.exp(-dtR * 12);
+      const turning = Math.max(-8, Math.min(8, wrap(p.heading - w.heading) / dtR));
+      this.carve += (turning - this.carve) * ease;
+      this.going += (Math.hypot(p.x - w.x, p.y - w.y) / dtR - this.going) * ease;
+    }
+    this.was = { heading: p.heading, x: p.x, y: p.y, at: wallNow };
+    const surfing = this.kit.trucks === SURF_TRUCKS && p.pose === POSE.ROLL;
     // The shadow on whatever's under them, smaller and fainter the higher they are.
     const sw = Math.max(6, 20 - air * 0.12);
     g.ellipse(x, gy, sw / 2, Math.max(1.5, 3 - air * 0.02)).fill({ color: 0x000000, alpha: Math.max(0.1, 0.3 - air * 0.002) });
@@ -172,13 +239,26 @@ class Rig {
     const flipping = p.trick > 0 && p.trick < TRICK.GRAB;
     const grabbing = p.trick === TRICK.GRAB;
     if (p.pose === POSE.CROUCH) {
-      frame = (p.crouch ?? 0) > 0.25 ? 3 : 6;
+      frame = skateCrouch((p.crouch ?? 0) > 0.25 ? 3 : 2);
+    } else if (p.pose === POSE.ROLL && p.slide) {
+      // Powersliding round: low, leaning back against it, dust kicking up off the wheels.
+      frame = skateCrouch(2);
+      lean = -0.3 * facing;
+      if (Math.random() < 0.7) {
+        const back = Math.random() < 0.5 ? -1 : 1;
+        this.sparks.push({ x: x + back * 8, y: gy - 1, vx: (Math.random() - 0.5) * 60, vy: -15 - Math.random() * 25, life: 0.3, dust: true });
+      }
+    } else if (surfing && Math.abs(this.carve) > 0.4 && !(p.push && p.push > 0)) {
+      // Surf trucks: leaning right over into each carve, one way then the
+      // other as you pump, down low through the hardest of it.
+      lean = Math.max(-0.52, Math.min(0.52, this.carve * 0.1)) * facing;
+      frame = skateCrouch(Math.abs(this.carve) > 3 ? 2 : 1);
     } else if (p.pose === POSE.ROLL && p.push !== undefined && p.push > 0) {
       // Pushing: down on the front knee, the back foot reaching out behind to kick along the ground.
       push = pushPose(p.push * 1000);
       if (push) frame = push.frame;
     } else if (p.pose === POSE.AIR) {
-      frame = grabbing ? 3 : flipping ? 5 : 4;
+      frame = grabbing ? skateCrouch(3) : flipping ? skateCrouch(1) : 4;
       if (flipping) {
         // The feet tuck up off the board as it turns under them.
         lift += 4;
@@ -194,7 +274,9 @@ class Rig {
       }
       if (grabbing) boardDy = -5;
     } else if (p.pose === POSE.MANUAL) {
-      lean = -0.18 * facing + (p.balance ?? 0) * 0.12;
+      // Back on the tail, nose up: leaning back over the back wheels, wobbling with the balance.
+      lean = -0.3 * facing + (p.balance ?? 0) * 0.12;
+      lift += 2;
     } else if (p.pose === POSE.GRIND) {
       lean = (p.balance ?? 0) * 0.2;
     } else if (p.pose === POSE.BAIL) {
@@ -217,7 +299,7 @@ class Rig {
       // (Backwards, a skater facing right goes round anticlockwise.)
       const way = (p.trick === TRICK.BACKFLIP ? -1 : 1) * facing;
       turn = way * t * Math.PI * 2;
-      frame = 3;
+      frame = skateCrouch(3);
       lean = turn;
       shiftX = -MIDDLE * Math.sin(turn);
       lift += MIDDLE - MIDDLE * Math.cos(turn);
@@ -237,19 +319,32 @@ class Rig {
       g.rect(bx - 11, gy - 3, 22, 2).fill(this.color);
       g.rect(bx - 8, gy - 6, 4, 3).fill(0xf1e9d2);
       g.rect(bx + 4, gy - 6, 4, 3).fill(0xf1e9d2);
-    } else this.board(g, x, by, facing, squash * boardTurn, boardFlip);
+    } else this.board(g, x, by, facing, squash * boardTurn, boardFlip, p.pose === POSE.MANUAL ? MANUAL_TILT : 0);
     if (push) drawPushLeg(g, x, by, facing, push, legColor(avatar.info.style));
     // Grinding: sparks off the trucks.
     if (p.pose === POSE.GRIND && wallNow - this.lastSparks > 30) {
       this.lastSparks = wallNow;
       for (let i = 0; i < 2; i++) this.sparks.push({ x: x - facing * (6 + Math.random() * 6), y: by - 1, vx: -facing * (30 + Math.random() * 70), vy: -40 - Math.random() * 60, life: 0.25 + Math.random() * 0.2 });
     }
+    // Flying along (past where pushing gets you: pumped, or off a ramp): streaks of speed behind.
+    if (p.pose === POSE.ROLL && this.going > 300 && Math.random() < (this.going - 300) / 140) {
+      const back = -Math.cos(p.heading);
+      this.streaks.push({ x: x + back * (8 + Math.random() * 6), y: by - 6 - Math.random() * 30, len: (6 + Math.random() * 10) * back, life: 1 });
+    }
+    for (const s of this.streaks) {
+      s.life -= 1 / 60 / 0.28;
+      s.x += s.len * 0.08;
+      if (s.life > 0) g.rect(Math.round(Math.min(s.x, s.x + s.len)), Math.round(s.y), Math.max(1, Math.round(Math.abs(s.len))), 1).fill({ color: 0xffffff, alpha: 0.55 * s.life });
+    }
+    this.streaks = this.streaks.filter((s) => s.life > 0);
     for (const s of this.sparks) {
       s.life -= 1 / 60;
       s.x += s.vx / 60;
       s.y += s.vy / 60;
       s.vy += 400 / 60;
-      if (s.life > 0) g.rect(Math.round(s.x), Math.round(s.y), 1, 1).fill(s.life > 0.2 ? 0xfff3a0 : 0xff9a3a);
+      if (s.life <= 0) continue;
+      if (s.dust) g.rect(Math.round(s.x), Math.round(s.y), 2, 2).fill({ color: 0xd8d2c4, alpha: Math.min(1, s.life * 3) * 0.8 });
+      else g.rect(Math.round(s.x), Math.round(s.y), 1, 1).fill(s.life > 0.2 ? 0xfff3a0 : 0xff9a3a);
     }
     this.sparks = this.sparks.filter((s) => s.life > 0);
     this.g.zIndex = avatar.sprite.zIndex - 0.1;
@@ -293,18 +388,22 @@ class Rig {
     this.bits = this.bits.filter((b) => b.life > 0);
     if (this.bits.length > 120) this.bits.splice(0, this.bits.length - 120);
     // Drawn in the world (seen by day), and again on the night's lights (glowing after dark).
-    this.paint(this.glowG.clear(), this.trailG.clear(), x, by, gy, down, now);
-    if (this.litGlow && this.litTrail) this.paint(this.litGlow.clear(), this.litTrail.clear(), x, by, gy, down, now);
+    this.paint(this.glowG.clear(), this.trailG.clear(), x, by, gy, down, now, false);
+    if (this.litGlow && this.litTrail) this.paint(this.litGlow.clear(), this.litTrail.clear(), x, by, gy, down, now, true);
   }
 
-  private paint(gl: Graphics, t: Graphics, x: number, by: number, gy: number, down: boolean, now: number) {
+  private paint(gl: Graphics, t: Graphics, x: number, by: number, gy: number, down: boolean, now: number, night: boolean) {
     const glow = DECKS[this.kit.deck]?.glow;
-    if (glow && !down) {
-      const pulse = 0.8 + 0.2 * Math.sin(now / 300);
-      gl.ellipse(x, by - 5, 15, 5).fill({ color: glow, alpha: 0.3 * pulse });
-      gl.ellipse(x, by - 5, 9, 3).fill({ color: glow, alpha: 0.35 * pulse });
-      gl.ellipse(x, gy, 22, 6).fill({ color: glow, alpha: 0.16 * pulse });
+    const d = this.deckAt;
+    // The glow deck, after dark: the deck itself lit up like neon, bright
+    // in the dark, with only a faint haze round it. (By day it's just its colour.)
+    if (glow && !down && d && night) {
+      const pulse = 0.9 + 0.1 * Math.sin(now / 400);
+      gl.rect(d.x, d.y, d.w, d.h).fill({ color: glow, alpha: 0.95 });
+      gl.ellipse(d.x + d.w / 2, d.y + d.h / 2, d.w / 2 + 4, d.h / 2 + 3).fill({ color: glow, alpha: 0.12 * pulse });
+      gl.ellipse(x, gy, 12, 3).fill({ color: glow, alpha: 0.07 * pulse });
     }
+    void by;
     const trail = this.kit.trail;
     if (!trail) return;
     const seg = (i: number, width: number, color: number, alpha: number, dy = 0) => {
@@ -356,13 +455,16 @@ class Rig {
   }
 
   /** The board, `y` its wheels' bottom: `turn` squashes it as it turns side-on, `flip` (turns) rolls it over. */
-  private board(g: Graphics, x: number, y: number, facing: number, turn: number, flip: number) {
+  /** The board side on at (x, y) (`tilt`: its nose raised so many px, a manual: back wheels down, front up). */
+  private board(g: Graphics, x: number, y: number, facing: number, turn: number, flip: number, tilt = 0) {
+    if (tilt && !flip) return this.tiltedBoard(g, x, y, facing, Math.max(2, Math.round(11 * Math.abs(turn))), tilt);
     const half = Math.max(2, Math.round(11 * Math.abs(turn)));
     const roll = flip ? Math.cos(flip * Math.PI * 2) : 1;
     if (flip && Math.abs(roll) < 0.35) {
       // Edge on, mid-flip: a thin sliver.
       g.rect(x - half, y - 7, half * 2, 1).fill(O);
       g.rect(x - half, y - 6, half * 2, 1).fill(this.color);
+      this.deckAt = { x: x - half, y: y - 7, w: half * 2, h: 2 };
       return;
     }
     const upside = roll < 0;
@@ -376,6 +478,7 @@ class Rig {
     // The deck: grip tape on top, the graphic underneath, kicked up at both ends.
     const top = upside ? this.color : 0x161616;
     g.rect(x - half, y - 6, half * 2, 2).fill(top);
+    this.deckAt = { x: x - half - (half > 4 ? 1 : 0), y: y - 7, w: half * 2 + (half > 4 ? 2 : 0), h: 4 };
     if (!upside) g.rect(x - half + 1, y - 6, half * 2 - 2, 1).fill(0x2c2c2c);
     if (half > 4) {
       g.rect(x - half - 1, y - 7, 2, 2).fill(top);
@@ -385,9 +488,40 @@ class Rig {
     if (!upside) {
       g.rect(x - half, y - 4, half * 2, 1).fill(this.color);
       // (The gold deck shines: a glint running along it.)
-      if (DECKS[this.kit.deck]?.shine) g.rect(x - half + Math.floor((performance.now() / 40) % (half * 2 + 12)) - 6, y - 4, 2, 1).fill(0xfff8d8);
+      // (Only along the deck: off its ends, between sweeps, nothing.)
+      if (DECKS[this.kit.deck]?.shine) {
+        const at = Math.floor((performance.now() / 40) % (half * 2 + 12)) - 6;
+        if (at >= 0 && at <= half * 2 - 2) g.rect(x - half + at, y - 4, 2, 1).fill(0xfff8d8);
+      }
     }
     void facing;
+  }
+
+  /**
+   * A manual: the board tipped back on its tail, its nose `tilt` px up, the
+   * deck stepping up from tail to nose (`facing`: which end's the nose),
+   * the back wheels on the ground and the front ones in the air with it.
+   */
+  private tiltedBoard(g: Graphics, x: number, y: number, facing: number, half: number, tilt: number) {
+    // How high the deck is at column i (from -half to half): nothing at the tail, `tilt` at the nose.
+    const up = (i: number) => Math.round((tilt * (facing * i + half)) / (2 * half));
+    const [ww, wh] = WHEEL_SIZE[this.kit.wheels] ?? WHEEL_SIZE[0];
+    const wheelAt = [x - Math.round(half * 0.73), x + Math.round(half * 0.36)];
+    for (const wx of wheelAt) {
+      const lift = up(wx + ww / 2 - x);
+      g.rect(wx, y - wh - 1 - lift, ww, wh).fill(O);
+      g.rect(wx + 1, y - wh - lift, ww - 2, wh - 1).fill(0xf1e9d2);
+    }
+    for (let i = -half; i < half; i++) {
+      const dy = up(i);
+      g.rect(x + i, y - 7 - dy, 1, 1).fill(O);
+      g.rect(x + i, y - 6 - dy, 1, 2).fill(0x161616);
+      g.rect(x + i, y - 4 - dy, 1, 1).fill(this.color);
+    }
+    // The tail, scraping the ground behind.
+    const tail = x - facing * half;
+    g.rect(Math.min(tail, tail - facing), y - 3, 2, 1).fill(O);
+    this.deckAt = { x: x - half, y: y - 7 - tilt, w: half * 2, h: 4 + tilt };
   }
 
   destroy() {
@@ -403,6 +537,8 @@ class Rig {
 
 class SkateBoardPanel extends Panel {
   runs: { name: string; points: number }[] = [];
+  /** The 1v1 picked: grinds only, or every trick. */
+  private grinds = false;
   combos: { name: string; points: number }[] = [];
 
   constructor(
@@ -410,6 +546,11 @@ class SkateBoardPanel extends Panel {
     private mine: () => { run: number; combo: number },
     private skating: () => boolean,
     private stop: () => void,
+    /** Into a 1v1: with whoever else is looking for one, or the bot; `grinds`: only grinds count. */
+    private duel: (bot: boolean, grinds: boolean) => void,
+    /** Dusty's daily quests, and claiming one's coins. */
+    private quests: Quests,
+    private claim: (day: number, slot: number) => void,
   ) {
     super("🛹 Skatepark", "skate-board");
   }
@@ -418,7 +559,7 @@ class SkateBoardPanel extends Panel {
     this.body.replaceChildren();
     const modes = el("div", "skate-modes");
     const mode = (icon: string, name: string, what: string, m: GameMode) => {
-      const b = button("", () => (this.hide(), this.start(m)), "skate-mode");
+      const b = button("", () => (this.hide(), this.start(m)), `skate-mode m-${m}`);
       b.append(el("span", "skate-mode-icon", icon), el("strong", "", name), el("span", "hint", what));
       modes.append(b);
     };
@@ -426,6 +567,25 @@ class SkateBoardPanel extends Panel {
     mode("⏱️", "60-second run", "Score all you can before the horn.", "run");
     mode("🔗", "Line", "One combo, as long as you can keep it going.", "line");
     this.body.append(modes);
+    // A 1v1: a 60-second run each, side by side; the higher score wins.
+    const duel = el("div", "skate-duel-row");
+    // Which sort: every trick counts, or only grinds.
+    const kinds = el("div", "skate-duel-kinds");
+    for (const [g, label] of [[false, "🛹 All tricks"], [true, "🛤️ Grinds only"]] as [boolean, string][]) {
+      kinds.append(button(label, () => ((this.grinds = g), this.render()), g === this.grinds ? "on" : ""));
+    }
+    duel.append(
+      el("span", "skate-duel-title", "⚔️ 1v1: 60 seconds, the higher score wins"),
+      kinds,
+      button("Find someone", () => (this.hide(), this.duel(false, this.grinds)), "primary"),
+      button("🤖 Take on the bot", () => (this.hide(), this.duel(true, this.grinds))),
+    );
+    if (this.grinds) duel.append(el("span", "hint skate-duel-hint", "Only grinds count: 100 a grind, and 100 a second you hold it."));
+    this.body.append(duel);
+    // Dusty's quests for today, how far you've got.
+    const quests = el("div", "skate-board-quests");
+    quests.append(el("h3", "", "🎯 Dusty's daily quests"), questList(this.quests, this.claim));
+    this.body.append(quests);
     if (this.skating()) this.body.append(button("Get off the board", () => (this.hide(), this.stop()), "small"));
     const me = this.mine();
     const list = (title: string, rows: { name: string; points: number }[], best: number) => {
@@ -446,7 +606,7 @@ class SkateBoardPanel extends Panel {
     const keys = el("details", "skate-keys");
     keys.append(el("summary", "", "How to skate"));
     for (const [k, what] of [
-      ["Arrows / WASD", "Ride: turn your way and push off. Pull back to stop."],
+      ["Arrows / WASD", "Ride: turn your way and push off. Press back the way you came: a powerslide round."],
       ["Space", "Hold to crouch, let go to ollie (the longer, the higher)."],
       ["Space (on a ramp)", "Going up a ramp: pop out off it, forward (with a direction held, that way: ramp to ramp, or right over one)."],
       ["Out of a quarter", "Up out of a quarter pipe, hold the way out over its lip: you fly on out of it instead of back in."],
@@ -458,6 +618,7 @@ class SkateBoardPanel extends Panel {
       ["Rails, ledges", "Come down on them moving along them: a grind. ← → to balance, Space to pop off."],
       ["L", "Manual: balance with ← →. Land into one to keep your combo going."],
       ["Trucks", "Which tricks you can do: stock trucks ollie, grab, 50-50 and manual. Flips, every grind and the big flips need better trucks from Dusty's van."],
+      ["Surf trucks", "Pump! Steer side to side across the way you're going (← → ← → going up, ↑ ↓ ↑ ↓ going sideways), in a steady rhythm: each carve shoves you on, far faster than pushing."],
       ["Esc", "Get off your board."],
     ]) {
       const row = el("div", "skate-key");
@@ -475,7 +636,13 @@ export class SkatePark {
   private me: Skater | null = null;
   private myRig: Rig | null = null;
   private mode: GameMode = "free";
-  private run = { phase: "" as "" | "count" | "go" | "over", left: 0, score: 0, overAt: 0 };
+  /**
+   * The 60-second run, by the clock on the wall (not frames: a slow frame or
+   * a hidden tab doesn't stretch it): when it goes and ends, the second last
+   * ticked, and what's been scored in it. `late`: time's up, a trick still
+   * in the air (let land, a few seconds at most).
+   */
+  private run = { phase: "" as "" | "count" | "go" | "late" | "over", goAt: 0, endAt: 0, ticked: 0, score: 0, combos: 0, tricks: 0, best: 0, bestLabel: "" };
   private lineDone = false;
   /** Your board, as you've built it (skatekit.ts). */
   private kit: Kit = { ...STOCK };
@@ -483,8 +650,16 @@ export class SkatePark {
   private others = new Map<number, Other>();
   private acc = 0;
   private last = 0;
+  /** The Skate Trainer's coach, watching what you do (a lesson being tried). */
+  watch: ((e: SkateEvent | { t: "run" } | { t: "line" } | { t: "frame" }, me: Skater) => void) | null = null;
+  /** Riding out of the park this frame: where, which way (stepped off after the frame's steps). */
+  private leaving: { tx: number; ty: number; dx: number; dy: number } | null = null;
+  /** Where your board was before the last step (drawn between it and where it is). */
+  private stepFrom: { x: number; y: number; z: number } | null = null;
   private sentAt = 0;
   private lastSent = "";
+  /** The pose and trick last sent (a change goes out at once). */
+  private lastPose = -1;
   private travelled = 0;
   private wasGrinding: "" | "rail" | "ledge" = "";
   /** Held keys, and presses waiting for the next step. */
@@ -504,6 +679,34 @@ export class SkatePark {
   private specialEl = el("div", "skate-special");
   private feedEl = el("div", "skate-feed");
   private bigEl = el("div", "skate-big");
+  /**
+   * Your 1v1, if you're in one (or looking for one): who against (0 the bot),
+   * their name and score as it comes in; `waiting` for an opponent, then
+   * the run itself (`this.run`), then `over` waiting on the result.
+   */
+  private duel: { phase: "waiting" | "on" | "over"; opp: number; name: string; theirs: number; grinds: boolean } | null = null;
+  /** A grinds-only 1v1: the points from grinding not yet whole (they come 100 a second held). */
+  private grindAcc = 0;
+  /** The bot you're up against, skating beside you (a 1v1 with it): its rider, how it's drawn, its avatar. */
+  private bot: { rider: BotRider; rig: Rig; avatar: Avatar; acc: number; last: number } | null = null;
+  private duelEl = el("div", "skate-duel");
+  /** Dusty's daily quests: what you've done toward them. */
+  readonly quests = new Quests((q) => {
+    sfx.special();
+    this.toast(`🎯 Quest done: ${q.text}! Dusty's got ${q.coins} 🪙 for you at his van.`, 5000);
+  });
+  /** For the quests: in the air (since when, how high), on a manual or a grind (how long), today's distance and speed not yet told, combos landed since the last bail. */
+  private qAir: { at: number; top: number } | null = null;
+  private qHeld = { manual: 0, grind: 0, grab: 0 };
+  private qDist = 0;
+  private qSpeed = 0;
+  private qAt = 0;
+  private qStreak = 0;
+  /** The run's card at the end: the total, how it went, what next. */
+  private resultsEl = el("div", "skate-results");
+  private tallyTimer = 0;
+  /** Surf trucks: how in rhythm your pumping is. */
+  private flowEl = el("div", "skate-flow");
   private touchEl = el("div", "skate-touch");
   private stickEl = el("div", "pb-stick move");
   private enterBtn: HTMLButtonElement;
@@ -523,6 +726,14 @@ export class SkatePark {
     private eco: Economy,
     /** The night's lights (DayNight), for glows and trails that shine after dark. */
     private lit: Container | null = null,
+    /** An avatar for the bot (at x, y in tiles), and done with it. */
+    private makeBot: ((x: number, y: number) => Avatar) | null = null,
+    /**
+     * Riding out of the park at tile (tx, ty), heading (dx, dy): whether you
+     * can walk on there (out of a gate, say). If so, you step off your board
+     * and walk on that way; no invisible wall.
+     */
+    private leave: ((tx: number, ty: number, dx: number, dy: number) => boolean) | null = null,
   ) {
     this.park = Park.fromMap(map)!;
     this.boardPanel = new SkateBoardPanel(
@@ -530,13 +741,20 @@ export class SkatePark {
       () => this.bests(),
       () => !!this.me,
       () => this.stop(),
+      (bot, grinds) => this.findDuel(bot, grinds),
+      this.quests,
+      (day, slot) => this.send({ t: "SkateQuest", day, slot }),
     );
     // The HUD: the score up top, the combo building below the middle, the balance, popups.
     const top = el("div", "skate-top");
-    top.append(this.scoreEl, this.specialEl);
+    top.append(this.scoreEl, this.specialEl, this.flowEl);
+    this.flowEl.append(el("span", "skate-flow-name", "🌊 Pump"), el("span", "skate-flow-bar"));
+    this.flowEl.hidden = true;
     this.balanceEl.append(el("div", "skate-needle"));
     this.offBtn = button("Get off ✕", () => this.stop(), "skate-off");
-    this.hud.append(top, this.comboEl, this.balanceEl, this.popEl, this.bigEl, this.feedEl, this.touchEl, this.stickEl, this.offBtn);
+    this.hud.append(top, this.comboEl, this.balanceEl, this.popEl, this.bigEl, this.feedEl, this.touchEl, this.stickEl, this.offBtn, this.resultsEl, this.duelEl);
+    this.duelEl.hidden = true;
+    this.resultsEl.hidden = true;
     this.stickEl.append(el("div", "pb-stick-knob"));
     this.stickEl.hidden = true;
     this.hud.hidden = true;
@@ -571,9 +789,11 @@ export class SkatePark {
 
   // ---- getting on and off ----
 
-  start(mode: GameMode) {
+  start(mode: GameMode, duelAt = 0) {
     const self = this.avatarOf(this.selfId());
     if (!self) return;
+    // (Something else picked, mid-1v1 or looking for one: out of it.)
+    if (!duelAt && this.duel) this.leaveDuel();
     const at = self.pos;
     if (!this.me) {
       if (!this.inPark(at.x, at.y)) {
@@ -595,12 +815,14 @@ export class SkatePark {
     me.link = 0;
     this.mode = mode;
     this.lineDone = false;
-    this.run = { phase: "", left: 0, score: 0, overAt: 0 };
+    this.run = { phase: "", goAt: 0, endAt: 0, ticked: 0, score: 0, combos: 0, tricks: 0, best: 0, bestLabel: "" };
+    this.hideResults();
     me.banked = 0;
     me.bestCombo = 0;
     if (mode === "run") {
       this.run.phase = "count";
-      this.run.left = COUNT_S;
+      this.run.goAt = duelAt || performance.now() + COUNT_S * 1000;
+      this.run.ticked = Math.ceil((this.run.goAt - performance.now()) / 1000) + 1;
       me.speed = 0;
     }
     if (mode === "line") this.bigText("🔗 Your line starts with your first trick. Keep it going!", "info", 2600);
@@ -625,7 +847,10 @@ export class SkatePark {
 
   stop() {
     if (!this.me) return;
+    if (this.duel) this.leaveDuel();
+    this.dropBot();
     this.me = null;
+    this.hideResults();
     this.myRig?.destroy();
     this.myRig = null;
     this.avatarOf(this.selfId())?.setArena(null);
@@ -652,8 +877,14 @@ export class SkatePark {
         if (!avatar) return;
         let o = this.others.get(m.id);
         if (!o) {
-          o = { snaps: [], heard: 0, kit: m.kit, rig: new Rig(this.scene, unpackKit(m.kit), this.lit) };
+          o = { snaps: [], heard: 0, kit: m.kit, rig: new Rig(this.scene, unpackKit(m.kit), this.lit), raw: m.sent, st: m.sent, lags: [], shown: null, drawnAt: 0 };
           this.others.set(m.id, o);
+        } else {
+          // Their clock wraps every 65 s: unwrapped by how far it's moved on. (Moved back: an old move, late; dropped.)
+          const d = (m.sent - o.raw) & 0xffff;
+          if (d > 0x8000) break;
+          o.raw = m.sent;
+          o.st += d;
         }
         // (They've changed their board.)
         if (o.kit !== m.kit) {
@@ -662,15 +893,36 @@ export class SkatePark {
         }
         const now = performance.now();
         o.heard = now;
+        o.lags.push(now - o.st);
+        if (o.lags.length > 40) o.lags.shift();
         o.snaps.push({
-          t: now,
+          st: o.st,
           p: { x: m.x * 0.32, y: m.y * 0.32, z: m.z, heading: (m.dir / 65536) * Math.PI * 2, pose: m.pose, trick: m.trick, spin: (m.spin / 65536) * Math.PI * 2 },
         });
-        if (o.snaps.length > 8) o.snaps.shift();
+        if (o.snaps.length > 40) o.snaps.shift();
         break;
       }
       case "SkateEvent":
         this.onEvent(m.id, m.kind, m.points, m.label);
+        break;
+      case "SkateQuestPaid":
+        this.quests.claimed(m.day, m.slot);
+        if (!m.already) this.toast(`🎯 Quest reward: +${m.coins} 🪙`, 3500);
+        this.questsChanged();
+        if (this.boardPanel.open) this.boardPanel.show();
+        break;
+      case "SkateDuelState":
+        this.onDuelState(m.phase, m.opp, m.name, m.startIn, m.grinds);
+        break;
+      case "SkateDuelScore":
+        if (this.duel) {
+          // The bot's combos, over its head as it lands them.
+          if (this.duel.opp === 0 && this.bot && m.points > this.duel.theirs) this.float(BOT_ID, `+${fmt(m.points - this.duel.theirs)}`, "combo");
+          this.duel.theirs = m.points;
+        }
+        break;
+      case "SkateDuelEnd":
+        this.onDuelEnd(m.mine, m.theirs, m.result);
         break;
       case "SkateBoard":
         this.boardPanel.runs = m.runs;
@@ -702,6 +954,23 @@ export class SkatePark {
     this.avatarOf(id)?.setArena(null);
   }
 
+  /** On your board again where you were when the connection dropped (if you're back near there, soon enough). */
+  private resume(self: Avatar, wallNow: number) {
+    const c = carried!;
+    carried = null;
+    const near = Math.hypot(self.pos.x * TILE + TILE / 2 - c.x, self.pos.y * TILE + TILE - 4 - c.y) < 3 * TILE;
+    if (wallNow - c.at > RESUME_MS || !near || !this.park.concrete(c.x, c.y)) return;
+    // (Not a run's countdown again: a run carries on as free skating.)
+    this.start(c.mode === "run" ? "free" : c.mode);
+    const me = this.me;
+    if (!me) return;
+    me.x = c.x;
+    me.y = c.y;
+    me.z = this.park.height(c.x, c.y);
+    me.heading = c.heading;
+    me.speed = c.speed;
+  }
+
   // ---- every frame ----
 
   update(wallNow: number) {
@@ -709,17 +978,21 @@ export class SkatePark {
     // The "Skate!" button while you're in the park on foot.
     const inPark = !!self && !this.me && this.inPark(self.pos.x, self.pos.y);
     if (this.enterBtn.hidden === inPark) this.enterBtn.hidden = !inPark;
+    // Back after the connection dropped, where you were: back on your board, carrying on.
+    if (carried && self && !this.me) this.resume(self, wallNow);
     if (this.me && self) this.play(wallNow, self);
     this.drawOthers(wallNow);
+    this.driveBot(wallNow);
     this.placeFloats(wallNow);
   }
 
   private play(wallNow: number, self: Avatar) {
     const me = this.me!;
-    const dt = this.last ? Math.min(0.1, (wallNow - this.last) / 1000) : 0;
+    // (Up to a quarter second a frame, stepped through: a slow frame or two doesn't slow the board down.)
+    const dt = this.last ? Math.min(0.25, (wallNow - this.last) / 1000) : 0;
     this.last = wallNow;
     // The run's clock.
-    if (this.mode === "run") this.runClock(dt, me);
+    if (this.mode === "run") this.runClock(wallNow, me);
     const frozen = this.mode === "run" && (this.run.phase === "count" || this.run.phase === "over");
     this.acc += dt;
     const inp = frozen ? NO_INPUT : this.input();
@@ -727,6 +1000,7 @@ export class SkatePark {
     const before = { x: me.x, y: me.y };
     while (this.acc >= STEP_S) {
       this.acc -= STEP_S;
+      this.stepFrom = { x: me.x, y: me.y, z: me.z };
       // (A press counts once.)
       const step = first ? inp : { ...inp, flip: false, manual: false };
       first = false;
@@ -736,16 +1010,44 @@ export class SkatePark {
       this.flipPressed = false;
       this.manualPressed = false;
     }
-    this.travelled += Math.hypot(me.x - before.x, me.y - before.y);
+    // Out of the park, where there's somewhere to walk: off the board (not mid-run or mid-1v1), walking on.
+    const out = this.leaving;
+    this.leaving = null;
+    if (out && this.leave && !this.duel && this.mode !== "run" && this.leave(out.tx, out.ty, out.dx, out.dy)) return;
+    const moved = Math.hypot(me.x - before.x, me.y - before.y);
+    this.travelled += moved;
+    this.watch?.({ t: "frame" }, me);
+    // A grinds-only 1v1: 100 a second while you're on a rail or a ledge (told each whole hundred).
+    if (this.duel?.grinds && this.duelGoing && me.mode === "grind") {
+      this.grindAcc += 100 * dt;
+      if (this.grindAcc >= 25) {
+        const add = Math.floor(this.grindAcc);
+        this.grindAcc -= add;
+        const was = Math.floor(this.run.score / 100);
+        this.run.score += add;
+        if (Math.floor(this.run.score / 100) > was) this.send({ t: "SkateDuelScore", points: this.run.score, done: false });
+      }
+    }
+    this.trackQuests(me, moved, wallNow);
     // Sounds of the wheels and grinds.
     const grinding = me.mode === "grind" && me.grind ? me.grind.line.kind : "";
     if (grinding !== this.wasGrinding) this.wasGrinding = grinding;
-    sfx.rolling(me.mode === "ground" || me.mode === "manual" ? me.speed : 0, grinding, this.travelled);
-    // Drawn.
+    sfx.rolling(me.mode === "ground" || me.mode === "manual" ? me.speed : 0, grinding || (me.mode === "ground" && me.slideDir ? "ledge" : ""), this.travelled);
+    // Drawn: between the last two steps, as far as the time since the last
+    // has gone (so it glides at any refresh rate, not jumps a step some frames
+    // and none others).
     const pose = this.myPose(me);
-    this.myRig?.draw(self, pose, this.park.height(me.x, me.y), wallNow);
-    // Told.
-    if (wallNow - this.sentAt >= SEND_MS) this.sendMove(wallNow, pose);
+    const f = this.acc / STEP_S;
+    const from = this.stepFrom;
+    if (from && Math.hypot(me.x - from.x, me.y - from.y) < 40) {
+      pose.x = from.x + (me.x - from.x) * f;
+      pose.y = from.y + (me.y - from.y) * f;
+      pose.z = from.z + (me.z - from.z) * f;
+    }
+    this.myRig?.draw(self, pose, this.park.height(pose.x, pose.y), wallNow);
+    // Told: a few dozen times a second, and at once (near enough) when you pop, land, start a trick.
+    const changed = pose.pose * 256 + pose.trick !== this.lastPose;
+    if (wallNow - this.sentAt >= SEND_MS || (changed && wallNow - this.sentAt >= QUICK_MS)) this.sendMove(wallNow, pose);
     this.drawHud(me);
   }
 
@@ -776,6 +1078,7 @@ export class SkatePark {
       balance: me.balance,
       crouch: me.crouch,
       bailT: me.bailT,
+      slide: me.mode === "ground" && me.slideDir !== 0,
     };
   }
 
@@ -785,15 +1088,24 @@ export class SkatePark {
     const z = Math.max(0, Math.min(255, Math.round(p.z)));
     const turn = (a: number) => ((Math.round((a / (Math.PI * 2)) * 65536) % 65536) + 65536) % 65536;
     const trick = p.pose === POSE.ROLL && p.push ? PUSH_CODE + Math.min(15, Math.floor((p.push / PUSH_S) * 15)) : p.trick;
-    const m = { t: "SkateMove" as const, x, y, z, dir: turn(p.heading), pose: p.pose, trick, spin: turn(p.spin) };
+    const m = { t: "SkateMove" as const, x, y, z, dir: turn(p.heading), pose: p.pose, trick, spin: turn(p.spin), kit: packKit(this.kit) };
     const key = `${x},${y},${z},${m.dir},${m.pose},${m.trick},${m.spin}`;
     // (Standing still, now and then: the server knows you're still there.)
     if (key === this.lastSent && wallNow - this.sentAt < 1000) return;
     this.lastSent = key;
+    this.lastPose = p.pose * 256 + p.trick;
     this.sentAt = wallNow;
-    this.send(m);
+    // When it was sent, by this page's clock (ms, wrapping): others play it back by that.
+    this.send({ ...m, sent: Math.round(wallNow) & 0xffff });
   }
 
+  /**
+   * Others, drawn smooth whatever the network's doing: each played back by
+   * when they sent their moves, a little behind (by how much their moves
+   * have been jittering lately); past their latest (a stall), carried on the
+   * way they were going a moment, then held; and drawn gliding toward where
+   * they should be (or moved there at once, if they're far off).
+   */
   private drawOthers(wallNow: number) {
     for (const [id, o] of this.others) {
       const avatar = this.avatarOf(id);
@@ -801,47 +1113,93 @@ export class SkatePark {
         this.forget(id);
         continue;
       }
-      // Between the two moves either side of a beat ago.
-      const t = wallNow - BEHIND_MS;
-      const s = o.snaps;
-      let a = s[0];
-      let b = s[0];
-      for (let i = 0; i < s.length; i++) {
-        if (s[i].t <= t) a = s[i];
-        if (s[i].t >= t) {
-          b = s[i];
-          break;
-        }
-        b = s[i];
+      const target = this.playback(o, wallNow);
+      if (!target) continue;
+      const dt = o.drawnAt ? Math.min(0.1, (wallNow - o.drawnAt) / 1000) : 0;
+      o.drawnAt = wallNow;
+      const s = o.shown;
+      if (!s || Math.hypot(target.x - s.x, target.y - s.y) > TELEPORT_PX) o.shown = target;
+      else {
+        // (Quick enough to keep up; slow enough to hide a hop.)
+        const k = 1 - Math.exp(-dt * 22);
+        o.shown = { ...target, x: s.x + (target.x - s.x) * k, y: s.y + (target.y - s.y) * k, z: s.z + (target.z - s.z) * Math.min(1, k * 1.6) };
       }
-      const f = b.t > a.t ? Math.max(0, Math.min(1, (t - a.t) / (b.t - a.t))) : 1;
-      const p: Pose = {
-        x: a.p.x + (b.p.x - a.p.x) * f,
-        y: a.p.y + (b.p.y - a.p.y) * f,
-        z: a.p.z + (b.p.z - a.p.z) * f,
-        heading: lerpAngle(a.p.heading, b.p.heading, f),
-        pose: b.p.pose,
-        trick: b.p.trick,
-        spin: lerpAngle(a.p.spin, b.p.spin, f),
-        bailT: b.p.pose === POSE.BAIL ? 0.3 : undefined,
-      };
-      // Pushing off (its stroke's phase sent in place of a trick).
-      if (p.pose === POSE.ROLL && p.trick >= PUSH_CODE) {
-        p.push = ((p.trick - PUSH_CODE) / 15) * PUSH_S;
-        p.trick = 0;
-      }
+      const p = o.shown;
       o.rig.draw(avatar, p, this.park.height(p.x, p.y), wallNow);
     }
   }
 
+  /** Where `o` should be drawn now: between the two moves either side of a moment ago (by their clock), or carried on past their last. */
+  private playback(o: Other, wallNow: number): Pose | null {
+    const s = o.snaps;
+    if (!s.length) return null;
+    // How late their moves reach us: the quickest of late (a base), and how much more than that most are.
+    const sorted = [...o.lags].sort((a, b) => a - b);
+    const base = sorted[0];
+    const jitter = sorted[Math.floor(sorted.length * 0.9)] - base;
+    const delay = Math.max(DELAY_MIN, Math.min(DELAY_MAX, jitter + 40));
+    // The moment drawn, by their clock.
+    const at = wallNow - base - delay;
+    // (Moves long gone by: not needed.)
+    while (s.length > 2 && s[1].st < at - 1000) s.shift();
+    let i = s.findIndex((q) => q.st > at);
+    let p: Pose;
+    if (i === 0) p = { ...s[0].p };
+    else if (i > 0) {
+      const a = s[i - 1];
+      const b = s[i];
+      const f = (at - a.st) / Math.max(1, b.st - a.st);
+      p = {
+        x: a.p.x + (b.p.x - a.p.x) * f,
+        y: a.p.y + (b.p.y - a.p.y) * f,
+        z: a.p.z + (b.p.z - a.p.z) * f,
+        heading: lerpAngle(a.p.heading, b.p.heading, f),
+        pose: f < 0.5 ? a.p.pose : b.p.pose,
+        trick: f < 0.5 ? a.p.trick : b.p.trick,
+        spin: lerpAngle(a.p.spin, b.p.spin, f),
+      };
+    } else {
+      // Past their latest move: carried on the way they were going, a little while.
+      i = s.length;
+      const last = s[i - 1];
+      const prev = s[i - 2];
+      p = { ...last.p };
+      if (prev && last.st > prev.st) {
+        const ahead = Math.min(COAST_MS, at - last.st);
+        const k = ahead / (last.st - prev.st);
+        p.x += (last.p.x - prev.p.x) * k;
+        p.y += (last.p.y - prev.p.y) * k;
+        p.z = Math.max(this.park.height(p.x, p.y), last.p.z + (last.p.z - prev.p.z) * k);
+      }
+    }
+    p.bailT = p.pose === POSE.BAIL ? 0.3 : undefined;
+    // Pushing off (its stroke's phase sent in place of a trick).
+    if (p.pose === POSE.ROLL && p.trick >= PUSH_CODE) {
+      p.push = ((p.trick - PUSH_CODE) / 15) * PUSH_S;
+      p.trick = 0;
+    }
+    return p;
+  }
 
   // ---- what happened on your board ----
 
   private onSkate(e: SkateEvent) {
     const me = this.me!;
+    this.watch?.(e, me);
     switch (e.t) {
       case "push":
         sfx.push();
+        break;
+      case "edge": {
+        // Riding out of the park (your way, not bounced into it): off your board, walking on.
+        const tx = Math.floor(e.x / TILE);
+        const ty = Math.floor(e.y / TILE);
+        // (The way you were going as you reached it, not after the bounce off it turned you round.)
+        if (!this.leaving && this.leave) this.leaving = { tx, ty, dx: e.dx, dy: e.dy };
+        break;
+      }
+      case "pump":
+        sfx.pump(e.power);
         break;
       case "pop":
         sfx.pop(e.power);
@@ -859,6 +1217,12 @@ export class SkatePark {
         if (e.on) sfx.grindOn(e.kind);
         break;
       case "trick":
+        this.questTrick(e.name, e.pts);
+        // A grinds-only 1v1: a grind's worth counted at once (and its seconds held, as they go).
+        if (this.duel?.grinds && this.duelGoing && Object.values(GRINDS).some((g) => e.name.startsWith(g))) {
+          this.run.score += Math.round(e.pts);
+          this.send({ t: "SkateDuelScore", points: this.run.score, done: false });
+        }
         sfx.counted(me.combo.count);
         this.pop(`${e.name}`, me.combo.count);
         if (this.mode === "line" && this.lineDone) this.lineDone = false;
@@ -882,6 +1246,7 @@ export class SkatePark {
         break;
       case "bail":
         sfx.bail();
+        this.qStreak = 0;
         if (e.lost > 0) sfx.lost();
         this.bigText(`💥 BAIL! ${e.why}${e.lost ? `  (lost ${fmt(e.lost)})` : ""}`, "bail", 1800);
         this.send({ t: "SkateScore", kind: SCORE.BAIL, points: e.lost, label: e.why });
@@ -889,8 +1254,23 @@ export class SkatePark {
         break;
       case "bank": {
         sfx.banked(e.pts, e.count);
+        this.qStreak++;
+        this.quest("comboPts", e.pts);
+        this.quest("comboTricks", e.count);
+        this.quest("banked", e.pts);
+        this.quest("cleanStreak", this.qStreak);
         this.bigText(`+${fmt(e.pts)}`, e.pts >= 5000 ? "huge" : e.pts >= 1500 ? "big" : "ok", 1600, e.label);
-        if (this.mode === "run" && this.run.phase === "go") this.run.score += e.pts;
+        if (this.mode === "run" && (this.run.phase === "go" || this.run.phase === "late")) {
+          const r = this.run;
+          if (!this.duel?.grinds) r.score += e.pts;
+          r.combos++;
+          r.tricks += e.count;
+          if (e.pts > r.best) {
+            r.best = e.pts;
+            r.bestLabel = e.label;
+          }
+          if (this.duel?.phase === "on") this.send({ t: "SkateDuelScore", points: r.score, done: false });
+        }
         if (e.pts >= TELL_PTS) this.send({ t: "SkateScore", kind: SCORE.COMBO, points: e.pts, label: e.label });
         this.saveBest("combo", e.pts);
         if (this.mode === "line") this.lineOver(e.pts, e.label);
@@ -901,6 +1281,8 @@ export class SkatePark {
 
   private lineOver(pts: number, label: string) {
     this.lineDone = true;
+    this.quest("lineScore", pts);
+    if (this.me) this.watch?.({ t: "line" }, this.me);
     const best = this.bests().combo;
     window.setTimeout(() => {
       if (!this.me || this.mode !== "line") return;
@@ -908,43 +1290,300 @@ export class SkatePark {
     }, 900);
   }
 
-  private runClock(dt: number, me: Skater) {
+  private runClock(wallNow: number, me: Skater) {
     const r = this.run;
     if (r.phase === "count") {
-      const was = Math.ceil(r.left);
-      r.left -= dt;
-      const now = Math.ceil(r.left);
-      if (now !== was) {
-        sfx.countdown(Math.max(0, now));
-        this.bigText(now > 0 ? `${now}` : "GO!", "count", 700);
+      // 3, 2, 1, GO!
+      const n = Math.ceil((r.goAt - wallNow) / 1000);
+      if (n !== r.ticked) {
+        r.ticked = n;
+        sfx.countdown(Math.max(0, n));
+        this.bigText(n > 0 ? `${n}` : "GO!", "count", 700);
       }
-      if (r.left <= 0) {
+      if (wallNow >= r.goAt) {
         r.phase = "go";
-        r.left = RUN_S;
+        r.endAt = r.goAt + RUN_S * 1000;
+        r.ticked = RUN_S;
       }
-    } else if (r.phase === "go") {
-      r.left -= dt;
-      if (r.left <= 0) {
-        r.left = 0;
-        // A trick still going: it's let finish (a few seconds at most).
-        if (me.mode === "ground" || me.mode === "bail" || r.overAt > 3) {
-          const ev: SkateEvent[] = [];
-          me.finish(ev);
-          for (const e of ev) this.onSkate(e);
-          r.phase = "over";
-          // (Stood still till you pick what next: nothing more counts.)
-          me.speed = 0;
-          sfx.horn();
-          const best = this.bests().run;
-          this.saveBest("run", r.score);
-          this.send({ t: "SkateScore", kind: SCORE.RUN, points: r.score, label: "" });
-          this.bigText(`⏱️ Time! ${fmt(r.score)}${r.score > best ? "  🏆 Your best!" : ""}`, "huge", 4000);
-          window.setTimeout(() => {
-            if (this.me && this.mode === "run" && this.run.phase === "over") this.boardPanel.show();
-          }, 2600);
-        } else r.overAt += dt;
-      }
+    } else if (r.phase === "go" || r.phase === "late") {
+      const left = (r.endAt - wallNow) / 1000;
+      const n = Math.max(0, Math.ceil(left));
+      // The last ten seconds, ticked off.
+      if (n !== r.ticked && n > 0 && n <= HURRY_S) sfx.hurry(n);
+      r.ticked = n;
+      if (left > 0) return;
+      // Time! A trick still going is let land (a few seconds at most).
+      if (me.mode === "ground" || me.mode === "bail" || wallNow - r.endAt > LATE_MS) this.endRun(me);
+      else r.phase = "late";
     }
+  }
+
+  /** The horn: what's still to bank banked, the score kept and told, and the card. */
+  private endRun(me: Skater) {
+    const r = this.run;
+    const ev: SkateEvent[] = [];
+    me.finish(ev);
+    for (const e of ev) this.onSkate(e);
+    r.phase = "over";
+    // (Stood still till you pick what next: nothing more counts.)
+    me.speed = 0;
+    sfx.horn();
+    const best = this.bests().run;
+    this.saveBest("run", r.score);
+    if (r.score > 0) this.send({ t: "SkateScore", kind: SCORE.RUN, points: r.score, label: "" });
+    this.quest("runScore", r.score);
+    this.quest("runs", 1);
+    this.watch?.({ t: "run" }, me);
+    if (this.duel?.phase === "on") {
+      this.send({ t: "SkateDuelScore", points: r.score, done: true });
+      this.duel.phase = "over";
+      this.duelBanner(`⚔️ Your score's in: ${fmt(r.score)}. Waiting on ${this.duel.name}…`);
+      return;
+    }
+    this.showResults(best);
+  }
+
+  /** The card: the total counting up, whether it's your best, the combos, the tricks, the best combo; go again, or ride on. */
+  private showResults(before: number) {
+    const r = this.run;
+    const total = el("div", "skate-results-total", "0");
+    const record = r.score > 0 && r.score > before;
+    const stat = (label: string, value: string, sub = "") => {
+      const d = el("div", "skate-results-stat");
+      d.append(el("b", "", value), el("span", "", label));
+      if (sub) d.append(el("small", "", sub));
+      return d;
+    };
+    const stats = el("div", "skate-results-stats");
+    stats.append(stat("combos", fmt(r.combos)), stat("tricks", fmt(r.tricks)), stat("best combo", fmt(r.best), r.bestLabel));
+    const badge = record
+      ? el("div", "skate-results-badge best", before > 0 ? `🏆 New personal best! (was ${fmt(before)})` : "🏆 Your first run on the board!")
+      : el("div", "skate-results-badge", r.score > 0 ? `Your best: ${fmt(before)}` : "Land some tricks before the horn!");
+    const btns = el("div", "skate-results-btns");
+    btns.append(button("🔁 Run again", () => this.start("run"), "primary"), button("🛹 Free skate", () => this.start("free")), button("🏆 Scoreboard", () => this.boardPanel.show()));
+    this.resultsEl.replaceChildren(
+      el("div", "skate-results-title", "⏱️ TIME!"),
+      el("div", "skate-results-label", "Total score"),
+      total,
+      badge,
+      stats,
+      btns,
+      el("div", "skate-results-hint", "Enter: run again · Esc: free skate"),
+    );
+    this.resultsEl.classList.toggle("record", record);
+    this.resultsEl.hidden = false;
+    // The total, counted up.
+    const t0 = performance.now();
+    const dur = Math.min(1600, 500 + r.score / 20);
+    let ticks = 0;
+    window.clearInterval(this.tallyTimer);
+    this.tallyTimer = window.setInterval(() => {
+      const k = Math.min(1, (performance.now() - t0) / dur);
+      total.textContent = fmt(Math.round(r.score * (1 - Math.pow(1 - k, 3))));
+      if (k < 1 && r.score > 0 && ticks++ % 2 === 0) sfx.tally();
+      if (k >= 1) {
+        window.clearInterval(this.tallyTimer);
+        total.classList.add("done");
+        if (record) sfx.special();
+      }
+    }, 40);
+  }
+
+  // ---- Dusty's quests ----
+
+  private quest(metric: Metric, value: number) {
+    this.quests.record(metric, value);
+  }
+
+  /** The quests (and the shop's tab of them) to be shown afresh. */
+  questsChanged: () => void = () => {};
+
+  /** A trick counted: drop-ins, gaps, spins and grinds, for the quests. */
+  private questTrick(name: string, pts: number) {
+    this.quest("tricks", 1);
+    if (name === "Drop In") this.quest("dropIns", 1);
+    if (name === "Kicker Gap" || name === "Funbox Gap" || name === "Stair Set") this.quest("gaps", 1);
+    const spin = /^(\d+) /.exec(name);
+    if (spin) this.quest("spin", Number(spin[1]));
+    if (Object.values(GRINDS).some((g) => name.startsWith(g))) this.quest("grindPts", pts);
+  }
+
+  /** Every frame: air (how high, how long), manuals, grinds and grabs held, how far and fast. */
+  private trackQuests(me: Skater, moved: number, wallNow: number) {
+    if (me.mode === "air") {
+      if (!this.qAir) this.qAir = { at: wallNow, top: 0 };
+      this.qAir.top = Math.max(this.qAir.top, me.z);
+    } else if (this.qAir) {
+      // Down: on four wheels (or a rail), not on your face.
+      if (me.mode !== "bail") {
+        this.quest("airHeight", this.qAir.top);
+        this.quest("airTime", (wallNow - this.qAir.at) / 1000);
+      }
+      this.qAir = null;
+    }
+    const held = (k: "manual" | "grind" | "grab", now: number, metric: Metric) => {
+      if (now > 0) this.qHeld[k] = Math.max(this.qHeld[k], now);
+      else if (this.qHeld[k] > 0) {
+        if (me.mode !== "bail") this.quest(metric, this.qHeld[k]);
+        this.qHeld[k] = 0;
+      }
+    };
+    held("manual", me.mode === "manual" ? me.manualT : 0, "manualTime");
+    held("grind", me.mode === "grind" && me.grind ? me.grind.t : 0, "grindTime");
+    held("grab", me.grab ? me.grab.t : 0, "grabTime");
+    // (Distance and speed told now and then, not every frame.)
+    this.qDist += moved;
+    if (me.mode === "ground") this.qSpeed = Math.max(this.qSpeed, me.speed);
+    if (wallNow - this.qAt > 1000) {
+      this.qAt = wallNow;
+      this.quest("distance", this.qDist);
+      this.quest("topSpeed", this.qSpeed);
+      this.qDist = 0;
+      this.qSpeed = 0;
+    }
+  }
+
+  // ---- 1v1 ----
+
+  /** Looking for a 1v1 (on a board first, if you're not); `grinds`: only grinds count. */
+  private findDuel(bot: boolean, grinds = false) {
+    if (!this.me) this.start("free");
+    if (!this.me) return;
+    this.send({ t: "SkateDuel", join: true, bot, grinds });
+  }
+
+  private leaveDuel() {
+    this.send({ t: "SkateDuel", join: false, bot: false, grinds: false });
+    this.duel = null;
+    this.duelEl.hidden = true;
+    this.dropBot();
+  }
+
+  /** The bot, onto a board beside you. */
+  private spawnBot() {
+    this.dropBot();
+    const me = this.me;
+    if (!me || !this.makeBot) return;
+    // Beside you if there's room, else just behind.
+    const side = [[0, 40], [0, -40], [40, 0], [-40, 0]].find(([dx, dy]) => this.park.concrete(me.x + dx, me.y + dy) && this.park.height(me.x + dx, me.y + dy) === me.z) ?? [0, 0];
+    const x = me.x + side[0];
+    const y = me.y + side[1];
+    const p = this.park as unknown as { tx0: number; ty0: number; tw: number; th: number };
+    const spots: { x: number; y: number }[] = [];
+    for (let ty = p.ty0; ty < p.ty0 + p.th; ty++) for (let tx = p.tx0; tx < p.tx0 + p.tw; tx++) if (this.park.concreteTile(tx, ty) && this.park.height(tx * TILE + 16, ty * TILE + 16) === 0) spots.push({ x: tx, y: ty });
+    const rider = new BotRider(this.park, x, y, spots, () => this.me && { x: this.me.x, y: this.me.y });
+    rider.s.heading = me.heading;
+    rider.grinds = !!this.duel?.grinds;
+    const avatar = this.makeBot((x - TILE / 2) / TILE, (y - TILE + 4) / TILE);
+    this.bot = { rider, rig: new Rig(this.scene, { deck: 6, wheels: 2, bearings: 4, trucks: 4, trail: 2 }, this.lit), avatar, acc: 0, last: 0 };
+  }
+
+  private dropBot() {
+    const b = this.bot;
+    if (!b) return;
+    this.bot = null;
+    b.rig.destroy();
+    b.avatar.destroy();
+  }
+
+  /** A 1v1's minute going (it counts). */
+  private get duelGoing(): boolean {
+    return this.duel?.phase === "on" && this.mode === "run" && (this.run.phase === "go" || this.run.phase === "late");
+  }
+
+  /** Every frame: the bot skates (from GO till the horn, then coasts), drawn on its board. */
+  private driveBot(wallNow: number) {
+    const b = this.bot;
+    if (!b) return;
+    const dt = b.last ? Math.min(0.25, (wallNow - b.last) / 1000) : 0;
+    b.last = wallNow;
+    b.acc += dt;
+    const go = this.mode === "run" && (this.run.phase === "go" || this.run.phase === "late") && !!this.duel;
+    while (b.acc >= STEP_S) {
+      b.acc -= STEP_S;
+      b.rider.step(STEP_S, go);
+    }
+    const s = b.rider.s;
+    b.rig.draw(b.avatar, this.myPose(s), this.park.height(s.x, s.y), wallNow);
+    b.avatar.update(wallNow, wallNow);
+  }
+
+  private onDuelState(phase: number, opp: number, name: string, startIn: number, grinds: boolean) {
+    if (phase === DUEL.WAITING) {
+      this.duel = { phase: "waiting", opp: 0, name: "", theirs: 0, grinds };
+      this.duelBanner(`⚔️ Looking for someone to take you on${grinds ? " (grinds only)" : ""}…`, true);
+      return;
+    }
+    if (phase !== DUEL.STARTING || !this.me) return;
+    this.duel = { phase: "on", opp, name, theirs: 0, grinds };
+    this.grindAcc = 0;
+    this.duelEl.hidden = true;
+    if (opp === 0) this.spawnBot();
+    sfx.special();
+    this.start("run", performance.now() + startIn);
+    this.bigText(`⚔️ 1v1 vs ${name}!`, "big", 1400, grinds ? "🛤️ Grinds only: only grinds count, and the longer the better" : "60 seconds: the higher score wins");
+  }
+
+  private onDuelEnd(mine: number, theirs: number, result: number) {
+    const d = this.duel;
+    const name = d?.name ?? "them";
+    this.duel = null;
+    this.duelEl.hidden = true;
+    // (The bot rolls to a stop, and is gone in a moment.)
+    const bot = this.bot;
+    if (bot) window.setTimeout(() => this.bot === bot && this.dropBot(), 3000);
+    if (!this.me) return;
+    const won = result === DUEL.WON || result === DUEL.WALKOVER;
+    if (result === DUEL.WON) this.quest("duelWins", 1);
+    const title = result === DUEL.WALKOVER ? "🏆 They left: you win!" : result === DUEL.WON ? "🏆 YOU WIN!" : result === DUEL.DRAW ? "🤝 A DRAW!" : "😤 YOU LOST";
+    const card = this.resultsEl;
+    const row = (who: string, pts: number, lead: boolean) => {
+      const r = el("div", `skate-duel-line${lead ? " lead" : ""}`);
+      r.append(el("span", "", who), el("b", "", fmt(pts)));
+      return r;
+    };
+    const btns = el("div", "skate-results-btns");
+    btns.append(
+      button("⚔️ Again", () => (this.hideResults(), this.findDuel(d?.opp === 0, !!d?.grinds)), "primary"),
+      button("🛹 Free skate", () => this.start("free")),
+      button("🏆 Scoreboard", () => this.boardPanel.show()),
+    );
+    card.replaceChildren(el("div", "skate-results-title", title), ...(d?.grinds ? [el("div", "skate-results-label", "🛤️ Grinds only")] : []), row("You", mine, mine >= theirs), row(name, theirs, theirs > mine), btns, el("div", "skate-results-hint", "Enter: again · Esc: free skate"));
+    card.classList.toggle("record", won);
+    card.hidden = false;
+    this.duelAgain = d ? { bot: d.opp === 0, grinds: d.grinds } : null;
+    if (won) sfx.special();
+    else sfx.lost();
+  }
+
+  /** The 1v1 card's Enter: the same again (the bot, or someone). */
+  private duelAgain: { bot: boolean; grinds: boolean } | null = null;
+
+  /** A line about your 1v1 up top (`cancel`: with a way out of waiting). */
+  private duelBanner(text: string, cancel = false) {
+    this.duelEl.replaceChildren(el("span", "", text));
+    if (cancel) {
+      this.duelEl.append(
+        button("🤖 Take on the bot", () => {
+          const grinds = !!this.duel?.grinds;
+          this.leaveDuel();
+          this.findDuel(true, grinds);
+        }, "small"),
+        button("Cancel", () => this.leaveDuel(), "small"),
+      );
+    }
+    this.duelEl.hidden = false;
+  }
+
+  private hideResults() {
+    this.duelAgain = null;
+    window.clearInterval(this.tallyTimer);
+    this.resultsEl.hidden = true;
+  }
+
+  /** The card up: Enter goes again, Esc rides on. */
+  private get resultsUp(): boolean {
+    return !this.resultsEl.hidden;
   }
 
   // ---- the HUD ----
@@ -953,11 +1592,22 @@ export class SkatePark {
     const r = this.run;
     const head =
       this.mode === "run"
-        ? `<span class="skate-mode-name">⏱️ ${r.phase === "count" ? "Get ready…" : r.phase === "over" ? "Time!" : `${Math.ceil(r.left)}s`}</span><b>${fmt(r.score)}</b>`
+        ? `<span class="skate-mode-name">⏱️ ${r.phase === "count" ? "Get ready…" : r.phase === "over" ? "Time!" : r.phase === "late" ? "Land it!" : `${Math.max(0, r.ticked)}s`}</span><b>${fmt(r.score)}</b>`
         : this.mode === "line"
           ? `<span class="skate-mode-name">🔗 Line</span><b>${fmt(me.combo.total)}</b>`
           : `<span class="skate-mode-name">🛹 Free skate</span><b>${fmt(me.banked)}</b><span class="skate-best">best combo ${fmt(me.bestCombo)}</span>`;
-    if (this.scoreEl.innerHTML !== head) this.scoreEl.innerHTML = head;
+    const d = this.duel;
+    const vs = d && d.phase !== "waiting" && this.mode === "run" ? `${d.grinds ? '<span class="skate-grinds">🛤️ Grinds only</span>' : ""}<span class="skate-vs">vs ${esc(d.name)} <b>${fmt(d.theirs)}</b></span>` : "";
+    if (this.scoreEl.innerHTML !== head + vs) this.scoreEl.innerHTML = head + vs;
+    // (The last ten seconds: the clock goes red.)
+    this.scoreEl.classList.toggle("hurry", this.mode === "run" && (r.phase === "late" || (r.phase === "go" && r.ticked <= HURRY_S)));
+    // Surf trucks: the pump's rhythm.
+    const surf = me.kit.pump > 0;
+    if (this.flowEl.hidden === surf) this.flowEl.hidden = !surf;
+    if (surf) {
+      this.flowEl.style.setProperty("--fill", `${Math.round(me.pumpFlow * 100)}%`);
+      this.flowEl.classList.toggle("full", me.pumpFlow > 0.85);
+    }
     this.specialEl.style.setProperty("--fill", `${Math.round(me.special * 100)}%`);
     this.specialEl.classList.toggle("full", me.special >= 1);
     // The combo building: its tricks, its points × how many.
@@ -1027,9 +1677,14 @@ export class SkatePark {
     this.floats.push({ el: f, id, until: performance.now() + 1600, y: 0 });
   }
 
+  /** Who `id` is: anyone here, or the bot. */
+  private who(id: number): Avatar | undefined {
+    return id === BOT_ID ? this.bot?.avatar : this.avatarOf(id);
+  }
+
   private placeFloats(wallNow: number) {
     this.floats = this.floats.filter((f) => {
-      const a = this.avatarOf(f.id);
+      const a = this.who(f.id);
       if (!a || wallNow > f.until) {
         f.el.remove();
         return false;
@@ -1101,6 +1756,19 @@ export class SkatePark {
   private onKey = (e: KeyboardEvent) => {
     if (!this.me || isTyping(e)) return;
     const code = e.code;
+    // The run's card up: Enter goes again, Esc rides on.
+    if (this.resultsUp && (code === "Enter" || code === "NumpadEnter" || code === "Escape")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) {
+        const again = this.duelAgain;
+        if (code !== "Escape" && again !== null) {
+          this.hideResults();
+          this.findDuel(again.bot, again.grinds);
+        } else this.start(code === "Escape" ? "free" : "run");
+      }
+      return;
+    }
     const used = ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "KeyJ", "KeyK", "KeyL", "KeyQ", "KeyE", "Escape"];
     if (!used.includes(code)) return;
     e.preventDefault();
@@ -1190,6 +1858,9 @@ export class SkatePark {
   }
 
   destroy() {
+    // (Gone with the connection, perhaps: what you were doing, to be carried on.)
+    const me = this.me;
+    if (me && me.mode !== "bail") carried = { x: me.x, y: me.y, z: me.z, heading: me.heading, speed: me.speed, mode: this.mode, at: performance.now() };
     this.stop();
     for (const id of [...this.others.keys()]) this.forget(id);
     for (const f of this.floats) f.el.remove();

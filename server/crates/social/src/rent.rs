@@ -18,7 +18,7 @@ use crate::routes::{db_err, me};
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use commons_api::economy::{COIN, EconError, Op, apply};
+use commons_api::economy::{COIN, EconError, Op, apply, key_used, totals};
 use commons_api::error::{ApiError, ApiResult};
 use commons_common::config;
 use commons_sim::city::{RentCatalog, RentTier, rent_catalog};
@@ -221,8 +221,57 @@ pub async fn open(
         e => e.into(),
     })?;
     record_charge(&mut tx, lease.id, 0, t.rent).await?;
+    if kind == "home" {
+        default_fence(&mut tx, state, player).await?;
+    }
     tx.commit().await.map_err(db_err)?;
     Ok(lease)
+}
+
+/// The Picket Fence, the cheapest there is: everyone renting their first house
+/// gets one, put up out front (so a house that's lived in shows it). Theirs
+/// to keep, change or take down; it's only given, and put up, the once.
+const DEFAULT_FENCE: i32 = 845;
+
+async fn default_fence(
+    conn: &mut PgConnection,
+    state: &SocialState,
+    player: Uuid,
+) -> ApiResult<()> {
+    let key = format!("default_fence:{player}");
+    if key_used(conn, &key).await.map_err(db_err)? {
+        return Ok(());
+    }
+    // (Bought one already: theirs is put up, nothing more given.)
+    if totals(conn, player, &[DEFAULT_FENCE])
+        .await
+        .map_err(db_err)?[0]
+        .1
+        == 0
+    {
+        apply(
+            conn,
+            &state.catalog,
+            player,
+            &[Op {
+                item: DEFAULT_FENCE,
+                delta: 1,
+            }],
+            "default_fence",
+            &key,
+        )
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO home_exterior (owner, slot, item_id) VALUES ($1, 'fence', $2)
+         ON CONFLICT (owner, slot) DO NOTHING",
+    )
+    .bind(player)
+    .bind(DEFAULT_FENCE)
+    .execute(&mut *conn)
+    .await
+    .map_err(db_err)?;
+    Ok(())
 }
 
 pub(crate) async fn charge_in(

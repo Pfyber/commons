@@ -2,7 +2,7 @@
 // Do not edit by hand.
 /* eslint-disable */
 
-export const PROTOCOL_VERSION = 55;
+export const PROTOCOL_VERSION = 57;
 export const CELL_TILES = 16;
 
 export class Writer {
@@ -484,8 +484,11 @@ export type ClientMsg =
   | { t: "TankTake"; x: number; y: number; index: number }
   | { t: "TankFeed"; x: number; y: number }
   | { t: "SkateOn"; on: boolean; kit: number }
-  | { t: "SkateMove"; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number }
+  | { t: "SkateMove"; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number; sent: number; kit: number }
   | { t: "SkateScore"; kind: number; points: number; label: string }
+  | { t: "SkateQuest"; day: number; slot: number }
+  | { t: "SkateDuel"; join: boolean; bot: boolean; grinds: boolean }
+  | { t: "SkateDuelScore"; points: number; done: boolean }
   ;
 
 export function encodeClientMsg(m: ClientMsg): Uint8Array {
@@ -827,12 +830,30 @@ export function encodeClientMsg(m: ClientMsg): Uint8Array {
       w.u8(m.pose);
       w.u8(m.trick);
       w.u16(m.spin);
+      w.u16(m.sent);
+      w.u32(m.kit);
       break;
     case "SkateScore":
       w.u8(74);
       w.u8(m.kind);
       w.u32(m.points);
       w.str(m.label);
+      break;
+    case "SkateQuest":
+      w.u8(75);
+      w.u32(m.day);
+      w.u8(m.slot);
+      break;
+    case "SkateDuel":
+      w.u8(76);
+      w.bool(m.join);
+      w.bool(m.bot);
+      w.bool(m.grinds);
+      break;
+    case "SkateDuelScore":
+      w.u8(77);
+      w.u32(m.points);
+      w.bool(m.done);
       break;
   }
   return w.finish();
@@ -1057,10 +1078,19 @@ export function decodeClientMsg(b: Uint8Array): ClientMsg {
       m = { t: "SkateOn", on: r.bool(), kit: r.u32() };
       break;
     case 73:
-      m = { t: "SkateMove", x: r.u16(), y: r.u16(), z: r.u8(), dir: r.u16(), pose: r.u8(), trick: r.u8(), spin: r.u16() };
+      m = { t: "SkateMove", x: r.u16(), y: r.u16(), z: r.u8(), dir: r.u16(), pose: r.u8(), trick: r.u8(), spin: r.u16(), sent: r.u16(), kit: r.u32() };
       break;
     case 74:
       m = { t: "SkateScore", kind: r.u8(), points: r.u32(), label: r.str() };
+      break;
+    case 75:
+      m = { t: "SkateQuest", day: r.u32(), slot: r.u8() };
+      break;
+    case 76:
+      m = { t: "SkateDuel", join: r.bool(), bot: r.bool(), grinds: r.bool() };
+      break;
+    case 77:
+      m = { t: "SkateDuelScore", points: r.u32(), done: r.bool() };
       break;
     default:
       throw new Error(`protocol: unknown ClientMsg tag ${tag}`);
@@ -1129,9 +1159,13 @@ export type ServerMsg =
   | { t: "ArenaBetSettled"; coins: number; refund: boolean }
   | { t: "ArenaStoodDown" }
   | { t: "Skating"; id: number; on: boolean }
-  | { t: "Skater"; id: number; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number; kit: number }
+  | { t: "Skater"; id: number; x: number; y: number; z: number; dir: number; pose: number; trick: number; spin: number; sent: number; kit: number }
   | { t: "SkateEvent"; id: number; kind: number; points: number; label: string }
   | { t: "SkateBoard"; runs: SkateEntry[]; combos: SkateEntry[] }
+  | { t: "SkateQuestPaid"; day: number; slot: number; coins: number; already: boolean }
+  | { t: "SkateDuelState"; phase: number; opp: number; name: string; startIn: number; grinds: boolean }
+  | { t: "SkateDuelScore"; points: number }
+  | { t: "SkateDuelEnd"; mine: number; theirs: number; result: number }
   ;
 
 export function encodeServerMsg(m: ServerMsg): Uint8Array {
@@ -1579,6 +1613,7 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(m.pose);
       w.u8(m.trick);
       w.u16(m.spin);
+      w.u16(m.sent);
       w.u32(m.kit);
       break;
     case "SkateEvent":
@@ -1592,6 +1627,31 @@ export function encodeServerMsg(m: ServerMsg): Uint8Array {
       w.u8(63);
       w.vec(m.runs, (x) => encSkateEntry(w, x));
       w.vec(m.combos, (x) => encSkateEntry(w, x));
+      break;
+    case "SkateQuestPaid":
+      w.u8(64);
+      w.u32(m.day);
+      w.u8(m.slot);
+      w.u16(m.coins);
+      w.bool(m.already);
+      break;
+    case "SkateDuelState":
+      w.u8(65);
+      w.u8(m.phase);
+      w.u32(m.opp);
+      w.str(m.name);
+      w.u16(m.startIn);
+      w.bool(m.grinds);
+      break;
+    case "SkateDuelScore":
+      w.u8(66);
+      w.u32(m.points);
+      break;
+    case "SkateDuelEnd":
+      w.u8(67);
+      w.u32(m.mine);
+      w.u32(m.theirs);
+      w.u8(m.result);
       break;
   }
   return w.finish();
@@ -1780,13 +1840,25 @@ export function decodeServerMsg(b: Uint8Array): ServerMsg {
       m = { t: "Skating", id: r.u32(), on: r.bool() };
       break;
     case 61:
-      m = { t: "Skater", id: r.u32(), x: r.u16(), y: r.u16(), z: r.u8(), dir: r.u16(), pose: r.u8(), trick: r.u8(), spin: r.u16(), kit: r.u32() };
+      m = { t: "Skater", id: r.u32(), x: r.u16(), y: r.u16(), z: r.u8(), dir: r.u16(), pose: r.u8(), trick: r.u8(), spin: r.u16(), sent: r.u16(), kit: r.u32() };
       break;
     case 62:
       m = { t: "SkateEvent", id: r.u32(), kind: r.u8(), points: r.u32(), label: r.str() };
       break;
     case 63:
       m = { t: "SkateBoard", runs: r.vec(() => decSkateEntry(r)), combos: r.vec(() => decSkateEntry(r)) };
+      break;
+    case 64:
+      m = { t: "SkateQuestPaid", day: r.u32(), slot: r.u8(), coins: r.u16(), already: r.bool() };
+      break;
+    case 65:
+      m = { t: "SkateDuelState", phase: r.u8(), opp: r.u32(), name: r.str(), startIn: r.u16(), grinds: r.bool() };
+      break;
+    case 66:
+      m = { t: "SkateDuelScore", points: r.u32() };
+      break;
+    case 67:
+      m = { t: "SkateDuelEnd", mine: r.u32(), theirs: r.u32(), result: r.u8() };
       break;
     default:
       throw new Error(`protocol: unknown ServerMsg tag ${tag}`);

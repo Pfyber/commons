@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     gov::spawn_ticker(state.db.clone());
     commons_api::stocking::spawn(state.db.clone());
+    commons_api::fridge::spawn_sweep(state.clone());
     let app = Router::new()
         .nest(
             "/api",
@@ -68,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
                 .merge(commons_api::homelife::routes())
                 .merge(commons_api::leaderboards::routes())
                 .merge(commons_api::fishquest::routes())
+                .merge(commons_api::fridge::routes())
                 .merge(commons_api::labyrinth::routes())
                 .merge(pets::routes())
                 .merge(vehicles::routes())

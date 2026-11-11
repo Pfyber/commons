@@ -42,6 +42,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/home/tank/put", post(tank_put))
         .route("/home/tank/take", post(tank_take))
         .route("/home/tank/feed", post(tank_feed))
+        .route("/home/light", post(light))
         .route("/activity", post(activity))
         .merge(crate::clubroom::routes())
         .merge(crate::leaderboards::internal_routes())
@@ -433,6 +434,9 @@ pub struct HomeObject {
     /// When its fish last ate (unix seconds).
     #[serde(default)]
     pub fed: i64,
+    /// Switched on (a lamp, the TV, a fireplace): it stays on while you're away.
+    #[serde(default)]
+    pub on: bool,
 }
 
 /// A player's saved look, what they wear from the mall, the pet out with
@@ -480,7 +484,7 @@ async fn home_objects(
     Ok(Json(rows.iter().map(home_object).collect()))
 }
 
-const HOME_OBJECT: &str = "SELECT x, y, item_id, fish, layer, rot, \
+const HOME_OBJECT: &str = "SELECT x, y, item_id, fish, layer, rot, lit, \
     extract(epoch FROM fed_at)::bigint AS fed FROM home_objects";
 
 fn home_object(r: &sqlx::postgres::PgRow) -> HomeObject {
@@ -492,6 +496,7 @@ fn home_object(r: &sqlx::postgres::PgRow) -> HomeObject {
         layer: r.get("layer"),
         rot: r.get("rot"),
         fed: r.get("fed"),
+        on: r.get("lit"),
     }
 }
 
@@ -590,7 +595,7 @@ async fn place(
         .bind(req.y)
         .bind(req.item)
         .bind(req.layer.clamp(0, 1))
-        .bind(req.rot.rem_euclid(4))
+        .bind(req.rot.rem_euclid(16))
         .bind(yard)
         .execute(&mut *tx)
         .await;
@@ -843,7 +848,39 @@ struct TankFed {
     applied: Applied,
 }
 
-/// A pinch of food for a tank's fish.
+#[derive(Deserialize)]
+struct LightReq {
+    owner: String,
+    x: i16,
+    y: i16,
+    #[serde(default)]
+    layer: i16,
+    on: bool,
+}
+
+/// A piece at home switched on or off: kept, so it's as it was left next time.
+async fn light(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<LightReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    service(&state, &headers)?;
+    let owner = uuid(&req.owner)?;
+    sqlx::query(
+        "UPDATE home_objects SET lit = $5 WHERE owner_id = $1 AND x = $2 AND y = $3 AND layer = $4 AND NOT yard",
+    )
+    .bind(owner)
+    .bind(req.x)
+    .bind(req.y)
+    .bind(req.layer)
+    .bind(req.on)
+    .execute(&state.db)
+    .await
+    .map_err(db_err)?;
+    Ok(Json(serde_json::json!({ "on": req.on })))
+}
+
+/// A pinch of food for a tank's fish (free: nothing comes out of the bag).
 async fn tank_feed(
     State(state): S,
     headers: HeaderMap,
@@ -851,11 +888,6 @@ async fn tank_feed(
 ) -> ApiResult<Json<TankFed>> {
     service(&state, &headers)?;
     let owner = uuid(&req.owner)?;
-    let food = state
-        .catalog
-        .by_key("fish_food")
-        .ok_or_else(|| conflict("not_enough_items", "you need fish food"))?
-        .id;
     let mut tx = state.db.begin().await.map_err(db_err)?;
     let (_, fish) = tank_at(&mut tx, owner, req.x, req.y, req.layer).await?;
     if fish.is_empty() {
@@ -872,27 +904,11 @@ async fn tank_feed(
     .fetch_one(&mut *tx)
     .await
     .map_err(db_err)?;
-    let applied = apply(
-        &mut tx,
-        &state.catalog,
-        owner,
-        &[Op {
-            item: food,
-            delta: -1,
-        }],
-        "tank_feed",
-        &req.key,
-    )
-    .await
-    .map_err(|e| match e {
-        EconError::Insufficient(_) => conflict(
-            "not_enough_items",
-            "You're out of fish food: try the Market.",
-        ),
-        e => e.into(),
-    })?;
     tx.commit().await.map_err(db_err)?;
-    Ok(Json(TankFed { fed, applied }))
+    Ok(Json(TankFed {
+        fed,
+        applied: Applied::default(),
+    }))
 }
 
 /// A fish out of a tank, back into the bag.

@@ -45,6 +45,7 @@ pub fn routes() -> Router<Arc<SocialState>> {
         .route("/gifts", get(gifts))
         .route("/gifts/{id}/open", post(open_gift))
         .route("/invite", post(invite))
+        .route("/drop_in", post(set_drop_in))
         .route("/notifications", get(notifications))
         .route("/notifications/read", post(read_notifications))
         .route("/homes", get(crate::homes::list))
@@ -232,11 +233,12 @@ async fn friends(State(state): S, headers: HeaderMap) -> ApiResult<Json<serde_js
             let id = Uuid::parse_str(&f.id).unwrap();
             let p = presence_msg(&state, id);
             json!({ "id": f.id, "name": f.name, "look": f.look, "level": f.level, "points": f.points,
-                    "online": p["online"], "where": p["where"] })
+                    "online": p["online"], "where": p["where"], "drop_in": f.drop_in })
         })
         .collect();
+    let drop_in = drop_in(&state.db, me).await.map_err(db_err)?;
     Ok(Json(
-        json!({ "friends": friends, "incoming": incoming, "outgoing": outgoing, "blocked": blocked }),
+        json!({ "friends": friends, "incoming": incoming, "outgoing": outgoing, "blocked": blocked, "drop_in": drop_in }),
     ))
 }
 
@@ -648,8 +650,8 @@ async fn presence(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// May `guest` enter `owner`'s home? Owners, close friends, and friends with a
-/// fresh invitation.
+/// May `guest` enter `owner`'s home? Owners, close friends, and friends: any
+/// time if the owner lets friends drop by (the default), else with a fresh invitation.
 async fn visit_allowed(state: &SocialState, guest: Uuid, owner: Uuid) -> ApiResult<bool> {
     if guest == owner {
         return Ok(true);
@@ -660,9 +662,43 @@ async fn visit_allowed(state: &SocialState, guest: Uuid, owner: Uuid) -> ApiResu
     let level = db::level(&state.db, guest, owner).await.map_err(db_err)?;
     Ok(match level {
         Some(l) if l >= CLOSE_FRIEND => true,
-        Some(l) if l >= FRIEND => state.hub.invited(owner, guest),
+        Some(l) if l >= FRIEND => {
+            state.hub.invited(owner, guest) || drop_in(&state.db, owner).await.map_err(db_err)?
+        }
         _ => false,
     })
+}
+
+/// Whether `owner` lets their friends drop by their home any time.
+async fn drop_in(db: &sqlx::PgPool, owner: Uuid) -> sqlx::Result<bool> {
+    Ok(
+        sqlx::query_scalar("SELECT friends_drop_in FROM players WHERE id = $1")
+            .bind(owner)
+            .fetch_optional(db)
+            .await?
+            .unwrap_or(false),
+    )
+}
+
+#[derive(Deserialize)]
+struct DropInReq {
+    open: bool,
+}
+
+/// Lets your friends drop by your home any time (or only when invited).
+async fn set_drop_in(
+    State(state): S,
+    headers: HeaderMap,
+    Json(req): Json<DropInReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let (me, _) = me(&state, &headers)?;
+    sqlx::query("UPDATE players SET friends_drop_in = $2 WHERE id = $1")
+        .bind(me)
+        .bind(req.open)
+        .execute(&state.db)
+        .await
+        .map_err(db_err)?;
+    Ok(Json(json!({ "open": req.open })))
 }
 
 #[derive(Deserialize)]

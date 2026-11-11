@@ -11,6 +11,7 @@ import { type Application, Container, type Filter, Graphics, Matrix, MeshPlane, 
 import { onSettings } from "../settings";
 import { BOWL_BLOCK, bowlArt, bowlGeom, bowlWallBlock } from "./amphitheatre";
 import { TILE, bakeChunk, decorTexture, hash, newTagTexture, objectTexture } from "./art";
+import type { Relief } from "./skateart";
 import { itemTexture } from "./items";
 import { type MapObject, type ZoneMap, groundAt } from "./map";
 import type { TileXY } from "./motion";
@@ -48,6 +49,8 @@ const LAY_TILES = 1.5;
 const CHUNK_VERTS = 15;
 /** Vertices along each side of a wall box's face. */
 const WALL_VERTS = 3;
+/** A skatepark piece's mesh in 3D: a vertex every this many px of its picture. */
+const RELIEF_STEP = 4;
 /** How much ground (px) one cell of a laid thing's grid spans. */
 const LAY_STEP = 64;
 
@@ -65,6 +68,8 @@ interface Laid {
   rt: RenderTexture | null;
   /** Vertices a side. */
   n: number;
+  /** A solid piece of furniture's side, toward the camera. */
+  side?: Graphics;
 }
 
 /** A transform the 3D view changed for this frame, to put back. */
@@ -83,7 +88,7 @@ const WALL_ABOVE = 1.5;
 const HUD_PX = 72;
 /** Decor drawn flat on the ground. */
 /** Objects that lie flat (people stand on them): the dance floor, the paintball field's markings, pads and bases. */
-const FLAT_OBJECTS = new Set(["dance_floor", "concert_stage", "pb_field", "pb_pad", "pb_spawn", "arena_spikes", "arena_carpet", "arena_bowl", "sk_quarter", "sk_kicker", "sk_box", "sk_stairs", "sk_rail", "sk_paint"]);
+const FLAT_OBJECTS = new Set(["dance_floor", "concert_stage", "pb_field", "pb_pad", "pb_spawn", "arena_spikes", "arena_carpet", "arena_bowl", "sk_quarter", "sk_kicker", "sk_box", "sk_stairs", "sk_rail", "sk_paint", "sk_volcano", "sk_pyramid"]);
 /** Drawn from above and laid on the ground in 3D, though they sort like things standing there. */
 const LAID_OBJECTS = new Set(["arena_gate_w", "arena_gate_e", "goal", "pb_x", "pb_snake", "pb_hedge", "bowling_lane", "pool_table", "roulette_table", "blackjack_table"]);
 /** What's around a map smaller than the screen; indoors in 3D, the dark over the walls. */
@@ -166,7 +171,7 @@ interface Placed {
   y1: number;
   sprite: Sprite | null;
   /** Its art, kept a while after it goes out of range (drawing it again as you walk back is what made the walk hitch). */
-  art: { texture: Texture; overhang: number; left: number } | null;
+  art: { texture: Texture; overhang: number; left: number; relief?: Relief } | null;
   /** When it last went out of range (its art goes first, when too much is kept). */
   hiddenAt: number;
   /** A mall display's item (and its "new" tag), drawn on the stand. */
@@ -235,6 +240,10 @@ export class Scene {
   private haze: Sprite | null = null;
   /** Flat things laid in perspective (3D), and the layers drawn in world coordinates that lie flat. */
   private laid = new Map<Container, Laid>();
+  /** The skatepark's ramps and boxes: where each pixel of their pictures stands (built up in 3D, not laid flat). */
+  private reliefs = new WeakMap<Sprite, Relief>();
+  /** …and the ground row each one's north edge is on (px). */
+  private reliefTop = new WeakMap<Sprite, number>();
   /** The arena bowl's walls, stood up in 3D: each face, where its corners are, and its depth. */
   private bowlFaces: { m: MeshPlane; at: (u: number, v: number) => [number, number, number]; foot: number; n: number }[] | null = null;
   /** The wall tiles stood up as boxes in 3D: their faces (nearest the top of the drawing order last). */
@@ -322,6 +331,10 @@ export class Scene {
     const cut = STANDS_ABOVE[p.o.kind];
     const s = new Sprite(cut ? this.artPart(p, 0, cut) : texture);
     s.position.set(p.o.x * TILE - left, p.o.y * TILE - overhang);
+    if (p.art.relief) {
+      this.reliefs.set(s, p.art.relief);
+      this.reliefTop.set(s, p.o.y * TILE);
+    }
     // The dance floor lies flat: people stand on it, not behind it.
     s.zIndex = FLAT_OBJECTS.has(p.o.kind) ? p.o.y * TILE + 1 : (p.o.y + p.o.h) * TILE - 1;
     if (FLAT_OBJECTS.has(p.o.kind) || LAID_OBJECTS.has(p.o.kind) || fountain) lying.add(s);
@@ -971,6 +984,117 @@ export class Scene {
     c.visible = false;
   }
 
+  /**
+   * A skatepark piece built up in perspective: a mesh over its picture, a
+   * vertex every `RELIEF_STEP` px, each at the ground point its pixel
+   * stands over and raised as high as it stands (as a skater on it is), so
+   * a quarter pipe curves up out of the ground and a box stands on it.
+   */
+  private layRelief(s: Sprite, r: Relief, cam: ReturnType<Scene["camera"]>) {
+    // (Upright furniture: two points across, one at every row's edge down.)
+    const upright = !!r.edgeGy && !!r.edgeZ;
+    const nx = upright ? 2 : Math.ceil(r.w / RELIEF_STEP) + 1;
+    const ny = upright ? r.h + 1 : Math.ceil(r.h / RELIEF_STEP) + 1;
+    const n = nx * 1000 + ny;
+    let l = this.laid.get(s);
+    if (l && (l.texture !== s.texture || l.n !== n)) {
+      l.mesh.destroy();
+      l = undefined;
+    }
+    if (!l) {
+      const mesh = new MeshPlane({ texture: s.texture, verticesX: nx, verticesY: ny });
+      mesh.autoResize = false;
+      l = { mesh, texture: s.texture, rt: null, n };
+      this.laid.set(s, l);
+      this.sorted.addChild(mesh);
+    }
+    const m = l.mesh;
+    m.zIndex = s.zIndex;
+    m.alpha = s.alpha;
+    m.tint = s.tint;
+    m.visible = s.visible;
+    // Its pixels' ground rows count from the piece's north edge (or, a piece
+    // of furniture, from its feet); its left edge, wherever it's anchored.
+    const x0 = s.position.x - s.anchor.x * r.w;
+    const ground0 = this.reliefTop.get(s) ?? s.position.y;
+    const pos = m.geometry.positions;
+    let k = 0;
+    if (upright) {
+      // Square to the camera across (as anything standing is: no shearing,
+      // seen from the side), built up and back down its rows.
+      const cx = x0 + r.w / 2;
+      for (let j = 0; j < ny; j++) {
+        const p = this.project(cx, ground0 + r.edgeGy![j], cam) ?? { ...this.projectMesh(cx, ground0 + r.edgeGy![j], cam), s: cam.z };
+        const y = p.y - r.edgeZ![j] * p.s;
+        pos[k++] = p.x - (r.w / 2) * p.s;
+        pos[k++] = y;
+        pos[k++] = p.x + (r.w / 2) * p.s;
+        pos[k++] = y;
+      }
+      m.geometry.getBuffer("aPosition").update();
+      // A solid piece: its side toward the camera, from its front edge back
+      // to where its top ends (so it's a box, not a front and a lid).
+      if (r.side) {
+        const sd = r.side;
+        const at = (gy: number) => this.project(cx, gy, cam) ?? { ...this.projectMesh(cx, gy, cam), s: cam.z };
+        const f = at(ground0);
+        const b = at(ground0 - sd.d);
+        const left = b.x < f.x;
+        const ex = (left ? sd.x0 : sd.x1) - r.w / 2;
+        const xf = f.x + ex * f.s;
+        const xb = b.x + ex * b.s;
+        let g = l.side;
+        if (!g) {
+          g = new Graphics();
+          this.sorted.addChild(g);
+          // (Drawn where it's seen already: not stood up again as a standing thing.)
+          this.asIs.add(g);
+          l.side = g;
+        }
+        g.clear();
+        g.zIndex = s.zIndex - 0.25;
+        g.visible = s.visible && Math.abs(xb - xf) > 0.6;
+        if (g.visible) {
+          g.poly([xf, f.y, xf, f.y - sd.h * f.s, xb, b.y - sd.h * b.s, xb, b.y])
+            .fill({ color: sd.color })
+            .stroke({ color: 0x2b2233, width: Math.max(1, f.s), alignment: 1 });
+        }
+      }
+      this.save(s);
+      s.visible = false;
+      return;
+    }
+    for (let j = 0; j < ny; j++) {
+      const row = Math.min(r.h - 1, Math.round((j * (r.h - 1)) / (ny - 1)));
+      for (let i = 0; i < nx; i++) {
+        const col = Math.min(r.w - 1, Math.round((i * (r.w - 1)) / (nx - 1)));
+        const at = row * r.w + col;
+        const wx = x0 + (i * r.w) / (nx - 1);
+        const wy = ground0 + r.gy[at];
+        const p = this.project(wx, wy, cam) ?? { ...this.projectMesh(wx, wy, cam), s: cam.z };
+        pos[k++] = p.x;
+        pos[k++] = p.y - r.z[at] * p.s;
+      }
+    }
+    m.geometry.getBuffer("aPosition").update();
+    this.save(s);
+    s.visible = false;
+  }
+
+  /**
+   * Builds `s` up in the 3D view by `r` (each pixel's ground row and height),
+   * its ground rows counted from `ground` (world px); null: stood up flat again.
+   */
+  setRelief(s: Sprite, r: Relief | null, ground = 0) {
+    if (!r) {
+      this.reliefs.delete(s);
+      this.reliefTop.delete(s);
+      return;
+    }
+    this.reliefs.set(s, r);
+    this.reliefTop.set(s, ground);
+  }
+
   /** A flat sprite laid on the ground in perspective. */
   private laySprite(s: Sprite, cam: ReturnType<Scene["camera"]>) {
     const w = s.texture.width * s.scale.x;
@@ -1202,6 +1326,7 @@ export class Scene {
     for (const [c, l] of this.laid) {
       if (c.destroyed || !c.parent) {
         l.mesh.destroy();
+        l.side?.destroy();
         l.rt?.destroy(true);
         this.laid.delete(c);
       }
@@ -1266,6 +1391,7 @@ export class Scene {
       if (c instanceof MeshPlane || this.asIs.has(c)) continue;
       if (this.flatLayers.has(c)) this.layFlat(c, cam);
       else if (c instanceof Sprite && standingWalls.has(c)) this.standWall(c, cam);
+      else if (c instanceof Sprite && this.reliefs.has(c)) this.layRelief(c, this.reliefs.get(c)!, cam);
       else if (lying.has(c) && c instanceof Sprite && (Math.abs(c.width) > LAY_TILES * TILE || Math.abs(c.height) > LAY_TILES * TILE)) this.laySprite(c, cam);
       else if (c.zIndex === 0 && c.position.x === 0 && c.position.y === 0) this.placeWhole(c, cam);
       else if (lying.has(c)) this.place(c, c.position.y, true, cam);
@@ -1320,7 +1446,10 @@ export class Scene {
       s.c.visible = s.visible;
     }
     this.saved.length = 0;
-    for (const l of this.laid.values()) l.mesh.visible = false;
+    for (const l of this.laid.values()) {
+      l.mesh.visible = false;
+      if (l.side) l.side.visible = false;
+    }
     for (const box of this.wallBoxes.values()) for (const m of box) m.visible = false;
     for (const f of this.bowlFaces ?? []) f.m.visible = false;
     this.world.position.set(this.worldAt.x, this.worldAt.y);

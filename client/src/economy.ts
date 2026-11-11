@@ -65,13 +65,22 @@ export class Economy {
 
   constructor(private auth: Auth) {}
 
+  /** Some of your fish went off (`n` of them, now Rotten Fish). */
+  onWentOff: ((n: number) => void) | null = null;
+
+  /** The API, for the panels that talk to it directly (the fridge). */
+  get api(): Auth {
+    return this.auth;
+  }
+
   /**
-   * Testing: a wish at the wishing well grants 10,000 coins (dev servers
-   * only; elsewhere there's no such thing). Whether it did.
+   * Testing: a tap on the wishing well; five quick taps grant 10,000 coins
+   * (dev servers only; elsewhere there's no such thing). Whether this one did.
    */
   async devWish(): Promise<boolean> {
     try {
-      await this.auth.send("/api/dev/well", {});
+      const r = await this.auth.send<{ granted: boolean }>("/api/dev/well", {});
+      if (!r.granted) return false;
     } catch {
       return false;
     }
@@ -82,8 +91,10 @@ export class Economy {
   async load() {
     const [cat, inv] = await Promise.all([
       this.auth.get<{ items: Item[] }>("/api/catalog"),
-      this.auth.get<{ items: { item: number; qty: number }[] }>("/api/inventory"),
+      this.auth.get<{ items: { item: number; qty: number }[]; went_off?: number }>("/api/inventory"),
     ]);
+    // Fish a week out of a fridge have gone off since we last looked.
+    if (inv.went_off) this.onWentOff?.(inv.went_off);
     for (const it of cat.items) {
       this.items.set(it.id, it);
       if (it.meta.code) COSMETIC_CODES.set(it.key, it.meta.code);

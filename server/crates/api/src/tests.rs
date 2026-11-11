@@ -3080,9 +3080,16 @@ mod devtools {
             }
         };
         let before = coins().await;
+        // One tap, or four: nothing. Five quick taps: a wish granted.
+        for _ in 0..4 {
+            assert_eq!(wish(s.clone()).await, StatusCode::OK);
+        }
+        assert_eq!(coins().await, before, "not till the fifth tap");
         assert_eq!(wish(s.clone()).await, StatusCode::OK);
-        assert_eq!(wish(s.clone()).await, StatusCode::OK, "every wish counts");
-        assert_eq!(coins().await, before + 2 * crate::devtools::WELL_COINS);
+        assert_eq!(coins().await, before + crate::devtools::WELL_COINS);
+        // And it starts counting again.
+        assert_eq!(wish(s.clone()).await, StatusCode::OK);
+        assert_eq!(coins().await, before + crate::devtools::WELL_COINS);
         // A real server: no such thing.
         let real = Arc::new(AppState {
             secret: s.secret.clone(),
@@ -3095,7 +3102,7 @@ mod devtools {
             mailer: None,
         });
         assert_eq!(wish(real).await, StatusCode::NOT_FOUND);
-        assert_eq!(coins().await, before + 2 * crate::devtools::WELL_COINS);
+        assert_eq!(coins().await, before + crate::devtools::WELL_COINS);
     }
 }
 
@@ -3497,6 +3504,73 @@ mod home_life {
     }
 
     #[tokio::test]
+    async fn a_light_left_on_is_on_when_you_come_back() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let p = player(&s).await;
+        let owner = p.to_string();
+        lease(&s, p).await;
+        let lamp = s.catalog.by_key("floor_lamp").unwrap().id;
+        give(
+            &s,
+            p,
+            &[Op {
+                item: lamp,
+                delta: 1,
+            }],
+        )
+        .await;
+        let (st, r) = call(
+            &s,
+            "/home/place",
+            json!({ "owner": owner, "item": lamp, "x": 5, "y": 4, "key": format!("{p}:lamp") }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let (st, r) = call(
+            &s,
+            "/home/light",
+            json!({ "owner": owner, "x": 5, "y": 4, "on": true }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        // Back later: the home's pieces load with it still on.
+        let req = Request::get(format!("/home/{owner}/objects"))
+            .header(
+                "authorization",
+                format!(
+                    "Bearer {}",
+                    token::sign(&s.secret, &ServiceClaims { svc: "test".into() }, 60)
+                ),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = internal::routes()
+            .with_state(s.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let objects: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(objects[0]["on"], true, "{objects}");
+        // And off again, off.
+        call(
+            &s,
+            "/home/light",
+            json!({ "owner": owner, "x": 5, "y": 4, "on": false }),
+        )
+        .await;
+        let lit: bool = sqlx::query_scalar("SELECT lit FROM home_objects WHERE owner_id = $1")
+            .bind(p)
+            .fetch_one(&s.db)
+            .await
+            .unwrap();
+        assert!(!lit);
+    }
+
+    #[tokio::test]
     async fn shelves_show_anything_and_fish_get_fed() {
         let Some(db) = db().await else { return };
         let s = state(db.clone(), 1000).await;
@@ -3508,14 +3582,15 @@ mod home_life {
         let ops =
             [(444, 2), (shelf, 1), (100, 1), (food, 1)].map(|(item, delta)| Op { item, delta });
         give(&s, p, &ops).await;
-        let (st, r) = call(&s, "/home/place", json!({ "owner": owner, "item": shelf, "x": 3, "y": 3, "rot": 1, "key": format!("{p}:s") })).await;
+        let (st, r) = call(&s, "/home/place", json!({ "owner": owner, "item": shelf, "x": 3, "y": 3, "rot": 1 | 4 | 8, "key": format!("{p}:s") })).await;
         assert_eq!(st, StatusCode::OK, "{r}");
+        // Facing right, and half a tile right and down: all of it kept.
         let rot: i16 = sqlx::query_scalar("SELECT rot FROM home_objects WHERE owner_id = $1")
             .bind(p)
             .fetch_one(&s.db)
             .await
             .unwrap();
-        assert_eq!(rot, 1);
+        assert_eq!(rot, 13);
         // A bowl on a shelf; never money.
         let (st, r) = call(
             &s,
@@ -3566,10 +3641,9 @@ mod home_life {
             json!({ "owner": owner, "x": 4, "y": 3, "key": format!("{p}:eat2") }),
         )
         .await;
-        assert_eq!(
-            (st, r["error"].as_str()),
-            (StatusCode::CONFLICT, Some("not_enough_items"))
-        );
+        // Fish food is free: feeding again takes nothing from the bag.
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["applied"]["totals"], json!([]));
     }
 
     #[tokio::test]
@@ -3661,6 +3735,94 @@ mod home_life {
     }
 
     #[tokio::test]
+    async fn fish_go_off_in_a_week_but_keep_in_the_fridge() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = Router::new()
+            .nest("/api", crate::fridge::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Fisher");
+        let fish = s.catalog.of_kind("fish").next().unwrap().id;
+        let rotten = s.catalog.by_key("rotten_fish").unwrap().id;
+        give(
+            &s,
+            p,
+            &[Op {
+                item: fish,
+                delta: 5,
+            }],
+        )
+        .await;
+        // No fridge yet: nowhere to put them.
+        let put = |qty: i32, key: &str| json!({ "item": fish, "qty": qty, "key": key });
+        let (st, r) = api(&app, &auth, "POST", "/api/fridge/put", put(2, "a")).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("no_fridge"))
+        );
+        lease(&s, p).await;
+        let fridge = s.catalog.by_key("mini_fridge").unwrap().id;
+        sqlx::query("INSERT INTO home_objects (owner_id, x, y, item_id) VALUES ($1, 2, 2, $2)")
+            .bind(p)
+            .bind(fridge)
+            .execute(&s.db)
+            .await
+            .unwrap();
+        let (st, r) = api(&app, &auth, "POST", "/api/fridge/put", put(2, "a")).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["fish"], json!([{ "item": fish, "qty": 2 }]));
+        // The same press again: put in once.
+        let (_, r) = api(&app, &auth, "POST", "/api/fridge/put", put(2, "a")).await;
+        assert_eq!(r["fish"], json!([{ "item": fish, "qty": 2 }]));
+        // Eight days on: the three in the bag have gone off; the fridge's haven't.
+        sqlx::query("UPDATE fish_lots SET since = now() - interval '8 days' WHERE player_id = $1")
+            .bind(p)
+            .execute(&s.db)
+            .await
+            .unwrap();
+        let (st, r) = api(&app, &auth, "GET", "/api/fridge", json!({})).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["went_off"], 3);
+        assert_eq!(r["room"], crate::fridge::PER_FRIDGE);
+        let mut conn = s.db.acquire().await.unwrap();
+        let have = crate::economy::totals(&mut conn, p, &[fish, rotten])
+            .await
+            .unwrap();
+        assert_eq!(have, vec![(fish, 0), (rotten, 3)]);
+        // Out of the fridge: a fresh week from now.
+        let (st, r) = api(&app, &auth, "POST", "/api/fridge/take", put(2, "b")).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["fish"], json!([]));
+        let (_, r) = api(&app, &auth, "GET", "/api/fridge", json!({})).await;
+        assert_eq!(r["went_off"], 0);
+        let have = crate::economy::totals(&mut conn, p, &[fish]).await.unwrap();
+        assert_eq!(have, vec![(fish, 2)]);
+        // Only so much room.
+        // (A second lot of the same fish: its own key, not a repeat of the first.)
+        apply_tx(
+            &s.db,
+            &s.catalog,
+            p,
+            &[Op {
+                item: fish,
+                delta: 60,
+            }],
+            "test",
+            &format!("{p}:more"),
+        )
+        .await
+        .unwrap();
+        let (st, r) = api(&app, &auth, "POST", "/api/fridge/put", put(50, "c")).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let (st, r) = api(&app, &auth, "POST", "/api/fridge/put", put(1, "d")).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("fridge_full"))
+        );
+    }
+
+    #[tokio::test]
     async fn a_drone_charges_its_fee_and_leaves_a_parcel() {
         let Some(db) = db().await else { return };
         let s = state(db.clone(), 1000).await;
@@ -3669,7 +3831,8 @@ mod home_life {
             .with_state(s.clone());
         let p = player(&s).await;
         let auth = bearer_for(&s, p, "Orderer");
-        let food = s.catalog.by_key("fish_food").unwrap();
+        // (Something the market sells: what's ordered.)
+        let food = s.catalog.by_key("planter_pot").unwrap();
         let price = food.buy().unwrap() as i32;
         give(
             &s,

@@ -230,6 +230,22 @@ export function drawHomeLife(ctx: CanvasRenderingContext2D, key: string, meta?: 
     case "round_pond":
       ctx.drawImage(pondCanvas(), 0, 0, 32, 32);
       return true;
+    case "pool_table": {
+      // The table from a little above: a wooden frame, green cloth, pockets, the rack and the cue ball.
+      px(ctx, "rgba(0,0,0,0.2)", 3, 25, 26, 3);
+      px(ctx, O, 1, 7, 30, 19);
+      px(ctx, "#7d5232", 2, 8, 28, 17);
+      px(ctx, O, 5, 11, 22, 11);
+      px(ctx, "#2f7a4f", 6, 12, 20, 9);
+      for (const [x, y] of [[5, 11], [15, 10], [25, 11], [5, 20], [15, 21], [25, 20]] as [number, number][]) px(ctx, "#1d1d1d", x, y, 2, 2);
+      px(ctx, "#f6c343", 19, 14, 2, 2);
+      px(ctx, "#c8553d", 21, 15, 2, 2);
+      px(ctx, "#3f6fa0", 19, 17, 2, 2);
+      px(ctx, "#fff8e3", 10, 16, 2, 2);
+      px(ctx, O, 4, 26, 3, 3);
+      px(ctx, O, 25, 26, 3, 3);
+      return true;
+    }
     case "shovel":
       px(ctx, O, 21, 2, 8, 4);
       px(ctx, "#c8a06a", 22, 3, 6, 2);
@@ -284,6 +300,54 @@ export function drawHomeLife(ctx: CanvasRenderingContext2D, key: string, meta?: 
       px(ctx, "#5f3d22", 6, 17, 20, 11);
       px(ctx, "#a97545", 6, 15, 20, 2);
       px(ctx, "#a97545", 4, 2, 24, 1);
+      return true;
+    case "mini_fridge":
+      // A rounded retro mini fridge in mint: a freezer door over the main one, chrome handles, a magnet, a little green light.
+      px(ctx, "rgba(0,0,0,0.2)", 7, 29, 19, 2);
+      px(ctx, O, 7, 4, 18, 26);
+      px(ctx, O, 8, 3, 16, 1);
+      px(ctx, "#8fd8c4", 8, 4, 16, 25);
+      px(ctx, "#b4ecdc", 8, 4, 16, 2);
+      px(ctx, "#b4ecdc", 9, 6, 1, 21);
+      px(ctx, "#6ab8a4", 22, 6, 2, 22);
+      // The freezer's seam, the main door's seam.
+      px(ctx, O, 8, 11, 16, 1);
+      px(ctx, "#6ab8a4", 8, 12, 16, 1);
+      // Chrome handles.
+      px(ctx, O, 19, 6, 3, 4);
+      px(ctx, "#e8eef4", 20, 7, 1, 2);
+      px(ctx, O, 19, 14, 3, 8);
+      px(ctx, "#e8eef4", 20, 15, 1, 6);
+      px(ctx, "#9aa4ae", 20, 20, 1, 1);
+      // A fish magnet, a note under it.
+      px(ctx, "#f8f0e0", 11, 15, 5, 6);
+      px(ctx, "#e8566b", 12, 14, 3, 2);
+      px(ctx, "#4f86d8", 11, 22, 4, 2);
+      px(ctx, "#4f86d8", 15, 22, 1, 1);
+      // The light: on, keeping cold.
+      px(ctx, "#5aff8a", 12, 8, 1, 1);
+      // Its little feet.
+      px(ctx, O, 9, 29, 3, 2);
+      px(ctx, O, 20, 29, 3, 2);
+      return true;
+    case "rotten_fish":
+      // A fish gone off: grey-green, an X for an eye, its bones showing, a stink rising off it.
+      px(ctx, O, 5, 15, 18, 9);
+      px(ctx, O, 3, 17, 2, 5);
+      px(ctx, "#8a9a6a", 6, 16, 16, 7);
+      px(ctx, "#6a7a4a", 6, 21, 16, 2);
+      px(ctx, O, 22, 14, 6, 4);
+      px(ctx, O, 22, 21, 6, 4);
+      px(ctx, "#7a8a5a", 23, 15, 4, 2);
+      px(ctx, "#7a8a5a", 23, 22, 4, 2);
+      px(ctx, O, 7, 17, 1, 1);
+      px(ctx, O, 9, 17, 1, 1);
+      px(ctx, O, 8, 18, 1, 1);
+      px(ctx, O, 7, 19, 1, 1);
+      px(ctx, O, 9, 19, 1, 1);
+      for (const x of [12, 15, 18]) px(ctx, "#e8e4cc", x, 17, 1, 4);
+      px(ctx, "#e8e4cc", 11, 19, 9, 1);
+      for (const [x, y] of [[9, 9], [10, 7], [9, 5], [15, 10], [16, 8], [15, 6], [21, 9], [22, 7]] as [number, number][]) px(ctx, "#9ab85a", x, y, 1, 2);
       return true;
     case "fish_food":
       px(ctx, O, 8, 6, 16, 24);

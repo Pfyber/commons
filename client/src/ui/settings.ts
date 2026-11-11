@@ -94,7 +94,7 @@ export class SettingsPanel extends Panel {
     // ---- experimental ----
     this.body.append(el("h4", "set-head", "🧪 Experimental"));
     this.body.append(el("p", "hint", "Still being worked on, and heavy: turn them off if the game slows down."));
-    toggle("Advanced shaders (soft shadows from the sun and lamps)", "shaders");
+    toggle("Advanced shaders (soft shadows from the sun and lamps; indoors, living firelight and shadows from your lights)", "shaders");
     toggle("Water reflections", "reflections");
     // ---- keys ----
     this.body.append(el("h4", "set-head", "⌨️ Keys"));
