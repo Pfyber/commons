@@ -33,7 +33,7 @@ export interface Dm {
 export interface Notification {
   id: number;
   kind: "friend_request" | "friend_accepted" | "gift" | "home_invite" | "close_friend" | string;
-  body: { from_id?: string; from_name?: string; item?: number; item_name?: string; qty?: number; club?: string; club_id?: string; crest?: string };
+  body: { from_id?: string; from_name?: string; item?: number; item_name?: string; qty?: number; club?: string; club_id?: string; crest?: string; title?: string; where?: string; spot?: string; soon?: number };
   at: number;
   read: boolean;
 }
@@ -274,6 +274,14 @@ export class Social {
 export function describe(n: Notification): string {
   const who = n.body.from_name ?? "Someone";
   switch (n.kind) {
+    case "knock":
+      return `🚪 ${who} is knocking at your door`;
+    case "parcel":
+      return "📦 Your drone delivery has landed on your doorstep!";
+    case "gathering":
+      return n.body.soon ? `🌆 ${n.body.title} starts in ${n.body.soon} min, at ${n.body.where}` : `🌆 ${n.body.title} has begun, at ${n.body.where}. Come along!`;
+    case "town_vote":
+      return `🗳 ${n.body.title}: visit the Town Hall to have your say`;
     case "friend_request":
       return `${who} would like to be friends`;
     case "friend_accepted":

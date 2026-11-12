@@ -1022,6 +1022,9 @@ export class ArenaShow {
     return { x: w.x / TILE - this.ox, y: w.y / TILE - this.oy };
   }
 
+  /** Down for the round: where the camera's got to on its way to the middle of the sand. */
+  private downCam: { x: number; y: number } | null = null;
+
   /** Where the camera looks: a little toward the aim, shaking on big blows. */
   camera(pos: { x: number; y: number }): { x: number; y: number } {
     // Watching from the stands: gliding over to the fight.
@@ -1035,8 +1038,23 @@ export class ArenaShow {
     }
     if (!this.capturing) return pos;
     // In the parade: just ahead of us, the way we're walking.
-    if (this.state?.status === OVER) return { x: pos.x, y: pos.y + 1 };
+    if (this.state?.status === OVER) {
+      this.downCam = null;
+      return { x: pos.x, y: pos.y + 1 };
+    }
     const t = performance.now();
+    // Down for the round: the camera glides off our body to the middle of the sand (till the next round).
+    const me = this.mine();
+    if (me && me.flags & FLAG.DOWN) {
+      const a = this.arenaObj;
+      const mid = { x: a.x + a.w / 2 - 0.5, y: a.y + a.h / 2 - 0.5 };
+      const c = (this.downCam ??= { x: pos.x + this.camLead.x, y: pos.y + this.camLead.y });
+      c.x += (mid.x - c.x) * 0.06;
+      c.y += (mid.y - c.y) * 0.06;
+      if (this.shake <= 0) return c;
+      return { x: c.x + (Math.sin(t / 29) + Math.sin(t / 17.3)) * 0.2 * this.shake, y: c.y + (Math.sin(t / 23) + Math.sin(t / 13.7)) * 0.2 * this.shake };
+    }
+    this.downCam = null;
     const sx = this.shake > 0 ? (Math.sin(t / 29) + Math.sin(t / 17.3)) * 0.27 * this.shake : 0;
     const sy = this.shake > 0 ? (Math.sin(t / 23) + Math.sin(t / 13.7)) * 0.27 * this.shake : 0;
     return { x: pos.x + this.camLead.x + sx, y: pos.y + this.camLead.y + sy };
@@ -2181,11 +2199,20 @@ export class ArenaShow {
     const dt = Math.min(0.05, (wallNow - this.lastFrame) / 1000);
     this.lastFrame = wallNow;
     this.fx.clear();
-    this.drawFires(wallNow, dt);
-    this.drawCaesar(wallNow);
-    this.drawGates(dt);
+    // The amphitheatre's scenery (its fires, Caesar, the gates, the crowd)
+    // is only drawn while any of it's in view: off the screen, nobody sees it
+    // move, and it picks up where it is when it's back.
+    const v = this.scene.viewRect();
+    const ao = this.arenaObj;
+    const M = 16;
+    const inView = this.capturing || this.watching || (ao.x + ao.w + M > v.x0 && ao.x - M < v.x1 && ao.y + ao.h + M > v.y0 && ao.y - M < v.y1);
+    if (inView) {
+      this.drawFires(wallNow, dt);
+      this.drawCaesar(wallNow);
+      this.drawGates(dt);
+    }
     this.hype *= Math.exp(-dt * 0.6);
-    this.drawCrowd(wallNow);
+    if (inView) this.drawCrowd(wallNow);
     this.updateWatch();
     const s = this.state;
     const live = !!s && s.status !== LOBBY;
@@ -2287,7 +2314,12 @@ export class ArenaShow {
         avatar.setArena({ x: t.x, y: t.y, facing: face, frame: pose.frame, walking: moving && pose.frame === null && !(f.flags & FLAG.DOWN), hurt: pose.hurt, lean: pose.lean, lift: pose.lift, hide: isGiant(f), height: isGiant(f) ? GOLIATH_HEIGHT + 24 : undefined, tint: f.flags & FLAG.FURY ? furyTint(performance.now()) : undefined });
         avatar.setFade(f.flags & FLAG.DOWN ? 0.7 : 1);
         this.posed.add(f.id);
-        this.drawGear(f, pos, since, serverNow, avatar, pose, moving);
+        // (Their gear, ring and glow: drawn while the ring's in view.)
+        if (inView) this.drawGear(f, pos, since, serverNow, avatar, pose, moving);
+        else {
+          const gg = this.gear.get(f.id);
+          if (gg?.visible) gg.visible = false;
+        }
       }
     }
     for (const id of [...this.posed]) {
@@ -2324,7 +2356,7 @@ export class ArenaShow {
       this.wasWinded = pw;
     }
     this.flyMissiles(dt);
-    this.drawArena(s, serverNow, wallNow);
+    if (inView) this.drawArena(s, serverNow, wallNow);
     this.drawFx(wallNow, dt, s, serverNow);
     this.drawParade(s, serverNow, wallNow, dt);
     this.updateHud(serverNow);
@@ -2627,6 +2659,7 @@ export class ArenaShow {
       this.gear.set(f.id, g);
     }
     g.clear();
+    if (!g.visible) g.visible = true;
     const slot = this.slotOf(f.id);
     const color = this.colorOf(slot);
     const fx = this.wx(pos.x);

@@ -76,6 +76,7 @@ import type { Hud } from "./ui/hud";
 import type { DirectoryPanel, ShopPanel } from "./ui/mall";
 import type { Minimap } from "./ui/minimap";
 import type { FridgePanel } from "./ui/fridge";
+import type { DailyPanel } from "./ui/daily";
 import { type ActionMenu, type BagPanel, FishermanPanel, GOLD_LURE_ITEM, GOLD_MAGNET_LURE_ITEM, LURE_ITEM, MAGNET_ITEM, MAGNET_LURE_ITEM, type MarketPanel, Panel, ROD_ITEM, type PlaceBanner, type PlotMenu, type ReelGame, isTyping } from "./ui/panels";
 import { Avatar, CAST_SWING_MS, PUMP_MS } from "./world/avatars";
 import { Furniture } from "./world/furniture";
@@ -173,6 +174,7 @@ export interface Ui {
   net: NetGame;
   market: MarketPanel;
   fridge: FridgePanel;
+  daily: DailyPanel;
   plot: PlotMenu;
   reel: ReelGame;
   salvage: SalvageGame;
@@ -312,6 +314,8 @@ const DOORSTEP: TileXY[] = [
 const MARKERS = new Set(["spot", "dept", "nook", "grove_slot"]);
 /** Objects whose art reaches only a tile above them (rows of bookcases, an aisle apart). */
 const LOW_REACH = new Set(["bookcase", "stack_sign"]);
+/** Map objects that are ground to ride over, not things to tap (a yard, the arena's bowl and carpet, paintball's spawns). */
+const OPEN_AREAS = new Set(["arena", "yard", "arena_bowl", "arena_carpet", "pb_spawn"]);
 
 const cheb = (a: TileXY, b: TileXY) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const SITTING = 1;
@@ -649,6 +653,8 @@ export class Game {
       onVisit(owner: string): void;
       /** Watch the arena on a TV (`owner`: whose home the TV's in, to come back to), or (null) stop and go back. */
       onWatch(owner: string | null, stop?: boolean): void;
+      /** Something to pop up a notification for (a parcel landed…), seen only here. */
+      onNote?(kind: string, body: Record<string, unknown>): void;
     },
   ) {
     this.hud = ui.hud;
@@ -676,6 +682,8 @@ export class Game {
       const from = spot(map, "mall") ?? { x: 0, y: 0 };
       const doorOf = (plot: string) => spot(map, plot.startsWith("apt:") ? "apartments" : `door:${plot}`);
       this.drones = new Drones(this.scene, ui.life, from, () => (mine ? doorOf(mine) : null), (text) => this.hud.toast(text, 4000), doorOf);
+      // Your parcel's landed: a notification pops up (with a chime), as a knock at the door does.
+      if (this.events.onNote) this.drones.onLanded = () => this.events.onNote?.("parcel", {});
     }
     this.furniture = new Furniture(map);
     const screenObj = map.objects.find((o) => o.kind === "big_screen");
@@ -928,7 +936,11 @@ export class Game {
         (id) => this.avatars.get(id),
         (id) => this.avatars.get(id)?.info.name ?? "someone",
         () => this.socket?.clock.now() ?? 0,
-        (m) => this.socket?.send(m),
+        (m) => {
+          // (Into the games: on foot, off your board or ride, at once.)
+          if (m.t === "ArenaJoin" || m.t === "ArenaStart") this.leaveRide();
+          this.socket?.send(m);
+        },
         (x, y) => this.daynight.addGlow(x, y, 3.4, 2.9, 0xff6a20, 0.55),
         () => this.avatars.values(),
       );
@@ -961,11 +973,8 @@ export class Game {
           const self = this.self;
           if (!self || !walkable(map, tx, ty)) return false;
           this.leftParkAt = performance.now();
+          // (Off the board onto the tile you're on, drawn on from where you were: no jump.)
           this.skate?.stop();
-          // Onto the tile the server has you on, drawn on from where you were (no jump).
-          const was = self.pos;
-          // (The tile under your feet, as the server reckons it from where your board was.)
-          self.snapSoft({ x: Math.floor(was.x + 0.5), y: Math.floor(was.y + 0.875) });
           // (Your everyday board is already under you: put there as you started skating.)
           const rides = this.ui.rides;
           const board = rides.owned().find((v) => v.meta.code === SKATEBOARD);
@@ -987,7 +996,7 @@ export class Game {
         this.trainer = new SkateTrainer(this.scene, labels, (mode) => {
           const self = this.self;
           if (!self) return false;
-          if (skate.capturing || skate.inPark(self.pos.x, self.pos.y)) {
+          if ((skate.capturing && !skate.street) || skate.inPark(self.pos.x, self.pos.y)) {
             skate.start(mode);
             return skate.capturing;
           }
@@ -997,10 +1006,23 @@ export class Game {
           return true;
         });
         skate.watch = (e, me) => this.trainer?.watch(e, me);
+        // Today's skate quests, for the daily missions.
+        ui.daily.skateQuests = () => skate.quests.today();
+        // Off your board out on the streets: off your everyday board too (walking).
+        skate.onStreetOff = () => void this.rideOn(null, true);
       }
       this.skateShopPanel = new SkateShopPanel(ui.eco, () => skate.board, (k) => skate.setKit(k), skate.quests, (day, slot) => this.socket?.send({ t: "SkateQuest", day, slot }));
       const panel = this.skateShopPanel;
-      skate.questsChanged = () => panel.open && panel.render();
+      skate.questsChanged = () => {
+        if (panel.open) panel.render();
+        if (ui.daily.open) void ui.daily.refresh();
+      };
+      // Claimed from the daily missions too, anywhere in the city (not just at the van).
+      const claimSkate = (slot: number) => this.socket?.send({ t: "SkateQuest", day: skate.quests.day, slot });
+      ui.daily.claimSkate = claimSkate;
+      this.disposers.push(() => {
+        if (ui.daily.claimSkate === claimSkate) ui.daily.claimSkate = null;
+      });
     }
     if (map.objects.some((o) => o.kind === "pb_field")) {
       this.paintball = new PaintballShow(
@@ -1012,7 +1034,11 @@ export class Game {
         (id) => this.avatars.get(id),
         (id) => this.avatars.get(id)?.info.name ?? "someone",
         () => this.socket?.clock.now() ?? 0,
-        (m) => this.socket?.send(m),
+        (m) => {
+          // (Into a match: on foot, off your board or ride, at once.)
+          if (m.t === "PbJoin") this.leaveRide();
+          this.socket?.send(m);
+        },
       );
     }
     const shoes = map.objects.find((o) => o.kind === "shoe_counter");
@@ -1265,7 +1291,11 @@ export class Game {
     if (!p?.anchor || !self) return;
     const a = p.anchor;
     const here = { x: Math.round(self.pos.x), y: Math.round(self.pos.y) };
-    if (cheb(self.destination, a) > a.range && cheb(here, a) > a.range) p.hide();
+    // On your board: where it's headed (it doesn't walk to a destination).
+    const dest = this.skate?.street ? (this.boardDest ?? here) : self.destination;
+    // (Opened from further off: open till you go further off than that.)
+    a.reach ??= Math.max(a.range, Math.min(cheb(here, a), cheb(dest, a)));
+    if (cheb(dest, a) > a.reach && cheb(here, a) > a.reach) p.hide();
   }
 
   /** A house's door: yours (go in), someone's (knock), or free (move in). */
@@ -1273,7 +1303,7 @@ export class Game {
     const self = this.self;
     const door = spot(this.scene.map, `door:${lot}`);
     if (!self || !door) return;
-    if (cheb(self.destination, door) > 3) this.moveTo(door, true);
+    if (cheb(this.standing ?? self.destination, door) > 3) this.moveTo(door, true);
     const homes = this.ui.homes;
     const r = homes.resident(lot);
     const menu = this.near(this.ui.menu, door, 6);
@@ -1345,13 +1375,164 @@ export class Game {
     if (!t.hit(w.x / TILE, w.y / TILE)) return false;
     const at = { x: Math.round(t.pos.x), y: Math.round(t.pos.y) };
     const self = this.self;
-    if (self && cheb(self.destination, at) > 2) {
+    if (self && cheb(this.standing ?? self.destination, at) > 2) {
       const spot = nearestWalkable(this.scene.map, at.x - 1, at.y, 2);
       if (spot) this.moveTo(spot, true);
     }
     t.greet();
     this.near(t.panel, at, 7).show();
     return true;
+  }
+
+  /**
+   * Off your board and whatever you ride, on foot: for a game that needs you
+   * walking (a fight in the arena, the Splat Yard, the bowling). Quiet, and
+   * safe to call any time (nothing to get off: nothing happens).
+   */
+  leaveRide() {
+    this.boardGoal = null;
+    if (this.skate?.capturing) this.skate.stop();
+    if (this.ui.rides.riding && !this.dismounting) void this.rideOn(null, true);
+  }
+
+  /**
+   * Each frame: in a game (the arena, the Splat Yard, the bowling), off any
+   * board or ride; doing something on the spot (fishing, sitting) or in a
+   * rowboat, off the board's physics (your board waits under you, and you're back on it after).
+   */
+  private offRideForGames() {
+    const self = this.self;
+    if (this.inAGame()) {
+      if (this.skate?.capturing || this.ui.rides.riding) this.leaveRide();
+      return;
+    }
+    if (this.skate?.street && ((self && self.state !== 0) || this.boat)) {
+      this.boardGoal = null;
+      this.skate.stop();
+    }
+  }
+
+  /** A game that has you now (fighting, playing paintball, bowling): no board, no ride. */
+  private inAGame(): boolean {
+    return !!this.arena?.capturing || !!this.paintball?.capturing || this.bowlingNow();
+  }
+
+  /** Riding your board somewhere (a tap's walk-up, a door): where to, and what then, once there. */
+  private boardGoal: { t: TileXY; then?: () => void; at: number } | null = null;
+  /** Where your board was last sent (a tap's walk-up, or the ground tapped): a menu by it stays open. */
+  private boardDest: TileXY | null = null;
+  /** Getting off your board just now (its ride put away): not straight back on it. */
+  private dismounting = false;
+
+  /** On your everyday skateboard, in the city: it's always the board's own riding (the park's physics). */
+  private get onBoard(): boolean {
+    return !!this.skate && this.zoneId === "city" && this.ui.rides.riding && this.ui.rides.ride === SKATEBOARD;
+  }
+
+  /**
+   * Where you are, for going somewhere: on your board, the tile you're riding
+   * over; else where you're walking to.
+   */
+  private get standing(): TileXY | null {
+    const self = this.self;
+    if (!self) return null;
+    if (this.skate?.street) return { x: Math.floor(self.pos.x + 0.5), y: Math.floor(self.pos.y + 0.875) };
+    return self.destination;
+  }
+
+  /** On your board: onto its physics (if not on already), from where you are, toward `toward` (world px). */
+  private boardOn(toward?: { x: number; y: number }): boolean {
+    const sk = this.skate;
+    const self = this.self;
+    if (!sk || !self) return false;
+    if (sk.capturing) return sk.street;
+    // (The zone's to know you're on it first, or it won't have you skating out here.)
+    if (self.info.vehicle !== SKATEBOARD) return false;
+    const m = self.currentMotion;
+    const rolling = m && this.socket ? speedAt(m, this.socket.clock.now()) : 0;
+    const fx = self.pos.x * TILE + TILE / 2;
+    const fy = self.pos.y * TILE + TILE - 4;
+    const heading = toward ? Math.atan2(toward.y - fy, toward.x - fx) : Math.PI / 2;
+    sk.startStreet(heading, (rolling / 10) * TILE, []);
+    return sk.street;
+  }
+
+  /** On your board, ride to tile `t` (and `then`, once there): false if the board can't (walk there as ever). */
+  private boardTo(t: TileXY, then?: () => void): boolean {
+    const w = { x: t.x * TILE + TILE / 2, y: t.y * TILE + TILE - 4 };
+    if (!this.boardOn(w)) return false;
+    this.skate!.steerTo(w.x, w.y);
+    this.boardGoal = { t, then, at: performance.now() };
+    this.boardDest = t;
+    return true;
+  }
+
+  /** Got where your board was headed (or as near as it'll get): what was to happen there, does. */
+  private boardArrive() {
+    const g = this.boardGoal;
+    const sk = this.skate;
+    const self = this.self;
+    if (!g) return;
+    if (!sk?.street || !self || performance.now() - g.at > 20_000) {
+      this.boardGoal = null;
+      return;
+    }
+    const d = Math.hypot(self.pos.x - g.t.x, self.pos.y - g.t.y);
+    const settled = !sk.aiming && sk.speed < 12;
+    if (d > 0.9 && !(settled && d < 2.5)) {
+      // (Stopped short of it, a way off: given up on.)
+      if (settled && !sk.aiming && sk.speed < 1) this.boardGoal = null;
+      return;
+    }
+    this.boardGoal = null;
+    g.then?.();
+  }
+
+  /**
+   * Your everyday board, under you in the city: always ridden as the park's
+   * board (its physics, your deck, your trail), standing still too; never the
+   * old tile-by-tile ride. Not while you're sat down, or getting off it.
+   */
+  private boardAlways() {
+    const sk = this.skate;
+    const self = this.self;
+    if (!sk || !self || sk.capturing || !this.onBoard || this.dismounting || this.place.watch || this.boat) return;
+    // (Sitting, fishing, anything but standing about; or in a game: it waits.)
+    if (self.state !== 0 || self.moving || this.inAGame() || performance.now() - sk.stoppedAt < 900) return;
+    this.boardOn();
+  }
+
+  /**
+   * The open ground (a tile) under screen point (sx, sy): somewhere just to
+   * ride to, nothing and nobody there to tap on (no one, no door or sign,
+   * none of your things, no water). Null if there's something there.
+   */
+  private openGround(sx: number, sy: number): TileXY | null {
+    const map = this.scene.map;
+    const w = this.scene.screenToWorld(sx, sy);
+    const x = w.x / TILE;
+    const y = w.y / TILE;
+    let t = { x: Math.floor(x), y: Math.floor(y) };
+    if ((this.cat?.active && this.cat.hit(x, y)) || this.caretaker?.hit(x, y) || this.clerk?.hit(x, y) || this.francy?.hit(x, y) || this.trainer?.hit(x, y)) return null;
+    if (this.petLife.yardPetAt(x, y)) return null;
+    for (const a of this.avatars.values()) {
+      if (a.info.id === this.selfId) continue;
+      const b = this.scene.screenBounds(a.sprite);
+      if (sx >= b.minX && sx <= b.maxX && sy >= b.minY && sy <= b.maxY) return null;
+    }
+    // (A thing's picture reaches a tile or two above where it stands.)
+    const thing = map.objects.some((o) => !MARKERS.has(o.kind) && !OPEN_AREAS.has(o.kind) && !o.kind.startsWith("sk_") && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - (LOW_REACH.has(o.kind) ? 1 : 2) && t.y < o.y + o.h);
+    if (thing) return null;
+    const p = this.props;
+    if (p.objectAt(t.x, t.y) !== null || p.topAt(t.x, t.y) !== null || p.plotAt(t.x, t.y) || p.pondAt(t.x, t.y) || p.wideAt(t.x, t.y)) return null;
+    if (this.drones?.at(t) || this.grove?.at(t)) return null;
+    // Nothing there, but nowhere to stand (a tree, a wall, a hedge): the nearest spot that is.
+    if (!walkable(map, t.x, t.y)) {
+      const near = nearestWalkable(map, t.x, t.y, 3);
+      if (!near) return null;
+      t = near;
+    }
+    return t;
   }
 
   /** Tapped on your board: the Skate Trainer's lessons, there and then (you ride on; it's open while you're nearby). */
@@ -1372,7 +1553,7 @@ export class Game {
     const y = w.y / TILE;
     if (!this.caretaker.hit(x, y)) return false;
     const self = this.self;
-    if (self && cheb(self.destination, this.caretaker.pos) > 3) this.walkTo(this.caretaker.avatar.destination);
+    if (self && cheb(this.standing ?? self.destination, this.caretaker.pos) > 3) this.walkTo(this.caretaker.avatar.destination);
     // Anchored where they stand now: their walks can be long.
     const at = this.caretaker.pos;
     this.near(this.ui.welcomePanel, { x: Math.round(at.x), y: Math.round(at.y) }, 6).show();
@@ -1403,13 +1584,13 @@ export class Game {
         return true;
       case "circulation_desk":
       case "card_catalogue": {
-        if (cheb(self.destination, front) > 2) this.walkTo(front);
+        if (cheb(this.standing ?? self.destination, front) > 2) this.walkTo(front);
         if (obj.kind === "circulation_desk") this.clerk?.chat();
         this.near(ui.catalogue, front, 8).show();
         return true;
       }
       case "new_arrivals":
-        if (cheb(self.destination, front) > 2) this.walkTo(front);
+        if (cheb(this.standing ?? self.destination, front) > 2) this.walkTo(front);
         this.near(ui.shelf, front, 5).openCase(NEW, 0);
         return true;
       case "bookcase": {
@@ -1436,7 +1617,7 @@ export class Game {
     if (!self) return false;
     const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
     const walkUp = () => {
-      if (cheb(self.destination, front) > 2) this.walkTo(front);
+      if (cheb(this.standing ?? self.destination, front) > 2) this.walkTo(front);
     };
     switch (obj.kind) {
       case "club_hall":
@@ -1554,7 +1735,7 @@ export class Game {
           .sort((a, b) => Math.hypot(a.x - obj.x, a.y - obj.y) - Math.hypot(b.x - obj.x, b.y - obj.y))[0]?.label;
         if (!key) return true;
         const at = { x: obj.x + obj.w, y: obj.y };
-        if (cheb(self.destination, at) > 2) this.walkTo(at);
+        if (cheb(this.standing ?? self.destination, at) > 2) this.walkTo(at);
         this.near(ui.metro, at, 4).openAt(key);
         return true;
       }
@@ -1567,7 +1748,7 @@ export class Game {
         return true;
       case "concert_mic":
       case "concert_curtain":
-        if (cheb(self.destination, front) > 3 && obj.kind === "concert_mic") this.walkTo(front);
+        if (cheb(this.standing ?? self.destination, front) > 3 && obj.kind === "concert_mic") this.walkTo(front);
         this.near(ui.concertPanel, { x: 14, y: 6 }, 9).show();
         return true;
       case "club_house": {
@@ -1606,7 +1787,7 @@ export class Game {
     const self = this.self;
     if (!room || !o || !self) return;
     const at = room.front(o, self.destination);
-    if (cheb(self.destination, at) > 0) this.walkTo(at);
+    if (cheb(this.standing ?? self.destination, at) > 0) this.walkTo(at);
     this.near(this.ui.shelf, at, 3).openCase(wing, n, mark);
   }
 
@@ -1688,7 +1869,7 @@ export class Game {
     this.francy.chat();
     const at = this.francy.tile;
     const self = this.self;
-    if (self && cheb(self.destination, at) > 2) {
+    if (self && cheb(this.standing ?? self.destination, at) > 2) {
       const near = nearestWalkable(this.scene.map, at.x + 1, at.y, 2);
       if (near) this.moveTo(near, true);
     }
@@ -1824,7 +2005,7 @@ export class Game {
     this.shopFrom = "pier";
     const self = this.self;
     const at = { x: spot.x, y: spot.y };
-    if (self && cheb(self.destination, at) > 2) {
+    if (self && cheb(this.standing ?? self.destination, at) > 2) {
       const near = nearestWalkable(this.scene.map, at.x + 1, at.y, 2);
       if (near) this.moveTo(near, true);
     }
@@ -1836,7 +2017,7 @@ export class Game {
   private openBar(counter: MapObject) {
     const self = this.self;
     const front = { x: counter.x + Math.floor(counter.w / 2), y: counter.y + counter.h };
-    if (self && cheb(self.destination, front) > 3) {
+    if (self && cheb(this.standing ?? self.destination, front) > 3) {
       const spot = nearestWalkable(this.scene.map, front.x, front.y, 2);
       if (spot) this.moveTo(spot, true);
     }
@@ -1879,24 +2060,40 @@ export class Game {
   private enterClubRoom(door: TileXY, club: string) {
     const self = this.self;
     if (!self) return;
-    if (cheb(self.destination, door) <= 1 && !self.moving) return this.ui.clubsPanel.goToRoom(club);
+    if (cheb(this.standing ?? self.destination, door) <= 1 && !self.moving && !this.skate?.aiming) return this.ui.clubsPanel.goToRoom(club);
     const spot = nearestWalkable(this.scene.map, door.x, door.y, 2);
     if (!spot) return;
     this.moveTo(spot, true);
+    if (this.onArrival(spot, () => this.ui.clubsPanel.goToRoom(club))) return;
     this.entering = { door: spot, zone: "clubroom", club };
   }
 
   private enter(door: TileXY, zone: string, arrive?: string) {
     const self = this.self;
     if (!self) return;
-    if (cheb(self.destination, door) <= 1 && !self.moving) {
+    if (cheb(this.standing ?? self.destination, door) <= 1 && !self.moving && !this.skate?.aiming) {
       this.goTo(zone, arrive);
       return;
     }
     const spot = nearestWalkable(this.scene.map, door.x, door.y, 2);
     if (!spot) return;
     this.moveTo(spot, true);
+    if (this.onArrival(spot, () => this.goTo(zone, arrive))) return;
     this.entering = { door: spot, zone, arrive };
+  }
+
+  /** Riding your board up to `spot` (just asked): `go` once there, off the board's physics first. */
+  private onArrival(spot: TileXY, go: () => void): boolean {
+    const g = this.boardGoal;
+    if (!g || g.t !== spot) return false;
+    g.then = () => {
+      this.skate?.stop();
+      // (Stopped a little short: the last step on foot, and then.)
+      const self = this.self;
+      if (self && (self.destination.x !== spot.x || self.destination.y !== spot.y)) this.socket?.send({ t: "MoveTo", x: spot.x, y: spot.y, sprint: false });
+      go();
+    };
+    return true;
   }
 
   /** The leave button: walk up to the way out, and out we go on arrival. */
@@ -1910,7 +2107,7 @@ export class Game {
     if (this.following !== null) this.stopFollowing(true);
     this.leaving = { exit, spot };
     this.hud.toast("🚪 Heading for the door…", 1500);
-    if (cheb(self.destination, spot) === 0 && !self.moving) return;
+    if (cheb(this.standing ?? self.destination, spot) === 0 && !self.moving) return;
     this.moveTo(spot, true);
   }
 
@@ -2037,7 +2234,6 @@ export class Game {
     if (this.following === from) {
       this.following = null;
       this.hud.setFollow(null);
-    this.hud.setRide(null);
       this.showFollowers();
       this.hud.toast(`👣 ${name} let you go off on your own.`, 3000);
     }
@@ -2082,7 +2278,14 @@ export class Game {
     }
     // Out on the lake (them, or us): wait on the bank till they're back.
     if (this.boat || isBoat(them.info.vehicle ?? 0)) return;
-    const goal = them.destination;
+    // Steering your own board: that's going your own way.
+    if (this.skate?.street && this.skate.steering) {
+      this.stopFollowing(true);
+      return;
+    }
+    // Where they're headed: on a board (theirs drawn where it's rolled, not walked), where they are now.
+    const goal = this.skate?.skating(them.info.id) ? { x: Math.floor(them.pos.x + 0.5), y: Math.floor(them.pos.y + 0.875) } : them.destination;
+    const here = this.standing ?? self.destination;
     // Keep up: run when they run, or when we've fallen behind.
     const now = this.socket?.clock.now() ?? 0;
     const motion = them.currentMotion;
@@ -2097,7 +2300,7 @@ export class Game {
     }
     if (them.state === SITTING && !them.moving) {
       // Already sitting beside them: stay put.
-      if (self.state === SITTING && cheb(self.destination, goal) <= 1) return;
+      if (self.state === SITTING && cheb(here, goal) <= 1) return;
       // Sit next to them if there's a free seat beside theirs.
       const taken = new Set([...this.avatars.values()].filter((a) => a.state === SITTING).map((a) => `${a.destination.x},${a.destination.y}`));
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -2112,7 +2315,7 @@ export class Game {
       }
     }
     // Otherwise stand right beside where they're going, on the side nearest us.
-    if (cheb(self.destination, goal) <= 1 && this.followGoal !== "") return;
+    if (cheb(here, goal) <= 1 && this.followGoal !== "") return;
     let best: TileXY | null = null;
     let bestD = Infinity;
     for (let dy = -1; dy <= 1; dy++) {
@@ -2129,8 +2332,9 @@ export class Game {
     }
     if (!best) return;
     const key = `${best.x},${best.y}`;
-    if (key === this.followGoal && self.moving) return;
-    if (best.x === self.destination.x && best.y === self.destination.y) return;
+    // (Already on the way there, walking or on the board.)
+    if (key === this.followGoal && (self.moving || !!this.skate?.aiming)) return;
+    if (best.x === here.x && best.y === here.y) return;
     this.followGoal = key;
     this.moveTo(best, false);
   }
@@ -2157,7 +2361,7 @@ export class Game {
     const self = this.self;
     const them = this.avatars.get(to);
     if (!self || !them || !this.socket) return;
-    if (cheb(self.destination, { x: Math.round(them.pos.x), y: Math.round(them.pos.y) }) > 2) {
+    if (cheb(this.standing ?? self.destination, { x: Math.round(them.pos.x), y: Math.round(them.pos.y) }) > 2) {
       const spot = nearestWalkable(this.scene.map, Math.round(them.pos.x) + 1, Math.round(them.pos.y), 2);
       if (spot) this.moveTo(spot, true);
       // Offer once we're there.
@@ -2324,7 +2528,8 @@ export class Game {
   /** How fast we'll go on `path` (the server decides; this is its rule). */
   private predictSpeed(path: TileXY[]): number {
     const v = this.self?.info.vehicle ?? 0;
-    const speed = rideSpeed(v);
+    // (Your skateboard's ridden on its physics, never tile by tile: a walk with it is a walk, as the server has it.)
+    const speed = v === SKATEBOARD ? 0 : rideSpeed(v);
     if (!speed) return WALK_SPEED_X10;
     if (this.zoneId === "city") return speed;
     const map = this.scene.map;
@@ -2409,27 +2614,44 @@ export class Game {
     const rides = this.ui.rides;
     const owned = rides.owned();
     if (this.zoneId !== "city" || !owned.length) return this.hud.setRide(null);
-    const it = (rides.riding && rides.item(rides.ride)) || owned[owned.length - 1];
+    const it = rides.picked() ?? owned[owned.length - 1];
     this.hud.setRide({ icon: itemIconUrl(it.key, it.kind), name: it.name.toLowerCase(), on: rides.riding });
   }
 
-  /** The ride button: get off, or on (choosing, if there's more than one). */
+  /** The ride button: off what you're on, or on the ride you've picked (its ⚙ picks another). */
   toggleRide() {
     const rides = this.ui.rides;
     if (rides.riding) return void this.rideOn(null);
+    const it = rides.picked();
+    if (it) void this.rideOn(it);
+  }
+
+  /** The ride button's ⚙: your rides, to pick which it gets you on (and on it, there and then). */
+  ridePicker() {
+    const rides = this.ui.rides;
     const owned = rides.owned();
-    if (owned.length === 1) return void this.rideOn(owned[0]);
-    const at = this.self?.destination ?? { x: 0, y: 0 };
-    this.near(this.ui.menu, at, 6).showWith(
-      "Ride",
-      "",
-      owned.map((it) => [it.name, () => void this.rideOn(it)] as [string, () => void]),
+    if (!owned.length) return;
+    const picked = rides.picked();
+    const on = rides.riding ? rides.item(rides.ride) : undefined;
+    this.hud.showRidePicker(
+      owned.map((it) => ({ icon: itemIconUrl(it.key, it.kind), name: it.name, picked: it === picked, on: it === on })),
+      (i) => {
+        const it = owned[i];
+        rides.pick(it);
+        this.showRideButton();
+        if (it !== on) void this.rideOn(it);
+      },
+      owned.length === 1 ? "More rides at the Vehicles shop, in the mall." : "",
     );
   }
 
   /** Gets on something of yours (outdoors only), or off with null. */
   async rideOn(it: Item | null, quiet = false) {
+    // (Off your board altogether: off its physics first.)
+    if (!it && this.skate?.street) this.skate.stop();
     if (it && this.zoneId !== "city") return this.hud.toast("Vehicles are for outdoors: ride once you're back outside.", 3500);
+    this.boardGoal = null;
+    if (!it) this.dismounting = true;
     try {
       await this.ui.rides.set(it?.id ?? 0);
       this.refreshLook();
@@ -2437,6 +2659,8 @@ export class Game {
       if (it && !quiet) this.hud.toast(`${it.name}: off you go! Zip anywhere outdoors; you'll hop off at doors.`, 3500);
     } catch (e) {
       this.hud.toast(e instanceof Error ? e.message : "That didn't work.", 3500);
+    } finally {
+      this.dismounting = false;
     }
   }
 
@@ -2497,7 +2721,7 @@ export class Game {
         this.hud.toast(`🐾 You pat ${petTitle(ui.eco, yard, false)}. ${sound(yard.item)}`, 3500);
         return true;
       }
-      if (self && cheb(self.destination, at) > 2) this.walkTo(at);
+      if (self && cheb(this.standing ?? self.destination, at) > 2) this.walkTo(at);
       const note = yard.walked_today ? `Had a walk today. ${yard.walks} walks together.` : `Hoping for a walk! ${yard.walks ? `${yard.walks} walks together so far.` : "Your first one together?"}`;
       this.near(ui.menu, at, 6).showWith(petTitle(ui.eco, yard, true), note, [["Take for a walk 🐾", () => void this.petLife.takeOut().catch(fail)]]);
       return true;
@@ -2632,7 +2856,7 @@ export class Game {
       case "Snap":
         // (On a board, you're where your own skating says: the server's word would only drag you back;
         // and just out of the park, rolling on, its step off the board would only stop you.)
-        if (m.id === this.selfId && (this.skate?.capturing || performance.now() - this.leftParkAt < 1500)) break;
+        if (m.id === this.selfId && (this.skate?.capturing || performance.now() - Math.max(this.leftParkAt, this.skate?.stoppedAt ?? -Infinity) < 1500)) break;
         this.avatars.get(m.id)?.snap({ x: m.x, y: m.y });
         break;
       case "AwayChanged":
@@ -3043,7 +3267,7 @@ export class Game {
     if (!self || !this.skateShop) return;
     const truck = van.kind === "sk_shop" ? van : { ...van, y: van.y + 1 };
     const front = { x: truck.x + 3, y: truck.y + truck.h };
-    if (!this.skate?.capturing && cheb(self.destination, front) > 2) {
+    if (!(this.skate?.capturing && !this.skate.street) && cheb(this.standing ?? self.destination, front) > 2) {
       const at = nearestWalkable(this.scene.map, front.x, front.y, 2);
       if (at) this.moveTo(at, true);
     }
@@ -3067,8 +3291,8 @@ export class Game {
       }
       return;
     }
-    // Mid-game at a bowling lane (or mid-fight in the arena, or on a skateboard) you stay put until you leave it.
-    if (this.paintball?.capturing || this.arena?.capturing || this.skate?.capturing) return;
+    // Mid-game at a bowling lane (or mid-fight in the arena, or skating the park) you stay put until you leave it.
+    if (this.paintball?.capturing || this.arena?.capturing || (this.skate?.capturing && !this.skate.street)) return;
     if (this.bowlingNow()) {
       const wall = performance.now();
       if (wall - this.bowlNagAt > 2500) {
@@ -3081,6 +3305,16 @@ export class Game {
     if (self.woozy && Math.random() < 0.5) {
       const off = { x: t.x + Math.round(Math.random() * 2 - 1), y: t.y + Math.round(Math.random() * 2 - 1) };
       if (walkable(this.scene.map, off.x, off.y)) t = off;
+    }
+    // On your everyday board: ridden there, on the board (never the old tile-by-tile ride).
+    if (this.onBoard || this.skate?.street) {
+      if (self.state === SITTING) {
+        this.socket.send({ t: "Stand" });
+        self.setState(0, self.standTile ?? self.destination);
+        this.hud.setSitting(false);
+      }
+      if (this.boardTo(t)) return;
+      if (this.skate?.street) return;
     }
     const now = this.socket.clock.now();
     // Walking off stands us up; the server does the same on MoveTo.
@@ -3317,8 +3551,39 @@ export class Game {
       if (touches.size > 1 || performance.now() - pinchedAt < 350) return;
       // Out on the paintball field: the mouse aims and shoots, it doesn't walk.
       if (this.paintball?.capturing || this.arena?.capturing) return;
-      // On a skateboard, nor: only Dusty's van (off your board, into his shop) and the Skate Trainer answer a tap.
-      if (this.skate?.capturing) {
+      // On your skateboard in the city (out on the streets, or about to be): a
+      // tap on open ground is where to ride to, on the park's board (your deck,
+      // your trail, your bearings); a tap on something (a door, someone, a
+      // stall) is tapped on as ever, and any going up to it is ridden too.
+      const sk = this.skate;
+      const myBoard = this.zoneId === "city" && this.ui.rides.riding && this.ui.rides.ride === SKATEBOARD;
+      if (sk && (sk.street || (!sk.capturing && myBoard))) {
+        const spot = this.openGround(e.global.x, e.global.y);
+        const self = this.self;
+        if (spot && self) {
+          if (Panel.dismissOnWorldTap()) return;
+          this.boardGoal = null;
+          if (this.following !== null) this.stopFollowing(true);
+          // (Somewhere you can't stand, a tree, a wall, a hedge: as near it as you can get.)
+          const raw = this.scene.screenToWorld(e.global.x, e.global.y);
+          const clicked = Math.floor(raw.x / TILE) === spot.x && Math.floor(raw.y / TILE) === spot.y;
+          const w = clicked ? raw : { x: spot.x * TILE + TILE / 2, y: spot.y * TILE + TILE / 2 };
+          if (!sk.capturing) {
+            const m = self.currentMotion;
+            const rolling = m && this.socket ? speedAt(m, this.socket.clock.now()) : 0;
+            const heading = Math.atan2(w.y - (self.pos.y * TILE + TILE - 4), w.x - (self.pos.x * TILE + TILE / 2));
+            sk.startStreet(heading, (rolling / 10) * TILE, []);
+          }
+          if (sk.capturing) {
+            sk.steerTo(w.x, w.y);
+            this.boardDest = { x: Math.floor(w.x / TILE), y: Math.floor(w.y / TILE) };
+            return;
+          }
+        }
+        // (Something to tap on, a door, someone, a stall: tapped on as ever, at
+        // once, wherever you are; any walking up to it is ridden, on the board.)
+      }
+      if (this.skate?.capturing && !this.skate.street) {
         if (this.trainerOnBoard(e.global.x, e.global.y)) return;
         const t = this.scene.screenToTile(e.global.x, e.global.y);
         const van = this.scene.map.objects.find((o) => (o.kind === "sk_shop" || o.kind === "sk_shop_back") && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 2 && t.y < o.y + o.h);
@@ -3474,7 +3739,7 @@ export class Game {
     let note = "";
     const walkUp = () => {
       const self = this.self;
-      if (self && cheb(self.destination, t) > 2) {
+      if (self && cheb(this.standing ?? self.destination, t) > 2) {
         const spot = nearestWalkable(this.scene.map, t.x, t.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3494,7 +3759,7 @@ export class Game {
       const front = { x: t.x + 1, y: t.y + 2 };
       actions.push(["🎱 Play pool", () => {
         const self = this.self;
-        if (self && cheb(self.destination, front) > 2) {
+        if (self && cheb(this.standing ?? self.destination, front) > 2) {
           const spot = nearestWalkable(this.scene.map, front.x, front.y, 2);
           if (spot) this.moveTo(spot, true);
         }
@@ -3716,7 +3981,7 @@ export class Game {
     // (What's on a table is what you tap.)
     const parcel = this.drones?.at(t);
     if (parcel) {
-      if (cheb(self.destination, t) > 2) {
+      if (cheb(this.standing ?? self.destination, t) > 2) {
         this.moveTo(t, true);
         this.hud.toast("📦 Walk up and tap the parcel to pick it up.", 2500);
         return true;
@@ -3738,7 +4003,7 @@ export class Game {
     const stand = map.objects.find((o) => o.kind === "yard_stand" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - 1 && t.y <= o.y);
     const yard = stand?.label ? this.yardStands?.yardAt(stand.label) : null;
     if (stand?.label && yard && (yard.goods.length || yard.mine)) {
-      if (cheb(self.destination, { x: stand.x, y: stand.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: stand.x, y: stand.y }) > 2) {
         const spot = nearestWalkable(map, stand.x, stand.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3748,7 +4013,7 @@ export class Game {
     // A garden pond's plain water, to fish, whoever's it is.
     const pond = this.props.pondAt(t.x, t.y);
     // (A rug's walked on: its menu is for when you're standing on it.)
-    const onRug = !pond && placed !== null && WALK_OVER.has(ui.eco.items.get(placed)?.key ?? "") && cheb(self.destination, t) > 0;
+    const onRug = !pond && placed !== null && WALK_OVER.has(ui.eco.items.get(placed)?.key ?? "") && cheb(this.standing ?? self.destination, t) > 0;
     if (placed && !pond && !onRug && (this.zoneId === "home" || this.zoneId === "clubroom" || this.zoneId === "city")) {
       this.furnitureMenu(t, placed, tapped);
       return true;
@@ -3763,7 +4028,7 @@ export class Game {
     // (Not the arena's ring: you walk about inside it; its sign is what you tap.)
     const obj = map.objects.find((o) => !MARKERS.has(o.kind) && o.kind !== "arena" && t.x >= o.x && t.x < o.x + o.w && t.y >= o.y - (LOW_REACH.has(o.kind) ? 1 : 2) && t.y < o.y + o.h && (o.kind !== "fountain" || this.onFountain(o)));
     if (obj?.kind === "leaderboard") {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3772,12 +4037,12 @@ export class Game {
     }
     if (obj?.kind === "market_cart") {
       const spot = this.furniture.approach({ x: obj.x, y: obj.y + 1 }, self.destination) ?? { x: obj.x, y: obj.y + 1 };
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) this.moveTo(spot, true);
       this.near(ui.market, obj).show();
       return true;
     }
     if (obj && (obj.kind === "town_hall" || obj.kind === "story_board")) {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3789,7 +4054,7 @@ export class Game {
     // The boat hire on the Lake (and the boats tied up by the pier).
     if (obj && (obj.kind === "boat_hire" || obj.kind === "boat_moored")) {
       const front = obj.kind === "boat_hire" ? { x: obj.x + 1, y: obj.y + obj.h } : (spot(map, "boat_dock") ?? { x: obj.x, y: obj.y });
-      if (cheb(self.destination, front) > 3) {
+      if (cheb(this.standing ?? self.destination, front) > 3) {
         const at = nearestWalkable(map, front.x, front.y, 2);
         if (at) this.moveTo(at, true);
       }
@@ -3797,7 +4062,7 @@ export class Game {
       return true;
     }
     if (obj && (obj.kind === "lantern_stand" || obj.kind === "bottles" || obj.kind === "campfire")) {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3807,7 +4072,7 @@ export class Game {
       return true;
     }
     if (obj && (obj.kind === "tailor" || obj.kind === "wardrobe")) {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3835,7 +4100,7 @@ export class Game {
     }
     if (obj?.kind === "pool_table" && this.pool) {
       const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
-      if (cheb(self.destination, front) > 3) {
+      if (cheb(this.standing ?? self.destination, front) > 3) {
         const spot = nearestWalkable(map, front.x, front.y, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3851,13 +4116,13 @@ export class Game {
     // Caesar (or his guard, or the grand entrance): walk up to him, and his games.
     if ((obj?.kind === "arena_court" || obj?.kind === "arena_gate") && this.arena) {
       const front = spot(map, "caesar") ?? { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
-      if (cheb(self.destination, front) > 2) this.moveTo(nearestWalkable(map, front.x, front.y, 2) ?? front, true);
+      if (cheb(this.standing ?? self.destination, front) > 2) this.moveTo(nearestWalkable(map, front.x, front.y, 2) ?? front, true);
       this.arena.openSign();
       return true;
     }
     if (obj?.kind === "arena_sign" && this.arena) {
       const front = { x: obj.x, y: obj.y + obj.h };
-      if (cheb(self.destination, front) > 3) {
+      if (cheb(this.standing ?? self.destination, front) > 3) {
         const spot = nearestWalkable(map, front.x, front.y, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3872,7 +4137,7 @@ export class Game {
     // The skatepark's board by its gate: get on a board (free skate, a run, a line), and today's best.
     if (obj?.kind === "sk_board" && this.skate) {
       const front = { x: obj.x + 1, y: obj.y + obj.h };
-      if (!this.skate.capturing && cheb(self.destination, front) > 2) {
+      if (!(this.skate.capturing && !this.skate.street) && cheb(this.standing ?? self.destination, front) > 2) {
         const at = nearestWalkable(map, front.x, front.y, 2);
         if (at) this.moveTo(at, true);
       }
@@ -3913,7 +4178,7 @@ export class Game {
       const lane = map.objects.filter((o) => o.kind === "bowling_lane").indexOf(obj);
       // Step up to the foot of the lane.
       const foot = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
-      if (cheb(self.destination, foot) > 1) {
+      if (cheb(this.standing ?? self.destination, foot) > 1) {
         const spot = nearestWalkable(map, foot.x, foot.y, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3923,7 +4188,7 @@ export class Game {
     if (obj && (obj.kind === "shoe_counter" || obj.kind === "shoe_rack")) {
       const counter = map.objects.find((o) => o.kind === "shoe_counter") ?? obj;
       const front = { x: counter.x + Math.floor(counter.w / 2), y: counter.y + counter.h };
-      if (cheb(self.destination, front) > 2) {
+      if (cheb(this.standing ?? self.destination, front) > 2) {
         const spot = nearestWalkable(map, front.x, front.y, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3956,7 +4221,7 @@ export class Game {
       const cab = map.objects.filter((o) => CABINET_KINDS.includes(o.kind)).indexOf(obj);
       // Cabinets are played from the front; the pinball machine from its left end.
       const front = obj.kind === "pinball" ? { x: obj.x - 1, y: obj.y + Math.floor(obj.h / 2) } : { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
-      if (cheb(self.destination, front) > 1) {
+      if (cheb(this.standing ?? self.destination, front) > 1) {
         const spot = nearestWalkable(map, front.x, front.y, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3966,7 +4231,7 @@ export class Game {
     if (obj?.kind === "prize_counter" && this.prizes) {
       this.clerk?.chat();
       const front = { x: obj.x + Math.floor(obj.w / 2), y: obj.y + obj.h };
-      if (cheb(self.destination, front) > 3) {
+      if (cheb(this.standing ?? self.destination, front) > 3) {
         const spot = nearestWalkable(map, front.x, front.y, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3983,7 +4248,7 @@ export class Game {
       return true;
     }
     if (obj?.kind === "founders_stone") {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x + 1, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -3996,7 +4261,7 @@ export class Game {
     }
     // The heart of the hedge maze: a mossy stair under the sundial, down to today's labyrinth.
     if (obj?.kind === "maze_heart") {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 2) {
         this.hud.toast("🌿 Find your way to the heart of the maze: there's something under the sundial.", 3500);
         return true;
       }
@@ -4012,14 +4277,14 @@ export class Game {
     }
     if (obj?.kind === "lab_heart") {
       this.hud.toast("🌟 The Glowroot. Step into its light to go back up.", 3000);
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x, obj.y, 2);
         if (spot) this.moveTo(spot, true);
       }
       return true;
     }
     if (obj && obj.kind in DISCOVERIES) {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4033,7 +4298,7 @@ export class Game {
     }
     if (obj && ["bandstand", "easels", "arcade"].includes(obj.kind)) {
       // Walk up to it (you need to be close to play), and open it.
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, Math.min(Math.max(t.x, obj.x), obj.x + obj.w - 1), obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4044,7 +4309,7 @@ export class Game {
     }
     if (obj && (obj.kind.startsWith("board_") || obj.kind === "notice_board" || obj.kind === "fountain")) {
       // Walk over if it's far, and open its panel straight away.
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 4) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 4) {
         const spot = nearestWalkable(map, obj.x + Math.floor(obj.w / 2), obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4059,7 +4324,7 @@ export class Game {
     }
     if (obj && (obj.kind === "apartments" || obj.kind === "stall")) {
       const front = spot(map, obj.kind === "stall" ? (obj.label ?? "") : "apartments");
-      if (front && cheb(self.destination, front) > 3) this.moveTo(front, true);
+      if (front && cheb(this.standing ?? self.destination, front) > 3) this.moveTo(front, true);
       const at = front ?? { x: obj.x, y: obj.y };
       if (obj.kind === "stall" && obj.label) this.near(ui.stall, at, 6).openFor(obj.label);
       else this.near(ui.apartments, at, 8).show();
@@ -4075,7 +4340,7 @@ export class Game {
       return true;
     }
     if (obj?.kind === "mall_directory") {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4084,7 +4349,7 @@ export class Game {
     }
     if (obj && (obj.kind === "fitting_room" || obj.kind === "mirror") && obj.label) {
       // Try things on before buying (only you see it until you wear it out).
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, obj.x + 1, obj.y + obj.h, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4093,7 +4358,7 @@ export class Game {
     }
     if (obj && (obj.kind === "display" || obj.kind === "shelf" || obj.kind === "mannequin" || obj.kind === "pet_pen") && obj.label) {
       // Walk up to it and look: what it is, what it costs, buy it.
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, obj.x, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4103,7 +4368,7 @@ export class Game {
     }
     const shopAt = obj?.kind === "counter" ? map.objects.find((d) => d.kind === "dept" && obj.x >= d.x && obj.x < d.x + d.w && obj.y >= d.y && obj.y < d.y + d.h) : undefined;
     if (obj && shopAt?.label && ui.shop.isOpen(shopAt.label)) {
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 2) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 2) {
         const spot = nearestWalkable(map, obj.x + 1, obj.y + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4112,7 +4377,7 @@ export class Game {
     }
     if (obj?.kind === "popup") {
       // The pop-up stand: this season's things.
-      if (cheb(self.destination, { x: obj.x, y: obj.y }) > 3) {
+      if (cheb(this.standing ?? self.destination, { x: obj.x, y: obj.y }) > 3) {
         const spot = nearestWalkable(map, obj.x + 2, obj.y + obj.h + 1, 2);
         if (spot) this.moveTo(spot, true);
       }
@@ -4125,7 +4390,7 @@ export class Game {
     }
     if (obj?.kind === "post_office") {
       const door = spot(map, "post_office");
-      if (door && cheb(self.destination, door) > 3) this.moveTo(door, true);
+      if (door && cheb(this.standing ?? self.destination, door) > 3) this.moveTo(door, true);
       this.near(ui.postOffice, door ?? { x: obj.x, y: obj.y }, 8).show();
       return true;
     }
@@ -4200,7 +4465,7 @@ export class Game {
     if (!self || !this.socket) return;
     // (Fishing already: only the magnet, swapped in for the line, goes in.)
     if (self.state === FISHING && (!magnet || this.magnetDown)) return;
-    if (cheb(self.destination, target) > CAST_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
+    if (cheb(this.standing ?? self.destination, target) > CAST_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
       const spot = this.castSpot(target, self.destination);
       if (!spot) return this.hud.toast("Find a spot on the shore.");
       this.moveTo(spot, true);
@@ -4222,7 +4487,7 @@ export class Game {
   private throwLure(target: TileXY, kind = LURE.GLIMMER) {
     const self = this.self;
     if (!self || !this.socket) return;
-    if (cheb(self.destination, target) > LURE_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
+    if (cheb(this.standing ?? self.destination, target) > LURE_RANGE || !walkable(this.scene.map, self.destination.x, self.destination.y)) {
       const spot = this.castSpot(target, self.destination);
       if (!spot) return this.hud.toast("Find a spot on the shore.");
       this.moveTo(spot, true);
@@ -4434,7 +4699,7 @@ export class Game {
   plotAction(x: number, y: number, action: number, item: number) {
     const self = this.self;
     if (!self || !this.socket) return;
-    if (cheb(self.destination, { x, y }) > 1) {
+    if (cheb(this.standing ?? self.destination, { x, y }) > 1) {
       const spot = this.furniture.approach({ x, y }, self.destination) ?? { x, y };
       this.moveTo(spot, true);
     }
@@ -4450,10 +4715,12 @@ export class Game {
     const seat = this.furniture.seats.get(seatId);
     if (!self || !seat || !this.socket) return;
     if (self.state === SITTING && self.destination.x === seat.tile.x && self.destination.y === seat.tile.y) return;
-    const from = self.state === SITTING ? (self.standTile ?? self.destination) : self.destination;
+    const from = self.state === SITTING ? (self.standTile ?? self.destination) : (this.standing ?? self.destination);
     const spot = this.furniture.approach(seat.tile, from);
     if (!spot) return;
     if (spot.x !== from.x || spot.y !== from.y || self.state === SITTING) this.moveTo(spot, true);
+    // (On your board: sat down once you've ridden up to it, stepping off.)
+    if (this.onArrival(spot, () => this.socket?.send({ t: "Sit", seat: seatId }))) return;
     this.socket.send({ t: "Sit", seat: seatId });
     if (seat.table) this.chess.show(seat.table.id, this.games.get(seat.table.id));
   }
@@ -4478,7 +4745,12 @@ export class Game {
     const self = this.self;
     if (!self || !this.socket) return;
     if (self.state === SITTING) this.socket.send({ t: "Stand" });
-    else if (!self.moving) this.socket.send({ t: "Sit", seat: SEAT_GROUND });
+    else if (this.skate?.street) {
+      // (On your board: off it, and down where you are.)
+      this.boardGoal = null;
+      this.skate.stop();
+      this.socket.send({ t: "Sit", seat: SEAT_GROUND });
+    } else if (!self.moving) this.socket.send({ t: "Sit", seat: SEAT_GROUND });
   }
 
   // ---- bugs and mushrooms (ADR 0019) -------------------------------------------------------
@@ -4578,6 +4850,7 @@ export class Game {
 
   emote(id: number) {
     this.socket?.send({ t: "Emote", emote: id });
+    this.hud.usedEmote(id);
   }
 
   chat(text: string) {
@@ -4594,6 +4867,22 @@ export class Game {
   private keyboardMove(wallNow: number) {
     const self = this.self;
     if (this.keys.size > 0 && this.following !== null) this.stopFollowing(true);
+    // On your everyday skateboard in the city, steering by the keys: the real board
+    // (pushing, gliding, ollies, kickflips, manuals), from where you are, as you were going.
+    if (self && this.keys.size > 0 && this.skate && !this.skate.capturing && this.ui.rides.riding && this.ui.rides.ride === SKATEBOARD) {
+      let dx = 0;
+      let dy = 0;
+      for (const k of this.keys) {
+        dx += KEY_DIRS[k]?.x ?? 0;
+        dy += KEY_DIRS[k]?.y ?? 0;
+      }
+      if (dx || dy) {
+        const m = self.currentMotion;
+        const rolling = m && this.socket ? speedAt(m, this.socket.clock.now()) : 0;
+        this.skate.startStreet(Math.atan2(dy, dx), (rolling / 10) * TILE, this.keys);
+        if (this.skate.capturing) return;
+      }
+    }
     if (!self || this.keys.size === 0) {
       // Keys released: stop at the tile we're walking into instead of
       // finishing the look-ahead segment.
@@ -4688,6 +4977,9 @@ export class Game {
     const on = !!this.skate?.capturing;
     if (on === this.skatingWas) return;
     this.skatingWas = on;
+    // (On or off a board, nothing's still held: a key from before doesn't carry on steering after.)
+    this.keys.clear();
+    this.lastKeyDir = "";
     const rides = this.ui.rides;
     if (on) {
       this.rodeBefore = rides.riding;
@@ -4720,6 +5012,9 @@ export class Game {
     const serverNow = this.socket?.clock.now() ?? 0;
     this.watching();
     this.boardReady();
+    this.offRideForGames();
+    this.boardAlways();
+    this.boardArrive();
     this.keyboardMove(wallNow);
     // The arena first: it places the fighters, so they're drawn (and the camera follows) where their gear is.
     this.arena?.update(serverNow, wallNow);
@@ -4802,8 +5097,7 @@ export class Game {
     this.daynight.update();
     this.milestones.update(wallNow, this.daynight.dark);
     this.ball?.update(serverNow);
-    const hour = this.daynight.hour();
-    this.weather.update(wallNow, hour);
+    this.weather.update(wallNow, this.daynight.clockHour());
     this.critters.update(wallNow, this.daynight.dark);
     if (this.natureFx) {
       this.natureFx.update(wallNow, this.daynight.dark);
@@ -4825,7 +5119,7 @@ export class Game {
     this.trainer?.update(Date.now(), wallNow);
     // A lesson waiting: into the park, and on your board.
     const me = this.self;
-    if (this.rideWhenIn && me && this.skate && !this.skate.capturing && this.skate.inPark(me.pos.x, me.pos.y)) {
+    if (this.rideWhenIn && me && this.skate && (!this.skate.capturing || this.skate.street) && this.skate.inPark(me.pos.x, me.pos.y)) {
       this.skate.start(this.rideWhenIn);
       this.rideWhenIn = null;
     }

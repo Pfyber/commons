@@ -722,7 +722,8 @@ async fn rent_renews_then_grace_then_release_returns_everything() {
     .fetch_one(&s.db)
     .await
     .unwrap();
-    assert_eq!(furniture, 1, "the furniture is back in the bag");
+    // (The piece that was placed, and the laptop everyone starts with.)
+    assert_eq!(furniture, 2, "the furniture is back in the bag");
     let svc = service(&s);
     let (st, _) = call(
         &s,

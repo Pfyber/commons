@@ -613,7 +613,8 @@ export class Avatar {
     const sitting = this.state === 1 && !walking;
     // On wheels (outdoors): a skateboard is pushed along; skates still
     // stride; on a bike you sit, on a scooter you stand.
-    const vehicle = sitting || fighting?.noRide ? 0 : this.info.vehicle;
+    // (A skateboard's drawn by its rider's own board, on its physics: never the old tile-by-tile ride.)
+    const vehicle = sitting || fighting?.noRide || this.info.vehicle === SKATEBOARD ? 0 : this.info.vehicle;
     const skating = vehicle === SKATEBOARD;
     const ride = vehicle && !skating ? RIDE_POSE[vehicle] : undefined;
     const dancing = this.emoteId === 4 && wallNow < this.emoteUntil;

@@ -225,6 +225,26 @@ impl Park {
 }
 
 impl Instance {
+    /// Whether a street lamp stands on `tile`: only a thin pole, ridden past on a board
+    /// (not a wall the size of its tile; walking, it's in the way as ever).
+    fn street_lamp(&self, tile: TilePos) -> bool {
+        let m = &self.zone.map;
+        let i = tile.1 as usize * m.width as usize + tile.0 as usize;
+        m.decor_legend
+            .iter()
+            .position(|d| d == "lamp")
+            .is_some_and(|lamp| m.decor.get(i) == Some(&(lamp as u8)))
+    }
+
+    /// Whether `id` may skate out on the streets here: in the city, on their own skateboard.
+    fn street_skater(&self, id: u32) -> bool {
+        self.zone.id == "city"
+            && self
+                .avatars
+                .get(&id)
+                .is_some_and(|a| a.vehicle == commons_sim::vehicles::SKATEBOARD)
+    }
+
     /// Whether `id` is on a board in the skatepark (they don't walk about).
     pub(super) fn skating(&self, id: u32) -> bool {
         self.skate
@@ -300,7 +320,8 @@ impl Instance {
             }
             return true;
         }
-        if !p.near(a.tile) {
+        // (Away from the park, only out on the streets on your own skateboard.)
+        if !p.near(a.tile) && !self.street_skater(id) {
             if !quiet {
                 self.error(
                     id,
@@ -373,7 +394,10 @@ impl Instance {
     /// One of Dusty's daily quests done: its coins paid (once a day each,
     /// whatever's asked: the ledger's key is the player, the day, the slot).
     pub(super) fn skate_quest(&mut self, id: u32, day: u32, slot: u8, now: u32) {
-        let Some(p) = &self.skate else { return };
+        // (Anywhere in the city: claimed at the van, or from the daily missions.)
+        if self.skate.is_none() {
+            return;
+        }
         let Some(a) = self.avatars.get_mut(&id) else {
             return;
         };
@@ -382,7 +406,7 @@ impl Instance {
         if slot as usize >= skate::QUEST_COINS.len() || day > today || day + 1 < today {
             return;
         }
-        if !p.near(a.tile) || !a.game_rl.try_take(now as u64) {
+        if !a.game_rl.try_take(now as u64) {
             return;
         }
         let Some(econ) = self.economy.clone() else {
@@ -627,11 +651,28 @@ impl Instance {
         }
         s.last_move = now;
         s.kit = kit;
-        // On the concrete, whatever they say.
-        let x = x.clamp(ax * 100, (ax + aw) * 100 - 1);
-        let y = y.clamp(ay * 100, (ay + ah) * 100 - 1);
+        // In the park, on its concrete, whatever they say; out on the streets
+        // (their own skateboard, in the city), only where anyone could walk.
+        let inside =
+            (ax * 100..(ax + aw) * 100).contains(&x) && (ay * 100..(ay + ah) * 100).contains(&y);
+        let street = !inside && self.street_skater(id);
+        let (x, y) = if street {
+            (x, y)
+        } else {
+            (
+                x.clamp(ax * 100, (ax + aw) * 100 - 1),
+                y.clamp(ay * 100, (ay + ah) * 100 - 1),
+            )
+        };
         let pose = pose.min(skate::pose::MAX);
         let tile = (x / 100, y / 100);
+        if street
+            && (tile.0 >= self.zone.map.width
+                || tile.1 >= self.zone.map.height
+                || !(self.grid.walkable(tile.0, tile.1) || self.street_lamp(tile)))
+        {
+            return;
+        }
         let Some(a) = self.avatars.get_mut(&id) else {
             return;
         };
@@ -667,6 +708,10 @@ impl Instance {
         }
         let points = points.min(skate::MAX_POINTS);
         let label = clean_label(&label);
+        // (The leaderboards are the park's: out on the streets, tricks are for fun.)
+        if self.skate.as_ref().is_some_and(|p| !p.near(a.tile)) {
+            return;
+        }
         let (player, name, cell) = (a.player_id.clone(), a.name.clone(), a.cell);
         let changed = {
             let Some(p) = self.skate.as_mut() else { return };

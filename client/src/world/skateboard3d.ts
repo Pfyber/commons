@@ -73,13 +73,22 @@ export function drawBoard3d(ctx: CanvasRenderingContext2D, kit: Kit, t: number) 
 
   // The trail streaming past behind it.
   trail(ctx, kit.trail, t, W, cy);
-  // The glow deck: only the faintest haze round it (it's the deck that glows).
+  // The glow deck: a small halo round it (it's the deck itself that glows: see the faces).
   if (deck.glow) {
-    ctx.fillStyle = hex(deck.glow);
-    ctx.globalAlpha = 0.05 + 0.02 * Math.sin(t * 3);
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, 82, 22, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // (A soft fade out from the deck, no rings.)
+    const g = ctx.createRadialGradient(cx, cy, 10, cx, cy, 100);
+    const c = hex(deck.glow);
+    g.addColorStop(0, c + "40");
+    g.addColorStop(0.45, c + "18");
+    g.addColorStop(1, c + "00");
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1, 0.32);
+    ctx.translate(-cx, -cy);
+    ctx.fillStyle = g;
+    ctx.globalAlpha = 0.9 + 0.1 * Math.sin(t * 3);
+    ctx.fillRect(cx - 110, cy - 110, 220, 220);
+    ctx.restore();
     ctx.globalAlpha = 1;
   }
 
@@ -170,7 +179,9 @@ export function drawBoard3d(ctx: CanvasRenderingContext2D, kit: Kit, t: number) 
       ctx.restore();
     }
     if (deck.glow) {
-      fill(ctx, pts, `rgba(200,255,230,${0.12 + 0.06 * Math.sin(t * 3)})`, false);
+      // The whole deck lit up from within (bright), its edge a neon line.
+      fill(ctx, pts, hex(deck.glow), false);
+      fill(ctx, pts, `rgba(235,255,245,${0.35 + 0.08 * Math.sin(t * 3)})`, false);
       neonEdge(ctx, pts, hex(deck.glow));
     }
   };
@@ -180,7 +191,12 @@ export function drawBoard3d(ctx: CanvasRenderingContext2D, kit: Kit, t: number) 
     fill(ctx, bottom, O);
     edge();
     gripFace(top);
-    if (deck.glow) neonEdge(ctx, top, hex(deck.glow));
+    if (deck.glow) {
+      // The grip side glows too: the whole deck, not a line round it.
+      fill(ctx, top, hex(deck.glow), false);
+      fill(ctx, top, `rgba(235,255,245,${0.3 + 0.08 * Math.sin(t * 3)})`, false);
+      neonEdge(ctx, top, hex(deck.glow));
+    }
   } else {
     fill(ctx, top, O);
     edge();

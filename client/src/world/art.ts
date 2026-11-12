@@ -86,7 +86,9 @@ function makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingCo
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
-  const ctx = c.getContext("2d")!;
+  // (Kept in memory, not on the GPU: the art's outlines are found by reading
+  // its pixels back, and a GPU canvas makes every read a slow copy.)
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = false;
   return [c, ctx];
 }

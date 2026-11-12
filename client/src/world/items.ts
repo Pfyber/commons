@@ -87,6 +87,25 @@ function drawIcon(ctx: CanvasRenderingContext2D, key: string, kind: string) {
     px(ctx, "#d9d4c6", 7, 12, 2, 1);
     return;
   }
+  if (key === "daily_crate") {
+    // A little treasure chest: a rounded wooden lid, gold bands and lock.
+    px(ctx, O, 2, 2, 12, 1);
+    px(ctx, O, 1, 3, 14, 11);
+    px(ctx, "#c47a3f", 2, 3, 12, 1);
+    px(ctx, "#a0582c", 2, 4, 12, 3);
+    px(ctx, "#f2bf3a", 2, 7, 12, 1);
+    px(ctx, "#a0582c", 2, 8, 12, 5);
+    px(ctx, "#6e3a1c", 2, 12, 12, 1);
+    for (const x of [3, 11]) {
+      px(ctx, "#f2bf3a", x, 3, 2, 10);
+      px(ctx, "#fff0a0", x, 3, 1, 10);
+    }
+    px(ctx, O, 6, 6, 4, 4);
+    px(ctx, "#f2bf3a", 7, 7, 2, 2);
+    px(ctx, O, 2, 14, 3, 1);
+    px(ctx, O, 11, 14, 3, 1);
+    return;
+  }
   if (key === "lucky_crate") {
     // A golden "?" block: dark rim, a bright top and right edge, rivets in
     // the corners, and a shaded question mark (its dot the bottom rivet).
@@ -588,7 +607,7 @@ function drawFurniture(ctx: CanvasRenderingContext2D, key: string) {
 const iconCache = new Map<string, string>();
 
 /** An item's icon canvas: fish at 32×32 (they have the detail), the rest 16×16. */
-function iconCanvas(key: string, kind: string): HTMLCanvasElement {
+export function iconCanvas(key: string, kind: string): HTMLCanvasElement {
   if (kind === "fish") return canvas(32, 32, (ctx) => drawFish(ctx, key));
   if (kind === "bug") return canvas(32, 32, (ctx) => drawBug(ctx, key));
   if (kind === "shroom") return canvas(32, 32, (ctx) => drawShroom(ctx, key));

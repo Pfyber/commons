@@ -91,6 +91,7 @@ impl MapFile {
             h: self.height,
             blocked: self.collision.iter().map(|&c| c != 0).collect(),
             streets: self.streets,
+            regions: Default::default(),
         }
     }
 }
@@ -99,8 +100,14 @@ impl MapFile {
 pub struct Grid {
     pub w: u16,
     pub h: u16,
+    /// Read freely; change it through `set_blocked` (which keeps `regions` true).
     pub blocked: Vec<bool>,
     pub streets: Option<StreetGrid>,
+    /// Which connected area each walkable tile is in (0 for blocked), worked
+    /// out once when first asked and forgotten when a tile changes: a walk
+    /// between two areas can't be, and is known so at once, not after a
+    /// search of everything reachable (see `path::find_path`).
+    regions: std::sync::OnceLock<Vec<u32>>,
 }
 
 impl Grid {
@@ -110,6 +117,7 @@ impl Grid {
             h,
             blocked: vec![false; w as usize * h as usize],
             streets: None,
+            regions: Default::default(),
         }
     }
 
@@ -135,7 +143,56 @@ impl Grid {
 
     pub fn set_blocked(&mut self, x: u16, y: u16, blocked: bool) {
         let i = self.idx(x, y);
-        self.blocked[i] = blocked;
+        if self.blocked[i] != blocked {
+            self.blocked[i] = blocked;
+            self.regions = Default::default();
+        }
+    }
+
+    /// Whether `a` and `b` are walkable and joined by walkable tiles (as a
+    /// walk goes: eight ways, no cutting corners). Labels the areas the first
+    /// time it's asked (one pass over the map), then it's a lookup.
+    pub fn connected(&self, a: TilePos, b: TilePos) -> bool {
+        if !self.walkable(a.0, a.1) || !self.walkable(b.0, b.1) {
+            return false;
+        }
+        let r = self.regions.get_or_init(|| self.label_regions());
+        r[self.idx(a.0, a.1)] == r[self.idx(b.0, b.1)]
+    }
+
+    /// Each walkable tile's area (1, 2, …), by flood fill, stepping as a walk can.
+    fn label_regions(&self) -> Vec<u32> {
+        let w = self.w as i32;
+        let mut label = vec![0u32; self.blocked.len()];
+        let mut stack = Vec::new();
+        let mut next = 0;
+        for start in 0..self.blocked.len() {
+            if self.blocked[start] || label[start] != 0 {
+                continue;
+            }
+            next += 1;
+            label[start] = next;
+            stack.push(start);
+            while let Some(i) = stack.pop() {
+                let (x, y) = ((i % w as usize) as i32, (i / w as usize) as i32);
+                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if !self.walkable_i(nx, ny) {
+                        continue;
+                    }
+                    // (A diagonal step needs both sides open, as in the search.)
+                    if dx != 0 && dy != 0 && (!self.walkable_i(x + dx, y) || !self.walkable_i(x, y + dy)) {
+                        continue;
+                    }
+                    let j = (ny * w + nx) as usize;
+                    if label[j] == 0 {
+                        label[j] = next;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+        label
     }
 
     /// The walkable tile closest to `p` (spiral search), if any within `radius`.

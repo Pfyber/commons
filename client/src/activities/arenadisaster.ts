@@ -174,6 +174,15 @@ export class DisasterShow {
   private tally = el("div", "ar-dis-tally");
   /** The spectators' vote. */
   private vote = el("div", "ar-vote");
+
+  /** The vote shown or not; while it is, what sits where it does (the 🔭 Watch button) goes up above it. */
+  private showVote(on: boolean) {
+    if (this.vote.hidden === !on && (!on || this.voteLift === this.vote.offsetHeight)) return;
+    this.vote.hidden = !on;
+    this.voteLift = on ? this.vote.offsetHeight : 0;
+    document.body.style.setProperty("--ar-vote-lift", `${this.voteLift ? this.voteLift + 10 : 0}px`);
+  }
+  private voteLift = 0;
   private buttons = new Map<number, { b: HTMLButtonElement; n: HTMLElement }>();
   private wheel: StoneWheel;
   private mine = 0;
@@ -258,7 +267,7 @@ export class DisasterShow {
     this.wheel.tick(wallNow);
     if (!live) {
       this.strip.hidden = true;
-      this.vote.hidden = true;
+      this.showVote(false);
       this.stage = -1;
       this.rocks = [];
       this.rainUntil = 0;
@@ -284,7 +293,7 @@ export class DisasterShow {
     this.stage = st.disasterStage;
     const kind = KINDS[st.disaster];
     // Spectators: the vote; everyone: where it's up to.
-    this.vote.hidden = st.disasterStage !== STAGE.VOTING || !this.host.canVote();
+    this.showVote(st.disasterStage === STAGE.VOTING && this.host.canVote());
     st.disasterVotes.forEach((n, i) => {
       const v = this.buttons.get(i + 1);
       if (v) v.n.textContent = String(n);
@@ -898,6 +907,7 @@ export class DisasterShow {
     this.sky.destroy({ children: true });
     this.strip.remove();
     this.vote.remove();
+    document.body.style.removeProperty("--ar-vote-lift");
     this.wheel.destroy();
   }
 }

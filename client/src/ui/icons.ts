@@ -125,6 +125,21 @@ export const ICONS: Record<string, string[]> = {
     "oooooooooooo",
     "............",
   ],
+  // A clipboard with ticks: the day's missions.
+  daily: [
+    "....oooo....",
+    ".ooo.yy.ooo.",
+    ".okkoooookk.",
+    ".okwwwwwwko.",
+    ".okwgwoowko.",
+    ".okwwgwwwko.",
+    ".okwgwoowko.",
+    ".okwwgwwwko.",
+    ".okwwwwwwko.",
+    ".okwoooowko.",
+    ".okkkkkkkko.",
+    ".oooooooooo.",
+  ],
   bell: [
     ".....oo.....",
     "....oyyo....",

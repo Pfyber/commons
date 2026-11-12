@@ -23,8 +23,18 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub const COIN: i32 = 1;
-/// Coins, seeds and the shovel every new player starts with.
-pub const WELCOME: &[(i32, i32)] = &[(COIN, 100), (200, 3), (1205, 1)];
+/// What every new player starts with: coins, seeds, the shovel, a laptop
+/// (for the drone's deliveries) and a skateboard.
+pub const WELCOME: &[(i32, i32)] = &[
+    (COIN, 100),
+    (200, 3),
+    (1205, 1),
+    (LAPTOP, 1),
+    (SKATEBOARD, 1),
+];
+/// The laptop (furniture) and the skateboard (a vehicle), in the starter kit.
+pub const LAPTOP: i32 = 467;
+pub const SKATEBOARD: i32 = 704;
 /// Kinds that count towards the album.
 const COLLECTABLE: &[&str] = &["fish", "plant", "junk", "bug", "shroom"];
 

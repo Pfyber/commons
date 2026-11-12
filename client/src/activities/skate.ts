@@ -26,7 +26,7 @@ import type { ZoneMap } from "../world/map";
 import type { Scene } from "../world/scene";
 import { NO_INPUT, PUSH_S, Park, Skater, TRICK, type Input, type SkateEvent, wrap } from "./skatesim";
 import type { Economy } from "../economy";
-import { DECKS, STOCK, loadKit, needs, packKit, ride, saveKit, unpackKit, type Kit } from "./skatekit";
+import { DECKS, STOCK, loadKit, needs, packKit, ride, saveKit, streetRide, unpackKit, type Kit } from "./skatekit";
 import { GRINDS } from "./skatesim";
 import { Quests, type Metric } from "./skatequests";
 import { BotRider } from "./skatebot";
@@ -86,7 +86,11 @@ const PUSH_CODE = 32;
 /** Combos worth sending to the board (and telling everyone about). */
 const TELL_PTS = 400;
 
-type GameMode = "free" | "run" | "line";
+/** Arriving where you clicked: how hard the board brakes to stop there (px/s²). */
+const SETTLE_BRAKE = 420;
+
+/** `street`: out of the park on your everyday board (no score, no clock: just riding). */
+type GameMode = "free" | "run" | "line" | "street";
 
 /** How a skater's drawn: where (feet, world px), how high, which way, doing what. */
 interface Pose {
@@ -173,6 +177,8 @@ class Rig {
   private carve = 0;
   /** Where the deck was drawn this frame (the glow deck lights just that up), if it was. */
   private deckAt: { x: number; y: number; w: number; h: number } | null = null;
+  /** The deck's own pixels as drawn this frame (its flat, its kicked-up nose and tail, a manual's steps): what the glow deck lights. */
+  private deckShape: { x: number; y: number; w: number; h: number }[] = [];
   private going = 0;
   private was: { heading: number; x: number; y: number; at: number } | null = null;
   private streaks: { x: number; y: number; len: number; life: number }[] = [];
@@ -201,9 +207,15 @@ class Rig {
     return (DECKS[this.kit.deck] ?? DECKS[0]).color;
   }
 
+  /** The grip tape on top of the deck: black, or (the glow deck) lit up in its glow, day and night. */
+  private get grip(): number {
+    return DECKS[this.kit.deck]?.glow ?? 0x161616;
+  }
+
   draw(avatar: Avatar, p: Pose, ground: number, wallNow: number) {
     const g = this.g.clear();
     this.deckAt = null;
+    this.deckShape = [];
     const x = Math.round(p.x);
     const gy = Math.round(p.y - ground);
     const air = p.z - ground;
@@ -395,13 +407,20 @@ class Rig {
   private paint(gl: Graphics, t: Graphics, x: number, by: number, gy: number, down: boolean, now: number, night: boolean) {
     const glow = DECKS[this.kit.deck]?.glow;
     const d = this.deckAt;
-    // The glow deck, after dark: the deck itself lit up like neon, bright
-    // in the dark, with only a faint haze round it. (By day it's just its colour.)
-    if (glow && !down && d && night) {
+    // The glow deck: the whole deck lit up bright (day and night), and a
+    // small halo round it, a glow on the ground under it: just a little
+    // on its surroundings, more after dark, when it's really shining.
+    if (glow && !down && d) {
       const pulse = 0.9 + 0.1 * Math.sin(now / 400);
-      gl.rect(d.x, d.y, d.w, d.h).fill({ color: glow, alpha: 0.95 });
-      gl.ellipse(d.x + d.w / 2, d.y + d.h / 2, d.w / 2 + 4, d.h / 2 + 3).fill({ color: glow, alpha: 0.12 * pulse });
-      gl.ellipse(x, gy, 12, 3).fill({ color: glow, alpha: 0.07 * pulse });
+      const k = (night ? 1 : 0.5) * pulse;
+      const shape = this.deckShape.length ? this.deckShape : [d];
+      // A mild soft edge round the deck's own shape (a pixel or two out, faint)…
+      for (const r of shape) gl.roundRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4, 2).fill({ color: glow, alpha: 0.05 * k });
+      for (const r of shape) gl.roundRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2, 1).fill({ color: glow, alpha: 0.09 * k });
+      // …the deck itself lit, every pixel of it (its kicked-up ends too)…
+      for (const r of shape) gl.rect(r.x, r.y, r.w, r.h).fill({ color: glow, alpha: night ? 0.75 : 0.4 });
+      // …and the faintest light on the ground under it.
+      gl.ellipse(x, gy, 10, 2.5).fill({ color: glow, alpha: 0.05 * k });
     }
     void by;
     const trail = this.kit.trail;
@@ -450,7 +469,7 @@ class Rig {
     const d = MIDDLE + BOARD_RISE;
     rect(-7, d - 1, -3, d + 2, 0xf1e9d2);
     rect(3, d - 1, 7, d + 2, 0xf1e9d2);
-    rect(-11, d - 3, 11, d - 1, 0x161616);
+    rect(-11, d - 3, 11, d - 1, this.grip);
     rect(-11, d - 1, 11, d, this.color);
   }
 
@@ -465,6 +484,7 @@ class Rig {
       g.rect(x - half, y - 7, half * 2, 1).fill(O);
       g.rect(x - half, y - 6, half * 2, 1).fill(this.color);
       this.deckAt = { x: x - half, y: y - 7, w: half * 2, h: 2 };
+      this.deckShape = [{ x: x - half, y: y - 6, w: half * 2, h: 1 }];
       return;
     }
     const upside = roll < 0;
@@ -476,10 +496,13 @@ class Rig {
       g.rect(wx + 1, wy + 1, ww - 2, wh - 1).fill(0xf1e9d2);
     }
     // The deck: grip tape on top, the graphic underneath, kicked up at both ends.
-    const top = upside ? this.color : 0x161616;
+    const top = upside ? this.color : this.grip;
     g.rect(x - half, y - 6, half * 2, 2).fill(top);
     this.deckAt = { x: x - half - (half > 4 ? 1 : 0), y: y - 7, w: half * 2 + (half > 4 ? 2 : 0), h: 4 };
-    if (!upside) g.rect(x - half + 1, y - 6, half * 2 - 2, 1).fill(0x2c2c2c);
+    // (Its shape: the flat of it, and its nose and tail kicked up a pixel.)
+    this.deckShape = [{ x: x - half, y: y - 6, w: half * 2, h: upside ? 2 : 3 }];
+    if (half > 4) this.deckShape.push({ x: x - half - 1, y: y - 7, w: 2, h: 2 }, { x: x + half - 1, y: y - 7, w: 2, h: 2 });
+    if (!upside) g.rect(x - half + 1, y - 6, half * 2 - 2, 1).fill(DECKS[this.kit.deck]?.glow ? 0xf2fff9 : 0x2c2c2c);
     if (half > 4) {
       g.rect(x - half - 1, y - 7, 2, 2).fill(top);
       g.rect(x + half - 1, y - 7, 2, 2).fill(top);
@@ -512,10 +535,12 @@ class Rig {
       g.rect(wx, y - wh - 1 - lift, ww, wh).fill(O);
       g.rect(wx + 1, y - wh - lift, ww - 2, wh - 1).fill(0xf1e9d2);
     }
+    this.deckShape = [];
     for (let i = -half; i < half; i++) {
       const dy = up(i);
+      this.deckShape.push({ x: x + i, y: y - 6 - dy, w: 1, h: 3 });
       g.rect(x + i, y - 7 - dy, 1, 1).fill(O);
-      g.rect(x + i, y - 6 - dy, 1, 2).fill(0x161616);
+      g.rect(x + i, y - 6 - dy, 1, 2).fill(this.grip);
       g.rect(x + i, y - 4 - dy, 1, 1).fill(this.color);
     }
     // The tail, scraping the ground behind.
@@ -735,7 +760,11 @@ export class SkatePark {
      */
     private leave: ((tx: number, ty: number, dx: number, dy: number) => boolean) | null = null,
   ) {
-    this.park = Park.fromMap(map)!;
+    // The whole city's a place to skate (the park's concrete, and the streets round it).
+    const city = Park.city(map);
+    this.cityWide = !!city;
+    this.park = (city ?? Park.fromMap(map))!;
+    this.parkRect = map.objects.find((o) => o.kind === "sk_park") ?? null;
     this.boardPanel = new SkateBoardPanel(
       (m) => this.start(m),
       () => this.bests(),
@@ -751,13 +780,16 @@ export class SkatePark {
     this.flowEl.append(el("span", "skate-flow-name", "🌊 Pump"), el("span", "skate-flow-bar"));
     this.flowEl.hidden = true;
     this.balanceEl.append(el("div", "skate-needle"));
-    this.offBtn = button("Get off ✕", () => this.stop(), "skate-off");
-    this.hud.append(top, this.comboEl, this.balanceEl, this.popEl, this.bigEl, this.feedEl, this.touchEl, this.stickEl, this.offBtn, this.resultsEl, this.duelEl);
+    this.offBtn = button("Get off ✕", () => this.getOff(), "skate-off");
+    this.hud.append(top, this.comboEl, this.balanceEl, this.popEl, this.bigEl, this.feedEl, this.touchEl, this.stickEl, this.resultsEl, this.duelEl);
+    // (Get off: on its own, over any panel that's open there, so it always works; shown with the HUD.)
+    this.offBtn.hidden = true;
+    document.body.append(this.offBtn);
     this.duelEl.hidden = true;
     this.resultsEl.hidden = true;
     this.stickEl.append(el("div", "pb-stick-knob"));
     this.stickEl.hidden = true;
-    this.hud.hidden = true;
+    this.hud.hidden = this.offBtn.hidden = true;
     document.body.append(this.hud);
     this.enterBtn = button("🛹 Skate!", () => this.boardPanel.show(), "skate-enter");
     this.enterBtn.hidden = true;
@@ -767,6 +799,7 @@ export class SkatePark {
     window.addEventListener("keyup", this.onKeyUp, true);
     window.addEventListener("blur", this.onBlur);
     canvas.addEventListener("pointerdown", this.onDown);
+    canvas.addEventListener("contextmenu", this.onMenu);
     window.addEventListener("pointermove", this.onMove);
     window.addEventListener("pointerup", this.onUp);
     window.addEventListener("pointercancel", this.onUp);
@@ -782,9 +815,74 @@ export class SkatePark {
     return id === this.selfId() ? !!this.me : this.others.has(id);
   }
 
+  /** Whether the whole city's skated (its streets too), not just the park. */
+  private cityWide = false;
+  /** The skatepark itself (its tiles), within the city that's skated. */
+  private parkRect: { x: number; y: number; w: number; h: number } | null;
+
   /** Whether the tile (tx, ty) is in the park (where you can get on a board). */
   inPark(tx: number, ty: number): boolean {
-    return this.park.concreteTile(Math.floor(tx + 0.5), Math.floor(ty + 0.5));
+    const x = Math.floor(tx + 0.5);
+    const y = Math.floor(ty + 0.5);
+    const r = this.parkRect;
+    return !!r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h && this.park.concreteTile(x, y);
+  }
+
+  /** Off the board altogether (your everyday board put away too, walking): see `getOff`. */
+  onStreetOff: (() => void) | null = null;
+
+  /** "Get off" (the button, Esc): off the board and off your everyday board too, walking, wherever you are (the park as well). */
+  getOff() {
+    this.stop();
+    this.onStreetOff?.();
+  }
+
+  /** Out on the streets on your everyday board (not the park's skating). */
+  get street(): boolean {
+    return !!this.me && this.mode === "street";
+  }
+
+  /** When you last got off a board (ms): the server's word on where you stand, just after, isn't needed. */
+  stoppedAt = -Infinity;
+
+  /**
+   * Onto your everyday board's physics, out on the streets, from where you
+   * are, heading `heading` at `speed` px/s (carrying on from the ride you
+   * were on), the keys held now held on it.
+   */
+  startStreet(heading: number, speed: number, keys: Iterable<string>) {
+    const self = this.avatarOf(this.selfId());
+    if (!self || this.me) return;
+    const at = self.pos;
+    const fx = at.x * TILE + TILE / 2;
+    const fy = at.y * TILE + TILE - 4;
+    if (!this.park.concrete(fx, fy)) return;
+    this.me = new Skater(this.park, fx, fy);
+    this.kit = loadKit(this.eco);
+    this.me.street = true;
+    this.me.kit = streetRide(this.kit);
+    this.me.heading = heading;
+    this.me.speed = speed;
+    this.myRig = new Rig(this.scene, this.kit, this.lit);
+    this.send({ t: "SkateOn", on: true, kit: packKit(this.kit) });
+    document.body.classList.add("skate-playing", "skate-street");
+    this.hud.hidden = this.offBtn.hidden = false;
+    this.mode = "street";
+    this.run = { phase: "", goAt: 0, endAt: 0, ticked: 0, score: 0, combos: 0, tricks: 0, best: 0, bestLabel: "" };
+    for (const k of keys) this.keys.add(k);
+    this.last = 0;
+  }
+
+  /** Rolled into the park (its skating, its score) or out onto the streets (just riding), carrying on as you were. */
+  private crossed(intoPark: boolean) {
+    const me = this.me;
+    if (!me) return;
+    me.street = !intoPark;
+    me.kit = intoPark ? ride(this.kit) : streetRide(this.kit);
+    me.combo.clear();
+    this.mode = intoPark ? "free" : "street";
+    document.body.classList.toggle("skate-street", !intoPark);
+    if (intoPark) this.bigText("🛹 Skatepark", "info", 1000);
   }
 
   // ---- getting on and off ----
@@ -808,9 +906,15 @@ export class SkatePark {
       this.myRig = new Rig(this.scene, this.kit, this.lit);
       this.send({ t: "SkateOn", on: true, kit: packKit(this.kit) });
       document.body.classList.add("skate-playing");
-      this.hud.hidden = false;
+      this.hud.hidden = this.offBtn.hidden = false;
     }
     const me = this.me;
+    // (From the streets into one of the park's modes: the park's board again.)
+    if (me.street) {
+      me.street = false;
+      me.kit = ride(this.kit);
+      document.body.classList.remove("skate-street");
+    }
     me.combo.clear();
     me.link = 0;
     this.mode = mode;
@@ -856,11 +960,19 @@ export class SkatePark {
     this.avatarOf(this.selfId())?.setArena(null);
     this.send({ t: "SkateOn", on: false, kit: 0 });
     sfx.quiet();
-    document.body.classList.remove("skate-playing");
-    this.hud.hidden = true;
+    document.body.classList.remove("skate-playing", "skate-street");
+    this.stoppedAt = performance.now();
+    // Handed back to walking (or riding) on the tile you're on, drawn on from where your board was: no jump.
+    const self = this.avatarOf(this.selfId());
+    if (self) self.snapSoft({ x: Math.floor(self.pos.x + 0.5), y: Math.floor(self.pos.y + 0.875) });
+    this.hud.hidden = this.offBtn.hidden = true;
     this.keys.clear();
     this.held = { pop: false, grab: false, spinL: false, spinR: false };
     this.stick = null;
+    this.aim = null;
+    this.aimHeld = false;
+    this.rightPop = false;
+    this.settling = false;
   }
 
   // ---- what the server says ----
@@ -996,8 +1108,15 @@ export class SkatePark {
     const frozen = this.mode === "run" && (this.run.phase === "count" || this.run.phase === "over");
     this.acc += dt;
     const inp = frozen ? NO_INPUT : this.input();
+    // (Arrived where you clicked: easing to a stop, not rolling on past it.)
+    if (inp.x || inp.y || inp.pop) this.settling = false;
+    else if (this.settling && me.mode === "ground") {
+      me.speed = Math.max(0, me.speed - SETTLE_BRAKE * dt);
+      if (me.speed === 0) this.settling = false;
+    }
     let first = true;
     const before = { x: me.x, y: me.y };
+    const startedAt = { x: me.x, y: me.y, heading: me.heading };
     while (this.acc >= STEP_S) {
       this.acc -= STEP_S;
       this.stepFrom = { x: me.x, y: me.y, z: me.z };
@@ -1013,7 +1132,21 @@ export class SkatePark {
     // Out of the park, where there's somewhere to walk: off the board (not mid-run or mid-1v1), walking on.
     const out = this.leaving;
     this.leaving = null;
-    if (out && this.leave && !this.duel && this.mode !== "run" && this.leave(out.tx, out.ty, out.dx, out.dy)) return;
+    // (The whole city's skated now, park and streets as one: no stepping off at the park's edge.)
+    if (out && this.leave && !this.cityWide && !this.duel && this.mode !== "run" && this.leave(out.tx, out.ty, out.dx, out.dy)) return;
+    // Through a gate, in or out: the park's skating, or just riding the streets, rolling on.
+    // (Mid-run, mid-line, mid-1v1: the gate's as good as a wall.)
+    const inside = this.inPark((me.x - TILE / 2) / TILE, (me.y - TILE + 4) / TILE);
+    if (this.mode === "street" && inside) this.crossed(true);
+    else if (!inside && this.mode !== "street") {
+      if (this.mode === "free" && !this.duel) this.crossed(false);
+      else {
+        me.x = startedAt.x;
+        me.y = startedAt.y;
+        me.heading = startedAt.heading + Math.PI;
+        me.speed *= 0.35;
+      }
+    }
     const moved = Math.hypot(me.x - before.x, me.y - before.y);
     this.travelled += moved;
     this.watch?.({ t: "frame" }, me);
@@ -1726,6 +1859,25 @@ export class SkatePark {
     if (k.has("ArrowRight") || k.has("KeyD")) x += 1;
     if (k.has("ArrowUp") || k.has("KeyW")) y -= 1;
     if (k.has("ArrowDown") || k.has("KeyS")) y += 1;
+    // The mouse: toward where you clicked (no arrow keys held: they take over), easing off as you get there.
+    const me = this.me;
+    if ((x || y) && !this.aimHeld) this.aim = null;
+    if (!x && !y && this.aim && me) {
+      const dx = this.aim.x - me.x;
+      const dy = this.aim.y - me.y;
+      const d = Math.hypot(dx, dy);
+      // (Braking in time to stop on it: from as far out as it takes at this speed.)
+      const stopIn = (me.speed * me.speed) / (2 * SETTLE_BRAKE);
+      if (d < Math.max(14, stopIn) && !this.aimHeld) {
+        this.aim = null;
+        this.settling = true;
+      }
+      else if (d >= 6) {
+        const m = Math.min(1, d / 48);
+        x = (dx / d) * m;
+        y = (dy / d) * m;
+      }
+    }
     if (this.stick) {
       const dx = this.stick.x - this.stick.x0;
       const dy = this.stick.y - this.stick.y0;
@@ -1745,7 +1897,7 @@ export class SkatePark {
     return {
       x,
       y,
-      pop: k.has("Space") || this.held.pop,
+      pop: k.has("Space") || this.held.pop || this.rightPop,
       flip: this.flipPressed,
       manual: this.manualPressed,
       grab: k.has("KeyK") || this.held.grab,
@@ -1774,7 +1926,7 @@ export class SkatePark {
     e.preventDefault();
     e.stopPropagation();
     if (code === "Escape") {
-      if (!e.repeat) this.stop();
+      if (!e.repeat) this.getOff();
       return;
     }
     this.keys.add(code);
@@ -1784,8 +1936,9 @@ export class SkatePark {
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
-    const had = this.keys.delete(e.code);
-    if (had && this.me) e.stopPropagation();
+    // (Let go: the game hears it too, so a key held as you got on isn't left
+    // held down after, riding you off on its own when you get off.)
+    this.keys.delete(e.code);
   };
 
   private onBlur = () => {
@@ -1794,7 +1947,60 @@ export class SkatePark {
     this.held = { pop: false, grab: false, spinL: false, spinR: false };
   };
 
+  /**
+   * The mouse: where a left click sent you (world px), steered toward and
+   * pushed for till you're there; held down, it follows the pointer. The
+   * right button's the pop (held: crouched; let go: an ollie; in the air: a flip).
+   */
+  private aim: { x: number; y: number } | null = null;
+  private aimHeld = false;
+  /** Out on the streets, where the left button went down: a click's the game's (ridden to, or tapped on); dragged, it steers. */
+  private press: { x: number; y: number } | null = null;
+  /** Got where you clicked: braking gently to a stop there (till you ride on). */
+  private settling = false;
+  private rightPop = false;
+
+  /** How fast your board's going (px/s; 0 off it). */
+  get speed(): number {
+    return this.me?.speed ?? 0;
+  }
+
+  /** Whether you're steering your board yourself now (a direction key, the mouse held down, the stick). */
+  get steering(): boolean {
+    if (this.aimHeld || this.stick) return true;
+    for (const k of this.keys) if (/^(Arrow(Up|Down|Left|Right)|Key[WASD])$/.test(k)) return true;
+    return false;
+  }
+
+  /** Whether you're on your way somewhere you clicked (not there yet). */
+  get aiming(): boolean {
+    return !!this.aim;
+  }
+
+  /** Ride to (x, y) (world px): pushing and steering there, easing to a stop (a tap, out on the streets). */
+  steerTo(x: number, y: number) {
+    this.aim = { x, y };
+    this.settling = false;
+  }
+
+  private aimAt(e: PointerEvent) {
+    const r = this.canvas.getBoundingClientRect();
+    const w = this.scene.screenToWorld(e.clientX - r.left, e.clientY - r.top);
+    this.aim = { x: w.x, y: w.y };
+  }
+
   private onDown = (e: PointerEvent) => {
+    if (this.me && e.pointerType === "mouse") {
+      if (e.button === 0 && this.street) this.press = { x: e.clientX, y: e.clientY };
+      else if (e.button === 0) {
+        this.aimAt(e);
+        this.aimHeld = true;
+      } else if (e.button === 2) {
+        e.preventDefault();
+        this.rightPop = true;
+      }
+      return;
+    }
     if (!this.me || e.pointerType !== "touch") return;
     e.preventDefault();
     document.body.classList.add("skate-touch-mode");
@@ -1802,6 +2008,11 @@ export class SkatePark {
   };
 
   private onMove = (e: PointerEvent) => {
+    if (this.me && this.press && e.pointerType === "mouse" && Math.hypot(e.clientX - this.press.x, e.clientY - this.press.y) > 10) {
+      this.press = null;
+      this.aimHeld = true;
+    }
+    if (this.me && this.aimHeld && e.pointerType === "mouse") this.aimAt(e);
     if (!this.stick || this.stick.id !== e.pointerId) return;
     this.stick.x = e.clientX;
     this.stick.y = e.clientY;
@@ -1816,7 +2027,19 @@ export class SkatePark {
   };
 
   private onUp = (e: PointerEvent) => {
+    if (e.pointerType === "mouse") {
+      if (e.button === 0) {
+        this.aimHeld = false;
+        this.press = null;
+      }
+      if (e.button === 2) this.rightPop = false;
+    }
     if (this.stick && this.stick.id === e.pointerId) this.stick = null;
+  };
+
+  /** (No menu on a right click while you're on a board: it's your pop.) */
+  private onMenu = (e: Event) => {
+    if (this.me) e.preventDefault();
   };
 
   /** On a phone: Ollie (hold to crouch), Flip, Grab (hold), Manual, and the two spins. */
@@ -1860,11 +2083,12 @@ export class SkatePark {
   destroy() {
     // (Gone with the connection, perhaps: what you were doing, to be carried on.)
     const me = this.me;
-    if (me && me.mode !== "bail") carried = { x: me.x, y: me.y, z: me.z, heading: me.heading, speed: me.speed, mode: this.mode, at: performance.now() };
+    if (me && me.mode !== "bail" && this.mode !== "street") carried = { x: me.x, y: me.y, z: me.z, heading: me.heading, speed: me.speed, mode: this.mode, at: performance.now() };
     this.stop();
     for (const id of [...this.others.keys()]) this.forget(id);
     for (const f of this.floats) f.el.remove();
     this.hud.remove();
+    this.offBtn.remove();
     this.enterBtn.remove();
     this.boardPanel.hide();
     this.boardPanel.el.remove();
@@ -1872,6 +2096,7 @@ export class SkatePark {
     window.removeEventListener("keyup", this.onKeyUp, true);
     window.removeEventListener("blur", this.onBlur);
     this.canvas.removeEventListener("pointerdown", this.onDown);
+    this.canvas.removeEventListener("contextmenu", this.onMenu);
     window.removeEventListener("pointermove", this.onMove);
     window.removeEventListener("pointerup", this.onUp);
     window.removeEventListener("pointercancel", this.onUp);

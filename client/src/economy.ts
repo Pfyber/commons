@@ -180,6 +180,22 @@ export class Economy {
   }
 
   /** Today's small gift, if not yet collected. */
+  /** The daily crate (server `dailycrate`, one every 18 hours): whether one's just been given (it's in the bag). */
+  async dailyCrate(): Promise<boolean> {
+    // (Not due yet, the next one 18 hours after the last: nothing to apply.)
+    const r = await this.auth.send<{ granted: boolean; applied?: Applied }>("/api/crate/daily", {});
+    if (r.applied) this.applyResult(r.applied);
+    return r.granted;
+  }
+
+  /**
+   * Opens a daily crate: what was in it (coins, then two pieces, each with its
+   * rarity), and the bag's new totals, for the caller to apply when it's shown.
+   */
+  openDailyCrate(): Promise<{ slots: { item: number; qty: number; rarity: number }[]; best: number; applied: Applied }> {
+    return this.auth.send("/api/crate/open", { key: crypto.randomUUID() });
+  }
+
   async daily(): Promise<{ item: number; qty: number } | null> {
     const r = await this.auth.send<{ granted: { item: number; qty: number } | null }>("/api/daily", {});
     if (r.granted) await this.load();

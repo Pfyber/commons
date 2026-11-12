@@ -136,6 +136,16 @@ export function ride(k: Kit): Ride {
   };
 }
 
+/**
+ * Your board out on the streets: as fast as your bearings and wheels make it,
+ * but your trucks don't matter there (no surf pumping, steering as stock),
+ * and an ollie and a kickflip (Space, and Space again in the air) always go.
+ */
+export function streetRide(k: Kit): Ride {
+  const r = ride(k);
+  return { ...r, flips: new Set(["", ...r.flips]), turn: 1, pump: 0, wobble: 1 };
+}
+
 /** Times the stock acceleration, by bearings level: 12% more a level up to Lv 5; the Pro ones (6), twice Lv 5. */
 export function bearingAccel(level: number): number {
   const lv = Math.max(1, Math.min(6, level));

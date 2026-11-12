@@ -1,14 +1,16 @@
 // Weather everyone shares: picked from the UTC clock in two-hour spells, so
 // all players see the same sky without any messages. Cloud shadows drift
 // across the ground, rain falls with ripples on the water, morning mist
-// hangs low. `?weather=rain` (clear, cloudy, rain, mist) overrides it.
+// hangs low. On Ljubljana's snow days (see snowdays.ts) it snows all day.
+// `?weather=rain` (clear, cloudy, rain, mist, snow) overrides it.
 
-import { type Application, Container, Graphics } from "pixi.js";
+import { type Application, Container, Graphics, GraphicsContext } from "pixi.js";
 import { TILE, hash } from "../world/art";
 import { type ZoneMap, groundAt } from "../world/map";
 import type { Scene } from "../world/scene";
+import { snowDay } from "./snowdays";
 
-export type WeatherKind = "clear" | "cloudy" | "rain" | "mist";
+export type WeatherKind = "clear" | "cloudy" | "rain" | "mist" | "snow";
 
 const SPELL_MS = 2 * 60 * 60 * 1000;
 
@@ -17,6 +19,8 @@ export function weatherAt(ms: number, hour: number): { kind: WeatherKind; wind: 
   const spell = Math.floor(ms / SPELL_MS);
   const h = hash(spell, 7, 31) % 100;
   const wind = 0.15 + (hash(spell, 9, 31) % 70) / 100;
+  // A snow day: snowing, a light breeze.
+  if (snowDay(ms)) return { kind: "snow", wind: Math.min(wind, 0.45) };
   let kind: WeatherKind = h < 45 ? "clear" : h < 75 ? "cloudy" : h < 90 ? "rain" : "mist";
   if (kind === "mist" && !(hour >= 4.5 && hour < 10)) kind = "cloudy";
   return { kind, wind };
@@ -26,6 +30,14 @@ interface Drop {
   x: number;
   y: number;
   v: number;
+}
+/** A snowflake: where, how fast it falls (px/ms), how big, where in its sway. */
+interface Flake {
+  x: number;
+  y: number;
+  v: number;
+  r: number;
+  ph: number;
 }
 interface Ripple {
   x: number;
@@ -37,8 +49,10 @@ export class Weather {
   kind: WeatherKind = "clear";
   wind = 0.3;
   private override: WeatherKind | null;
-  /** Cloud shadows, in world space. */
-  private shadows = new Graphics();
+  /** Cloud shadows, in world space: each cloud's shape built once (`cloudShape`), only moved. */
+  private shadows = new Container();
+  private clouds: Graphics[] = [];
+  private cloudShapes = new Map<string, GraphicsContext>();
   /** Rain streaks and mist, in screen space (above the night shade). */
   private sky = new Container();
   private rain = new Graphics();
@@ -46,6 +60,7 @@ export class Weather {
   /** Ripples on water, in world space. */
   private ripples = new Graphics();
   private drops: Drop[] = [];
+  private flakes: Flake[] = [];
   private rings: Ripple[] = [];
   private nextRing = 0;
 
@@ -57,7 +72,7 @@ export class Weather {
     private indoors = false,
   ) {
     const q = new URLSearchParams(location.search).get("weather");
-    this.override = indoors ? "clear" : ((["clear", "cloudy", "rain", "mist"] as const).find((k) => k === q) ?? null);
+    this.override = indoors ? "clear" : ((["clear", "cloudy", "rain", "mist", "snow"] as const).find((k) => k === q) ?? null);
     scene.world.addChild(this.ripples, this.shadows);
     scene.lieFlat(this.ripples);
     this.sky.addChild(this.mist, this.rain);
@@ -67,6 +82,10 @@ export class Weather {
   destroy() {
     this.app.stage.removeChild(this.sky);
     this.sky.destroy({ children: true });
+    this.shadows.destroy({ children: true });
+    this.clouds.length = 0;
+    for (const c of this.cloudShapes.values()) c.destroy();
+    this.cloudShapes.clear();
   }
 
   /** Drawn at all (the settings can turn the weather's look off). */
@@ -77,11 +96,12 @@ export class Weather {
       // No rain, no mist, no cloud shadows: a clear sky to look at.
       this.kind = "clear";
       this.scene.wind = 0.2;
-      this.shadows.clear();
+      for (const c of this.clouds) c.visible = false;
       this.rain.clear();
       this.mist.clear();
       this.ripples.clear();
       this.drops.length = 0;
+      this.flakes.length = 0;
       this.rings.length = 0;
       return;
     }
@@ -91,13 +111,61 @@ export class Weather {
     this.scene.wind = this.wind;
     this.drawShadows(now);
     this.drawRain(now);
+    this.drawSnow(now);
     this.drawMist(now);
+  }
+
+  /** Snow: flakes drifting down, swaying, near ones bigger and quicker than far ones. */
+  private drawSnow(now: number) {
+    if (this.kind !== "snow") {
+      this.flakes.length = 0;
+      return;
+    }
+    const g = this.rain;
+    const { width, height } = this.app.screen;
+    while (this.flakes.length < 220) {
+      const near = Math.random() < 0.3;
+      this.flakes.push({
+        x: Math.random() * (width + 200) - 100,
+        y: Math.random() * height,
+        v: near ? 0.05 + Math.random() * 0.03 : 0.025 + Math.random() * 0.02,
+        r: near ? 2 : 1,
+        ph: Math.random() * Math.PI * 2,
+      });
+    }
+    const dt = Math.min(50, this.app.ticker.deltaMS);
+    const drift = 0.008 + this.wind * 0.03;
+    for (const f of this.flakes) {
+      f.y += f.v * dt;
+      f.x += (drift + Math.sin(now / 900 + f.ph) * 0.02) * dt * (f.r === 2 ? 1.4 : 1);
+      if (f.y > height + 4) {
+        f.y = -4;
+        f.x = Math.random() * (width + 200) - 200;
+      }
+      if (f.x > width + 100) f.x -= width + 200;
+      // Square flakes, as the art's pixels are.
+      g.rect(Math.round(f.x), Math.round(f.y), f.r * 2, f.r * 2);
+    }
+    g.fill({ color: 0xffffff, alpha: 0.85 });
+  }
+
+  /** Cloud `i`'s shadow (`size` across, `step` dark a ring), drawn once and kept. */
+  private cloudShape(i: number, size: number, step: number): GraphicsContext {
+    const key = `${i}:${step}`;
+    let c = this.cloudShapes.get(key);
+    if (!c) {
+      c = new GraphicsContext();
+      // Concentric rings: faint at the rim, a little denser in the middle, so
+      // the shadow has a soft edge instead of a hard one.
+      for (const k of [1, 0.8, 0.6, 0.42]) c.ellipse(0, 0, size * 1.3 * k, size * 0.6 * k).fill({ color: 0x1d2b3a, alpha: step });
+      this.cloudShapes.set(key, c);
+    }
+    return c;
   }
 
   /** Big soft cloud shadows drifting with the wind. */
   private drawShadows(now: number) {
-    const g = this.shadows.clear();
-    const count = this.indoors ? 0 : this.kind === "clear" ? 2 : this.kind === "mist" ? 0 : 7;
+    const count = this.indoors ? 0 : this.kind === "clear" ? 2 : this.kind === "mist" || this.kind === "snow" ? 0 : 7;
     const mw = this.map.width * TILE;
     const mh = this.map.height * TILE;
     const drift = (now / 1000) * (8 + this.wind * 22);
@@ -105,13 +173,15 @@ export class Weather {
       const bx = ((hash(i, 1, 41) % mw) + drift * (0.8 + (i % 3) * 0.15)) % (mw + 600) - 300;
       const by = (hash(i, 2, 41) % mh) + Math.sin(now / 9000 + i) * 20;
       const size = 140 + (hash(i, 3, 41) % 160);
-      // Concentric rings: faint at the rim, a little denser in the middle, so
-      // the shadow has a soft edge instead of a hard one.
       const step = this.kind === "rain" ? 0.03 : 0.018;
-      for (const k of [1, 0.8, 0.6, 0.42]) {
-        g.ellipse(bx, by, size * 1.3 * k, size * 0.6 * k).fill({ color: 0x1d2b3a, alpha: step });
-      }
+      let c = this.clouds[i];
+      if (!c) c = this.clouds[i] = this.shadows.addChild(new Graphics());
+      const shape = this.cloudShape(i, size, step);
+      if (c.context !== shape) c.context = shape;
+      c.position.set(bx, by);
+      if (!c.visible) c.visible = true;
     }
+    for (let i = count; i < this.clouds.length; i++) if (this.clouds[i].visible) this.clouds[i].visible = false;
   }
 
   private drawRain(now: number) {
@@ -161,6 +231,8 @@ export class Weather {
     const { width, height } = this.app.screen;
     // Rain greys the day a little.
     if (this.kind === "rain") g.rect(0, 0, width, height).fill({ color: 0x8a96a3, alpha: 0.14 });
+    // Snow whitens the day: a pale, cool veil.
+    if (this.kind === "snow") g.rect(0, 0, width, height).fill({ color: 0xe8eef6, alpha: 0.16 });
     if (this.kind !== "mist") return;
     g.rect(0, 0, width, height).fill({ color: 0xf2f4f2, alpha: 0.16 });
     for (let i = 0; i < 9; i++) {

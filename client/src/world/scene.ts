@@ -1416,6 +1416,8 @@ export class Scene {
         continue;
       }
       for (const k of c.children) {
+        // (Not drawn at all, hidden or culled out of view: nothing to place.)
+        if (!k.visible || !k.renderable) continue;
         const foot = this.feet.get(k);
         if (this.asIs.has(k)) continue;
         if (this.flatLayers.has(k)) this.layFlat(k, cam);

@@ -71,6 +71,8 @@ import { JournalPanel, NetGame } from "./ui/nature";
 import { Nature } from "./nature";
 import { ActionMenu, BagPanel, MarketPanel, PlaceBanner, PlotMenu, ReelGame, button } from "./ui/panels";
 import { FridgePanel } from "./ui/fridge";
+import { CrateOpening, showCrateToast } from "./ui/crate";
+import { DailyPanel } from "./ui/daily";
 import { isWearable } from "./world/items";
 import { styleFor } from "./world/art";
 import { SettingsPanel } from "./ui/settings";
@@ -262,11 +264,13 @@ async function main() {
     onEmote: (id) => game?.emote(id),
     onSit: () => game?.toggleSit(),
     onRide: () => game?.toggleRide(),
+    onRidePick: () => game?.ridePicker(),
     onLeave: () => game?.leaveBuilding(),
     onToys: () => game?.pickToy(),
     onBag: () => ui.bag.toggle(),
     onAlbum: () => ui.album.toggle(),
     onFriends: () => (ui.friends.open ? ui.friends.hide() : ui.friends.showList()),
+    onDaily: () => (ui.daily.open ? ui.daily.hide() : void ui.daily.openUp()),
     onNotifications: () => notifications.toggle(),
     onSound: () => sound.toggle(),
     onSettings: () => settingsPanel.toggle(),
@@ -467,6 +471,12 @@ async function main() {
     }, on ? "small" : "small primary-sm");
     return b;
   };
+  // Opening a daily crate (from its popup, or the bag): the chest in the middle of the screen.
+  let crateOpen: CrateOpening | null = null;
+  const openDailyCrate = () => {
+    if (crateOpen) return;
+    crateOpen = new CrateOpening(eco, () => eco.openDailyCrate(), () => (crateOpen = null));
+  };
   const ui: Ui = {
     eco,
     hud,
@@ -494,13 +504,18 @@ async function main() {
       },
       (item) => rides.ride === item.meta.code,
       (item) => wearButton(item) ?? (game as Game | null)?.bagExtra(item) ?? null,
-      () => (game as Game | null)?.openCrate(),
+      (item) => {
+        if (item.key !== "daily_crate") return (game as Game | null)?.openCrate();
+        ui.bag.hide();
+        openDailyCrate();
+      },
     ),
     album: new JournalPanel(eco, forage, museum),
     forage,
     net: new NetGame(),
     market: new MarketPanel(eco),
     fridge: new FridgePanel(eco),
+    daily: new DailyPanel(eco),
     life,
     room: new RoomPanel(eco, life),
     drone: new DronePanel(eco, life, (text) => (game as Game | null)?.say(text)),
@@ -603,9 +618,18 @@ async function main() {
   // New ones pop up (with a chime) to answer at once.
   const popups = new NotifyPopups(social, noteActions);
   social.onNotify = (n) => popups.show(n);
+  // The daily missions: their button marked when the bonus is there to claim (looked at now and then).
+  ui.daily.onReady = (ready) => hud.setDailyReady(ready);
+  void ui.daily.refresh();
+  window.setInterval(() => void ui.daily.refresh(), 120_000);
+  /** A notification of our own (a parcel landed, a gathering starting): popped up, with its chime. */
+  const note = (kind: string, body: Record<string, unknown>) => popups.show({ id: -Date.now(), kind, body, at: Date.now() / 1000, read: true });
   eco.onChange(() => hud.setCoins(eco.coins));
   eco.onWentOff = (n) => hud.toast(`🐟 ${n} fish in your bag went off (a week out of the fridge): they're Rotten Fish now.`, 6000);
-  social.onChange(() => hud.setBadge(social.unreadCount));
+  social.onChange(() => {
+    hud.setBadge(social.unreadCount);
+    hud.setFriendsOnline(social.friends.filter((f) => f.online).length);
+  });
   social.onToast = (t) => hud.toast(t, 4000);
   await Promise.all([eco.load().catch(() => {}), social.start().catch(() => {}), homes.load().catch(() => {}), rent.load().catch(() => {}), pets.load().catch(() => {}), rides.load().catch(() => {})]);
   eco.onChange(() => {
@@ -693,6 +717,7 @@ async function main() {
             void travel({ zone: z, arrive });
           },
           onVisit: (owner) => void travel({ zone: "home", owner }),
+          onNote: (kind, body) => note(kind, body),
           // A home TV: watch the arena (unseen, in the middle of it); stop, and back to that home.
           onWatch: (owner, stop) => {
             if (stop) return void travel({ zone: "home", owner: owner ?? undefined });
@@ -794,7 +819,7 @@ async function main() {
       if (nudged.has(key)) continue;
       if (start - now <= 10 * 60_000 && now - start <= 15 * 60_000) {
         nudged.add(key);
-        hud.toast(start > now ? `🌆 ${g.title} starts in ${Math.ceil((start - now) / 60_000)} min, at ${g.where}.` : `🌆 ${g.title} has begun, at ${g.where}. Come along!`, 7000);
+        note("gathering", { title: g.title, where: g.where, spot: g.spot, soon: start > now ? Math.ceil((start - now) / 60_000) : 0 });
       }
     }
   };
@@ -808,9 +833,14 @@ async function main() {
       if (!me) return;
       const open = s.open.find((o) => !me.voted.includes(o.id) && (o.status === "voting" || o.status === "collecting"));
       if (open && (me.can_vote_founding || me.can_vote)) {
-        hud.toast(`🗳 ${open.status === "voting" ? "A town vote is open" : "The town is collecting ideas"}: “${open.title}”. Visit the Town Hall.`, 7000);
+        note("town_vote", { title: `${open.status === "voting" ? "A town vote is open" : "The town is collecting ideas"}: “${open.title}”` });
       }
     })
+    .catch(() => {});
+  // The daily crate: a popup when it's yours (Open now, or keep it in the bag).
+  eco
+    .dailyCrate()
+    .then((granted) => granted && showCrateToast(openDailyCrate))
     .catch(() => {});
   // A small daily gift, no streaks (spec §8.3).
   eco

@@ -4,7 +4,7 @@
 // water, and a soft aqua glow breathing over it all. Drawn over the still
 // fountain (art.ts, "fountain"), in the same pixels.
 
-import { Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Container, Sprite, Texture } from "pixi.js";
 import { TILE } from "./art";
 import type { MapObject } from "./map";
 import { type Scene, fountainFoot } from "./scene";
@@ -26,9 +26,25 @@ function glowTexture(): Texture {
   return Texture.from(c);
 }
 
+/** Colours as the canvas takes them (made once each). */
+const HEX = new Map<number, string>();
+
+/** Room round the drawing for the water's pixels (the jet, splashes), each side. */
+const PAD = 8;
+
 export class FountainFx {
   private root = new Container();
-  private g = new Graphics();
+  /**
+   * The water's pixels, painted each frame on a small canvas and shown as one
+   * picture (the same pixels as before; a canvas fills a few hundred little
+   * rectangles in no time, where vector shapes had to be rebuilt each frame).
+   */
+  private canvas = document.createElement("canvas");
+  private ctx: CanvasRenderingContext2D;
+  private tex: Texture;
+  private water: Sprite;
+  /** The fountain's box in world pixels (with its overhang): to skip it out of view. */
+  private box: { x0: number; y0: number; x1: number; y1: number };
   private glow: Sprite;
   private bowlGlow: Sprite;
   /** Where the still drawing's top-left is, in world pixels. */
@@ -41,7 +57,7 @@ export class FountainFx {
   private iy: number;
 
   constructor(
-    scene: Scene,
+    private scene: Scene,
     obj: MapObject,
   ) {
     const w = obj.w * TILE;
@@ -64,7 +80,15 @@ export class FountainFx {
     this.bowlGlow.blendMode = "add";
     this.bowlGlow.position.set(this.x0 + this.cx, this.y0 + this.cy - 22);
     this.bowlGlow.scale.set(0.8, 0.3);
-    this.root.addChild(this.glow, this.g, this.bowlGlow);
+    this.canvas.width = w + PAD * 2;
+    this.canvas.height = TOP + h + PAD * 2;
+    this.ctx = this.canvas.getContext("2d", { willReadFrequently: true })!;
+    this.tex = Texture.from(this.canvas);
+    this.tex.source.scaleMode = "nearest";
+    this.water = new Sprite(this.tex);
+    this.water.position.set(this.x0 - PAD, this.y0 - PAD);
+    this.box = { x0: this.x0 - PAD, y0: this.y0 - PAD, x1: this.x0 + w + PAD, y1: this.y0 + TOP + h + PAD };
+    this.root.addChild(this.glow, this.water, this.bowlGlow);
     // Just over the fountain itself, under anyone standing in front of it.
     this.root.zIndex = (obj.y + obj.h) * TILE - 0.5;
     // (Its water is drawn in world pixels; it's held at the pedestal's foot,
@@ -83,12 +107,28 @@ export class FountainFx {
   }
 
   update(now: number) {
-    const g = this.g.clear();
+    // Out of view: nothing to animate (it picks up where the clock is when it's back).
+    const v = this.scene.viewRect();
+    const b = this.box;
+    const seen = b.x1 > v.x0 * TILE && b.x0 < v.x1 * TILE && b.y1 > v.y0 * TILE && b.y0 < v.y1 * TILE;
+    if (this.root.visible !== seen) this.root.visible = seen;
+    if (!seen) return;
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     const { cx, cy, ix, iy } = this;
-    const X = this.x0;
-    const Y = this.y0;
-    const dot = (x: number, y: number, color: number, alpha = 1, w = 1, h = 1) =>
-      g.rect(Math.round(X + x), Math.round(Y + y), w, h).fill({ color, alpha });
+    // (The colour and alpha only set when they change: each set is parsed.)
+    let lastColor = -1;
+    let lastAlpha = -1;
+    const dot = (x: number, y: number, color: number, alpha = 1, w = 1, h = 1) => {
+      if (alpha <= 0) return;
+      const al = Math.min(1, alpha);
+      if (al !== lastAlpha) ctx.globalAlpha = lastAlpha = al;
+      if (color !== lastColor) {
+        lastColor = color;
+        ctx.fillStyle = HEX.get(color) ?? HEX.set(color, `#${color.toString(16).padStart(6, "0")}`).get(color)!;
+      }
+      ctx.fillRect(Math.round(x) + PAD, Math.round(y) + PAD, w, h);
+    };
 
     // The glow over the water, breathing slowly.
     const breathe = 0.5 + 0.5 * Math.sin(now / 1100);
@@ -159,9 +199,12 @@ export class FountainFx {
         dot(sx, sy + 1, 0xffffff, s * 0.6);
       }
     }
+    ctx.globalAlpha = 1;
+    this.tex.source.update();
   }
 
   destroy() {
     this.root.destroy({ children: true });
+    this.tex.destroy(true);
   }
 }

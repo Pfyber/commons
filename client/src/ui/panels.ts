@@ -75,7 +75,7 @@ export class Panel {
   private static current: Panel | null = null;
   /** Where in the world the panel belongs (a board, a stall…): it closes
    * when you walk away. Null for panels opened from the HUD. */
-  anchor: { x: number; y: number; range: number } | null = null;
+  anchor: { x: number; y: number; range: number; reach?: number } | null = null;
 
   /** The open panel, if any. */
   static get open(): Panel | null {
@@ -299,7 +299,7 @@ const KIND_ORDER: [string, string][] = [
   ["card", "Cards"],
   ["exterior", "For your house"],
   ["ticket", "Arcade tickets"],
-  ["crate", "Lucky finds"],
+  ["crate", "Crates"],
   ["wear", "Clothes & suits"],
 ];
 

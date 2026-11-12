@@ -262,6 +262,10 @@ function noteButtons(n: Notification, social: Social, actions: NoteActions, done
   if ((n.kind === "club_event_soon" || n.kind === "club_event_now") && place && age < 7200) act("Show me", () => actions.walkToSpot?.(place), "small primary-sm");
   if (n.kind === "club_meetup_now" && club && age < 3600) act("Go up", () => actions.goToClubRoom?.(club), "small primary-sm");
   if (n.kind === "gift" && gifts) act("Go home", () => actions.goHome());
+  // Knocking at your door: in they come (a friend can be invited; anyone else, just told).
+  if (n.kind === "knock" && from && age < INVITE_SECS && social.friends.some((f) => f.id === from)) act("Let them in", () => void social.invite(from), "small primary-sm");
+  if (n.kind === "parcel" && age < 3600) act("Go home", () => actions.goHome(), "small primary-sm");
+  if (n.kind === "gathering" && n.body.spot && age < 3600) act("Show me", () => actions.walkToSpot?.(n.body.spot!), "small primary-sm");
   return out;
 }
 

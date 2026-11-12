@@ -63,6 +63,8 @@ pub enum Weather {
     Cloudy,
     Rain,
     Mist,
+    /// One of Ljubljana's snow days (`SNOW_RECORD`): snowing all day.
+    Snow,
 }
 
 impl Weather {
@@ -72,6 +74,7 @@ impl Weather {
             Self::Cloudy => "cloudy",
             Self::Rain => "rain",
             Self::Mist => "mist",
+            Self::Snow => "snow",
         }
     }
 }
@@ -86,8 +89,42 @@ pub fn hash(x: u32, y: u32, salt: u32) -> u32 {
     h
 }
 
+/// The dates it most often snows in Ljubljana, from ten winters of records
+/// (2015/16–2024/25, Open-Meteo's ERA5 archive, a day with 0.5 cm of fresh
+/// snow or more): (month, day, winters of the ten it snowed). The client's
+/// `SNOW_RECORD` (ambient/snowdays.ts), where the record's told in full.
+pub const SNOW_RECORD: [(u32, u32, u32); 30] = [(11, 21, 2), (11, 22, 2), (11, 26, 2), (11, 29, 2), (11, 30, 2), (12, 2, 2), (12, 6, 2), (12, 8, 2), (12, 9, 4), (12, 13, 3), (12, 20, 2), (12, 28, 2), (1, 3, 2), (1, 4, 2), (1, 5, 2), (1, 6, 3), (1, 10, 2), (1, 16, 2), (1, 18, 3), (1, 19, 2), (1, 23, 2), (1, 28, 2), (1, 31, 2), (2, 3, 2), (2, 11, 2), (2, 12, 2), (2, 13, 2), (2, 26, 3), (3, 1, 3), (3, 3, 2)];
+/// It snows on a date that snowed in at least this many of the ten winters (four: 9 December).
+pub const SNOW_WINTERS: u32 = 4;
+
+/// Whether `ms` (unix ms) falls on a snow day: the date in Ljubljana (all
+/// winter in CET, UTC+1) is one of the snowiest on record.
+pub fn snow_day(ms: i64) -> bool {
+    let days = (ms + 3_600_000).div_euclid(86_400_000);
+    let (month, day) = month_day(days);
+    SNOW_RECORD
+        .iter()
+        .any(|&(m, d, n)| m == month && d == day && n >= SNOW_WINTERS)
+}
+
+/// The (month, day) of `days` since 1 Jan 1970 (the civil calendar).
+fn month_day(days: i64) -> (u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (month, day)
+}
+
 /// The weather at `ms` (unix ms) for a local `hour` (0–24): the client's `weatherAt`.
 pub fn weather_at(ms: i64, hour: f64) -> Weather {
+    if snow_day(ms) {
+        return Weather::Snow;
+    }
     let spell = ms.div_euclid(SPELL_MS) as u32;
     let h = hash(spell, 7, 31) % 100;
     let w = match h {
@@ -504,6 +541,19 @@ pub fn kind(key: &str) -> Option<&'static Kind> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn it_snows_on_ljubljanas_snowiest_day() {
+        // 9 Dec, every year (noon and late in the evening, CET); not the 8th, nor in July.
+        for (y, ms) in [(2025, 1_765_281_600_000_i64), (2026, 1_796_817_600_000)] {
+            assert_eq!(weather_at(ms, 12.0), Weather::Snow, "{y}: noon");
+            assert_eq!(weather_at(ms + 11 * 3_600_000 - 60_000, 23.0), Weather::Snow, "{y}: 23:59 CET");
+            assert_ne!(weather_at(ms - 86_400_000, 12.0), Weather::Snow, "{y}: the 8th");
+        }
+        assert_ne!(weather_at(1_783_944_000_000, 12.0), Weather::Snow, "July");
+        assert_eq!(month_day(0), (1, 1));
+        assert_eq!(month_day(20_431), (12, 9), "9 Dec 2025");
+    }
     use super::*;
 
     #[test]
@@ -553,6 +603,7 @@ mod tests {
                     Weather::Cloudy,
                     Weather::Rain,
                     Weather::Mist,
+                    Weather::Snow,
                 ] {
                     for moon in [false, true] {
                         let m = Moment {

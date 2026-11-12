@@ -671,6 +671,53 @@ export function burst(t: number, len: number, level: number, type: BiquadFilterT
   src.stop(t + len + 0.02);
 }
 
+/**
+ * As `tone`, but placed in the room: panned (`pan` -1…1), `wet` of it into
+ * the room echo, with an `attack` (s) to swell in rather than click.
+ */
+export function ring(t: number, len: number, level: number, type: OscillatorType, from: number, to = from, pan = 0, wet = 0.3, attack = 0.005) {
+  level *= scale;
+  const d = dest(pan, wet);
+  if (!d || level < 0.002) return;
+  const a = audio();
+  // (A touch early, to lead in, but never before now.)
+  t = Math.max(t, a.currentTime);
+  const osc = a.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(from, t);
+  if (to !== from) osc.frequency.exponentialRampToValueAtTime(to, t + len);
+  const g = a.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(level, t + Math.max(0.003, attack));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  osc.connect(g).connect(d);
+  osc.start(t);
+  osc.stop(t + len + 0.02);
+}
+
+/** As `burst`, but placed in the room (`pan`, `wet`), swelling in over `attack` (s). */
+export function hiss(t: number, len: number, level: number, type: BiquadFilterType, from: number, to = from, q = 1, pan = 0, wet = 0.3, attack = 0.004) {
+  level *= scale;
+  const d = dest(pan, wet);
+  if (!d || level < 0.002) return;
+  const a = audio();
+  t = Math.max(t, a.currentTime);
+  const src = a.createBufferSource();
+  src.buffer = noiseBuffer(a);
+  const fl = a.createBiquadFilter();
+  fl.type = type;
+  fl.Q.value = q;
+  fl.frequency.setValueAtTime(from, t);
+  if (to !== from) fl.frequency.exponentialRampToValueAtTime(to, t + len);
+  const g = a.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(level, t + Math.max(0.003, attack));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  src.connect(fl).connect(g).connect(d);
+  src.start(t, Math.random() * 0.5);
+  src.stop(t + len + 0.02);
+}
+
 /** A notification come in: a soft two-note chime (an invite or a request, a brighter three). */
 export function notifyChime(kind: string) {
   const t = at(0);

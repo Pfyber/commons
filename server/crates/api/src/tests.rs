@@ -3735,6 +3735,217 @@ mod home_life {
     }
 
     #[tokio::test]
+    async fn a_daily_crate_opens_into_coins_and_two_home_pieces() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = Router::new()
+            .nest("/api", crate::dailycrate::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Crate");
+        let qty = |item: i32| {
+            let db = s.db.clone();
+            async move {
+                sqlx::query_scalar::<_, i32>(
+                    "SELECT qty FROM inventory WHERE player_id = $1 AND item_id = $2",
+                )
+                .bind(p)
+                .bind(item)
+                .fetch_optional(&db)
+                .await
+                .unwrap()
+                .unwrap_or(0)
+            }
+        };
+        // No crate yet: nothing to open.
+        let (st, r) = api(
+            &app,
+            &auth,
+            "POST",
+            "/api/crate/open",
+            json!({ "key": "k0" }),
+        )
+        .await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("no_crate")),
+            "{r}"
+        );
+        // Today's crate.
+        let (st, r) = api(&app, &auth, "POST", "/api/crate/daily", json!({})).await;
+        assert_eq!(
+            (st, r["granted"].clone()),
+            (StatusCode::OK, json!(true)),
+            "{r}"
+        );
+        assert_eq!(qty(crate::dailycrate::DAILY_CRATE).await, 1);
+        // Asked again straight away: none (the next is 18 hours on).
+        let (st, again) = api(&app, &auth, "POST", "/api/crate/daily", json!({})).await;
+        assert_eq!(
+            (st, again["granted"].clone()),
+            (StatusCode::OK, json!(false)),
+            "{again}"
+        );
+        assert_eq!(qty(crate::dailycrate::DAILY_CRATE).await, 1);
+        // Someone whose last crate came 17 hours ago: none yet; 18 hours ago: the next.
+        // (The ledger only takes new rows: their last grant's written as of then.)
+        for (hours, granted) in [(17, false), (18, true)] {
+            let q = player(&s).await;
+            sqlx::query("INSERT INTO economy_ledger (player_id, item_id, delta, reason, idempotency_key, at) VALUES ($1, $2, 1, 'daily_crate', $3, now() - make_interval(hours => $4))")
+                .bind(q)
+                .bind(crate::dailycrate::DAILY_CRATE)
+                .bind(format!("daily_crate:{q}:test"))
+                .bind(hours)
+                .execute(&s.db)
+                .await
+                .unwrap();
+            let (_, r) = api(
+                &app,
+                &bearer_for(&s, q, "Later"),
+                "POST",
+                "/api/crate/daily",
+                json!({}),
+            )
+            .await;
+            assert_eq!(r["granted"], json!(granted), "{hours}h: {r}");
+        }
+        let coins = qty(COIN).await;
+        let (st, r) = api(
+            &app,
+            &auth,
+            "POST",
+            "/api/crate/open",
+            json!({ "key": "k1" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        let slots = r["slots"].as_array().unwrap().clone();
+        assert_eq!(slots.len(), 3, "{r}");
+        // Coins first, 30–300; then two pieces for a home or its outside.
+        assert_eq!(slots[0]["item"], json!(COIN));
+        let got = slots[0]["qty"].as_i64().unwrap() as i32;
+        assert!((30..=300).contains(&got), "{got}");
+        assert_eq!(qty(COIN).await, coins + got);
+        for sl in &slots[1..] {
+            let it = s.catalog.get(sl["item"].as_i64().unwrap() as i32).unwrap();
+            assert!(
+                ["furniture", "exterior"].contains(&it.kind.as_str()),
+                "{}",
+                it.key
+            );
+            assert_eq!(sl["rarity"].as_i64().unwrap(), it.rarity as i64);
+        }
+        assert_eq!(
+            r["best"].as_i64().unwrap(),
+            slots
+                .iter()
+                .map(|x| x["rarity"].as_i64().unwrap())
+                .max()
+                .unwrap()
+        );
+        assert_eq!(qty(crate::dailycrate::DAILY_CRATE).await, 0);
+        // The same open again (a retry): the same three things, paid once.
+        let (st, again) = api(
+            &app,
+            &auth,
+            "POST",
+            "/api/crate/open",
+            json!({ "key": "k1" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{again}");
+        assert_eq!(again["slots"], r["slots"]);
+        assert_eq!(qty(COIN).await, coins + got);
+        // The odds: coins mostly common, legendary (241–300) rare; every tier turns up.
+        let mut tiers = [0u32; 5];
+        for k in 0..4000 {
+            let roll = crate::dailycrate::roll(&s, p, &format!("odds{k}"));
+            tiers[roll[0].2] += 1;
+            assert_eq!(roll.len(), 3);
+        }
+        assert!(
+            tiers[0] > 1800 && tiers[4] < 150 && tiers[4] > 10,
+            "{tiers:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_mission_done_pays_a_daily_bonus_once() {
+        let Some(db) = db().await else { return };
+        let s = state(db.clone(), 1000).await;
+        let app = Router::new()
+            .nest("/api", crate::daily::routes())
+            .with_state(s.clone());
+        let p = player(&s).await;
+        let auth = bearer_for(&s, p, "Daily");
+        // Nothing done: no bonus.
+        let (st, r) = api(&app, &auth, "POST", "/api/daily/bonus", json!({})).await;
+        assert_eq!(
+            (st, r["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not_done"))
+        );
+        // The skate quests paid (as the zone pays them), both orders filled.
+        let day = chrono::Utc::now().timestamp().div_euclid(86_400);
+        for slot in 0..3 {
+            apply_tx(
+                &s.db,
+                &s.catalog,
+                p,
+                &[Op {
+                    item: COIN,
+                    delta: 20,
+                }],
+                "skate_quest",
+                &format!("skate_quest:{p}:{day}:{slot}"),
+            )
+            .await
+            .unwrap();
+        }
+        let period = crate::fishquest::period_at(chrono::Utc::now().timestamp());
+        for board in [
+            crate::fishquest::Board::Fish,
+            crate::fishquest::Board::Magnet,
+        ] {
+            for (item, need, _) in crate::fishquest::state_of(&s, board, p, period)
+                .await
+                .unwrap()
+            {
+                sqlx::query("INSERT INTO fish_quests (player_id, period, item_id, delivered) VALUES ($1, $2, $3, $4) ON CONFLICT (player_id, period, item_id) DO UPDATE SET delivered = EXCLUDED.delivered")
+                    .bind(p)
+                    .bind(period)
+                    .bind(item)
+                    .bind(need)
+                    .execute(&s.db)
+                    .await
+                    .unwrap();
+            }
+        }
+        let (_, r) = api(&app, &auth, "GET", "/api/daily", json!({})).await;
+        assert_eq!(
+            (r["all_done"].clone(), r["claimed"].clone()),
+            (json!(true), json!(false)),
+            "{r}"
+        );
+        let coins = || async {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT qty FROM inventory WHERE player_id = $1 AND item_id = 1",
+            )
+            .bind(p)
+            .fetch_one(&s.db)
+            .await
+            .unwrap()
+        };
+        let before = coins().await;
+        let (st, r) = api(&app, &auth, "POST", "/api/daily/bonus", json!({})).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(coins().await, before + crate::daily::DAILY_BONUS);
+        // Once a day.
+        let (_, r) = api(&app, &auth, "POST", "/api/daily/bonus", json!({})).await;
+        assert_eq!(r["duplicate"], true);
+        assert_eq!(coins().await, before + crate::daily::DAILY_BONUS);
+    }
+
+    #[tokio::test]
     async fn fish_go_off_in_a_week_but_keep_in_the_fridge() {
         let Some(db) = db().await else { return };
         let s = state(db.clone(), 1000).await;

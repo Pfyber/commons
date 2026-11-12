@@ -70,7 +70,7 @@ export class Soundscape {
   update(now: number, s: SoundInput) {
     if (!this.started || !this.master || this.muted) return;
     // Birds by day, quieter spells in the rain.
-    if (s.dark < 0.4 && s.weather !== "rain" && now > this.nextBird) {
+    if (s.dark < 0.4 && s.weather !== "rain" && s.weather !== "snow" && now > this.nextBird) {
       this.nextBird = now + 1500 + Math.random() * 4500;
       this.bird(audio(), audio().currentTime);
     }

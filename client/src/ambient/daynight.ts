@@ -1,4 +1,5 @@
-// Day/night lighting tied to the player's local time (spec §7.1). A
+// Day/night lighting tied to the real sun over Ljubljana (see sun.ts): dark
+// when it's dark outside in Slovenia, early in winter and late in summer. A
 // full-screen multiply tint darkens the world; lamps and lit windows add warm
 // light back in on top of it as it gets dark, and a colour grade keeps it all
 // rich (most of all at golden hour). `?hour=21.5` overrides the clock for testing.
@@ -8,6 +9,7 @@ import { settings } from "../settings";
 import { TILE, buildingLanterns } from "../world/art";
 import type { ZoneMap } from "../world/map";
 import type { Scene } from "../world/scene";
+import { lightHour } from "./sun";
 
 interface Key {
   h: number;
@@ -367,11 +369,18 @@ export class DayNight {
     return !this.room && !this.indoors;
   }
 
+  /** The local clock's hour (`?hour=` too): what the weather goes by, as the server's bugs do. */
+  clockHour(): number {
+    if (this.override !== null) return this.override;
+    const d = new Date();
+    return d.getHours() + d.getMinutes() / 60;
+  }
+
   hour(): number {
     if (this.override !== null) return this.override;
     if (this.alwaysDay) return 13;
-    const d = new Date();
-    return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+    // (The lighting's own clock, set by how high the sun really is: see `lightHour`.)
+    return lightHour(Date.now());
   }
 
   /** Sets the colour grade (only when it has moved enough to notice). */
@@ -459,6 +468,31 @@ export class DayNight {
     }
   }
 
+  /**
+   * Only the lights in (or spilling into) view are drawn: the city has a few
+   * thousand (every lamp, lantern and lit doorway), and each one the
+   * renderer walks costs a frame time whether or not it's on screen. Each
+   * sprite's checked where it is now (so moving ones, a glowing board, are
+   * right), by `renderable` (`visible` is its owner's: a found wisp hides).
+   */
+  private cullLights() {
+    const v = this.scene.viewRect();
+    // (A margin: a lamp's pool spreads well past its post.)
+    const m = 2 * TILE;
+    const x0 = v.x0 * TILE - m;
+    const y0 = v.y0 * TILE - m;
+    const x1 = v.x1 * TILE + m;
+    const y1 = v.y1 * TILE + m;
+    for (const c of this.lights.children) {
+      if (!(c instanceof Sprite)) continue;
+      const rx = (c.texture.width * Math.abs(c.scale.x)) / 2;
+      const ry = (c.texture.height * Math.abs(c.scale.y)) / 2;
+      const want = c.x + rx > x0 && c.x - rx < x1 && c.y + ry > y0 && c.y - ry < y1;
+      // (Only when it changes: setting it marks the scene to be gathered up again.)
+      if (c.renderable !== want) c.renderable = want;
+    }
+  }
+
   update() {
     // The lights sit over the shade, so they ride along with the camera.
     this.lights.position.copyFrom(this.scene.world.position);
@@ -513,9 +547,10 @@ export class DayNight {
     this.lights.alpha = Math.min(1, dark * 1.15);
     this.lights.visible = dark > 0.05;
     if (this.lights.visible) {
-      // A slow, faint flicker, each lamp in its own time.
+      this.cullLights();
+      // A slow, faint flicker, each lamp in its own time (the ones in view: nobody sees the rest).
       const t = performance.now() / 1000;
-      for (const f of this.flicker) f.s.alpha = f.base * (0.94 + 0.06 * Math.sin(t * 2.3 + f.phase) * Math.sin(t * 0.7 + f.phase * 2));
+      for (const f of this.flicker) if (f.s.renderable) f.s.alpha = f.base * (0.94 + 0.06 * Math.sin(t * 2.3 + f.phase) * Math.sin(t * 0.7 + f.phase * 2));
     }
   }
 }

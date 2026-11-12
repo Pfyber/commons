@@ -7,6 +7,8 @@ pub mod auth;
 pub mod bottles;
 pub mod clubroom;
 pub mod cosmetics;
+pub mod daily;
+pub mod dailycrate;
 pub mod devtools;
 pub mod economy;
 pub mod error;

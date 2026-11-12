@@ -701,6 +701,37 @@ async fn set_drop_in(
     Ok(Json(json!({ "open": req.open })))
 }
 
+/// When each visitor last knocked at each door (a knock a minute, at most).
+static KNOCKS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<(Uuid, Uuid), Instant>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// `guest` knocked at `owner`'s door (not let in): the owner hears it (not if they've blocked them).
+async fn knock(state: &SocialState, guest: Uuid, owner: Uuid) {
+    {
+        let mut k = KNOCKS.lock().unwrap();
+        let now = Instant::now();
+        k.retain(|_, at| now.duration_since(*at).as_secs() < 60);
+        if k.contains_key(&(guest, owner)) {
+            return;
+        }
+        k.insert((guest, owner), now);
+    }
+    if db::blocked(&state.db, guest, owner).await.unwrap_or(true) {
+        return;
+    }
+    let Ok(name) = db::name_of(&state.db, guest).await else {
+        return;
+    };
+    notify(
+        state,
+        owner,
+        "knock",
+        json!({ "from_id": guest.to_string(), "from_name": name }),
+    )
+    .await;
+}
+
 #[derive(Deserialize)]
 struct VisitQ {
     guest: String,
@@ -716,7 +747,11 @@ async fn can_visit(
     let (guest, owner) = (uuid(&q.guest)?, uuid(&q.owner)?);
     crate::homes::require_home(&state.db, owner).await?;
     if !visit_allowed(&state, guest, owner).await? {
-        return Err(forbidden("not_invited", "You need an invitation to visit."));
+        knock(&state, guest, owner).await;
+        return Err(forbidden(
+            "not_invited",
+            "You knocked: they'll hear it. You need an invitation to go in.",
+        ));
     }
     Ok(Json(
         json!({ "ok": true, "owner_name": db::name_of(&state.db, owner).await.map_err(db_err)? }),

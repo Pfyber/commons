@@ -48,6 +48,9 @@ export class Drones {
   private tex = parcelTexture();
   private off: () => void;
 
+  /** Your own parcel just landed (a notification pops up); unset, a toast says so. */
+  onLanded: (() => void) | null = null;
+
   constructor(
     private scene: Scene,
     private life: HomeLife,
@@ -124,7 +127,7 @@ export class Drones {
       if (a >= 1) {
         if (!f.landed) {
           f.landed = true;
-          if (f.mine) this.toast(`📦 Your parcel's on the doorstep!`);
+          if (f.mine) (this.onLanded ? this.onLanded() : this.toast(`📦 Your parcel's on the doorstep!`));
         }
         f.view.position.set(x, y);
         f.view.zIndex = y;

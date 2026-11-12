@@ -4,7 +4,7 @@
 //! - `POST /api/dev/well`: the wishing well grants 10,000 coins, every time.
 
 use crate::AppState;
-use crate::economy::{Applied, COIN, Op, apply, bearer_player};
+use crate::economy::{COIN, Op, apply, bearer_player};
 use crate::error::{ApiError, ApiResult};
 use crate::store::db_err;
 use axum::extract::State;

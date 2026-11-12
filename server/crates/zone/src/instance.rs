@@ -1154,6 +1154,8 @@ impl Instance {
         // Barely into a step and turning off it: turn from the tile just
         // left, now (the client does the same, blending the half-step).
         let mut turned_early = false;
+        // (Turning early, the route from the tile just left is the walk: not worked out twice.)
+        let mut found = None;
         if let Some((prev, next, _, into)) = a.motion.as_ref().and_then(|m| m.splice_at(now))
             && into < TURN_EARLY
             && let Some(back) = route(grid, prev, target, MAX_PATH_EXPANSIONS)
@@ -1163,8 +1165,9 @@ impl Instance {
             start = prev;
             t0 = now;
             turned_early = true;
+            found = Some(back);
         }
-        let Some(mut full) = route(grid, start, target, MAX_PATH_EXPANSIONS) else {
+        let Some(mut full) = found.or_else(|| route(grid, start, target, MAX_PATH_EXPANSIONS)) else {
             self.error(id, error_code::NO_PATH, "can't get there");
             return;
         };
@@ -1223,6 +1226,11 @@ impl Instance {
     /// the city, or a test ride kept to a test track. `None`: on foot.
     fn ride_speed(&self, id: u32, path: &[TilePos]) -> Option<u8> {
         let a = self.avatars.get(&id)?;
+        // Your skateboard's ridden on its own physics (`Skater` moves), never
+        // tile by tile: a walk with it (sitting down, stepping off) is a walk.
+        if a.ride & !vehicles::TEST_RIDE == vehicles::SKATEBOARD {
+            return None;
+        }
         let speed = vehicles::speed_x10(a.ride)?;
         let test = a.ride & vehicles::TEST_RIDE != 0;
         if test {

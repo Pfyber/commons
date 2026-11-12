@@ -8,17 +8,54 @@ import { isTyping } from "./panels";
 
 const LOG_LINES = 6;
 const LOG_MS = 12_000;
+/** Where your last emote's kept (the emotes button does it again). */
+const LAST_EMOTE_KEY = "commons.emote.last";
+
+/** A little badge on a button's top right corner (the emotes' ▴, the ride's ⚙). */
+function corner(cls: string): HTMLElement {
+  const c = document.createElement("span");
+  c.className = `hud-corner ${cls}`;
+  c.setAttribute("aria-hidden", "true");
+  return c;
+}
+
+/** A button's word, beside its icon (in a tray, where there's room to say what it does). */
+function label(text: string): HTMLElement {
+  return Object.assign(document.createElement("span"), { className: "tray-label", textContent: text });
+}
+
+/** A tray of buttons that opens above the bottom bar: a title (and a note on its right), its buttons, a line under them. */
+function tray(title: string, note: string, cls: string): HTMLElement {
+  const t = document.createElement("div");
+  t.className = `hud-tray ${cls}`;
+  t.hidden = true;
+  const head = document.createElement("div");
+  head.className = "hud-tray-head";
+  head.append(Object.assign(document.createElement("strong"), { textContent: title }), Object.assign(document.createElement("span"), { textContent: note }));
+  const body = document.createElement("div");
+  body.className = "hud-tray-body";
+  const foot = document.createElement("div");
+  foot.className = "hud-tray-foot";
+  foot.hidden = true;
+  t.append(head, body, foot);
+  return t;
+}
 
 export interface HudHandlers {
   onChat(text: string): void;
   onEmote(id: number): void;
   onSit(): void;
+  /** The ride button: on (or off) the ride you've picked. */
   onRide(): void;
+  /** The ride button's ⚙: which of your rides it gets you on. */
+  onRidePick(): void;
   /** The toys button: pick a toy to play with. */
   onToys(): void;
   onBag(): void;
   onAlbum(): void;
   onFriends(): void;
+  /** The day's missions (skating, fishing…), and the bonus for doing them all. */
+  onDaily(): void;
   onNotifications(): void;
   /** Toggles sound; returns whether it's now muted. */
   onSound(): boolean;
@@ -91,7 +128,8 @@ export class Hud {
           <button type="button" class="pill btn map-btn" title="City map (M)" aria-label="City map"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("map")}" /></button>
           <button type="button" class="pill btn bag-btn" title="Bag (B)" aria-label="Bag"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bag")}" /></button>
           <button type="button" class="pill btn album-btn extra" title="Naturalist's Journal (L)" aria-label="Journal"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("book")}" /></button>
-          <button type="button" class="pill btn friends-btn extra" title="Friends (F)" aria-label="Friends"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("friends")}" /></button>
+          <button type="button" class="pill btn friends-btn extra" title="Friends (F)" aria-label="Friends"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("friends")}" /><span class="online-dot" hidden></span></button>
+          <button type="button" class="pill btn daily-btn" title="Daily missions" aria-label="Daily missions"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("daily")}" /><span class="badge-count" hidden>!</span></button>
           <button type="button" class="pill btn notes-btn" title="Notifications (N)" aria-label="Notifications"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("bell")}" /><span class="badge-count" hidden></span></button>
           <button type="button" class="pill btn clubs-btn" title="Clubs (K)" aria-label="Clubs"><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("shield")}" /><span class="badge-count" hidden>!</span></button>
           <button type="button" class="pill btn phone-btn" title="Phone" aria-label="Phone" hidden><img class="px-icon" alt="" width="24" height="24" src="${iconUrl("phone")}" /></button>
@@ -145,6 +183,7 @@ export class Hud {
     root.querySelector<HTMLButtonElement>(".bag-btn")!.onclick = () => h.onBag();
     root.querySelector<HTMLButtonElement>(".album-btn")!.onclick = () => h.onAlbum();
     root.querySelector<HTMLButtonElement>(".friends-btn")!.onclick = () => h.onFriends();
+    root.querySelector<HTMLButtonElement>(".daily-btn")!.onclick = () => h.onDaily();
     root.querySelector<HTMLButtonElement>(".notes-btn")!.onclick = () => h.onNotifications();
     this.booksBtn = root.querySelector<HTMLButtonElement>(".books-btn")!;
     this.booksBtn.onclick = () => h.onBooks();
@@ -152,7 +191,8 @@ export class Hud {
     this.phoneBtn.onclick = () => h.onPhone();
     this.clubsBtn = root.querySelector<HTMLButtonElement>(".clubs-btn")!;
     this.clubsBtn.onclick = () => h.onClubs();
-    this.badgeEl = root.querySelector(".badge-count")!;
+    this.badgeEl = root.querySelector(".notes-btn .badge-count")!;
+    this.dailyBadge = root.querySelector(".daily-btn .badge-count")!;
     const soundBtn = root.querySelector<HTMLButtonElement>(".sound-btn")!;
     const sound = () => this.setMuted(h.onSound());
     soundBtn.onclick = sound;
@@ -207,19 +247,28 @@ export class Hud {
     chatFab.replaceChildren(pxIcon("chat"));
     // (Focused straight from the tap, so the phone's keyboard comes up.)
     chatFab.onclick = () => {
-      bottom.classList.remove("emoting");
       bottom.classList.add("chatting");
       this.input.focus();
     };
     bar.appendChild(chatFab);
+    // The emotes, as the ride: one tap does your last emote again; its ⚙ (top right) opens them all.
     const emoteFab = document.createElement("button");
     emoteFab.type = "button";
     emoteFab.className = "emote-fab";
-    emoteFab.title = "Emotes";
-    emoteFab.setAttribute("aria-label", "Emotes");
-    emoteFab.replaceChildren(pxIcon("laugh"));
-    emoteFab.onclick = () => bottom.classList.toggle("emoting");
+    this.emoteFab = emoteFab;
+    emoteFab.onclick = () => {
+      this.closeTray();
+      h.onEmote(this.lastEmote);
+    };
     bar.appendChild(emoteFab);
+    this.emoteGear = this.gear("All emotes, sitting and toys", () => this.toggleTray(this.emoteTray, emoteFab));
+    this.usedEmote(this.lastEmote);
+    this.emoteTray = tray("Emotes", `keys 1–${FREE_EMOTES}`, "emote-tray");
+    bar.appendChild(this.emoteTray);
+    // Under the emotes, in the same tray: sitting down (or up), and your toys.
+    const more = document.createElement("div");
+    more.className = "emote-more";
+    this.emoteTray.insertBefore(more, this.emoteTray.querySelector(".hud-tray-foot"));
     this.moodBtn = document.createElement("button");
     this.moodBtn.type = "button";
     this.moodBtn.className = "mood-btn";
@@ -231,22 +280,35 @@ export class Hud {
     this.sitBtn = document.createElement("button");
     this.sitBtn.type = "button";
     this.sitBtn.className = "sit";
-    this.sitBtn.onclick = () => h.onSit();
-    bar.appendChild(this.sitBtn);
+    this.sitBtn.onclick = () => {
+      this.closeTray();
+      h.onSit();
+    };
+    more.appendChild(this.sitBtn);
+    // Your ride: one tap on (or off) the one you've picked; its ⚙ (top right) to pick another.
     this.rideBtn = document.createElement("button");
     this.rideBtn.type = "button";
     this.rideBtn.className = "ride-btn";
     this.rideBtn.hidden = true;
-    this.rideBtn.onclick = () => h.onRide();
+    this.rideBtn.onclick = () => {
+      this.closeTray();
+      h.onRide();
+    };
     bar.appendChild(this.rideBtn);
+    this.rideGear = this.gear("Change your ride", () => (this.openTray === this.rideTray ? this.closeTray() : h.onRidePick()));
+    this.rideTray = tray("Your rides", "", "ride-tray");
+    bar.appendChild(this.rideTray);
     this.toysEl = document.createElement("button");
     this.toysEl.type = "button";
     this.toysEl.className = "toys-btn";
     this.toysEl.title = "Play with a toy";
     this.toysEl.setAttribute("aria-label", this.toysEl.title);
     this.toysEl.hidden = true;
-    this.toysEl.onclick = () => h.onToys();
-    bar.appendChild(this.toysEl);
+    this.toysEl.onclick = () => {
+      this.closeTray();
+      h.onToys();
+    };
+    more.appendChild(this.toysEl);
     this.setSitting(false);
     // The way out, in the corner, when you're inside somewhere.
     this.exitBtn = document.createElement("button");
@@ -262,16 +324,140 @@ export class Hud {
     this.exitBtn.append(door, document.createElement("span"));
     this.exitBtn.onclick = () => h.onLeave();
     root.appendChild(this.exitBtn);
+    const grid = this.emoteTray.querySelector(".hud-tray-body")!;
     for (const [id, e] of Object.entries(EMOTES).filter(([id]) => Number(id) <= FREE_EMOTES)) {
       const b = document.createElement("button");
       b.type = "button";
-      b.append(pxIcon(EMOTE_ICONS[Number(id)] ?? "heart"));
+      b.append(pxIcon(EMOTE_ICONS[Number(id)] ?? "heart"), Object.assign(document.createElement("span"), { className: "emote-key", textContent: id }));
       b.title = `${e.label} (${id})`;
       b.className = "emote";
       b.setAttribute("aria-label", e.label);
-      b.onclick = () => (h.onEmote(Number(id)), bottom.classList.remove("emoting"));
-      bar.appendChild(b);
+      b.onclick = () => {
+        h.onEmote(Number(id));
+        this.closeTray();
+      };
+      grid.appendChild(b);
     }
+    // A tray closes on a tap anywhere else, or Esc.
+    document.addEventListener(
+      "pointerdown",
+      (ev) => {
+        const t = ev.target as Node;
+        if (this.openTray && !this.openTray.contains(t) && !this.trayAnchor?.contains(t)) this.closeTray();
+      },
+      true,
+    );
+    window.addEventListener("keydown", (ev) => ev.key === "Escape" && this.closeTray());
+  }
+
+  private emoteTray: HTMLElement;
+  private rideTray: HTMLElement;
+  private rideGear: HTMLElement;
+  private emoteFab!: HTMLButtonElement;
+  private emoteGear!: HTMLElement;
+
+  /** Your last emote (kept on this device): the emotes button does it again. */
+  private get lastEmote(): number {
+    let id = 1;
+    try {
+      id = Number(localStorage.getItem(LAST_EMOTE_KEY)) || 1;
+    } catch {
+      // (Not kept: a wave.)
+    }
+    return id >= 1 && id <= FREE_EMOTES ? id : 1;
+  }
+
+  /** You did emote `id` (from the tray, or its key): the emotes button's now that one. */
+  usedEmote(id: number) {
+    if (id < 1 || id > FREE_EMOTES) return;
+    try {
+      localStorage.setItem(LAST_EMOTE_KEY, String(id));
+    } catch {
+      // (Just for now, then.)
+    }
+    const label = EMOTES[id]?.label ?? "Emote";
+    this.emoteFab.replaceChildren(pxIcon(EMOTE_ICONS[id] ?? "heart"), this.emoteGear);
+    this.emoteFab.title = `${label} again (${id})`;
+    this.emoteFab.setAttribute("aria-label", this.emoteFab.title);
+  }
+
+  /** A round ⚙ on a button's top right corner: `open` (its tray), not the button's own tap. */
+  private gear(title: string, open: () => void): HTMLElement {
+    const g = corner("hud-gear");
+    g.append(pxIcon("gear", 1));
+    g.removeAttribute("aria-hidden");
+    g.setAttribute("role", "button");
+    g.setAttribute("aria-haspopup", "true");
+    g.tabIndex = 0;
+    g.title = title;
+    g.setAttribute("aria-label", title);
+    const go = (ev: Event) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      open();
+    };
+    g.addEventListener("click", go);
+    g.addEventListener("keydown", (ev) => (ev.key === "Enter" || ev.key === " ") && go(ev));
+    return g;
+  }
+  /** The tray that's open (the emotes, or your rides), and the button it opened from. */
+  private openTray: HTMLElement | null = null;
+  private trayAnchor: HTMLElement | null = null;
+
+  /** Opens `t` above `anchor` (centred on it, kept on screen), or closes it if it's open. */
+  private toggleTray(t: HTMLElement, anchor: HTMLElement) {
+    if (this.openTray === t) return this.closeTray();
+    this.closeTray();
+    this.openTray = t;
+    this.trayAnchor = anchor;
+    t.hidden = false;
+    anchor.classList.add("open");
+    const bar = t.parentElement!;
+    const mid = anchor.offsetLeft + anchor.offsetWidth / 2;
+    const room = bar.getBoundingClientRect().left;
+    const left = Math.max(-room + 8, Math.min(mid - t.offsetWidth / 2, window.innerWidth - room - t.offsetWidth - 8));
+    t.style.left = `${Math.round(left)}px`;
+    t.style.setProperty("--tip", `${Math.round(mid - left)}px`);
+  }
+
+  private closeTray() {
+    if (!this.openTray) return;
+    this.openTray.hidden = true;
+    this.trayAnchor?.classList.remove("open");
+    this.openTray = null;
+    this.trayAnchor = null;
+  }
+
+  /**
+   * Your rides, to pick from (the ride button's ⚙): each with its picture, the
+   * one picked marked; `pick` gets you on it. `hint`: a line under them.
+   */
+  showRidePicker(rides: { icon: string; name: string; picked: boolean; on: boolean }[], pick: (i: number) => void, hint = "") {
+    const body = this.rideTray.querySelector(".hud-tray-body")!;
+    body.replaceChildren();
+    rides.forEach((r, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = r.picked ? "ride-opt picked" : "ride-opt";
+      const img = document.createElement("img");
+      img.className = "px-icon";
+      img.alt = "";
+      img.width = 24;
+      img.height = 24;
+      img.src = r.icon;
+      const name = Object.assign(document.createElement("span"), { className: "ride-opt-name", textContent: r.name });
+      const tag = Object.assign(document.createElement("span"), { className: "ride-opt-tag", textContent: r.on ? "Riding" : r.picked ? "✓" : "" });
+      b.append(img, name, tag);
+      b.onclick = () => {
+        this.closeTray();
+        pick(i);
+      };
+      body.appendChild(b);
+    });
+    const foot = this.rideTray.querySelector<HTMLElement>(".hud-tray-foot")!;
+    foot.textContent = hint;
+    foot.hidden = !hint;
+    if (this.openTray !== this.rideTray) this.toggleTray(this.rideTray, this.rideBtn);
   }
 
   /** The leave button: where it takes you (`label`), or null to hide it (outdoors). */
@@ -293,7 +479,7 @@ export class Hud {
     img.width = 24;
     img.height = 24;
     img.src = icon;
-    this.toysEl.replaceChildren(img);
+    this.toysEl.replaceChildren(img, label("Toys"));
   }
 
   /** The ride button: what you'd ride (its icon), and whether you're on it; null hides it. */
@@ -306,14 +492,14 @@ export class Hud {
     img.width = 24;
     img.height = 24;
     img.src = ride.icon;
-    this.rideBtn.replaceChildren(img);
+    this.rideBtn.replaceChildren(img, this.rideGear);
     this.rideBtn.title = ride.on ? `Get off the ${ride.name} (R)` : `Ride the ${ride.name} (R)`;
     this.rideBtn.setAttribute("aria-label", this.rideBtn.title);
     this.rideBtn.classList.toggle("on", ride.on);
   }
 
   setSitting(sitting: boolean) {
-    this.sitBtn.replaceChildren(pxIcon(sitting ? "stand" : "sit"));
+    this.sitBtn.replaceChildren(pxIcon(sitting ? "stand" : "sit"), label(sitting ? "Stand up" : "Sit"));
     this.sitBtn.title = sitting ? "Stand up" : "Sit down here";
     this.sitBtn.setAttribute("aria-label", this.sitBtn.title);
   }
@@ -321,6 +507,23 @@ export class Hud {
   setPlace(name: string, instance: number) {
     this.place.textContent = `${name} · ${instance}`;
   }
+
+  /** The friends button: a green dot on its corner while at least one friend's online (`n` of them). */
+  setFriendsOnline(n: number) {
+    const btn = document.querySelector<HTMLElement>(".friends-btn");
+    const dot = btn?.querySelector<HTMLElement>(".online-dot");
+    if (!btn || !dot) return;
+    dot.hidden = n === 0;
+    const title = n ? `Friends (F): ${n} online` : "Friends (F)";
+    btn.title = title;
+    btn.setAttribute("aria-label", title);
+  }
+
+  /** The daily missions' button: marked when everything's done and the bonus is waiting. */
+  setDailyReady(ready: boolean) {
+    this.dailyBadge.hidden = !ready;
+  }
+  private dailyBadge: HTMLElement;
 
   setBadge(n: number) {
     this.badgeEl.hidden = n === 0;

@@ -1,7 +1,7 @@
 // Small lives in the park, client-only: fireflies drifting over the meadow
 // and water after dark, and fish jumping in the pond by day.
 
-import { type Application, Graphics } from "pixi.js";
+import { type Application, Container, Graphics, GraphicsContext } from "pixi.js";
 import { TILE } from "../world/art";
 import { type ZoneMap, groundAt } from "../world/map";
 import type { Scene } from "../world/scene";
@@ -25,7 +25,18 @@ const JUMP_MS = 700;
 
 export class Critters {
   /** Fireflies glow above the night shade, following the world transform. */
-  private glow = new Graphics();
+  private glow = new Container();
+  /**
+   * A firefly: its soft halo and bright core, built once and shared (each
+   * one only moves and fades, as its `alpha`: the shapes multiply by it, as
+   * the halo's 0.18 and the core's full did with the pulse before).
+   */
+  private flyShape = new GraphicsContext()
+    .circle(0, 0, 4)
+    .fill({ color: 0xd8ff7a, alpha: 0.18 })
+    .rect(-1, -1, 2, 2)
+    .fill({ color: 0xf4ffb0, alpha: 1 });
+  private flyMarks: Graphics[] = [];
   /** Fish and their rings, among the world's sprites. */
   private water = new Graphics();
   private flies: Fly[] = [];
@@ -46,7 +57,8 @@ export class Critters {
 
   destroy() {
     this.app.stage.removeChild(this.glow);
-    this.glow.destroy();
+    this.glow.destroy({ children: true });
+    this.flyShape.destroy();
   }
 
   /** Fireflies like meadows, water edges and the wood. */
@@ -60,12 +72,11 @@ export class Critters {
     const v = this.scene.viewRect();
     this.glow.position.copyFrom(this.scene.world.position);
     this.glow.scale.copyFrom(this.scene.world.scale);
-    const g = this.glow.clear();
-
     if (dark > 0.4) {
       // Keep a swarm in view: respawn any that drift off-screen.
       while (this.flies.length < FLIES) this.flies.push(this.spawnFly(v));
-      for (const f of this.flies) {
+      while (this.flyMarks.length < this.flies.length) this.flyMarks.push(this.glow.addChild(new Graphics(this.flyShape)));
+      this.flies.forEach((f, i) => {
         f.vx += (Math.random() - 0.5) * 0.8 * dt;
         f.vy += (Math.random() - 0.5) * 0.8 * dt;
         f.vx *= 0.98;
@@ -75,13 +86,14 @@ export class Critters {
         if (f.x < v.x0 - 1 || f.x > v.x1 + 1 || f.y < v.y0 - 1 || f.y > v.y1 + 1) Object.assign(f, this.spawnFly(v));
         const pulse = 0.5 + 0.5 * Math.sin(now / 400 + f.phase);
         const a = pulse * Math.min(1, (dark - 0.4) * 2.5);
-        const px = Math.round(f.x * TILE);
-        const py = Math.round(f.y * TILE);
-        g.circle(px, py, 4).fill({ color: 0xd8ff7a, alpha: a * 0.18 });
-        g.rect(px - 1, py - 1, 2, 2).fill({ color: 0xf4ffb0, alpha: a });
-      }
+        const m = this.flyMarks[i];
+        m.position.set(Math.round(f.x * TILE), Math.round(f.y * TILE));
+        m.alpha = a;
+        if (!m.visible) m.visible = true;
+      });
     } else {
       this.flies.length = 0;
+      for (const m of this.flyMarks) if (m.visible) m.visible = false;
     }
 
     // Fish jumping in the pond by day.

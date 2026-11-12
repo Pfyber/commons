@@ -60,6 +60,11 @@ pub fn find_path(
     if from == to {
         return Some(vec![from]);
     }
+    // Two separate areas (somewhere fenced off, across water): no walk joins
+    // them, and searching for one would only burn the tick finding that out.
+    if !grid.connected(from, to) {
+        return None;
+    }
     let (wx, wy, ww, wh) = window(grid, from, to);
     let (wx, wy, ww, wh) = (wx as i32, wy as i32, ww as i32, wh as i32);
     let open_at =
@@ -254,6 +259,26 @@ mod tests {
             }
         }
         assert!(p.contains(&(2, 4)));
+    }
+
+    #[test]
+    fn walled_off_areas_are_known_apart_and_rejoined_when_the_wall_goes() {
+        let mut g = Grid::open(9, 5);
+        for y in 0..5 {
+            g.set_blocked(4, y, true);
+        }
+        assert!(!g.connected((0, 0), (8, 4)));
+        assert!(find_path(&g, (0, 0), (8, 4), 100_000).is_none());
+        // A gap in the wall: one area again (the labels follow the change).
+        g.set_blocked(4, 2, false);
+        assert!(g.connected((0, 0), (8, 4)));
+        assert!(find_path(&g, (0, 0), (8, 4), 100_000).is_some());
+        // A diagonal gap isn't a way through (no cutting corners).
+        let mut d = Grid::open(4, 4);
+        for (x, y) in [(1, 0), (0, 1), (2, 1), (1, 2)] {
+            d.set_blocked(x, y, true);
+        }
+        assert!(!d.connected((0, 0), (2, 2)));
     }
 
     #[test]

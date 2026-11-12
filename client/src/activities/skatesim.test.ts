@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MapObject } from "../world/map";
 import { Combo, NO_INPUT, Park, QUARTER_H, Skater, type Input, type SkateEvent, wrap } from "./skatesim";
-import { ride } from "./skatekit";
+import { ride, streetRide } from "./skatekit";
 
 const T = 32;
 
@@ -58,6 +58,26 @@ describe("the park", () => {
 });
 
 describe("a skater", () => {
+  it("on the streets: off at once to cruising speed, faster push by push, an ollie and a kickflip on Space", () => {
+    const long = new Park([{ kind: "sk_park", x: 0, y: 0, w: 120, h: 6 }], (tx, ty) => tx >= 0 && ty >= 0 && tx < 120 && ty < 6);
+    const s = new Skater(long, 2 * T, 3 * T, steady());
+    s.street = true;
+    s.kit = streetRide({ deck: 0, wheels: 0, bearings: 1, trucks: 0, trail: 0 });
+    run(s, 0.5, { ...NO_INPUT, x: 1 });
+    expect(s.speed).toBeGreaterThan(200);
+    const early = s.speed;
+    run(s, 8, { ...NO_INPUT, x: 1 });
+    expect(s.speed).toBeGreaterThan(early + 60);
+    expect(s.speed).toBeLessThanOrEqual(290 * 1.45 + 1);
+    // Space: an ollie; Space again up there: a kickflip.
+    let t = 0;
+    const ev = run(s, 1.2, () => {
+      t += 1 / 120;
+      return { ...NO_INPUT, x: 1, pop: t < 0.1 || (t > 0.2 && t < 0.25) };
+    });
+    expect(ev.some((e) => e.t === "trick" && e.name === "Kickflip")).toBe(true);
+  });
+
   it("riding off the concrete says which way it was going (not the way the bounce turned it)", () => {
     // Rolling south off the bottom of the pad.
     const s = new Skater(park(), 18 * T, 13 * T + 20, steady());

@@ -153,13 +153,15 @@ export class Park {
   private tw: number;
   private th: number;
 
-  constructor(objects: MapObject[], concrete: (tx: number, ty: number) => boolean) {
+  /** `bounds`: the tiles it covers (the whole city, for skating its streets too); the park and its edge if not given. */
+  constructor(objects: MapObject[], concrete: (tx: number, ty: number) => boolean, bounds?: { x: number; y: number; w: number; h: number }) {
     const park = objects.find((o) => o.kind === "sk_park");
     if (!park) throw new Error("no skatepark here");
-    this.tx0 = park.x - 1;
-    this.ty0 = park.y - 1;
-    this.tw = park.w + 2;
-    this.th = park.h + 2;
+    const b = bounds ?? { x: park.x - 1, y: park.y - 1, w: park.w + 2, h: park.h + 2 };
+    this.tx0 = b.x;
+    this.ty0 = b.y;
+    this.tw = b.w;
+    this.th = b.h;
     this.x0 = this.tx0 * TILE;
     this.y0 = this.ty0 * TILE;
     this.x1 = (this.tx0 + this.tw) * TILE;
@@ -228,6 +230,35 @@ export class Park {
       const g = map.ground[ty * map.width + tx];
       return g === skate || (road >= 0 && g === road);
     });
+  }
+
+  /**
+   * The whole city as somewhere to skate: the park's concrete (and its ramps,
+   * boxes, rails) inside it; out on the streets, anywhere you could walk
+   * that isn't water. Through a gate from one to the other, just rolling on.
+   */
+  static city(map: ZoneMap): Park | null {
+    const park = map.objects.find((o) => o.kind === "sk_park");
+    if (!park) return null;
+    const skate = map.ground_legend.indexOf("skate");
+    const road = map.ground_legend.indexOf("skate_road");
+    const water = map.ground_legend.indexOf("water");
+    // (A street lamp's just a thin pole: ridden past, not a wall the size of its tile.)
+    const lamp = map.decor_legend.indexOf("lamp");
+    const inPark = (tx: number, ty: number) => tx >= park.x && tx < park.x + park.w && ty >= park.y && ty < park.y + park.h;
+    return new Park(
+      map.objects,
+      (tx, ty) => {
+        if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return false;
+        const i = ty * map.width + tx;
+        const g = map.ground[i];
+        // (In the park, its concrete; and the odd patch of lawn in it, ridden over as the streets are.)
+        if (inPark(tx, ty) && (g === skate || (road >= 0 && g === road))) return true;
+        if (lamp >= 0 && map.decor[i] === lamp) return g !== water;
+        return map.collision[i] === 0 && g !== water;
+      },
+      { x: 0, y: 0, w: map.width, h: map.height },
+    );
   }
 
   /** Whether (x, y) is on the concrete. */
@@ -476,6 +507,15 @@ const KICK_ACC = 300;
 const KICK_FROM = 0.07;
 const KICK_TO = 0.42;
 const PUSH_MAX = 290;
+/**
+ * Out on the streets (your everyday board): kicked up to about the speed a
+ * board's always gone about town (`STREET_START` px/s, at `STREET_KICK`
+ * px/s²) at once, then on faster push by push, up to `STREET_TOP` times
+ * pushing speed (your bearings and wheels as ever).
+ */
+const STREET_START = 230;
+const STREET_KICK = 900;
+const STREET_TOP = 1.45;
 const TOP_SPEED = 520;
 
 /** Everything unlocked, at stock speed (the rules on their own: the tests, and before the shop's been seen). */
@@ -636,6 +676,8 @@ export class Skater {
   private manualWanted = 0;
   /** Rolling: how steeply the ground rose under you last step (a mound's crest, flown off). */
   private lastRise = 0;
+  /** Out on the streets on your everyday board (not in the park): see `STREET_START`. */
+  street = false;
   /** How long (s) since any input at all. */
   private idle = 0;
   /** The special meter (0–1); full, every trick's worth more. */
@@ -684,7 +726,9 @@ export class Skater {
 
   /** A flip of the board, by which way the stick's held (if your trucks can). */
   private startFlip(inp: Input, ev: SkateEvent[]) {
-    const s = stickOf(inp.x, inp.y);
+    let s = stickOf(inp.x, inp.y);
+    // (Out on the streets, steering as you go: a flip your trucks can't do is a plain kickflip.)
+    if (this.street && !this.kit.flips.has(s)) s = "";
     if (!this.kit.flips.has(s)) {
       ev.push({ t: "locked", what: "flip" });
       return;
@@ -777,9 +821,11 @@ export class Skater {
         const rate = 8 * this.kit.turn - 3.4 * Math.min(1, this.speed / 320) * (this.kit.turn > 1 ? 0.65 : 1);
         this.heading = kickTurn ? want : wrap(this.heading + Math.max(-rate * dt, Math.min(rate * dt, diff)));
         // Pushing off, while you're going your way and not flat out (and not pumping: no need).
-        const max = PUSH_MAX * this.kit.top;
+        const max = PUSH_MAX * this.kit.top * (this.street ? STREET_TOP : 1);
         if (Math.abs(diff) < 1.2 && ahead && this.speed < max && this.crouch === 0 && (this.pumpFlow < 0.3 || this.side === 0)) {
           this.pushing = true;
+          // (On the streets, off from a standstill straight to cruising speed.)
+          if (this.street && this.speed < STREET_START) this.speed = Math.min(STREET_START, this.speed + STREET_KICK * this.kit.accel * mag * dt);
           // The speed comes in kicks: while the back foot's on the ground, a
           // shove (less, the faster you're going already); between, a glide.
           if (this.push >= KICK_FROM && this.push < KICK_TO) {
@@ -804,7 +850,7 @@ export class Skater {
       if (was < KICK_FROM && this.push >= KICK_FROM) ev.push({ t: "push" });
     } else this.push = 0;
     const idling = Math.max(0, Math.min(1, this.idle - IDLE_FROM)) * IDLE_DRAG;
-    this.speed = Math.max(0, this.speed - ((this.speed > PUSH_MAX * this.kit.top ? FRICTION_FAST : FRICTION) + idling) * dt);
+    this.speed = Math.max(0, this.speed - ((this.speed > PUSH_MAX * this.kit.top * (this.street ? STREET_TOP : 1) ? FRICTION_FAST : FRICTION) + idling) * dt);
     this.rollOnSlopes(dt);
     // The combo: just landed, a moment to catch it in a manual, else it's banked.
     if (this.link > 0) {

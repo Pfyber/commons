@@ -42,7 +42,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 /// Which of his orders: the fish, or what the magnet brings up.
 #[derive(Clone, Copy)]
-enum Board {
+pub(crate) enum Board {
     Fish,
     Magnet,
 }
@@ -129,7 +129,7 @@ fn order(state: &AppState, board: Board, player: Uuid, period: i64) -> Vec<(i32,
 }
 
 /// The order now, as handed in so far.
-async fn state_of(
+pub(crate) async fn state_of(
     state: &AppState,
     board: Board,
     player: Uuid,
